@@ -1,6 +1,6 @@
 [project]
 name = "bollhav"
-version = "1.0.0"
+version = "1.0.1"
 authors = [
   { name="Erik Bremstedt", email="erik@bremstedtanalytics.se" },
 ]
@@ -16,6 +16,9 @@ dependencies = [
   "croniter>=0.3.0",
   "polars>=0.20.0"
 ]
+
+[project.optional-dependencies]
+dev = ["pytest", "ruff"]
 
 [project.urls]
 Homepage = "https://github.com/ebremstedt/bollhav"
