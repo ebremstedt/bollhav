@@ -1,0 +1,22 @@
+[project]
+name = "bollhav"
+version = "1.0.0"
+authors = [
+  { name="Erik Bremstedt", email="erik@bremstedtanalytics.se" },
+]
+description = "Standardizing models"
+readme = "README.md"
+requires-python = ">=3.11.0"
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
+]
+dependencies = [
+  "croniter>=0.3.0",
+  "polars>=0.20.0"
+]
+
+[project.urls]
+Homepage = "https://github.com/ebremstedt/bollhav"
+Issues = "https://github.com/ebremstedt/bollhav/issues"
