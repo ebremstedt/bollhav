@@ -64,7 +64,6 @@ model.batch_size  # BatchSize.DAILY
 | `WEEKLY`     | `0 0 * * 0`       |
 | `DAILY`      | `0 3 * * *`       |
 | `HOURLY`     | `0 * * * *`       |
-| `SUBHOURLY`  | `*/15 * * * *`    |
 
 ### With dynamic DDL via callable
 
