@@ -15,18 +15,14 @@ class PostgresType(Enum):
     SMALLSERIAL = "SMALLSERIAL"
     SERIAL = "SERIAL"
     BIGSERIAL = "BIGSERIAL"
-
     # Monetary
     MONEY = "MONEY"
-
     # Character
     CHAR = "CHAR"
     VARCHAR = "VARCHAR"
     TEXT = "TEXT"
-
     # Binary
     BYTEA = "BYTEA"
-
     # Date/Time
     TIMESTAMP = "TIMESTAMP"
     TIMESTAMPTZ = "TIMESTAMPTZ"
@@ -34,10 +30,8 @@ class PostgresType(Enum):
     TIME = "TIME"
     TIMETZ = "TIMETZ"
     INTERVAL = "INTERVAL"
-
     # Boolean
     BOOLEAN = "BOOLEAN"
-
     # Geometric
     POINT = "POINT"
     LINE = "LINE"
@@ -46,34 +40,26 @@ class PostgresType(Enum):
     PATH = "PATH"
     POLYGON = "POLYGON"
     CIRCLE = "CIRCLE"
-
     # Network
     CIDR = "CIDR"
     INET = "INET"
     MACADDR = "MACADDR"
     MACADDR8 = "MACADDR8"
-
     # Bit String
     BIT = "BIT"
     VARBIT = "VARBIT"
-
     # Text Search
     TSVECTOR = "TSVECTOR"
     TSQUERY = "TSQUERY"
-
     # UUID
     UUID = "UUID"
-
     # XML
     XML = "XML"
-
     # JSON
     JSON = "JSON"
     JSONB = "JSONB"
-
     # Arrays
     ARRAY = "ARRAY"
-
     # Range
     INT4RANGE = "INT4RANGE"
     INT8RANGE = "INT8RANGE"
@@ -81,7 +67,6 @@ class PostgresType(Enum):
     TSRANGE = "TSRANGE"
     TSTZRANGE = "TSTZRANGE"
     DATERANGE = "DATERANGE"
-
     # Multirange (Postgres 14+)
     INT4MULTIRANGE = "INT4MULTIRANGE"
     INT8MULTIRANGE = "INT8MULTIRANGE"
@@ -89,10 +74,8 @@ class PostgresType(Enum):
     TSMULTIRANGE = "TSMULTIRANGE"
     TSTZMULTIRANGE = "TSTZMULTIRANGE"
     DATEMULTIRANGE = "DATEMULTIRANGE"
-
     # Object Identifier
     OID = "OID"
-
     # Pseudo
     VOID = "VOID"
 
@@ -102,6 +85,9 @@ class PostgresColumn(DatabaseColumn):
     data_type: PostgresType = PostgresType.TEXT
     primary_key: bool = False
     unique: bool = False
+    precision: int | None = None
+    scale: int | None = None
+    length: int | None = None
 
     def __post_init__(self) -> None:
         if self.primary_key and self.nullable:
@@ -113,5 +99,6 @@ class PostgresColumn(DatabaseColumn):
         return (
             f"PostgresColumn(name={self.name!r}, data_type={self.data_type}, "
             f"nullable={self.nullable}, order={self.order}, primary_key={self.primary_key}, "
-            f"unique={self.unique})"
+            f"unique={self.unique}, precision={self.precision}, scale={self.scale}, "
+            f"length={self.length})"
         )
