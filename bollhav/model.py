@@ -40,6 +40,7 @@ class Model:
         write_mode: WriteMode = WriteMode.APPEND,
         tags: list[str] | None = None,
         cron: str | None = None,
+        enabled: bool = True,
         **kwargs,
     ):
         if model_type == ModelType.VIEW and write_mode != WriteMode.VIEW:
@@ -66,6 +67,7 @@ class Model:
         self.tags = tags
         self.columns = columns
         self.cron = cron
+        self.enabled = enabled
         self.batch_size = _infer_batch_size(cron) if cron else None
 
         for key, val in kwargs.items():
@@ -82,7 +84,7 @@ class Model:
             f"destination_db={self.destination_db}, destination_columns={self.destination_columns!r}, "
             f"model_type={self.model_type}, write_mode={self.write_mode}, "
             f"tags={self.tags!r}, columns={self.columns!r}, cron={self.cron!r}, "
-            f"batch_size={self.batch_size}, extra={self.extra!r})"
+            f"batch_size={self.batch_size}, enabled={self.enabled}, extra={self.extra!r})"
         )
 
     def __eq__(self, other: object) -> bool:
