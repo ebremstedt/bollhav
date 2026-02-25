@@ -1,5 +1,4 @@
 # Bollhav
-
 A lightweight config class for defining data pipeline models.
 
 ## Usage
@@ -9,10 +8,10 @@ A lightweight config class for defining data pipeline models.
 model = Model(
     name="orders",
     source_table="raw.orders",
-    destination_table="orders",
-    destination_schema="public",
+    table="orders",
+    schema="public",
     write_mode=WriteMode.TRUNCATE_INSERT,
-    destination_db=Database.POSTGRES,
+    database=Database.POSTGRES,
     columns=[
         PostgresColumn(name="id", data_type=PostgresType.BIGINT, primary_key=True, nullable=False),
         PostgresColumn(name="customer_id", data_type=PostgresType.BIGINT),
@@ -27,11 +26,11 @@ model = Model(
 model = Model(
     name="orders_view",
     source_table="raw.orders",
-    destination_table="orders_view",
-    destination_schema="public",
+    table="orders_view",
+    schema="public",
     model_type=ModelType.VIEW,
     write_mode=WriteMode.VIEW,
-    destination_db=Database.POSTGRES,
+    database=Database.POSTGRES,
     columns=[
         PostgresColumn(name="id", data_type=PostgresType.BIGINT),
         PostgresColumn(name="amount", data_type=PostgresType.NUMERIC, precision=10, scale=2),
@@ -44,7 +43,7 @@ model = Model(
 model = Model(
     name="orders",
     source_table="raw.orders",
-    destination_db=Database.POSTGRES,
+    database=Database.POSTGRES,
     columns=[
         PostgresColumn(name="id", data_type=PostgresType.BIGINT),
         PostgresColumn(name="amount", data_type=PostgresType.NUMERIC, precision=10, scale=2),
@@ -72,21 +71,29 @@ def my_ddl(table_name: str, schema: str, **kwargs) -> str:
 model = Model(
     name="orders",
     source_table="raw.orders",
-    destination_db=Database.POSTGRES,
+    database=Database.POSTGRES,
     columns=[
         PostgresColumn(name="id", data_type=PostgresType.BIGINT, primary_key=True, nullable=False),
     ],
-    destination_ddl=my_ddl,
+    ddl=my_ddl,
     table_name="orders",
     schema="public",
 )
-model.extra["destination_ddl"]  # resolved DDL string
+model.extra["ddl"]  # resolved DDL string
 ```
 
 Callables in `**kwargs` are resolved at init using the non-callable kwargs as arguments.
 
-## Write modes
+### With debug
+```python
+model = Model(
+    name="orders",
+    source_table="raw.orders",
+    debug=True,
+)
+```
 
+## Write modes
 | `WriteMode`        | `ModelType` | Description                   |
 |--------------------|-------------|-------------------------------|
 | `APPEND`           | `TABLE`     | Insert without truncating     |
@@ -98,7 +105,6 @@ Callables in `**kwargs` are resolved at init using the non-callable kwargs as ar
 `ModelType` and `WriteMode` are validated against each other at init.
 
 ## PostgresColumn
-
 | Field         | Type            | Default  | Notes                        |
 |---------------|-----------------|----------|------------------------------|
 | `name`        | `str`           | required |                              |
@@ -114,13 +120,12 @@ Callables in `**kwargs` are resolved at init using the non-callable kwargs as ar
 `primary_key=True` with `nullable=True` raises at init.
 
 ## Tags
-
 Optional and freeform.
 ```python
 model = Model(
     name="orders",
     source_table="raw.orders",
-    destination_db=Database.POSTGRES,
+    database=Database.POSTGRES,
     columns=[
         PostgresColumn(name="id", data_type=PostgresType.BIGINT),
     ],
