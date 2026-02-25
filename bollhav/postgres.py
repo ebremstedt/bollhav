@@ -67,6 +67,24 @@ class PostgresType(Enum):
 
 @dataclass
 class PostgresColumn(DatabaseColumn):
+    """
+    Defines a single column in a Postgres table.
+
+    Inherits name, nullable, and order from DatabaseColumn.
+
+    Args:
+        data_type:   Postgres data type. Defaults to TEXT.
+        primary_key: Marks column as primary key. Cannot be nullable.
+        unique:      Adds a UNIQUE constraint.
+        precision:   Total number of significant digits (NUMERIC/DECIMAL).
+        scale:       Digits to the right of the decimal point.
+        length:      Max character length (CHAR/VARCHAR).
+        description: Optional human-readable description of the column.
+
+    Raises:
+        ValueError: If primary_key=True and nullable=True.
+    """
+
     data_type: PostgresType = PostgresType.TEXT
     primary_key: bool = False
     unique: bool = False
