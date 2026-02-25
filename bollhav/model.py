@@ -20,6 +20,7 @@ class Model:
         cron: str | None = None,
         enabled: bool = True,
         debug: bool = False,
+        description: str | None = None,
         **kwargs,
     ):
         if model_type == ModelType.VIEW and write_mode != WriteMode.VIEW:
@@ -43,6 +44,7 @@ class Model:
         self.cron = cron
         self.enabled = enabled
         self.debug = debug
+        self.description = description
         self.batch_size = infer_batch_size(cron) if cron else None
 
         for key, val in kwargs.items():
@@ -60,7 +62,8 @@ class Model:
             f"model_type={self.model_type}, write_mode={self.write_mode}, "
             f"tags={self.tags!r}, cron={self.cron!r}, "
             f"batch_size={self.batch_size}, enabled={self.enabled}, "
-            f"debug={self.debug}, extra={self.extra!r})"
+            f"debug={self.debug}, description={self.description!r}, "
+            f"extra={self.extra!r})"
         )
 
     def __eq__(self, other: object) -> bool:
