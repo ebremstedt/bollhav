@@ -46,6 +46,7 @@ class Model:
         enabled: bool = True,
         debug: bool = False,
         description: str | None = None,
+        source_dsn: str | None = None,
         **kwargs,
     ):
         if model_type == ModelType.VIEW and write_mode != WriteMode.VIEW:
@@ -70,6 +71,7 @@ class Model:
         self.enabled = enabled
         self.debug = debug
         self.description = description
+        self.source_dsn = source_dsn
         self.batch_size = infer_batch_size(cron) if cron else None
 
         for key, val in kwargs.items():
@@ -81,13 +83,21 @@ class Model:
 
     def __repr__(self) -> str:
         return (
-            f"Model(name={self.name!r}, source_entity={self.source_entity!r}, "
-            f"table={self.table!r}, schema={self.schema!r}, "
-            f"database={self.database}, columns={self.columns!r}, "
-            f"model_type={self.model_type}, write_mode={self.write_mode}, "
-            f"tags={self.tags!r}, cron={self.cron!r}, "
-            f"batch_size={self.batch_size}, enabled={self.enabled}, "
-            f"debug={self.debug}, description={self.description!r}, "
+            f"Model("
+            f"name={self.name!r}, "
+            f"source_entity={self.source_entity!r}, "
+            f"table={self.table!r}, "
+            f"schema={self.schema!r}, "
+            f"database={self.database}, "
+            f"columns={self.columns!r}, "
+            f"model_type={self.model_type}, "
+            f"write_mode={self.write_mode}, "
+            f"tags={self.tags!r}, "
+            f"cron={self.cron!r}, "
+            f"enabled={self.enabled}, "
+            f"debug={self.debug}, "
+            f"description={self.description!r}, "
+            f"source_dsn={self.source_dsn!r}, "
             f"extra={self.extra!r})"
         )
 
