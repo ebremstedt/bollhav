@@ -6,12 +6,17 @@ from enum import Enum
 class PostgresType(Enum):
     # Numeric
     SMALLINT = "SMALLINT"
+    INT2 = "INT2"
     INTEGER = "INTEGER"
+    INT4 = "INT4"
     BIGINT = "BIGINT"
+    INT8 = "INT8"
     DECIMAL = "DECIMAL"
     NUMERIC = "NUMERIC"
     REAL = "REAL"
+    FLOAT4 = "FLOAT4"
     DOUBLE_PRECISION = "DOUBLE PRECISION"
+    FLOAT8 = "FLOAT8"
     SMALLSERIAL = "SMALLSERIAL"
     SERIAL = "SERIAL"
     BIGSERIAL = "BIGSERIAL"
@@ -19,6 +24,7 @@ class PostgresType(Enum):
     MONEY = "MONEY"
     # Character
     CHAR = "CHAR"
+    CHARACTER_VARYING = "CHARACTER VARYING"
     VARCHAR = "VARCHAR"
     TEXT = "TEXT"
     # Binary
@@ -58,8 +64,6 @@ class PostgresType(Enum):
     # JSON
     JSON = "JSON"
     JSONB = "JSONB"
-    # Arrays
-    ARRAY = "ARRAY"
     # Range
     INT4RANGE = "INT4RANGE"
     INT8RANGE = "INT8RANGE"
@@ -74,10 +78,6 @@ class PostgresType(Enum):
     TSMULTIRANGE = "TSMULTIRANGE"
     TSTZMULTIRANGE = "TSTZMULTIRANGE"
     DATEMULTIRANGE = "DATEMULTIRANGE"
-    # Object Identifier
-    OID = "OID"
-    # Pseudo
-    VOID = "VOID"
 
 
 @dataclass
