@@ -100,9 +100,20 @@ class PostgresColumn(DatabaseColumn):
             )
 
     def __repr__(self) -> str:
-        return (
-            f"PostgresColumn(name={self.name!r}, data_type={self.data_type}, "
-            f"nullable={self.nullable}, order={self.order}, primary_key={self.primary_key}, "
-            f"unique={self.unique}, precision={self.precision}, scale={self.scale}, "
-            f"length={self.length}, description={self.description!r})"
-        )
+        parts = [
+            f"name={self.name!r}",
+            f"data_type={self.data_type}",
+            f"nullable={self.nullable}",
+            f"order={self.order}",
+            f"primary_key={self.primary_key}",
+            f"unique={self.unique}",
+        ]
+        if self.precision is not None:
+            parts.append(f"precision={self.precision}")
+        if self.scale is not None:
+            parts.append(f"scale={self.scale}")
+        if self.length is not None:
+            parts.append(f"length={self.length}")
+        if self.description is not None:
+            parts.append(f"description={self.description!r}")
+        return f"PostgresColumn({', '.join(parts)})"
