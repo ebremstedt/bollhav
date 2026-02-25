@@ -9,7 +9,7 @@ class Model:
     def __init__(
         self,
         name: str,
-        source_table: str,
+        source_entity: str,
         table: str = "",
         schema: str = "",
         database: Database | None = None,
@@ -32,7 +32,7 @@ class Model:
             raise ValueError("database must be set when columns is provided")
 
         self.name = name
-        self.source_table = source_table
+        self.source_entity = source_entity
         self.table = table
         self.schema = schema
         self.database = database
@@ -54,7 +54,7 @@ class Model:
 
     def __repr__(self) -> str:
         return (
-            f"Model(name={self.name!r}, source_table={self.source_table!r}, "
+            f"Model(name={self.name!r}, source_entity={self.source_entity!r}, "
             f"table={self.table!r}, schema={self.schema!r}, "
             f"database={self.database}, columns={self.columns!r}, "
             f"model_type={self.model_type}, write_mode={self.write_mode}, "
