@@ -2,7 +2,7 @@ import polars as pl
 from bollhav.database import Database
 from bollhav.postgres import PostgresColumn
 from bollhav.modes import WriteMode, ModelType
-from bollhav.batching import BatchSize, infer_batch_size
+from bollhav.batching import infer_batch_size
 
 
 class Model:
