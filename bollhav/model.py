@@ -6,6 +6,31 @@ from bollhav.batching import infer_batch_size
 
 
 class Model:
+    """
+    Represents a data model definition for a pipeline target.
+
+    Args:
+        name:           Unique identifier for the model.
+        source_entity:  Source table or view to read from.
+        table:          Destination table name.
+        schema:         Destination schema name.
+        database:       Target database type. Required if columns is set.
+        columns:        Column definitions. Required if database is set.
+        model_type:     TABLE or VIEW. Defaults to TABLE.
+        write_mode:     How to write data. VIEW requires ModelType.VIEW.
+        tags:           Optional labels for filtering.
+        cron:           Cron expression. Infers batch_size automatically.
+        enabled:        Whether the model is active. Defaults to True.
+        debug:          Enables debug mode. Defaults to False.
+        description:    Optional human-readable description of the model.
+        **kwargs:       Extra metadata. Callable values are resolved with
+                        non-callable kwargs as arguments.
+
+    Raises:
+        ValueError: If model_type and write_mode are incompatible.
+        ValueError: If database is set without columns or vice versa.
+    """
+
     def __init__(
         self,
         name: str,
