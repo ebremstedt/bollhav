@@ -1,134 +1,99 @@
-# Bollhav
-A lightweight config class for defining data pipeline models.
+# bollhav
 
-## Usage
+Model definition framework for data pipeline targets.
 
-### Basic table
+## Implementations
+[Postgres](README_postgres.md) \
+[Parquet](README_parquet.md)
+
+---
+
+## Installation
+
+```bash
+pip install bollhav
+```
+
+## Model
+
 ```python
+from bollhav import Model, ModelType, WriteMode, Database, PostgresColumn, PostgresType
+
 model = Model(
     name="orders",
-    source_table="raw.orders",
+    source_entity="raw.orders",
     table="orders",
     schema="public",
-    write_mode=WriteMode.TRUNCATE_INSERT,
     database=Database.POSTGRES,
     columns=[
-        PostgresColumn(name="id", data_type=PostgresType.BIGINT, primary_key=True, nullable=False),
-        PostgresColumn(name="customer_id", data_type=PostgresType.BIGINT),
-        PostgresColumn(name="amount", data_type=PostgresType.NUMERIC, precision=10, scale=2),
-        PostgresColumn(name="created_at", data_type=PostgresType.TIMESTAMPTZ),
+        PostgresColumn(name="id", data_type=PostgresType.BIGINT, primary_key=True, nullable=False, order=0),
+        PostgresColumn(name="created_at", data_type=PostgresType.TIMESTAMPTZ, nullable=False, order=1),
+        PostgresColumn(name="email", data_type=PostgresType.TEXT, nullable=True, order=2, sensitive=True),
     ],
-)
-```
-
-### View
-```python
-model = Model(
-    name="orders_view",
-    source_table="raw.orders",
-    table="orders_view",
-    schema="public",
-    model_type=ModelType.VIEW,
-    write_mode=WriteMode.VIEW,
-    database=Database.POSTGRES,
-    columns=[
-        PostgresColumn(name="id", data_type=PostgresType.BIGINT),
-        PostgresColumn(name="amount", data_type=PostgresType.NUMERIC, precision=10, scale=2),
-    ],
-)
-```
-
-### With a schedule
-```python
-model = Model(
-    name="orders",
-    source_table="raw.orders",
-    database=Database.POSTGRES,
-    columns=[
-        PostgresColumn(name="id", data_type=PostgresType.BIGINT),
-        PostgresColumn(name="amount", data_type=PostgresType.NUMERIC, precision=10, scale=2),
-    ],
+    write_mode=WriteMode.APPEND,
     cron="0 3 * * *",
+    partitioned_by=["created_at"],
 )
-model.batch_size  # BatchSize.DAILY
 ```
 
-`batch_size` is inferred from the cron expression and is read-only.
+### Parameters
 
-| `BatchSize` | Example cron  |
-|-------------|---------------|
-| `YEARLY`    | `0 0 1 1 *`   |
-| `MONTHLY`   | `0 0 1 * *`   |
-| `WEEKLY`    | `0 0 * * 0`   |
-| `DAILY`     | `0 3 * * *`   |
-| `HOURLY`    | `0 * * * *`   |
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `name` | `str` | required | Unique identifier for the model |
+| `source_entity` | `str` | required | Source table or view to read from |
+| `table` | `str` | `""` | Destination table name |
+| `schema` | `str` | `""` | Destination schema name |
+| `database` | `Database` | `None` | Target database. Required if `columns` is set |
+| `columns` | `list[PostgresColumn \| ParquetColumn]` | `None` | Column definitions. Required if `database` is set |
+| `model_type` | `ModelType` | `TABLE` | `TABLE` or `VIEW` |
+| `write_mode` | `WriteMode` | `APPEND` | How to write data. `VIEW` requires `ModelType.VIEW` |
+| `tags` | `list[str]` | `None` | Labels for filtering |
+| `cron` | `str` | `None` | Cron expression. Automatically infers `batch_size` |
+| `enabled` | `bool` | `True` | Whether the model is active |
+| `debug` | `bool` | `False` | Enables debug mode |
+| `description` | `str` | `None` | Human-readable description |
+| `source_dsn` | `str` | `None` | DSN for the source connection |
+| `source_query` | `str` | `None` | Optional query to use instead of `source_entity` |
+| `partitioned_by` | `list[str]` | `None` | Column names to partition by. Must exist in `columns` |
+| `**kwargs` | | | Extra metadata. Callable values are resolved with non-callable kwargs as arguments |
 
-### With dynamic kwargs
+### Computed attributes
+
+| Attribute | Description |
+|---|---|
+| `batch_size` | Inferred from `cron` if set, otherwise `None` |
+| `sensitive` | `True` if any column has `sensitive=True` |
+
+## Databases
+
 ```python
-def my_ddl(table_name: str, schema: str, **kwargs) -> str:
-    return f"CREATE TABLE {schema}.{table_name} (id SERIAL PRIMARY KEY);"
+from bollhav import Database
 
-model = Model(
-    name="orders",
-    source_table="raw.orders",
-    database=Database.POSTGRES,
-    columns=[
-        PostgresColumn(name="id", data_type=PostgresType.BIGINT, primary_key=True, nullable=False),
-    ],
-    ddl=my_ddl,
-    table_name="orders",
-    schema="public",
-)
-model.extra["ddl"]  # resolved DDL string
-```
-
-Callables in `**kwargs` are resolved at init using the non-callable kwargs as arguments.
-
-### With debug
-```python
-model = Model(
-    name="orders",
-    source_table="raw.orders",
-    debug=True,
-)
+Database.POSTGRES
+Database.PARQUET
 ```
 
 ## Write modes
-| `WriteMode`        | `ModelType` | Description                   |
-|--------------------|-------------|-------------------------------|
-| `APPEND`           | `TABLE`     | Insert without truncating     |
-| `TRUNCATE_INSERT`  | `TABLE`     | Truncate then insert          |
-| `OVERWRITE_INSERT` | `TABLE`     | Overwrite matching rows       |
-| `MERGE`            | `TABLE`     | Upsert based on keys          |
-| `VIEW`             | `VIEW`      | Create or replace view        |
 
-`ModelType` and `WriteMode` are validated against each other at init.
+```python
+from bollhav import WriteMode
 
-## PostgresColumn
-| Field         | Type            | Default  | Notes                        |
-|---------------|-----------------|----------|------------------------------|
-| `name`        | `str`           | required |                              |
-| `data_type`   | `PostgresType`  | required |                              |
-| `nullable`    | `bool`          | `True`   |                              |
-| `order`       | `int \| None`   | `None`   |                              |
-| `primary_key` | `bool`          | `False`  | Implies `nullable=False`     |
-| `unique`      | `bool`          | `False`  |                              |
-| `precision`   | `int \| None`   | `None`   | For `NUMERIC`, `DECIMAL`     |
-| `scale`       | `int \| None`   | `None`   | For `NUMERIC`, `DECIMAL`     |
-| `length`      | `int \| None`   | `None`   | For `VARCHAR`, `CHAR`, `BIT` |
+WriteMode.APPEND
+WriteMode.VIEW     # Must be used with ModelType.VIEW
+```
 
-`primary_key=True` with `nullable=True` raises at init.
+## Extra kwargs
 
-## Tags
-Optional and freeform.
+Non-reserved keyword arguments are stored in `model.extra`. Callable values are resolved at init time using the non-callable kwargs as arguments.
+
 ```python
 model = Model(
     name="orders",
-    source_table="raw.orders",
-    database=Database.POSTGRES,
-    columns=[
-        PostgresColumn(name="id", data_type=PostgresType.BIGINT),
-    ],
-    tags=["finance", "critical"],
+    source_entity="raw.orders",
+    static="production",
+    env=lambda static: f"env={static}",
 )
+
+model.extra  # {"static": "production", "env": "env=production"}
 ```

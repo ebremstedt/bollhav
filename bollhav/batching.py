@@ -8,7 +8,6 @@ class BatchSize(Enum):
     WEEKLY = "WEEKLY"
     DAILY = "DAILY"
     HOURLY = "HOURLY"
-    SUBHOURLY = "SUBHOURLY"
 
 
 def infer_batch_size(cron: str) -> BatchSize | None:

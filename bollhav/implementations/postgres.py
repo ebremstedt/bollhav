@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from bollhav.database import DatabaseColumn
 from enum import Enum
 
@@ -91,7 +91,6 @@ class PostgresColumn(DatabaseColumn):
     precision: int | None = None
     scale: int | None = None
     length: int | None = None
-    description: str | None = None
 
     def __post_init__(self) -> None:
         if self.primary_key and self.nullable:
@@ -100,11 +99,11 @@ class PostgresColumn(DatabaseColumn):
             )
 
     def __repr__(self) -> str:
-        parts = [
-            f"name={self.name!r}",
+        base_parts = [
+            f"{f.name}={getattr(self, f.name)!r}" for f in fields(DatabaseColumn)
+        ]
+        parts = base_parts + [
             f"data_type={self.data_type}",
-            f"nullable={self.nullable}",
-            f"order={self.order}",
             f"primary_key={self.primary_key}",
             f"unique={self.unique}",
         ]
@@ -114,6 +113,4 @@ class PostgresColumn(DatabaseColumn):
             parts.append(f"scale={self.scale}")
         if self.length is not None:
             parts.append(f"length={self.length}")
-        if self.description is not None:
-            parts.append(f"description={self.description!r}")
         return f"PostgresColumn({', '.join(parts)})"
