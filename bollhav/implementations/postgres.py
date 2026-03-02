@@ -91,6 +91,7 @@ class PostgresColumn(DatabaseColumn):
     precision: int | None = None
     scale: int | None = None
     length: int | None = None
+    sensitive: bool | None = None
 
     def __post_init__(self) -> None:
         if self.primary_key and self.nullable:
@@ -106,6 +107,7 @@ class PostgresColumn(DatabaseColumn):
             f"data_type={self.data_type}",
             f"primary_key={self.primary_key}",
             f"unique={self.unique}",
+            f"sensitive={self.sensitive}",
         ]
         if self.precision is not None:
             parts.append(f"precision={self.precision}")
