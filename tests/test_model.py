@@ -1,4 +1,5 @@
 import pytest
+from datetime import datetime, timezone
 from unittest.mock import patch
 from bollhav.database import Database
 from bollhav.implementations.postgres import PostgresColumn, PostgresType
@@ -61,6 +62,8 @@ def test_defaults():
     assert m.partitioned_by is None
     assert m.sensitive is False
     assert m.extra == {}
+    assert m.begin is None
+    assert m.end is None
 
 
 # --- model_type / write_mode validation ---
@@ -269,6 +272,57 @@ def test_extra_callable_resolved():
     assert m.extra["dynamic"] == "hello world"
 
 
+# --- begin / end ---
+
+
+def test_begin_and_end_accepted():
+    begin = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    end = datetime(2026, 3, 2, tzinfo=timezone.utc)
+    m = Model(name="test", source_entity="raw.orders", begin=begin, end=end)
+    assert m.begin == begin
+    assert m.end == end
+
+
+def test_begin_none_by_default():
+    m = Model(name="test", source_entity="raw.orders")
+    assert m.begin is None
+
+
+def test_end_none_by_default():
+    m = Model(name="test", source_entity="raw.orders")
+    assert m.end is None
+
+
+def test_begin_naive_datetime_raises():
+    with pytest.raises(ValueError, match="begin must be timezone-aware"):
+        Model(
+            name="test",
+            source_entity="raw.orders",
+            begin=datetime(2026, 1, 1),
+        )
+
+
+def test_end_naive_datetime_raises():
+    with pytest.raises(ValueError, match="end must be timezone-aware"):
+        Model(
+            name="test",
+            source_entity="raw.orders",
+            end=datetime(2026, 3, 2),
+        )
+
+
+def test_begin_in_repr():
+    begin = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    m = Model(name="test", source_entity="raw.orders", begin=begin)
+    assert "2026-01-01T00:00:00+00:00" in repr(m)
+
+
+def test_end_in_repr():
+    end = datetime(2026, 3, 2, tzinfo=timezone.utc)
+    m = Model(name="test", source_entity="raw.orders", end=end)
+    assert "2026-03-02T00:00:00+00:00" in repr(m)
+
+
 # --- repr ---
 
 
@@ -316,6 +370,34 @@ def test_inequality_by_partitioned_by():
         database=Database.POSTGRES,
         columns=make_postgres_columns(),
         partitioned_by=None,
+    )
+    assert a != b
+
+
+def test_inequality_by_begin():
+    a = Model(
+        name="test",
+        source_entity="raw.orders",
+        begin=datetime(2026, 1, 1, tzinfo=timezone.utc),
+    )
+    b = Model(
+        name="test",
+        source_entity="raw.orders",
+        begin=datetime(2026, 6, 1, tzinfo=timezone.utc),
+    )
+    assert a != b
+
+
+def test_inequality_by_end():
+    a = Model(
+        name="test",
+        source_entity="raw.orders",
+        end=datetime(2026, 3, 2, tzinfo=timezone.utc),
+    )
+    b = Model(
+        name="test",
+        source_entity="raw.orders",
+        end=datetime(2026, 12, 1, tzinfo=timezone.utc),
     )
     assert a != b
 
