@@ -1,9 +1,11 @@
 from datetime import datetime
+from typing import Callable
 from bollhav.database import Database
 from bollhav.implementations.postgres import PostgresColumn
 from bollhav.implementations.parquet import ParquetColumn
 from bollhav.modes import WriteMode, ModelType
 from bollhav.batching import infer_batch_size
+from bollhav.sorting import sort_columns
 
 
 class Model:
@@ -25,6 +27,7 @@ class Model:
         target_dsn: str | None = None,
         source_dsn: str | None = None,
         source_query: str | None = None,
+        column_sorting: Callable | None = sort_columns,
         partitioned_by: list[str] | None = None,
         begin: datetime | None = None,
         end: datetime | None = None,
@@ -68,6 +71,7 @@ class Model:
         self.target_dsn = target_dsn
         self.source_dsn = source_dsn
         self.source_query = source_query
+        self.column_sorting = column_sorting
         self.partitioned_by = partitioned_by
         self.begin = begin
         self.end = end
@@ -77,6 +81,12 @@ class Model:
         self.sensitive = (
             any(getattr(c, "sensitive", False) for c in columns) if columns else False
         )
+
+        if self.columns and self.column_sorting:
+            col_names = [c.name for c in self.columns]
+            sorted_names = self.column_sorting(col_names)
+            name_to_col = {c.name: c for c in self.columns}
+            self.columns = [name_to_col[n] for n in sorted_names]
 
         for key, val in kwargs.items():
             if callable(val):
