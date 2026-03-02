@@ -1,16 +1,15 @@
 from datetime import datetime
-from collections.abc import Generator
+from typing import Generator
 import psycopg
 import polars as pl
 from roskarl import DSN
 from bollhav.model import Model
 from bollhav.modes import WriteMode
-from .ddl import build_ddl, get_pk_columns
-from .modes.append import append
+from ddl import build_ddl, get_pk_columns
+from modes.append import append
 from modes.truncate_insert import truncate_insert
 from modes.overwrite_insert import overwrite_insert
 from modes.update_insert import update_insert
-from modes.merge import merge
 from modes.view import create_view
 
 
@@ -119,15 +118,6 @@ def write(
 
                 elif write_mode == WriteMode.UPDATE_INSERT:
                     update_insert(
-                        conn=conn,
-                        schema=schema,
-                        table=table,
-                        df=df,
-                        pk_columns=pk_columns,
-                    )
-
-                elif write_mode == WriteMode.MERGE:
-                    merge(
                         conn=conn,
                         schema=schema,
                         table=table,
