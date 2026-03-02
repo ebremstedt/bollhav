@@ -7,6 +7,33 @@ from bollhav.implementations.parquet import ParquetColumn
 from bollhav.modes import WriteMode, ModelType
 from bollhav.model import Model
 from bollhav.implementations.parquet import ParquetColumn, ParquetType
+from bollhav.sorting import sort_columns
+
+
+def test_column_sorting_applied_on_init():
+    columns = [
+        PostgresColumn(
+            name="email", data_type=PostgresType.TEXT, nullable=True, order=0
+        ),
+        PostgresColumn(
+            name="_id",
+            data_type=PostgresType.BIGINT,
+            primary_key=True,
+            nullable=False,
+            order=1,
+        ),
+        PostgresColumn(
+            name="_type", data_type=PostgresType.TEXT, nullable=True, order=2
+        ),
+    ]
+    m = Model(
+        name="test",
+        source_entity="raw.orders",
+        database=Database.POSTGRES,
+        columns=columns,
+        column_sorting=lambda cols: sort_columns(cols, [r"^_id$", r"^_"]),
+    )
+    assert [c.name for c in m.columns] == ["_id", "_type", "email"]
 
 
 def make_postgres_columns(sensitive: bool = False) -> list[PostgresColumn]:
