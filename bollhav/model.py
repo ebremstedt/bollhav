@@ -1,5 +1,4 @@
 from datetime import datetime
-import polars as pl
 from bollhav.database import Database
 from bollhav.implementations.postgres import PostgresColumn
 from bollhav.implementations.parquet import ParquetColumn
@@ -28,6 +27,8 @@ class Model:
         partitioned_by: list[str] | None = None,
         begin: datetime | None = None,
         end: datetime | None = None,
+        retries: int | None = None,
+        lookback: int | None = None,
         **kwargs,
     ):
         if model_type == ModelType.VIEW and write_mode != WriteMode.VIEW:
@@ -68,6 +69,8 @@ class Model:
         self.partitioned_by = partitioned_by
         self.begin = begin
         self.end = end
+        self.retries = retries
+        self.lookback = lookback
         self.batch_size = infer_batch_size(cron) if cron else None
         self.sensitive = (
             any(getattr(c, "sensitive", False) for c in columns) if columns else False
@@ -101,6 +104,8 @@ class Model:
             f"partitioned_by={self.partitioned_by!r}, "
             f"begin={self.begin.isoformat() if self.begin else None!r}, "
             f"end={self.end.isoformat() if self.end else None!r}, "
+            f"retries={self.retries!r}, "
+            f"lookback={self.lookback!r}, "
             f"sensitive={self.sensitive}, "
             f"extra={self.extra!r})"
         )
