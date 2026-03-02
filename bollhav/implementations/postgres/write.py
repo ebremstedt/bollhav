@@ -1,20 +1,17 @@
-from __future__ import annotations
-
 from datetime import datetime
 from collections.abc import Generator
-
 import psycopg
 import polars as pl
 from roskarl import DSN
 from bollhav.model import Model
 from bollhav.modes import WriteMode
 from .ddl import build_ddl, get_pk_columns
-from .append import append
-from .truncate_insert import truncate_insert
-from .overwrite_insert import overwrite_insert
-from .update_insert import update_insert
-from .merge import merge
-from .view import create_view
+from .modes.append import append
+from modes.truncate_insert import truncate_insert
+from modes.overwrite_insert import overwrite_insert
+from modes.update_insert import update_insert
+from modes.merge import merge
+from modes.view import create_view
 
 
 def _get_connection(dsn: DSN) -> psycopg.Connection:
