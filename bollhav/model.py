@@ -1,3 +1,4 @@
+from datetime import datetime
 import polars as pl
 from bollhav.database import Database
 from bollhav.implementations.postgres import PostgresColumn
@@ -25,6 +26,8 @@ class Model:
         source_dsn: str | None = None,
         source_query: str | None = None,
         partitioned_by: list[str] | None = None,
+        begin: datetime | None = None,
+        end: datetime | None = None,
         **kwargs,
     ):
         if model_type == ModelType.VIEW and write_mode != WriteMode.VIEW:
@@ -42,6 +45,10 @@ class Model:
                 raise ValueError(
                     f"partitioned_by references unknown columns: {invalid}"
                 )
+        if begin is not None and begin.tzinfo is None:
+            raise ValueError("begin must be timezone-aware")
+        if end is not None and end.tzinfo is None:
+            raise ValueError("end must be timezone-aware")
 
         self.name = name
         self.source_entity = source_entity
@@ -59,6 +66,8 @@ class Model:
         self.source_dsn = source_dsn
         self.source_query = source_query
         self.partitioned_by = partitioned_by
+        self.begin = begin
+        self.end = end
         self.batch_size = infer_batch_size(cron) if cron else None
         self.sensitive = (
             any(getattr(c, "sensitive", False) for c in columns) if columns else False
@@ -90,6 +99,8 @@ class Model:
             f"source_dsn={self.source_dsn!r}, "
             f"source_query={self.source_query!r}, "
             f"partitioned_by={self.partitioned_by!r}, "
+            f"begin={self.begin.isoformat() if self.begin else None!r}, "
+            f"end={self.end.isoformat() if self.end else None!r}, "
             f"sensitive={self.sensitive}, "
             f"extra={self.extra!r})"
         )
