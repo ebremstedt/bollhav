@@ -76,6 +76,8 @@ Database.PARQUET
 
 ## Write modes
 
+Read more [here](MODES.md)
+
 ```python
 from bollhav import WriteMode
 
