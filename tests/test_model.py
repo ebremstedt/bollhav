@@ -2,11 +2,10 @@ import pytest
 from datetime import datetime, timezone
 from unittest.mock import patch
 from bollhav.database import Database
-from bollhav.implementations.postgres import PostgresColumn, PostgresType
-from bollhav.implementations.parquet import ParquetColumn
+from bollhav.postgres import PostgresColumn, PostgresType
+from bollhav.parquet import ParquetColumn, ParquetType
 from bollhav.modes import WriteMode, ModelType
 from bollhav.model import Model
-from bollhav.implementations.parquet import ParquetType
 
 
 def make_postgres_columns(sensitive: bool = False) -> list[PostgresColumn]:
