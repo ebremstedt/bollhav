@@ -6,7 +6,7 @@ from bollhav.implementations.postgres import PostgresColumn, PostgresType
 from bollhav.implementations.parquet import ParquetColumn
 from bollhav.modes import WriteMode, ModelType
 from bollhav.model import Model
-from bollhav.implementations.parquet import ParquetColumn, ParquetType
+from bollhav.implementations.parquet import ParquetType
 
 
 def make_postgres_columns(sensitive: bool = False) -> list[PostgresColumn]:
