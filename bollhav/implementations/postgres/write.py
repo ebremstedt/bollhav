@@ -39,7 +39,6 @@ def _ensure_table(
 
 
 def write(
-    dsn: DSN,
     df_gen: Generator[pl.DataFrame, None, None],
     model: Model,
     since: datetime | None = None,
@@ -53,14 +52,14 @@ def write(
     if write_mode == WriteMode.VIEW:
         if not model.source_query:
             raise ValueError(f"VIEW mode requires source_query on model '{model.name}'")
-        conn = _get_connection(dsn=dsn)
+        conn = _get_connection(dsn=model.target_dsn)
         try:
             with conn:
                 create_view(
                     conn=conn,
                     schema=schema,
-                    view_name=table,
-                    source_query=model.source_query,
+                    name=table,
+                    query=model.source_query,
                 )
         finally:
             conn.close()
@@ -86,7 +85,7 @@ def write(
         if filter_column is None:
             raise ValueError("OVERWRITE_INSERT requires filter_column")
 
-    conn = _get_connection(dsn=dsn)
+    conn = _get_connection(dsn=model.target_dsn)
 
     try:
         with conn:

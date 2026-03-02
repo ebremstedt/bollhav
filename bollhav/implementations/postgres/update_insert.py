@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import psycopg
 import polars as pl
 
@@ -11,21 +9,27 @@ def update_insert(
     df: pl.DataFrame,
     pk_columns: list[str],
 ) -> None:
-    df_columns = df.columns
-    col_names = ", ".join(f'"{c}"' for c in df_columns)
-    placeholders = ", ".join(["%s"] * len(df_columns))
-    conflict_cols = ", ".join(f'"{c}"' for c in pk_columns)
-    update_cols = [c for c in df_columns if c not in pk_columns]
-    update_set = ", ".join(f'"{c}" = EXCLUDED."{c}"' for c in update_cols)
+    with conn.transaction():
+        temp_table = f"{schema}.temp_{table}_{id(df)}"
 
-    sql = (
-        f'INSERT INTO {schema}."{table}" ({col_names}) '
-        f"VALUES ({placeholders}) "
-        f"ON CONFLICT ({conflict_cols}) "
-        f"DO UPDATE SET {update_set}"
-    )
+        col_names = ", ".join(f'"{c}"' for c in df.columns)
+        pk_cols_str = ", ".join(f'"{c}"' for c in pk_columns)
 
-    rows = df.rows()
+        conn.execute(
+            f'CREATE TEMP TABLE "{temp_table}" (LIKE {schema}."{table}") ON COMMIT DROP'
+        )
 
-    with conn.cursor() as cursor:
-        cursor.executemany(query=sql, params_seq=rows)
+        with conn.cursor().copy(
+            f'COPY "{temp_table}" ({col_names}) FROM STDIN WITH (FORMAT binary)'
+        ) as copy:
+            copy.write_table(df.to_arrow())
+
+        update_set = ", ".join(
+            f'"{c}" = t."{c}"' for c in df.columns if c not in pk_columns
+        )
+
+        conn.execute(
+            f'INSERT INTO {schema}."{table}" ({col_names}) '
+            f'SELECT {col_names} FROM "{temp_table}" t '
+            f"ON CONFLICT ({pk_cols_str}) DO UPDATE SET {update_set}"
+        )

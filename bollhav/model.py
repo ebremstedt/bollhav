@@ -22,6 +22,7 @@ class Model:
         enabled: bool = True,
         debug: bool = False,
         description: str | None = None,
+        target_dsn: str | None = None,
         source_dsn: str | None = None,
         source_query: str | None = None,
         partitioned_by: list[str] | None = None,
@@ -64,6 +65,7 @@ class Model:
         self.enabled = enabled
         self.debug = debug
         self.description = description
+        self.target_dsn = target_dsn
         self.source_dsn = source_dsn
         self.source_query = source_query
         self.partitioned_by = partitioned_by
