@@ -1,6 +1,4 @@
-from __future__ import annotations
-
-from .columns import PostgresColumn
+from columns import PostgresColumn
 
 
 def build_ddl(columns: list[PostgresColumn]) -> str:
