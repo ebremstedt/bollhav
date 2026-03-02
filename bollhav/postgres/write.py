@@ -1,8 +1,7 @@
 from datetime import datetime
 from typing import Generator
-import psycopg
+from psycopg import Connection
 import polars as pl
-from roskarl import DSN
 from bollhav.model import Model
 from bollhav.modes import WriteMode
 from ddl import build_ddl, get_pk_columns
@@ -13,19 +12,8 @@ from modes.update_insert import update_insert
 from modes.view import create_view
 
 
-def _get_connection(dsn: DSN) -> psycopg.Connection:
-    conn_string = (
-        f"host={dsn.hostname} "
-        f"port={dsn.port} "
-        f"dbname={dsn.database} "
-        f"user={dsn.username} "
-        f"password={dsn.password}"
-    )
-    return psycopg.connect(conninfo=conn_string, autocommit=False)
-
-
 def _ensure_table(
-    conn: psycopg.Connection,
+    conn: Connection,
     schema: str,
     table: str,
     ddl: str,
@@ -35,6 +23,7 @@ def _ensure_table(
 
 
 def write(
+    conn: Connection,
     df_gen: Generator[pl.DataFrame, None, None],
     model: Model,
     since: datetime | None = None,
@@ -48,7 +37,6 @@ def write(
     if write_mode == WriteMode.VIEW:
         if not model.source_query:
             raise ValueError(f"VIEW mode requires source_query on model '{model.name}'")
-        conn = _get_connection(dsn=model.target_dsn)
         try:
             with conn:
                 create_view(
@@ -64,7 +52,7 @@ def write(
     ddl: str = build_ddl(columns=model.columns)
 
     pk_columns: list[str] = []
-    if write_mode in (WriteMode.UPDATE_INSERT, WriteMode.MERGE):
+    if write_mode in (WriteMode.UPDATE_INSERT):
         pk_columns = get_pk_columns(columns=model.columns)
         if not pk_columns:
             raise ValueError(
@@ -80,8 +68,6 @@ def write(
             )
         if filter_column is None:
             raise ValueError("OVERWRITE_INSERT requires filter_column")
-
-    conn = _get_connection(dsn=model.target_dsn)
 
     try:
         with conn:
