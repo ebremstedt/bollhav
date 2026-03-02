@@ -1,8 +1,9 @@
 import re
 
 patterns = [
-    r"^_id$",
-    r"^_",
+    r"^_data_modified$",
+    r"^_metadata_modified$",
+    r"^_",  # any other _ prefixed columns
 ]
 
 
