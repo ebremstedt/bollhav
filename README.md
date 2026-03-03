@@ -9,13 +9,11 @@ Model definition framework for data pipeline targets.
 ---
 
 ## Installation
-
 ```bash
 pip install bollhav
 ```
 
 ## Model
-
 ```python
 from bollhav import Model, ModelType, WriteMode, Database, PostgresColumn, PostgresType
 
@@ -26,13 +24,13 @@ model = Model(
     schema="public",
     database=Database.POSTGRES,
     columns=[
-        PostgresColumn(name="id", data_type=PostgresType.BIGINT, primary_key=True, nullable=False, order=0),
-        PostgresColumn(name="created_at", data_type=PostgresType.TIMESTAMPTZ, nullable=False, order=1),
-        PostgresColumn(name="email", data_type=PostgresType.TEXT, nullable=True, order=2, sensitive=True),
+        PostgresColumn(name="id", data_type=PostgresType.BIGINT, primary_key=True, nullable=False),
+        PostgresColumn(name="created_at", data_type=PostgresType.TIMESTAMPTZ, nullable=False),
+        PostgresColumn(name="email", data_type=PostgresType.TEXT, nullable=True, sensitive=True),
     ],
     write_mode=WriteMode.APPEND,
     cron="0 3 * * *",
-    partitioned_by=["created_at"],
+    partitioned_by="created_at",
 )
 ```
 
@@ -55,7 +53,12 @@ model = Model(
 | `description` | `str` | `None` | Human-readable description |
 | `source_dsn` | `str` | `None` | DSN for the source connection |
 | `source_query` | `str` | `None` | Optional query to use instead of `source_entity` |
-| `partitioned_by` | `list[str]` | `None` | Column names to partition by. Must exist in `columns` |
+| `partitioned_by` | `str` | `None` | Column name to partition by. Must exist in `columns` |
+| `begin` | `datetime` | `None` | Backfill start — must be UTC-aware |
+| `end` | `datetime` | `None` | Backfill end — must be UTC-aware |
+| `retries` | `int` | `None` | Retry count on failure |
+| `lookback` | `int` | `None` | Lookback window in batch units |
+| `tz_aware` | `bool` | `True` | Enforces UTC on `begin`/`end` |
 | `**kwargs` | | | Extra metadata. Callable values are resolved with non-callable kwargs as arguments |
 
 ### Computed attributes
@@ -64,9 +67,10 @@ model = Model(
 |---|---|
 | `batch_size` | Inferred from `cron` if set, otherwise `None` |
 | `sensitive` | `True` if any column has `sensitive=True` |
+| `unique_columns` | Columns with `unique=True` — required for `UPDATE_INSERT` |
+| `partitioned_by_index` | `True` if `partitioned_by` is set |
 
 ## Databases
-
 ```python
 from bollhav import Database
 
@@ -77,18 +81,32 @@ Database.PARQUET
 ## Write modes
 
 Read more [here](MODES.md)
-
 ```python
 from bollhav import WriteMode
 
 WriteMode.APPEND
-WriteMode.VIEW     # Must be used with ModelType.VIEW
+WriteMode.OVERWRITE_INSERT  # requires partitioned_by
+WriteMode.TRUNCATE_INSERT
+WriteMode.UPDATE_INSERT     # requires at least one column with unique=True
+WriteMode.VIEW              # requires ModelType.VIEW
+```
+
+## UTC enforcement
+
+When `tz_aware=True` (default), `begin` and `end` must be UTC-aware. Naive or non-UTC datetimes raise `ValueError`.
+```python
+from datetime import datetime, timezone
+
+model = Model(
+    ...,
+    begin=datetime(2025, 1, 1, tzinfo=timezone.utc),
+    end=datetime(2025, 2, 1, tzinfo=timezone.utc),
+)
 ```
 
 ## Extra kwargs
 
 Non-reserved keyword arguments are stored in `model.extra`. Callable values are resolved at init time using the non-callable kwargs as arguments.
-
 ```python
 model = Model(
     name="orders",
