@@ -1,7 +1,7 @@
 from unittest.mock import MagicMock, patch
 import polars as pl
 import pytest
-from bollhav.postgres.write import write
+from bollhav.postgres.write_modes import write
 
 
 def test_invalid_write_mode():
