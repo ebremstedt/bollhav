@@ -59,6 +59,8 @@ Updates rows that already exist, inserts rows that don't. Never deletes.
 - This is much like a MERGE statement, where deduplication is handled.
 - Duplicates are not okay
 - When we want to make sure that deletes from source are _NOT_ handled
+- This relies on a unique key constraint
+- NOT IDEMPOTENT
 
 ### Explanation
 
@@ -87,6 +89,7 @@ Deletes matching rows first, then inserts all incoming rows fresh. Effectively a
 - This is much like a MERGE statement, where deduplication is handled.
 - Duplicates are not okay
 - When we want to make sure that deletes from source _ARE_ handled
+- IDEMPOTENT
 
 ### Explanation
 
