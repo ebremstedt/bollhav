@@ -14,7 +14,6 @@ def write(
     model: Model,
     since: datetime | None = None,
     until: datetime | None = None,
-    filter_column: str | None = None,
 ) -> None:
     match model.write_mode:
         case WriteMode.VIEW:
@@ -24,11 +23,9 @@ def write(
         case WriteMode.TRUNCATE_INSERT:
             write_using_mode = truncate_insert
         case WriteMode.OVERWRITE_INSERT:
-            write_using_mode = partial(
-                overwrite_insert, since=since, until=until, filter_column=filter_column
-            )
+            write_using_mode = partial(overwrite_insert, since=since, until=until)
         case WriteMode.UPDATE_INSERT:
-            write_using_mode = update_insert
+            write_using_mode = partial(update_insert, since=since, until=until)
         case _:
             raise ValueError(f"Unhandled write mode: {model.write_mode}")
 
