@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Callable
 from bollhav.database import Database
 from bollhav.postgres.columns import PostgresColumn
@@ -24,15 +24,17 @@ class Model:
         enabled: bool = True,
         debug: bool = False,
         description: str | None = None,
-        target_dsn: str | None = None,
-        source_dsn: str | None = None,
+        target_dsn_env_var: str | None = None,
+        source_dsn_env_var: str | None = None,
         source_query: str | None = None,
         column_sorting: Callable | None = sort_columns,
-        partitioned_by: list[str] | None = None,
+        partitioned_by: str | None = None,
+        partitioned_by_index: bool = False,
         begin: datetime | None = None,
         end: datetime | None = None,
         retries: int | None = None,
         lookback: int | None = None,
+        tz_aware: bool = True,
         **kwargs,
     ):
         if model_type == ModelType.VIEW and write_mode != WriteMode.VIEW:
@@ -45,15 +47,19 @@ class Model:
             raise ValueError("database must be set when columns is provided")
         if partitioned_by and columns:
             col_names = {c.name for c in columns}
-            invalid = [p for p in partitioned_by if p not in col_names]
-            if invalid:
+            if partitioned_by not in col_names:
                 raise ValueError(
-                    f"partitioned_by references unknown columns: {invalid}"
+                    f"Partitioned_by references unknown column: {partitioned_by!r}"
                 )
-        if begin is not None and begin.tzinfo is None:
-            raise ValueError("begin must be timezone-aware")
-        if end is not None and end.tzinfo is None:
-            raise ValueError("end must be timezone-aware")
+        if tz_aware:
+            if begin is not None and (
+                begin.tzinfo is None or begin.utcoffset() != timedelta(0)
+            ):
+                raise ValueError("begin must be UTC-aware")
+            if end is not None and (
+                end.tzinfo is None or end.utcoffset() != timedelta(0)
+            ):
+                raise ValueError("end must be UTC-aware")
 
         self.name = name
         self.source_entity = source_entity
@@ -68,19 +74,29 @@ class Model:
         self.enabled = enabled
         self.debug = debug
         self.description = description
-        self.target_dsn = target_dsn
-        self.source_dsn = source_dsn
+        self.target_dsn_env_var = target_dsn_env_var
+        self.source_dsn_env_var = source_dsn_env_var
         self.source_query = source_query
         self.column_sorting = column_sorting
         self.partitioned_by = partitioned_by
+        self.partitioned_by_index = partitioned_by is not None
         self.begin = begin
         self.end = end
         self.retries = retries
         self.lookback = lookback
+        self.tz_aware = tz_aware
         self.batch_size = infer_batch_size(cron) if cron else None
         self.sensitive = (
             any(getattr(c, "sensitive", False) for c in columns) if columns else False
         )
+        self.unique_columns = (
+            [c for c in columns if getattr(c, "unique", False)] if columns else []
+        )
+
+        if write_mode == WriteMode.UPDATE_INSERT and not self.unique_columns:
+            raise ValueError(
+                "WriteMode.UPDATE_INSERT requires at least one column with unique=True"
+            )
 
         if self.columns and self.column_sorting:
             col_names = [c.name for c in self.columns]
@@ -111,7 +127,7 @@ class Model:
             f"enabled={self.enabled}, "
             f"debug={self.debug}, "
             f"description={self.description!r}, "
-            f"source_dsn={self.source_dsn!r}, "
+            f"source_dsn={self.source_dsn_env_var!r}, "
             f"source_query={self.source_query!r}, "
             f"partitioned_by={self.partitioned_by!r}, "
             f"begin={self.begin.isoformat() if self.begin else None!r}, "
@@ -119,6 +135,8 @@ class Model:
             f"retries={self.retries!r}, "
             f"lookback={self.lookback!r}, "
             f"sensitive={self.sensitive}, "
+            f"unique_columns={self.unique_columns!r}, "
+            f"tz_aware={self.tz_aware}, "
             f"extra={self.extra!r})"
         )
 
