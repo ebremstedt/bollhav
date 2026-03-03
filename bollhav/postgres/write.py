@@ -32,11 +32,7 @@ def write(
         case _:
             raise ValueError(f"Unhandled write mode: {model.write_mode}")
 
-    try:
-        with conn:
-            for df in df_gen:
-                if len(df) == 0:
-                    continue
-                write_using_mode(conn=conn, model=model, df=df)
-    finally:
-        conn.close()
+    for df in df_gen:
+        if len(df) == 0:
+            continue
+        write_using_mode(conn=conn, model=model, df=df)
