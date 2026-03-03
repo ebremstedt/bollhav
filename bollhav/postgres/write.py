@@ -4,11 +4,7 @@ from psycopg import Connection
 import polars as pl
 from bollhav.model import Model
 from bollhav.modes import WriteMode
-from modes.append import append
-from modes.truncate_insert import truncate_insert
-from modes.overwrite_insert import overwrite_insert
-from modes.update_insert import update_insert
-from modes.view import create_view
+from modes import truncate_insert, overwrite_insert, update_insert, create_view, append
 from datetime import datetime
 
 
