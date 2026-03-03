@@ -1,8 +1,8 @@
 from datetime import datetime
 from typing import Callable
 from bollhav.database import Database
-from bollhav.implementations.postgres import PostgresColumn
-from bollhav.implementations.parquet import ParquetColumn
+from bollhav.postgres.columns import PostgresColumn
+from bollhav.parquet.columns import ParquetColumn
 from bollhav.modes import WriteMode, ModelType
 from bollhav.batching import infer_batch_size
 from bollhav.sorting import sort_columns
