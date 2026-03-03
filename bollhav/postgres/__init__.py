@@ -1,3 +1,3 @@
-from postgres import PostgresColumn, PostgresType
+from bollhav.postgres.columns import PostgresColumn, PostgresType
 
 __all__ = ["PostgresColumn", "PostgresType"]
