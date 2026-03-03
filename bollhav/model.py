@@ -1,8 +1,8 @@
 from datetime import datetime
 from typing import Callable
 from bollhav.database import Database
-from bollhav.implementations.postgres import PostgresColumn
-from bollhav.implementations.parquet import ParquetColumn
+from bollhav.postgres.columns import PostgresColumn
+from bollhav.parquet.columns import ParquetColumn
 from bollhav.modes import WriteMode, ModelType
 from bollhav.batching import infer_batch_size
 from bollhav.sorting import sort_columns
@@ -24,6 +24,7 @@ class Model:
         enabled: bool = True,
         debug: bool = False,
         description: str | None = None,
+        target_dsn: str | None = None,
         source_dsn: str | None = None,
         source_query: str | None = None,
         column_sorting: Callable | None = sort_columns,
@@ -67,6 +68,7 @@ class Model:
         self.enabled = enabled
         self.debug = debug
         self.description = description
+        self.target_dsn = target_dsn
         self.source_dsn = source_dsn
         self.source_query = source_query
         self.column_sorting = column_sorting
