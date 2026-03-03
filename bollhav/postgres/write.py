@@ -23,10 +23,7 @@ def _ensure_table(
 
 
 def write(
-<<<<<<< HEAD:bollhav/postgres/write.py
     conn: Connection,
-=======
->>>>>>> 33dbfdc (gall):bollhav/implementations/postgres/write.py
     df_gen: Generator[pl.DataFrame, None, None],
     model: Model,
     since: datetime | None = None,
@@ -40,10 +37,6 @@ def write(
     if write_mode == WriteMode.VIEW:
         if not model.source_query:
             raise ValueError(f"VIEW mode requires source_query on model '{model.name}'")
-<<<<<<< HEAD:bollhav/postgres/write.py
-=======
-        conn = _get_connection(dsn=model.target_dsn)
->>>>>>> 33dbfdc (gall):bollhav/implementations/postgres/write.py
         try:
             with conn:
                 create_view(
@@ -76,11 +69,6 @@ def write(
         if filter_column is None:
             raise ValueError("OVERWRITE_INSERT requires filter_column")
 
-<<<<<<< HEAD:bollhav/postgres/write.py
-=======
-    conn = _get_connection(dsn=model.target_dsn)
-
->>>>>>> 33dbfdc (gall):bollhav/implementations/postgres/write.py
     try:
         with conn:
             _ensure_table(conn=conn, schema=schema, table=table, ddl=ddl)
