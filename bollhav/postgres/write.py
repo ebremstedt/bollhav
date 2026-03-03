@@ -17,19 +17,19 @@ def write(
 ) -> None:
     match model.write_mode:
         case WriteMode.VIEW:
-            write_using_mode = create_view
+            write_function = create_view
         case WriteMode.APPEND:
-            write_using_mode = append
+            write_function = append
         case WriteMode.TRUNCATE_INSERT:
-            write_using_mode = truncate_insert
+            write_function = truncate_insert
         case WriteMode.OVERWRITE_INSERT:
-            write_using_mode = partial(overwrite_insert, since=since, until=until)
+            write_function = partial(overwrite_insert, since=since, until=until)
         case WriteMode.UPDATE_INSERT:
-            write_using_mode = partial(update_insert, since=since, until=until)
+            write_function = partial(update_insert, since=since, until=until)
         case _:
             raise ValueError(f"Unhandled write mode: {model.write_mode}")
 
     for df in df_gen:
         if len(df) == 0:
             continue
-        write_using_mode(conn=conn, model=model, df=df)
+        write_function(conn=conn, model=model, df=df)
