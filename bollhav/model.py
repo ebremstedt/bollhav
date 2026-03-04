@@ -148,10 +148,11 @@ class Model:
         return self.__dict__ == other.__dict__
 
     def get_batch_intervals(
-        self,
-        interval: TZInterval,
+        self, interval: TZInterval, cron_override: str | None = None
     ) -> list[TZInterval]:
         it = croniter(self.cron, interval.since)
+        if cron_override is not None:
+            it = croniter(cron_override, interval.since)
 
         intervals: list[TZInterval] = []
         current = interval.since
