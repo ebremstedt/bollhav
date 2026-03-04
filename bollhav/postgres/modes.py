@@ -134,7 +134,7 @@ def update_insert(conn: psycopg.Connection, model: Model, df: pl.DataFrame) -> N
         )
 
 
-def create_view(
+def create_replace_view(
     conn: psycopg.Connection,
     model: Model,
     query: str,
