@@ -36,7 +36,6 @@ def write(
             raise ValueError(f"Unhandled write mode: {model.write_mode}")
 
     for df in df_gen:
-        print(df)
         if len(df) == 0:
             continue
         write_function(conn=conn, model=model, df=df)
