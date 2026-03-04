@@ -1,6 +1,8 @@
 from datetime import datetime, timedelta
 from typing import Callable
+from icron import croniter
 from bollhav.database import Database
+from bollhav.intervals import TZInterval
 from bollhav.postgres.columns import PostgresColumn
 from bollhav.parquet.columns import ParquetColumn
 from bollhav.modes import WriteMode, ModelType
@@ -144,3 +146,23 @@ class Model:
         if not isinstance(other, Model):
             return NotImplemented
         return self.__dict__ == other.__dict__
+
+    def get_batch_intervals(
+        self,
+        interval: TZInterval,
+    ) -> list[TZInterval]:
+        it = croniter(self.cron, interval.since)
+
+        intervals: list[TZInterval] = []
+        current = interval.since
+
+        for tick in it:
+            if tick >= interval.until:
+                break
+            intervals.append(TZInterval(current, tick))
+            current = tick
+
+        if current < interval.until:
+            intervals.append(TZInterval(current, interval.until))
+
+        return intervals
