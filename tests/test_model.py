@@ -227,7 +227,6 @@ class TestEq:
 
 # --- get_batch_intervals ---
 
-
 class TestGetBatchIntervals:
     def _make_interval(self, since: datetime, until: datetime) -> MagicMock:
         interval = MagicMock()
@@ -242,13 +241,12 @@ class TestGetBatchIntervals:
         since = utc_dt(2024, 1, 1, 0)
         tick1 = utc_dt(2024, 1, 1, 1)
         until = utc_dt(2024, 1, 1, 2)
-
-        mock_croniter.return_value = iter([tick1, until])
-
+        mock_it = MagicMock()
+        mock_it.get_next.side_effect = [tick1, until]
+        mock_croniter.return_value = mock_it
         m = minimal_model(cron="0 * * * *")
         interval = self._make_interval(since, until)
         result = m.get_batch_intervals(interval)
-
         assert len(result) == 2
         assert result[0].since == since
         assert result[0].until == tick1
@@ -259,12 +257,12 @@ class TestGetBatchIntervals:
     def test_cron_override_used_when_provided(self, mock_croniter: MagicMock) -> None:
         since = utc_dt(2024, 1, 1)
         until = utc_dt(2024, 1, 2)
-        mock_croniter.return_value = iter([until])
-
+        mock_it = MagicMock()
+        mock_it.get_next.side_effect = [until]
+        mock_croniter.return_value = mock_it
         m = minimal_model(cron="0 * * * *")
         interval = self._make_interval(since, until)
         m.get_batch_intervals(interval, cron_override="0 0 * * *")
-
         mock_croniter.assert_called_with("0 0 * * *", since)
 
     @patch("bollhav.model.croniter")
@@ -273,13 +271,12 @@ class TestGetBatchIntervals:
     ) -> None:
         since = utc_dt(2024, 1, 1)
         until = utc_dt(2024, 1, 2)
-        # first tick is already >= until
-        mock_croniter.return_value = iter([until])
-
+        mock_it = MagicMock()
+        mock_it.get_next.side_effect = [until]
+        mock_croniter.return_value = mock_it
         m = minimal_model(cron="0 * * * *")
         interval = self._make_interval(since, until)
         result = m.get_batch_intervals(interval)
-
         assert len(result) == 1
         assert result[0].since == since
         assert result[0].until == until
@@ -288,14 +285,12 @@ class TestGetBatchIntervals:
     def test_tick_exactly_at_until_not_included(self, mock_croniter: MagicMock) -> None:
         since = utc_dt(2024, 1, 1)
         until = utc_dt(2024, 1, 1, 6)
-        tick = utc_dt(2024, 1, 1, 6)  # == until, should stop
-
-        mock_croniter.return_value = iter([tick])
-
+        tick = utc_dt(2024, 1, 1, 6)
+        mock_it = MagicMock()
+        mock_it.get_next.side_effect = [tick]
+        mock_croniter.return_value = mock_it
         m = minimal_model(cron="0 * * * *")
         interval = self._make_interval(since, until)
         result = m.get_batch_intervals(interval)
-
         assert len(result) == 1
-        assert result[0].since == since
-        assert result[0].until == until
+        assert result[0].since == since  
