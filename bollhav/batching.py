@@ -1,5 +1,5 @@
 from enum import Enum
-from croniter import croniter
+from icron import croniter
 
 
 class BatchSize(Enum):
