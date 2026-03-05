@@ -148,23 +148,16 @@ class Model:
             return NotImplemented
         return self.__dict__ == other.__dict__
 
-    def get_batch_intervals(
-        self, interval: TZInterval, cron_override: str | None = None
-    ) -> list[TZInterval]:
-        it = croniter(self.cron, interval.since)
-        if cron_override is not None:
-            it = croniter(cron_override, interval.since)
-
+    def get_batch_intervals(self, interval: TZInterval, cron_override: str | None = None) -> list[TZInterval]:
+        it = croniter(cron_override or self.cron, interval.since)
         intervals: list[TZInterval] = []
         current = interval.since
-
-        for tick in it:
+        while True:
+            tick = it.get_next(datetime)
             if tick >= interval.until:
                 break
             intervals.append(TZInterval(current, tick))
             current = tick
-
         if current < interval.until:
             intervals.append(TZInterval(current, interval.until))
-
         return intervals
