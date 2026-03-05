@@ -72,7 +72,7 @@ class Model:
         self.model_type = model_type
         self.write_mode = write_mode
         self.tags = set(tags) if tags else set()
-        self.tags.add(self.name)
+        self.tags.update([self.name, self.schema])
         self.cron = cron
         self.enabled = enabled
         self.debug = debug
