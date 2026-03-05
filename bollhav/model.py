@@ -21,7 +21,7 @@ class Model:
         columns: list[PostgresColumn | ParquetColumn] | None = None,
         model_type: ModelType = ModelType.TABLE,
         write_mode: WriteMode = WriteMode.APPEND,
-        tags: list[str] | None = None,
+        tags: set[str] | None = None,
         cron: str | None = None,
         enabled: bool = True,
         debug: bool = False,
@@ -71,7 +71,8 @@ class Model:
         self.columns = columns
         self.model_type = model_type
         self.write_mode = write_mode
-        self.tags = tags
+        self.tags = set(tags) if tags else set()
+        self.tags.add(self.name)
         self.cron = cron
         self.enabled = enabled
         self.debug = debug
