@@ -227,6 +227,7 @@ class TestEq:
 
 # --- get_batch_intervals ---
 
+
 class TestGetBatchIntervals:
     def _make_interval(self, since: datetime, until: datetime) -> MagicMock:
         interval = MagicMock()
@@ -293,4 +294,4 @@ class TestGetBatchIntervals:
         interval = self._make_interval(since, until)
         result = m.get_batch_intervals(interval)
         assert len(result) == 1
-        assert result[0].since == since  
+        assert result[0].since == since
