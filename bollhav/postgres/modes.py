@@ -115,6 +115,7 @@ def update_insert(conn: psycopg.Connection, model: Model, df: pl.DataFrame) -> N
         col_names = ", ".join(f'"{c}"' for c in df.columns)
         pk_cols_str = ", ".join(f'"{c}"' for c in unique_columns)
 
+        conn.execute(f'DROP TABLE IF EXISTS "{temp_table}"')
         conn.execute(
             f'CREATE TEMP TABLE "{temp_table}" (LIKE {model.schema}."{model.name}") ON COMMIT DROP'
         )
