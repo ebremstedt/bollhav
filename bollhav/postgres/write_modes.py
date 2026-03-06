@@ -5,6 +5,7 @@ import polars as pl
 from bollhav.model import Model
 from bollhav.modes import WriteMode
 from bollhav.postgres.modes import (
+    recreate_insert,
     truncate_insert,
     overwrite_insert,
     update_insert,
@@ -24,6 +25,8 @@ def write_dataframes(
     match model.write_mode:
         case WriteMode.APPEND:
             write_function = append
+        case WriteMode.RECREATE_INSERT:
+            write_function = recreate_insert
         case WriteMode.TRUNCATE_INSERT:
             write_function = truncate_insert
         case WriteMode.OVERWRITE_INSERT:
@@ -49,13 +52,14 @@ def write(
 ) -> None:
     if model.write_mode in (
         WriteMode.APPEND,
+        WriteMode.RECREATE_INSERT,
         WriteMode.TRUNCATE_INSERT,
         WriteMode.OVERWRITE_INSERT,
         WriteMode.UPDATE_INSERT,
     ):
         if not df_gen:
             raise ValueError(
-                "Modes APPEND, TRUNCATE_INSERT, OVERWRITE_INSERT, UPDATE_INSERT need a dataframe"
+                "Modes APPEND, RECREATE_INSERT, TRUNCATE_INSERT, OVERWRITE_INSERT, UPDATE_INSERT need a dataframe"
             )
         write_dataframes(
             conn=conn, model=model, df_gen=df_gen, since=since, until=until

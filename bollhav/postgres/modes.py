@@ -91,6 +91,22 @@ def overwrite_insert(
                 copy.write_row(row)
 
 
+def recreate_insert(
+    conn: psycopg.Connection,
+    model: Model,
+    df: pl.DataFrame,
+) -> None:
+    with conn.transaction():
+        conn.execute(f'DROP TABLE IF EXISTS {model.schema}."{model.name}"')
+        _ensure(conn, model)
+        col_names = ", ".join(f'"{c}"' for c in df.columns)
+        with conn.cursor().copy(
+            f'COPY {model.schema}."{model.name}" ({col_names}) FROM STDIN'
+        ) as copy:
+            for row in df.rows():
+                copy.write_row(row)
+
+
 def truncate_insert(
     conn: psycopg.Connection,
     model: Model,
