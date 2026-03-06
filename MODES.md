@@ -27,6 +27,31 @@ flowchart TD
 
 ---
 
+## RECREATE_INSERT
+
+Drops and recreates the table before inserting. Stronger than TRUNCATE_INSERT as it also resets the schema.
+
+### When to use:
+- When the table schema may have changed and needs to be realigned with the model
+- When a full schema reset is preferred over a simple truncate
+
+### Explanation
+```mermaid
+flowchart TD
+    A[Incoming rows] --> B[DROP TABLE target]
+    B --> C[CREATE TABLE target]
+    C --> D[INSERT all rows]
+    D --> E[Target table]
+
+    style A fill:#4A90D9,stroke:#2C5F8A,color:#fff
+    style B fill:#C0392B,stroke:#922B21,color:#fff
+    style C fill:#E67E22,stroke:#A04000,color:#fff
+    style D fill:#5BA85A,stroke:#3A7A39,color:#fff
+    style E fill:#2C3E50,stroke:#1a252f,color:#fff
+```
+
+---
+
 ## TRUNCATE_INSERT
 
 Fully reloads the table on every run. Wipes everything first, then inserts.
