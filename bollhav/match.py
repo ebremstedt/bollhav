@@ -104,10 +104,6 @@ def match_execute_functions(
 
         export TAGS="[wee|x],[xyz&(c|e)]"
 
-    And parsed with:
-
-        env_var_tag_expression("TAGS")
-
     LIMITATIONS
     -----------
     - Square brackets are required around every group
