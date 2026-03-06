@@ -36,6 +36,7 @@ def write_dataframes(
     for df in df_gen:
         if len(df) == 0:
             continue
+        df = df.select([col.name for col in model.columns])
         write_function(conn=conn, model=model, df=df)
 
 
