@@ -21,7 +21,7 @@ class Model:
         columns: list[PostgresColumn | ParquetColumn] | None = None,
         model_type: ModelType = ModelType.TABLE,
         write_mode: WriteMode = WriteMode.APPEND,
-        tags: set[str] | None = None,
+        tags: set[str] = set(),
         cron: str | None = None,
         enabled: bool = True,
         debug: bool = False,
@@ -36,6 +36,9 @@ class Model:
         end: datetime | None = None,
         retries: int | None = None,
         lookback: int | None = None,
+        name_add_to_tags: bool = True,
+        schema_add_to_tags: bool = True,
+        model_gets_all_tag: bool = True,
         tz_aware: bool = True,
         **kwargs,
     ):
@@ -72,7 +75,15 @@ class Model:
         self.model_type = model_type
         self.write_mode = write_mode
         self.tags = set(tags) if tags else set()
-        self.tags.update([self.name, self.schema])
+        self.name_add_to_tags = name_add_to_tags
+        if self.name_add_to_tags:
+            tags.add(self.name)
+        self.schema_add_to_tags = schema_add_to_tags
+        if self.schema_add_to_tags:
+            tags.add(self.schema)
+        self.every_model_gets_all_tag = model_gets_all_tag
+        if self.every_model_gets_all_tag:
+            tags.add("all")
         self.cron = cron
         self.enabled = enabled
         self.debug = debug
