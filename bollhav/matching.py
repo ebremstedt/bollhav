@@ -10,11 +10,11 @@ def _model_matches(model: Model, parsed: list[list[str | list[str]]]) -> bool:
     return _tags_match(model.model_config.tags, parsed)
 
 
-def _tags_match(model_tags: list[str], parsed: list[list[str | list[str]]]) -> bool:
+def _tags_match(model_tags: set[str], parsed: list[list[str | list[str]]]) -> bool:
     return any(_group_matches(model_tags, group) for group in parsed)
 
 
-def _group_matches(model_tags: list[str], group: list[str | list[str]]) -> bool:
+def _group_matches(model_tags: set[str], group: list[str | list[str]]) -> bool:
     for term in group:
         if isinstance(term, list):
             if not any(t in model_tags for t in term):
@@ -139,9 +139,10 @@ def match_models(
             module_spec = importlib.util.spec_from_file_location(
                 name=file.stem, location=file
             )
+            if module_spec is None or module_spec.loader is None:
+                continue
             module = importlib.util.module_from_spec(spec=module_spec)
             module_spec.loader.exec_module(module)
-
             for _, obj in inspect.getmembers(module):
                 if isinstance(obj, Model) and _model_matches(obj, parsed):
                     models.append(obj)

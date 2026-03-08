@@ -16,10 +16,10 @@ class ModelConfig:
         table: str = "",
         schema: str = "",
         database: Database | None = None,
-        columns: list[PostgresColumn | ParquetColumn] | None = None,
+        columns: list[PostgresColumn | ParquetColumn] = [],
         model_type: ModelType = ModelType.TABLE,
         write_mode: WriteMode = WriteMode.APPEND,
-        tags: set[str] | None = None,  # fix: was `set()` — mutable default arg
+        tags: set[str] | None = None,
         cron: str | None = None,
         enabled: bool = True,
         debug: bool = False,
@@ -44,9 +44,9 @@ class ModelConfig:
             raise ValueError("ModelType.VIEW must use WriteMode.VIEW")
         if model_type == ModelType.TABLE and write_mode == WriteMode.VIEW:
             raise ValueError("ModelType.TABLE cannot use WriteMode.VIEW")
-        if database is not None and columns is None:
+        if database is not None and len(columns) == 0:
             raise ValueError("columns must be set when database is provided")
-        if columns is not None and database is None:
+        if len(columns) > 0 and database is None:
             raise ValueError("database must be set when columns is provided")
         if partitioned_by and columns:
             col_names = {c.name for c in columns}

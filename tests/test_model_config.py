@@ -99,7 +99,7 @@ def test_defaults():
     assert m.table == ""
     assert m.schema == ""
     assert m.database is None
-    assert m.columns is None
+    assert m.columns == []
     assert m.model_type == ModelType.TABLE
     assert m.write_mode == WriteMode.APPEND
     assert m.enabled is True
