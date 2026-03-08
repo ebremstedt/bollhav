@@ -1,10 +1,9 @@
-# bollhav
+# bollhav ⚽ 🌊
 
-Model definition framework for data pipeline targets.
+Model definition framework for data pipeline targets with multiple target implementations:
 
-## Implementations
-[Postgres](README_postgres.md) \
-[Parquet](README_parquet.md)
+- [Postgres](README_postgres.md)
+- [Parquet](README_parquet.md)
 
 ---
 
@@ -13,11 +12,12 @@ Model definition framework for data pipeline targets.
 pip install bollhav
 ```
 
-## Model
+## Model creation example
 ```python
-from bollhav import Model, ModelType, WriteMode, Database, PostgresColumn, PostgresType
+from bollhav import Model, ModelConfig, WriteMode, Database, PostgresColumn, PostgresType, TZInterval
+import polars as pl
 
-model = Model(
+config = ModelConfig(
     name="orders",
     source_entity="raw.orders",
     table="orders",
@@ -32,6 +32,14 @@ model = Model(
     cron="0 3 * * *",
     partitioned_by="created_at",
 )
+
+def execute(interval: TZInterval) -> pl.DataFrame:
+    return pl.read_database(
+        f"SELECT * FROM {config.source_entity} WHERE created_at >= '{interval.since}' AND created_at < '{interval.until}'",
+        connection=...,
+    )
+
+model = Model(model_config=config, execute=execute)
 ```
 
 ### Parameters
@@ -46,7 +54,7 @@ model = Model(
 | `columns` | `list[PostgresColumn \| ParquetColumn]` | `None` | Column definitions. Required if `database` is set |
 | `model_type` | `ModelType` | `TABLE` | `TABLE` or `VIEW` |
 | `write_mode` | `WriteMode` | `APPEND` | How to write data. `VIEW` requires `ModelType.VIEW` |
-| `tags` | `list[str]` | `None` | Labels for filtering |
+| `tags` | `set[str]` | `None` | Labels for filtering |
 | `cron` | `str` | `None` | Cron expression. Automatically infers `batch_size` |
 | `enabled` | `bool` | `True` | Whether the model is active |
 | `debug` | `bool` | `False` | Enables debug mode |
@@ -70,13 +78,6 @@ model = Model(
 | `unique_columns` | Columns with `unique=True` — required for `UPDATE_INSERT` |
 | `partitioned_by_index` | `True` if `partitioned_by` is set |
 
-## Databases
-```python
-from bollhav import Database
-
-Database.POSTGRES
-Database.PARQUET
-```
 
 ## Write modes
 
@@ -104,16 +105,73 @@ model = Model(
 )
 ```
 
-## Extra kwargs
+model.extra  # {"static": "production", "env": "env=production"}
+```
 
-Non-reserved keyword arguments are stored in `model.extra`. Callable values are resolved at init time using the non-callable kwargs as arguments.
+## Batch intervals
+
+`Model.get_batch_intervals` splits a `TZInterval` into sub-intervals driven by the model's cron expression. Useful for chunked backfills.
+
 ```python
-model = Model(
-    name="orders",
-    source_entity="raw.orders",
-    static="production",
-    env=lambda static: f"env={static}",
+from datetime import datetime, timezone
+from bollhav.intervals import TZInterval
+
+interval = TZInterval(
+    since=datetime(2025, 1, 1, tzinfo=timezone.utc),
+    until=datetime(2025, 1, 1, 3, 0, tzinfo=timezone.utc),
 )
 
-model.extra  # {"static": "production", "env": "env=production"}
+batches = model.get_batch_intervals(interval)
+# With cron="0 * * * *":
+# [TZInterval(00:00, 01:00), TZInterval(01:00, 02:00), TZInterval(02:00, 03:00)]
+```
+
+Pass `cron_override` to use a different cron expression without changing the model config:
+```python
+batches = model.get_batch_intervals(interval, cron_override="*/15 * * * *")
+```
+
+## Tag filtering
+
+Tags are automatically populated at init time. By default `name`, `schema`, and `"all"` are added.
+
+```python
+model = ModelConfig(name="orders", source_entity="raw.orders", schema="public")
+model.tags  # {"orders", "public", "all"}
+```
+
+Control which tags are auto-added:
+```python
+ModelConfig(..., name_add_to_tags=False, schema_add_to_tags=False, model_gets_all_tag=False)
+```
+
+Use `match_models` to discover and filter model instances from a folder by tag expression:
+
+```python
+from bollhav.match_models import match_models
+
+models = match_models(folder="src/models", tags="[orders|payments]")
+models = match_models(folder="src/models", tags="[public&reporting]")
+models = match_models(folder="src/models", tags="[public&(orders|payments)]")
+```
+
+### Tag expression syntax
+
+| Syntax | Meaning |
+|---|---|
+| `[tag]` | model has `tag` |
+| `[a\|b]` | model has `a` OR `b` |
+| `[a&b]` | model has `a` AND `b` |
+| `[a&(b\|c)]` | model has `a` AND (`b` OR `c`) |
+| `[g1],[g2]` | matches `g1` OR `g2` (comma = outer OR) |
+
+Square brackets are required around every group. Only one level of parentheses is supported.
+
+---
+
+## Testing
+
+Tests use `pytest`. Run the full suite:
+```bash
+pytest tests/
 ```
