@@ -12,7 +12,9 @@ UTC = timezone.utc
 def make_model(cron: str = "0 * * * *") -> Model:
     config = MagicMock()
     config.cron = cron
-    return Model(model_config=config, execute=MagicMock())
+    fn = MagicMock()
+    fn.__name__ = "execute"
+    return Model(model_config=config, execute=fn)
 
 
 def make_interval(since: datetime, until: datetime) -> MagicMock:
@@ -46,6 +48,7 @@ def test_model_is_dataclass():
 def test_model_stores_config_and_execute():
     config = MagicMock()
     fn = MagicMock()
+    fn.__name__ = "execute"
     m = Model(model_config=config, execute=fn)
     assert m.model_config is config
     assert m.execute is fn
