@@ -2,7 +2,7 @@ from typing import Generator
 from functools import partial
 from psycopg import Connection
 import polars as pl
-from bollhav.model import Model
+from bollhav.model_config import ModelConfig
 from bollhav.modes import WriteMode
 from bollhav.postgres.modes import (
     recreate_insert,
@@ -17,7 +17,7 @@ from datetime import datetime
 
 def write_dataframes(
     conn: Connection,
-    model: Model,
+    model: ModelConfig,
     df_gen: Generator[pl.DataFrame, None, None],
     since: datetime | None = None,
     until: datetime | None = None,
@@ -45,7 +45,7 @@ def write_dataframes(
 
 def write(
     conn: Connection,
-    model: Model,
+    model: ModelConfig,
     df_gen: Generator[pl.DataFrame, None, None] | None = None,
     since: datetime | None = None,
     until: datetime | None = None,
