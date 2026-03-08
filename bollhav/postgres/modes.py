@@ -1,7 +1,7 @@
 import psycopg
 import polars as pl
 from datetime import datetime, timedelta
-from bollhav.model import Model
+from bollhav.model_config import ModelConfig
 from bollhav.postgres import PostgresColumn
 
 
@@ -26,7 +26,7 @@ def ensure_schema(conn: psycopg.Connection, schema: str) -> None:
     conn.execute(f"CREATE SCHEMA IF NOT EXISTS {schema}")
 
 
-def ensure_table(conn: psycopg.Connection, model: Model) -> None:
+def ensure_table(conn: psycopg.Connection, model: ModelConfig) -> None:
     col_defs = ",\n".join(
         _col_ddl(col) for col in model.columns if isinstance(col, PostgresColumn)
     )
@@ -41,14 +41,14 @@ def ensure_table(conn: psycopg.Connection, model: Model) -> None:
         )
 
 
-def _ensure(conn: psycopg.Connection, model: Model) -> None:
+def _ensure(conn: psycopg.Connection, model: ModelConfig) -> None:
     ensure_schema(conn, model.schema)
     ensure_table(conn, model)
 
 
 def append(
     conn: psycopg.Connection,
-    model: Model,
+    model: ModelConfig,
     df: pl.DataFrame,
 ) -> None:
     _ensure(conn, model)
@@ -68,7 +68,7 @@ def _assert_utc(dt: datetime, name: str) -> None:
 
 def overwrite_insert(
     conn: psycopg.Connection,
-    model: Model,
+    model: ModelConfig,
     df: pl.DataFrame,
     since: datetime,
     until: datetime,
@@ -93,7 +93,7 @@ def overwrite_insert(
 
 def recreate_insert(
     conn: psycopg.Connection,
-    model: Model,
+    model: ModelConfig,
     df: pl.DataFrame,
 ) -> None:
     with conn.transaction():
@@ -109,7 +109,7 @@ def recreate_insert(
 
 def truncate_insert(
     conn: psycopg.Connection,
-    model: Model,
+    model: ModelConfig,
     df: pl.DataFrame,
 ) -> None:
     _ensure(conn, model)
@@ -123,7 +123,9 @@ def truncate_insert(
                 copy.write_row(row)
 
 
-def update_insert(conn: psycopg.Connection, model: Model, df: pl.DataFrame) -> None:
+def update_insert(
+    conn: psycopg.Connection, model: ModelConfig, df: pl.DataFrame
+) -> None:
     _ensure(conn, model)
     unique_columns = [col.name for col in model.unique_columns]
     with conn.transaction():
@@ -153,7 +155,7 @@ def update_insert(conn: psycopg.Connection, model: Model, df: pl.DataFrame) -> N
 
 def create_replace_view(
     conn: psycopg.Connection,
-    model: Model,
+    model: ModelConfig,
     query: str,
 ) -> None:
     with conn.transaction():

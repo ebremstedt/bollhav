@@ -1,17 +1,19 @@
-from bollhav.model import Model
+from bollhav.model_config import ModelConfig
 from bollhav.modes import ModelType, WriteMode
 from bollhav.batching import BatchSize
 from bollhav.database import Database, DatabaseColumn
 from bollhav.intervals import TZInterval
-from bollhav.match import match_execute_functions
+from bollhav.matching import match_models
+from bollhav.model import Model
 
 __all__ = [
-    "Model",
+    "ModelConfig",
     "ModelType",
     "WriteMode",
     "BatchSize",
     "Database",
     "DatabaseColumn",
     "TZInterval",
-    "match_execute_functions",
+    "match_models",
+    "Model",
 ]

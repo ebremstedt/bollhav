@@ -1,55 +1,56 @@
-import importlib
+import importlib.util
+import inspect
 import re
-from pathlib import Path
 import sys
-import types
-from typing import Callable
+from pathlib import Path
+from bollhav.model import Model
 
 
-def _parse_tag_expression(expr: str) -> list[list[str]]:
+def _model_matches(model: Model, parsed: list[list[str | list[str]]]) -> bool:
+    return _tags_match(model.model_config.tags, parsed)
+
+
+def _tags_match(model_tags: list[str], parsed: list[list[str | list[str]]]) -> bool:
+    return any(_group_matches(model_tags, group) for group in parsed)
+
+
+def _group_matches(model_tags: list[str], group: list[str | list[str]]) -> bool:
+    for term in group:
+        if isinstance(term, list):
+            if not any(t in model_tags for t in term):
+                return False
+        else:
+            if term not in model_tags:
+                return False
+    return True
+
+
+def _parse_tag_expression(expr: str) -> list[list[str | list[str]]]:
     groups = re.findall(r"\[([^\]]+)\]", expr)
     if not groups:
-        raise ValueError(
-            f"Invalid tag expression: {expr}. Groups must be wrapped in []."
-        )
+        raise ValueError(f"Invalid tag expression: {expr!r}. Must use [group] syntax.")
 
-    result: list[list[str]] = []
+    parsed = []
     for group in groups:
-        if "&" in group:
-            and_terms = group.split("&")
-            or_sets: list[list[str]] = []
-            for term in and_terms:
-                term = term.strip()
-                paren_match = re.match(r"^\(([^)]+)\)$", term)
-                if paren_match:
-                    or_sets.append([t.strip() for t in paren_match.group(1).split("|")])
-                else:
-                    or_sets.append([term])
-            result.append(or_sets)
-        else:
-            result.append([[t.strip() for t in group.split("|")]])
+        terms = group.split("&")
+        parsed_terms = []
+        for term in terms:
+            or_match = re.fullmatch(r"\(([^)]+)\)", term.strip())
+            if or_match:
+                parsed_terms.append(or_match.group(1).split("|"))
+            elif "|" in term:
+                parsed_terms.append(term.split("|"))
+            else:
+                parsed_terms.append(term.strip())
+        parsed.append(parsed_terms)
 
-    return result
+    return parsed
 
 
-def _module_matches(
-    module: types.ModuleType,
-    parsed: list,
-) -> bool:
-    model = getattr(module, "model", None)
-    if model is None:
-        return False
-    module_tags: set[str] = getattr(model, "tags", set())
-    for group in parsed:
-        if all(any(tag in module_tags for tag in or_set) for or_set in group):
-            return True
-    return False
-
-
-def match_execute_functions(
+def match_models(
     folder: str = "src/models",
     tags: str | None = None,
-) -> list[Callable]:
+) -> list[Model]:
     """
     Discover and return execute functions from Python modules in a folder recursively,
     filtered by a tag expression.
@@ -124,7 +125,6 @@ def match_execute_functions(
         raise ValueError("tags must be a non-empty expression.")
 
     parsed = _parse_tag_expression(tags)
-    print(f"Filtering execute functions to those with tags: {tags}")
 
     folder_path = Path(folder)
     parent_dir = str(folder_path.parent)
@@ -134,16 +134,19 @@ def match_execute_functions(
         added_to_path = True
 
     try:
-        execute_functions = []
+        models = []
         for file in folder_path.rglob("*.py"):
             module_spec = importlib.util.spec_from_file_location(
                 name=file.stem, location=file
             )
             module = importlib.util.module_from_spec(spec=module_spec)
             module_spec.loader.exec_module(module)
-            if _module_matches(module, parsed):
-                execute_functions.append(module.execute)
-        return execute_functions
+
+            for _, obj in inspect.getmembers(module):
+                if isinstance(obj, Model) and _model_matches(obj, parsed):
+                    models.append(obj)
+
+        return models
     finally:
         if added_to_path:
             sys.path.remove(parent_dir)
