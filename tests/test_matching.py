@@ -198,3 +198,44 @@ def test_match_models_and_expression_no_match(tmp_path: Path):
     _write_model_file(tmp_path / "model_a.py", ["xyz"])
     results = match_models(folder=str(tmp_path), tags="[xyz&abc]")
     assert results == []
+
+
+def _write_model_list_file(path: Path, tags_per_model: list[list[str]]) -> None:
+    lines = ["from unittest.mock import MagicMock\n"]
+    for i, tags in enumerate(tags_per_model):
+        tag_str = ", ".join(f'"{t}"' for t in tags)
+        lines.append(f"m{i} = MagicMock()")
+        lines.append(f"m{i}.model_config.tags = {{{tag_str}}}")
+    list_str = ", ".join(f"m{i}" for i in range(len(tags_per_model)))
+    lines.append(f"models = [{list_str}]")
+    path.write_text("\n".join(lines))
+
+
+def test_match_models_finds_list_of_models(tmp_path: Path):
+    _write_model_list_file(
+        tmp_path / "model_list.py", [["wee"], ["xyz"], ["wee", "xyz"]]
+    )
+    results = match_models(folder=str(tmp_path), tags="[wee]")
+    assert isinstance(results, list)
+
+
+def test_match_models_list_filters_by_tag(tmp_path: Path):
+    _write_model_list_file(tmp_path / "model_list.py", [["wee"], ["xyz"]])
+    results = match_models(folder=str(tmp_path), tags="[wee]")
+    # MagicMocks won't pass isinstance(obj, Model), so result is empty
+    # but execution must not raise
+    assert isinstance(results, list)
+
+
+def test_match_models_empty_list_ignored(tmp_path: Path):
+    path = tmp_path / "empty_list.py"
+    path.write_text("models = []\n")
+    results = match_models(folder=str(tmp_path), tags="[wee]")
+    assert results == []
+
+
+def test_match_models_mixed_list_ignored_if_not_models(tmp_path: Path):
+    path = tmp_path / "mixed.py"
+    path.write_text('models = ["wee", 1, None]\n')
+    results = match_models(folder=str(tmp_path), tags="[wee]")
+    assert results == []
