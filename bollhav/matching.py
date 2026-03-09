@@ -55,6 +55,8 @@ def match_models(
     Discover and return execute functions from Python modules in a folder recursively,
     filtered by a tag expression.
 
+    This can match either a declared model or a declared list of models, or both!
+
     TAG EXPRESSION SYNTAX
     =====================
 
@@ -123,16 +125,13 @@ def match_models(
     """
     if not tags:
         raise ValueError("tags must be a non-empty expression.")
-
     parsed = _parse_tag_expression(tags)
-
     folder_path = Path(folder)
     parent_dir = str(folder_path.parent)
     added_to_path = False
     if parent_dir not in sys.path:
         sys.path.insert(0, parent_dir)
         added_to_path = True
-
     try:
         models = []
         for file in folder_path.rglob("*.py"):
@@ -146,7 +145,8 @@ def match_models(
             for _, obj in inspect.getmembers(module):
                 if isinstance(obj, Model) and _model_matches(obj, parsed):
                     models.append(obj)
-
+                elif isinstance(obj, list) and all(isinstance(m, Model) for m in obj):
+                    models.extend(m for m in obj if _model_matches(m, parsed))
         return models
     finally:
         if added_to_path:
