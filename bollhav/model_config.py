@@ -8,6 +8,10 @@ from bollhav.batching import infer_batch_size
 from bollhav.sorting import sort_columns
 
 
+def snake_to_tags(s: str) -> set[str]:
+    return set(s.split("_"))
+
+
 class ModelConfig:
     def __init__(
         self,
@@ -37,6 +41,7 @@ class ModelConfig:
         name_add_to_tags: bool = True,
         schema_add_to_tags: bool = True,
         model_gets_all_tag: bool = True,
+        unkebab_schema_for_tags: bool = True,
         tz_aware: bool = True,
         **kwargs,
     ):
@@ -72,6 +77,7 @@ class ModelConfig:
         self.columns = columns
         self.model_type = model_type
         self.write_mode = write_mode
+        self.unkebab_schema_for_tags = unkebab_schema_for_tags
         self.tags = set(tags) if tags else set()
         self.name_add_to_tags = name_add_to_tags
         if self.name_add_to_tags:
@@ -82,6 +88,8 @@ class ModelConfig:
         self.every_model_gets_all_tag = model_gets_all_tag
         if self.every_model_gets_all_tag:
             self.tags.add("all")
+        if self.unkebab_schema_for_tags:
+            self.tags.update(snake_to_tags(s=self.schema))
         self.cron = cron
         self.enabled = enabled
         self.debug = debug
