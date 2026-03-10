@@ -3,7 +3,7 @@ import inspect
 import re
 import sys
 from pathlib import Path
-from bollhav.model import Model
+from bollhav.model.model import Model
 
 
 def _model_matches(model: Model, parsed: list[list[str | list[str]]]) -> bool:

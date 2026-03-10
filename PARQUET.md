@@ -1,10 +1,8 @@
+[README.md](README.md)
+
 # ParquetColumn
 
 Column definitions for Parquet targets.
-
-**Back to** [Model](README.md)
-
----
 
 ## Usage
 

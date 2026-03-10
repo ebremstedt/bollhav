@@ -1,9 +1,8 @@
 from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 import pytest
-
-from bollhav.modes import WriteMode, ModelType
-from bollhav.model_config import ModelConfig
+from bollhav.model.modes import WriteMode, ModelType
+from bollhav.model.model_config import ModelConfig
 
 
 UTC = timezone.utc
@@ -228,7 +227,9 @@ def test_partitioned_by_none_sets_index_false():
 
 
 def test_batch_size_inferred_from_cron():
-    with patch("bollhav.model_config.infer_batch_size", return_value=100) as mock_infer:
+    with patch(
+        "bollhav.model.model_config.infer_batch_size", return_value=100
+    ) as mock_infer:
         m = ModelConfig(**base_kwargs(cron="0 * * * *"))
         mock_infer.assert_called_once_with("0 * * * *")
         assert m.batch_size == 100

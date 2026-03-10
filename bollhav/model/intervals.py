@@ -12,3 +12,5 @@ class TZInterval:
             raise ValueError("since and until must be timezone-aware")
         if self.since >= self.until:
             raise ValueError("since must be before until")
+        if self.since == self.until:
+            raise ValueError("Since can not be equal to until")

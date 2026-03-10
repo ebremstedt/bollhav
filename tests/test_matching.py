@@ -1,10 +1,9 @@
 import textwrap
 from pathlib import Path
 from unittest.mock import MagicMock
-
 import pytest
 
-from bollhav.matching import (
+from bollhav.model.matching import (
     _group_matches,
     _model_matches,
     _parse_tag_expression,
@@ -158,8 +157,6 @@ def test_match_models_empty_tags_raises(tmp_path: Path):
 
 def test_match_models_returns_matching_model(tmp_path: Path):
     _write_model_file(tmp_path / "model_a.py", ["wee", "all"])
-    from bollhav.model import Model
-    import importlib.util, inspect
 
     results = match_models(folder=str(tmp_path), tags="[wee]")
     # Since the fake module uses MagicMock (not real Model instances),

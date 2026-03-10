@@ -1,5 +1,5 @@
 from dataclasses import dataclass, fields
-from bollhav.database import DatabaseColumn
+from bollhav.model.database import DatabaseColumn
 from enum import Enum
 
 
