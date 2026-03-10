@@ -151,7 +151,8 @@ class ModelConfig:
 
         self.schema = schema
         self.schema_suffix = schema_suffix
-        if use_schema_suffix:
+        self.use_schema_suffix = use_schema_suffix
+        if self.use_schema_suffix:
             self.schema_with_suffix = self.schema + self.schema_suffix
 
         self.source_entity = source_entity
