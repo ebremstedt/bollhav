@@ -13,12 +13,89 @@ def snake_to_tags(s: str) -> set[str]:
 
 
 class ModelConfig:
+    """
+    Configuration for a data model, defining source, target, write behavior, and metadata.
+
+    Parameters
+    ----------
+    name : str
+        Unique model identifier. Added to tags by default.
+    source_entity : str
+        Source table/view name to read from.
+    table : str
+        Target table name.
+    schema : str
+        Target schema name. Added to tags by default.
+    schema_suffix : str
+        Suffix appended to schema when use_suffix=True.
+    database : Database | None
+        Target database. Required if columns is provided.
+    columns : list[PostgresColumn | ParquetColumn]
+        Column definitions. Required if database is provided.
+    model_type : ModelType
+        TABLE or VIEW. VIEW requires WriteMode.VIEW.
+    write_mode : WriteMode
+        How data is written (APPEND, UPDATE_INSERT, VIEW, etc).
+        UPDATE_INSERT requires at least one column with unique=True.
+    tags : set[str] | None
+        Additional tags. name, schema, and "all" are added automatically.
+    cron : str | None
+        Cron expression used to infer batch_size.
+    enabled : bool
+        Whether the model is active.
+    debug : bool
+        Enables debug mode.
+    description : str | None
+        Human-readable description.
+    target_dsn_env_var : str | None
+        Env var name for the target DSN.
+    source_dsn_env_var : str | None
+        Env var name for the source DSN.
+    source_query : str | None
+        Optional override query for reading from source.
+    column_sorting : Callable | None
+        Function to sort column order. Defaults to sort_columns.
+    partitioned_by : str | None
+        Column name used for batch partitioning. Must exist in columns if set.
+    partitioned_by_index : bool
+        Auto-set to True when partitioned_by is provided.
+    begin : datetime | None
+        Start of the valid time range. Must be UTC-aware if tz_aware=True.
+    end : datetime | None
+        End of the valid time range. Must be UTC-aware if tz_aware=True.
+    retries : int | None
+        Number of retry attempts on failure.
+    lookback : int | None
+        Lookback window in batch units.
+    name_add_to_tags : bool
+        Whether to add name to tags.
+    schema_add_to_tags : bool
+        Whether to add schema to tags.
+    model_gets_all_tag : bool
+        Whether to add "all" to tags.
+    unkebab_schema_for_tags : bool
+        Whether to split schema on underscores and add parts as tags.
+    use_schema_suffix : bool
+        Whether to append schema_suffix to schema.
+    tz_aware : bool
+        Enforces UTC-awareness on begin/end if True.
+    **kwargs
+        Extra fields stored in self.extra. Callable values are resolved at init time.
+
+    Raises
+    ------
+    ValueError
+        On invalid combinations of model_type/write_mode, missing columns/database,
+        unknown partitioned_by column, non-UTC begin/end, or UPDATE_INSERT without unique columns.
+    """
+
     def __init__(
         self,
         name: str,
         source_entity: str,
         table: str = "",
         schema: str = "",
+        schema_suffix: str = "",
         database: Database | None = None,
         columns: list[PostgresColumn | ParquetColumn] = [],
         model_type: ModelType = ModelType.TABLE,
@@ -42,8 +119,7 @@ class ModelConfig:
         schema_add_to_tags: bool = True,
         model_gets_all_tag: bool = True,
         unkebab_schema_for_tags: bool = True,
-        model_environment_suffix: str = "",
-        use_model_environment_suffix: bool = True,
+        use_schema_suffix: bool = True,
         tz_aware: bool = True,
         **kwargs,
     ):
@@ -72,18 +148,19 @@ class ModelConfig:
                 raise ValueError("end must be UTC-aware")
 
         self.name = name
-        self.model_environment_suffix = model_environment_suffix
-        if use_model_environment_suffix:
-            self.name_with_environtment_suffix = (
-                f"{self.name}_{self.model_environment_suffix}"
-            )
+
+        self.schema = schema
+        self.schema_suffix = schema_suffix
+        if use_schema_suffix:
+            self.schema_with_suffix = self.schema + self.schema_suffix
+
         self.source_entity = source_entity
         self.table = table
-        self.schema = schema
         self.database = database
         self.columns = columns
         self.model_type = model_type
         self.write_mode = write_mode
+
         self.unkebab_schema_for_tags = unkebab_schema_for_tags
         self.tags = set(tags) if tags else set()
         self.name_add_to_tags = name_add_to_tags
@@ -97,6 +174,7 @@ class ModelConfig:
             self.tags.add("all")
         if self.unkebab_schema_for_tags:
             self.tags.update(snake_to_tags(s=self.schema))
+
         self.cron = cron
         self.enabled = enabled
         self.debug = debug
