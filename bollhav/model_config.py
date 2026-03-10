@@ -42,6 +42,8 @@ class ModelConfig:
         schema_add_to_tags: bool = True,
         model_gets_all_tag: bool = True,
         unkebab_schema_for_tags: bool = True,
+        model_environment_suffix: str = "",
+        use_model_environment_suffix: bool = True,
         tz_aware: bool = True,
         **kwargs,
     ):
@@ -70,6 +72,11 @@ class ModelConfig:
                 raise ValueError("end must be UTC-aware")
 
         self.name = name
+        self.model_environment_suffix = model_environment_suffix
+        if use_model_environment_suffix:
+            self.name_with_environtment_suffix = (
+                f"{self.name}_{self.model_environment_suffix}"
+            )
         self.source_entity = source_entity
         self.table = table
         self.schema = schema
