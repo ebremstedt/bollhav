@@ -176,27 +176,28 @@ def update_insert(
 ) -> None:
     _ensure(conn=conn, model_config=model_config)
     unique_columns = [col.name for col in model_config.unique_columns]
+    temp_table = f"temp_{model_config.name}_{id(df)}"
+
+    col_names = sql.SQL(", ").join(sql.Identifier(c) for c in df.columns)
+    pk_cols = sql.SQL(", ").join(sql.Identifier(c) for c in unique_columns)
+    update_set = sql.SQL(", ").join(
+        sql.SQL("{col} = EXCLUDED.{col}").format(col=sql.Identifier(c))
+        for c in df.columns
+        if c not in unique_columns
+    )
+    col_defs = sql.SQL(", ").join(
+        sql.SQL("{name} {type}").format(
+            name=sql.Identifier(col.name),
+            type=sql.SQL(col.data_type.value),
+        )
+        for col in model_config.columns
+    )
+
     with conn.transaction():
-        temp_table = f"temp_{model_config.name}_{id(df)}"
-        col_names = sql.SQL(", ").join(sql.Identifier(c) for c in df.columns)
-        pk_cols = sql.SQL(", ").join(sql.Identifier(c) for c in unique_columns)
-        update_set = sql.SQL(", ").join(
-            sql.SQL("{col} = EXCLUDED.{col}").format(col=sql.Identifier(c))
-            for c in df.columns
-            if c not in unique_columns
-        )
         conn.execute(
-            sql.SQL("DROP TABLE IF EXISTS {temp}").format(
-                temp=sql.Identifier(temp_table)
-            )
-        )
-        conn.execute(
-            sql.SQL(
-                "CREATE TEMP TABLE {temp} (LIKE {schema}.{table}) ON COMMIT DROP"
-            ).format(
+            sql.SQL("CREATE TEMP TABLE {temp} ({col_defs}) ON COMMIT DROP").format(
                 temp=sql.Identifier(temp_table),
-                schema=sql.Identifier(model_config.schema),
-                table=sql.Identifier(model_config.name),
+                col_defs=col_defs,
             )
         )
         with conn.cursor().copy(
