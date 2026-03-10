@@ -2,8 +2,8 @@ from typing import Generator
 from functools import partial
 from psycopg import Connection
 import polars as pl
-from bollhav.model_config import ModelConfig
-from bollhav.modes import WriteMode
+from bollhav.model.model_config import ModelConfig
+from bollhav.model.modes import WriteMode
 from bollhav.postgres.modes import (
     recreate_insert,
     truncate_insert,

@@ -1,10 +1,8 @@
+[README.md](README.md)
+
 # PostgresColumn
 
 Column definitions for Postgres targets.
-
-**Back to** [Model](README.md)
-
----
 
 ## Usage
 

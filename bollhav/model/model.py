@@ -1,8 +1,8 @@
 from datetime import datetime
 from typing import Callable, Annotated
 from icron import croniter
-from bollhav.intervals import TZInterval
-from bollhav.model_config import ModelConfig
+from bollhav.model.intervals import TZInterval
+from bollhav.model.model_config import ModelConfig
 from dataclasses import dataclass
 
 

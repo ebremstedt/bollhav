@@ -3,7 +3,7 @@ from psycopg import sql
 import polars as pl
 from typing import cast, LiteralString
 from datetime import datetime, timedelta
-from bollhav.model_config import ModelConfig
+from bollhav.model.model_config import ModelConfig
 from bollhav.postgres import PostgresColumn
 
 
