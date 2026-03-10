@@ -178,12 +178,14 @@ def update_insert(
     unique_columns = [col.name for col in model_config.unique_columns]
     temp_table = f"temp_{model_config.name}_{id(df)}"
 
-    col_names = sql.SQL(", ").join(sql.Identifier(c) for c in df.columns)
+    col_names = sql.SQL(", ").join(
+        sql.Identifier(col.name) for col in model_config.columns
+    )
     pk_cols = sql.SQL(", ").join(sql.Identifier(c) for c in unique_columns)
     update_set = sql.SQL(", ").join(
-        sql.SQL("{col} = EXCLUDED.{col}").format(col=sql.Identifier(c))
-        for c in df.columns
-        if c not in unique_columns
+        sql.SQL("{col} = EXCLUDED.{col}").format(col=sql.Identifier(col.name))
+        for col in model_config.columns
+        if col.name not in unique_columns
     )
     col_defs = sql.SQL(", ").join(
         sql.SQL("{name} {type}").format(
