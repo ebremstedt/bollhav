@@ -152,9 +152,6 @@ class ModelConfig:
         self.schema = schema
         self.schema_suffix = schema_suffix
         self.use_schema_suffix = use_schema_suffix
-        if self.use_schema_suffix:
-            self.schema_with_suffix = self.schema + self.schema_suffix
-
         self.source_entity = source_entity
         self.table = table
         self.database = database
@@ -216,6 +213,12 @@ class ModelConfig:
                     **{k: v for k, v in kwargs.items() if not callable(v)}
                 )
         self.extra = kwargs
+
+    @property
+    def schema_with_suffix(self) -> str:
+        if self.use_schema_suffix:
+            return self.schema + "_" + self.schema_suffix
+        return self.schema
 
     def __repr__(self) -> str:
         return (
