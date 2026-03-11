@@ -79,16 +79,16 @@ def _resolve_cron_interval(expression: str) -> tuple[datetime, datetime]:
 def load_env_config() -> EnvConfig:
     cron_enabled = env_var_bool(name="CRON_ENABLED", default=False)
     backfill_enabled = env_var_bool(name="BACKFILL_ENABLED", default=False)
-
     if cron_enabled and backfill_enabled:
         raise ValueError("CRON_ENABLED and BACKFILL_ENABLED cannot both be true")
 
-    cron_expression = env_var_cron(name="CRON_EXPRESSION") if cron_enabled else None
+    cron_expression = env_var_cron(name="CRON_EXPRESSION")
+    if not cron_enabled:
+        cron_expression = None
+
     cron_since, cron_until = (
         _resolve_cron_interval(cron_expression) if cron_expression else (None, None)
     )
-
-    production = env_var_bool(name="PRODUCTION", default=False)
 
     return EnvConfig(
         tags=env_var(name="TAGS", required=True),
@@ -108,7 +108,7 @@ def load_env_config() -> EnvConfig:
             else None,
         ),
         debug=env_var_bool(name="DEBUG", default=False),
-        production=production,
+        production=env_var_bool(name="PRODUCTION", default=False),
         schema_suffix=env_var(name="SCHEMA_SUFFIX", default=""),
     )
 
