@@ -53,6 +53,7 @@ class EnvConfig:
         print(f"tags:             {self.tags}")
         print(f"debug:            {self.debug}")
         print(f"production:       {self.production}")
+        print(f"schema_suffix:    {self.schema_suffix}")
         if self.cron.enabled:
             print(f"cron.expression:  {self.cron.expression}")
             print(f"cron.since:       {self.cron.since}")
