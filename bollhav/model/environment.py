@@ -1,4 +1,4 @@
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timezone, timedelta
 from roskarl import (
     env_var_bool,
@@ -33,10 +33,10 @@ class EnvConfig:
     backfill: BackfillConfig
     schema_suffix: str
     production: bool = False
-    debug: bool = field(default=False)
+    debug: bool = False
 
     def __str__(self) -> str:
-        return f"EnvConfig(tags={self.tags}, cron={self.cron}, backfill={self.backfill}, debug={self.debug}, production={self.production})"
+        return f"EnvConfig(tags={self.tags}, cron={self.cron}, backfill={self.backfill}, debug={self.debug}, production={self.production}, schema_suffix={self.schema_suffix})"
 
     def debugprint(self, msg: str) -> None:
         if self.debug:
@@ -77,8 +77,8 @@ def _resolve_cron_interval(expression: str) -> tuple[datetime, datetime]:
 
 
 def load_env_config() -> EnvConfig:
-    cron_enabled = env_var_bool(name="CRON_ENABLED") or False
-    backfill_enabled = env_var_bool(name="BACKFILL_ENABLED") or False
+    cron_enabled = env_var_bool(name="CRON_ENABLED", default=False)
+    backfill_enabled = env_var_bool(name="BACKFILL_ENABLED", default=False)
 
     if cron_enabled and backfill_enabled:
         raise ValueError("CRON_ENABLED and BACKFILL_ENABLED cannot both be true")
@@ -88,8 +88,9 @@ def load_env_config() -> EnvConfig:
         _resolve_cron_interval(cron_expression) if cron_expression else (None, None)
     )
 
+    production = env_var_bool(name="PRODUCTION", default=False)
+
     return EnvConfig(
-        pipeline_environment=env_var(name="PIPELINE_ENVIRONMENT", required=True),
         tags=env_var(name="TAGS", required=True),
         cron=CronConfig(
             enabled=cron_enabled,
@@ -106,7 +107,9 @@ def load_env_config() -> EnvConfig:
             if backfill_enabled
             else None,
         ),
-        debug=env_var_bool(name="DEBUG") or False,
+        debug=env_var_bool(name="DEBUG", default=False),
+        production=production,
+        schema_suffix="" if production else (env_var(name="SCHEMA_SUFFIX", default="")),
     )
 
 
