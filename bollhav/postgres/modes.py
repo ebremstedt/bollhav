@@ -196,6 +196,13 @@ def update_insert(
     )
 
     with conn.transaction():
+        # Drop in case session reuses connection and ON COMMIT DROP didn't clean up previous run
+        conn.execute(
+            sql.SQL("DROP TABLE IF EXISTS {temp}").format(
+                temp=sql.Identifier(temp_table)
+            )
+        )
+        # ON COMMIT DROP handles cleanup on normal flow, but DROP IF EXISTS above is the safety net
         conn.execute(
             sql.SQL("CREATE TEMP TABLE {temp} ({col_defs}) ON COMMIT DROP").format(
                 temp=sql.Identifier(temp_table),
