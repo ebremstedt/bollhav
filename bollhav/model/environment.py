@@ -44,6 +44,12 @@ class EnvConfig:
             print(f"{ts} {msg}")
 
     def __post_init__(self) -> None:
+        if not self.production and self.schema_suffix == "":
+            raise ValueError("Non-production requires non-empty schema_suffix")
+
+        if self.production:
+            self.schema_suffix = ""
+
         print(f"tags:             {self.tags}")
         print(f"debug:            {self.debug}")
         print(f"production:       {self.production}")
@@ -54,12 +60,6 @@ class EnvConfig:
         if self.backfill.enabled:
             print(f"backfill.since:   {self.backfill.since}")
             print(f"backfill.until:   {self.backfill.until}")
-
-        if not self.production and self.schema_suffix == "":
-            raise ValueError("Only production can use empty suffix")
-
-        if self.production and self.schema_suffix != "":
-            raise ValueError("Production must use empty suffix")
 
 
 def _resolve_cron_interval(expression: str) -> tuple[datetime, datetime]:
@@ -109,7 +109,7 @@ def load_env_config() -> EnvConfig:
         ),
         debug=env_var_bool(name="DEBUG", default=False),
         production=production,
-        schema_suffix="" if production else (env_var(name="SCHEMA_SUFFIX", default="")),
+        schema_suffix=env_var(name="SCHEMA_SUFFIX", default=""),
     )
 
 
