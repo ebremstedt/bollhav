@@ -1,11 +1,9 @@
 # bollhav ⚽ 🌊
 
-Model definition framework that standardizes code at the model and the pipeline level.
-
-Several database implementations available soon.
+Model definition framework that standardizes code at pipe and model level. Follow the link to understand the [abstractions](ABSTRACTIONS.md) used in this library.
 
 - [Model level](MODEL.md)
-- [Pipeline level](Environment)
+- [Pipe level](Environment)
 - [Postgres](POSTGRES.md)
 - [Parquet](PARQUET.md)
 
