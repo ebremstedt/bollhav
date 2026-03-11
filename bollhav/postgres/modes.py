@@ -176,7 +176,7 @@ def update_insert(
 ) -> None:
     _ensure(conn=conn, model_config=model_config)
     unique_columns = [col.name for col in model_config.unique_columns]
-    temp_table = f"temp_{model_config.name}_{id(df)}"
+    temp_table = f"temp_{model_config.name}"
 
     col_names = sql.SQL(", ").join(
         sql.Identifier(col.name) for col in model_config.columns
@@ -195,40 +195,48 @@ def update_insert(
         for col in model_config.columns
     )
 
-    with conn.transaction():
-        # Drop in case session reuses connection and ON COMMIT DROP didn't clean up previous run
+    try:
+        with conn.transaction():
+            # Cleanup leftover from a previous failed run where the finally block may not have reached
+            conn.execute(
+                sql.SQL("DROP TABLE IF EXISTS {temp}").format(
+                    temp=sql.Identifier(temp_table)
+                )
+            )
+            # ON COMMIT DROP handles cleanup on success, finally block handles cleanup on failure
+            conn.execute(
+                sql.SQL("CREATE TEMP TABLE {temp} ({col_defs}) ON COMMIT DROP").format(
+                    temp=sql.Identifier(temp_table),
+                    col_defs=col_defs,
+                )
+            )
+            with conn.cursor().copy(
+                sql.SQL("COPY {temp} ({cols}) FROM STDIN").format(
+                    temp=sql.Identifier(temp_table),
+                    cols=col_names,
+                )
+            ) as copy:
+                for row in df.rows():
+                    copy.write_row(row)
+            conn.execute(
+                sql.SQL(
+                    "INSERT INTO {schema}.{table} ({cols}) "
+                    "SELECT {cols} FROM {temp} t "
+                    "ON CONFLICT ({pk_cols}) DO UPDATE SET {update_set}"
+                ).format(
+                    schema=sql.Identifier(model_config.schema),
+                    table=sql.Identifier(model_config.name),
+                    cols=col_names,
+                    temp=sql.Identifier(temp_table),
+                    pk_cols=pk_cols,
+                    update_set=update_set,
+                )
+            )
+    finally:
+        # Guaranteed cleanup on both success and failure, covers cases where ON COMMIT DROP is insufficient
         conn.execute(
             sql.SQL("DROP TABLE IF EXISTS {temp}").format(
                 temp=sql.Identifier(temp_table)
-            )
-        )
-        # ON COMMIT DROP handles cleanup on normal flow, but DROP IF EXISTS above is the safety net
-        conn.execute(
-            sql.SQL("CREATE TEMP TABLE {temp} ({col_defs}) ON COMMIT DROP").format(
-                temp=sql.Identifier(temp_table),
-                col_defs=col_defs,
-            )
-        )
-        with conn.cursor().copy(
-            sql.SQL("COPY {temp} ({cols}) FROM STDIN").format(
-                temp=sql.Identifier(temp_table),
-                cols=col_names,
-            )
-        ) as copy:
-            for row in df.rows():
-                copy.write_row(row)
-        conn.execute(
-            sql.SQL(
-                "INSERT INTO {schema}.{table} ({cols}) "
-                "SELECT {cols} FROM {temp} t "
-                "ON CONFLICT ({pk_cols}) DO UPDATE SET {update_set}"
-            ).format(
-                schema=sql.Identifier(model_config.schema),
-                table=sql.Identifier(model_config.name),
-                cols=col_names,
-                temp=sql.Identifier(temp_table),
-                pk_cols=pk_cols,
-                update_set=update_set,
             )
         )
 
