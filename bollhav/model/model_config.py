@@ -1,12 +1,10 @@
 from datetime import datetime, timedelta
 from typing import Callable
-from bollhav.database import Database
-from bollhav.postgres import PostgresColumn
-from bollhav.parquet import ParquetColumn
-from bollhav.model_type import ModelType
-from bollhav.write_modes import WriteMode
-from bollhav.batching import infer_batch_size
-from bollhav.sorting import sort_columns
+from bollhav.model.database import Database, DatabaseColumn
+from bollhav.model.model_type import ModelType
+from bollhav.model.write_modes import WriteMode
+from bollhav.model.batching import infer_batch_size
+from bollhav.model.sorting import sort_columns
 
 
 def snake_to_tags(s: str) -> set[str]:
@@ -22,7 +20,7 @@ class ModelConfig:
         schema: str = "",
         schema_suffix: str = "",
         database: Database | None = None,
-        columns: list[PostgresColumn | ParquetColumn] = [],
+        columns: list[DatabaseColumn] = [],
         model_type: ModelType = ModelType.TABLE,
         write_mode: WriteMode = WriteMode.APPEND,
         tags: set[str] | None = None,
