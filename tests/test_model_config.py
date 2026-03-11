@@ -1,9 +1,9 @@
 from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 import pytest
-from bollhav.model_type import ModelType
+from bollhav.model.model_type import ModelType
 from bollhav.model.model_config import ModelConfig
-from bollhav.write_modes import WriteMode
+from bollhav.model.write_modes import WriteMode
 
 
 UTC = timezone.utc
