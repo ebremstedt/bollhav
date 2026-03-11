@@ -44,6 +44,8 @@ class ModelConfig:
         model_gets_all_tag: bool = True,
         unkebab_schema_for_tags: bool = True,
         use_schema_suffix: bool = True,
+        schema_append_YYMMDD_to_suffix: bool = False,
+        schema_append_week_to_suffix: bool = False,
         tz_aware: bool = True,
         **kwargs,
     ):
@@ -75,6 +77,8 @@ class ModelConfig:
         self._schema = schema
         self.schema_suffix = schema_suffix
         self.use_schema_suffix = use_schema_suffix
+        self.schema_append_YYMMDD_to_suffix = schema_append_YYMMDD_to_suffix
+        self.schema_append_week_to_suffix = schema_append_week_to_suffix
         self.source_entity = source_entity
         self.table = table
         self.database = database
@@ -140,7 +144,15 @@ class ModelConfig:
     @property
     def schema(self) -> str:
         if self.use_schema_suffix and self.schema_suffix:
-            return self._schema + "_" + self.schema_suffix
+            schema = self._schema + "_" + self.schema_suffix
+
+            if self.schema_append_YYMMDD_to_suffix:
+                schema = schema + "_" + datetime.now().strftime("%y%m%d")
+
+            if self.schema_append_week_to_suffix:
+                schema = schema = +"_" + datetime.now().strftime("%y%W")
+
+            return schema
         return self._schema
 
     def __repr__(self) -> str:
