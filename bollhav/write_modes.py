@@ -8,8 +8,3 @@ class WriteMode(Enum):
     UPDATE_INSERT = "UPDATE_INSERT"  # Update and/or insert, but do not delete
     OVERWRITE_INSERT = "OVERWRITE_INSERT"  # Update and/or insert, but _do_ delete first
     VIEW = "VIEW"  # Simply update view in place
-
-
-class ModelType(Enum):
-    TABLE = "TABLE"
-    VIEW = "VIEW"

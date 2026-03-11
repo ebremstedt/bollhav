@@ -1,15 +1,17 @@
 from bollhav.model.model_config import ModelConfig
-from bollhav.model.modes import ModelType, WriteMode
-from bollhav.model.batching import BatchSize
-from bollhav.model.database import Database, DatabaseColumn
+from bollhav.batching import BatchSize
+from bollhav.database import Database, DatabaseColumn
 from bollhav.model.intervals import TZInterval
 from bollhav.model.matching import match_models
 from bollhav.model.model import Model
+from bollhav.model_type import ModelType
+from bollhav.sorting import sort_columns
+from bollhav.batching import infer_batch_size
+from bollhav.write_modes import WriteMode
 
 
 __all__ = [
     "ModelConfig",
-    "ModelType",
     "WriteMode",
     "BatchSize",
     "Database",
@@ -17,4 +19,7 @@ __all__ = [
     "TZInterval",
     "match_models",
     "Model",
+    "ModelType",
+    "sort_columns",
+    "infer_batch_size",
 ]
