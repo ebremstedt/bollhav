@@ -150,7 +150,7 @@ class ModelConfig:
                 schema = schema + "_" + datetime.now().strftime("%y%m%d")
 
             if self.schema_append_week_to_suffix:
-                schema = schema = +"_" + datetime.now().strftime("%y%W")
+                schema = schema = +"_v" + datetime.now().strftime("%y%W")
 
             return schema
         return self._schema
