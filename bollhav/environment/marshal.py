@@ -13,6 +13,16 @@ from typing import Callable
 
 @dataclass
 class CronConfig:
+    """
+    Configuration for scheduled cron-based execution.
+
+    Attributes:
+        enabled: Whether cron mode is active.
+        expression: The cron expression string (e.g. '0 0 1 * *').
+        since: Resolved start of the last completed cron interval.
+        until: Resolved end of the last completed cron interval.
+    """
+
     enabled: bool
     expression: str | None
     since: datetime | None
@@ -21,13 +31,36 @@ class CronConfig:
 
 @dataclass
 class BackfillConfig:
+    """
+    Configuration for manual backfill execution over a fixed time range.
+
+    Attributes:
+        enabled: Whether backfill mode is active.
+        since: Start of the backfill range.
+        until: End of the backfill range.
+        cron: Optional cron expression used to override the model cron, which is used to make smaller batches out of intervals.
+    """
+
     enabled: bool
     since: datetime | None
     until: datetime | None
+    cron: str | None
 
 
 @dataclass
 class EnvConfig:
+    """
+    Top-level runtime configuration resolved from environment variables.
+
+    Attributes:
+        tags: Comma-separated model tags used to filter which models to execute.
+        cron: Cron execution configuration.
+        backfill: Backfill execution configuration.
+        schema_suffix: Suffix appended to target schemas, required in non-production.
+        production: Whether the process is running in production mode.
+        debug: Whether debug logging is enabled.
+    """
+
     tags: str | None
     cron: CronConfig
     backfill: BackfillConfig
@@ -61,6 +94,7 @@ class EnvConfig:
         if self.backfill.enabled:
             print(f"backfill.since:   {self.backfill.since}")
             print(f"backfill.until:   {self.backfill.until}")
+            print(f"backfill.cron:    {self.backfill.cron}")
 
 
 def _resolve_cron_interval(expression: str) -> tuple[datetime, datetime]:
@@ -105,6 +139,9 @@ def load_env_config() -> EnvConfig:
             if backfill_enabled
             else None,
             until=env_var_iso8601_datetime(name="BACKFILL_UNTIL")
+            if backfill_enabled
+            else None,
+            cron=env_var_cron(name="BACKFILL_CRON", default="0 0 1 * *")  # monthly
             if backfill_enabled
             else None,
         ),
