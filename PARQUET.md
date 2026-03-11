@@ -17,7 +17,7 @@ ParquetColumn(
     precision=18,
     scale=4,
     sensitive=False,
-    description="Order total",
+    description="Order totals",
 )
 ```
 
