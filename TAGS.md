@@ -1,3 +1,5 @@
+[README.md](README.md)
+
 # Tag Expression Filter
 
 Discovers and returns `execute` functions from Python modules in a folder recursively, filtered by a tag expression.

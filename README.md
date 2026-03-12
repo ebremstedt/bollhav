@@ -7,7 +7,7 @@ Model definition framework that standardizes code at pipe and model level. Follo
 - [Postgres](POSTGRES.md)
 - [Parquet](PARQUET.md)
 
-Match your models with [tags!](TAGS.md)
+Match which models to run with [tags](TAGS.md)!
 
 ## Installation
 ```bash
