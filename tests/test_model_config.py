@@ -104,8 +104,7 @@ def test_defaults():
     assert m.write_mode == WriteMode.APPEND
     assert m.enabled is True
     assert m.debug is False
-    assert m.cron is None
-    assert m.batch_size is None
+    assert m.cron_batch is None
     assert m.sensitive is False
     assert m.unique_columns == []
     assert m.tz_aware is True
@@ -222,23 +221,6 @@ def test_partitioned_by_sets_index_true():
 def test_partitioned_by_none_sets_index_false():
     m = ModelConfig(**base_kwargs())
     assert m.partitioned_by_index is False
-
-
-# --- Batch size ---
-
-
-def test_batch_size_inferred_from_cron():
-    with patch(
-        "bollhav.model.model_config.infer_batch_size", return_value=100
-    ) as mock_infer:
-        m = ModelConfig(**base_kwargs(cron="0 * * * *"))
-        mock_infer.assert_called_once_with("0 * * * *")
-        assert m.batch_size == 100
-
-
-def test_batch_size_none_when_no_cron():
-    m = ModelConfig(**base_kwargs())
-    assert m.batch_size is None
 
 
 # --- Extra kwargs ---

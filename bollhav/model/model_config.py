@@ -1,10 +1,13 @@
 from datetime import datetime, timedelta
 from typing import Callable
+
+from icron import croniter
 from bollhav.model.database import Database, DatabaseColumn
+from bollhav.model.intervals import TZInterval
 from bollhav.model.model_type import ModelType
 from bollhav.model.write_modes import WriteMode
-from bollhav.model.batching import infer_batch_size
 from bollhav.model.sorting import sort_columns
+from roskarl import CronBatch
 
 
 def snake_to_tags(s: str) -> set[str]:
@@ -24,7 +27,7 @@ class ModelConfig:
         model_type: ModelType = ModelType.TABLE,
         write_mode: WriteMode = WriteMode.APPEND,
         tags: set[str] | None = None,
-        cron: str | None = None,
+        cron_batch: CronBatch | None = None,
         enabled: bool = True,
         debug: bool = False,
         description: str | None = None,
@@ -99,7 +102,7 @@ class ModelConfig:
         if self.unkebab_schema_for_tags:
             self.tags.update(snake_to_tags(s=self._schema))
 
-        self.cron = cron
+        self.cron_batch = cron_batch
         self.enabled = enabled
         self.debug = debug
         self.description = description
@@ -114,7 +117,6 @@ class ModelConfig:
         self.retries = retries
         self.lookback = lookback
         self.tz_aware = tz_aware
-        self.batch_size = infer_batch_size(cron) if cron else None
         self.sensitive = (
             any(getattr(c, "sensitive", False) for c in columns) if columns else False
         )
@@ -166,7 +168,7 @@ class ModelConfig:
             f"model_type={self.model_type}, "
             f"write_mode={self.write_mode}, "
             f"tags={self.tags!r}, "
-            f"cron={self.cron!r}, "
+            f"cron={self.cron_batch!r}, "
             f"enabled={self.enabled}, "
             f"debug={self.debug}, "
             f"description={self.description!r}, "
@@ -187,3 +189,19 @@ class ModelConfig:
         if not isinstance(other, ModelConfig):
             return NotImplemented
         return self.__dict__ == other.__dict__
+
+    def get_batch_intervals(
+        self, interval: TZInterval, cron_override: CronBatch | None = None
+    ) -> list[TZInterval]:
+        it = croniter(cron_override or self.cron_batch, interval.since)
+        intervals: list[TZInterval] = []
+        current = interval.since
+        while True:
+            tick = it.get_next(datetime)
+            if tick >= interval.until:
+                break
+            intervals.append(TZInterval(current, tick))
+            current = tick
+        if current < interval.until:
+            intervals.append(TZInterval(current, interval.until))
+        return intervals
