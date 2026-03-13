@@ -1,13 +1,15 @@
-# bollhav ⚽ 🌊
+# bollhav
 
-Model definition framework that standardizes code at pipe and model level. Follow the link to understand the [abstractions](ABSTRACTIONS.md) used in this library.
+Model definition framework that standardizes code at pipe and model level using the [model and pipe abstractions](ABSTRACTIONS.md).
 
-- [Model level](MODEL.md)
-- [Pipe level](Environment)
-- [Postgres](POSTGRES.md)
-- [Parquet](PARQUET.md)
+This library is very permissive by design. Use the model level without using pipe level. Or use both with a database implemetation, or make your own.
 
-Match which models to run with [tags](TAGS.md)!
+- [Model](DOCS/MODEL.md)
+- [Pipe](DOCS/PIPE.md)
+- [Modes](DOCS/MODES.MD)
+    - [Postgres implementation](DOCS/POSTGRES.md)
+
+Match which models to run using [tags](DOCS/TAGS.md) with examples [here](DOCS/MATCHING.md).
 
 ## Installation
 ```bash
@@ -15,8 +17,13 @@ pip install bollhav
 ```
 
 ## Testing
-
 Tests use `pytest`. Run the full suite:
 ```bash
 pytest tests/
+```
+
+## Build + publish example
+
+```sh
+git tag 1.2.3 && git push --tags
 ```

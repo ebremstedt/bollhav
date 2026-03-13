@@ -1,8 +1,8 @@
-[README.md](README.md)
+[README.md](..README.md)
 
 # Model
 
-Standardizes code at the **model level!**
+Standardizes code at the **model** level
 
 ## Model creation example
 ```python
