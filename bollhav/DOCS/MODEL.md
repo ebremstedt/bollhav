@@ -2,145 +2,149 @@
 
 # Model
 
-Standardizes code at the **model** level
+Standardizes code at the **model** level.
+
+A `Model` is a pure data object describing what data looks like and where it goes. It does not contain execution logic — that lives in a separate `execute` function that receives the model as a parameter.
 
 ## Model creation example
+
 ```python
-from bollhav.model import Model, ModelConfig, WriteMode, Database, PostgresColumn, PostgresType, TZInterval
-import polars as pl
+from bollhav.model.model import Model
+from bollhav.model.target import Target
+from bollhav.model.source import Source
+from bollhav.model.bounds import Bounds
+from bollhav.model.batch import Batch
+from bollhav.model.schema import Schema
+from bollhav.model.write_modes import WriteMode
+from bollhav.postgres.columns import PostgresColumn, PostgresType
+from bollhav.model.database import Database
 
-config = ModelConfig(
+model = Model(
     name="orders",
-    source_entity="raw.orders",
-    table="orders",
-    schema="public",
-    database=Database.POSTGRES,
-    columns=[
-        PostgresColumn(name="id", data_type=PostgresType.BIGINT, primary_key=True, nullable=False),
-        PostgresColumn(name="created_at", data_type=PostgresType.TIMESTAMPTZ, nullable=False),
-        PostgresColumn(name="email", data_type=PostgresType.TEXT, nullable=True, sensitive=True),
-    ],
-    write_mode=WriteMode.APPEND,
-    cron="0 3 * * *",
-    partitioned_by="created_at",
+    target=Target(
+        name="orders",
+        schema=Schema(name="public"),
+        database=Database.POSTGRES,
+        columns=[
+            PostgresColumn(name="id", data_type=PostgresType.BIGINT, primary_key=True, nullable=False),
+            PostgresColumn(name="created_at", data_type=PostgresType.TIMESTAMPTZ, nullable=False),
+            PostgresColumn(name="email", data_type=PostgresType.TEXT, nullable=True, sensitive=True),
+        ],
+        write_mode=WriteMode.APPEND,
+        partitioned_by="created_at",
+    ),
+    source=Source(name="raw.orders"),
+    bounds=Bounds(begin=datetime(2024, 1, 1, tzinfo=timezone.utc)),
+    batching=Batch(default="0 * * * *"),
+    debug=True,
 )
-
-def execute(interval: TZInterval) -> pl.DataFrame:
-    return pl.read_database(
-        f"SELECT * FROM {config.source_entity} WHERE created_at >= '{interval.since}' AND created_at < '{interval.until}'",
-        connection=...,
-    )
-
-model = Model(model_config=config, execute=execute)
 ```
 
-### Parameters
+### Model parameters
 
 | Parameter | Type | Default | Description |
 |---|---|---|---|
 | `name` | `str` | required | Unique identifier for the model |
-| `source_entity` | `str` | required | Source table or view to read from |
-| `table` | `str` | `""` | Destination table name |
-| `schema` | `str` | `""` | Destination schema name |
-| `database` | `Database` | `None` | Target database. Required if `columns` is set |
-| `columns` | `list[PostgresColumn \| ParquetColumn]` | `None` | Column definitions. Required if `database` is set |
-| `model_type` | `ModelType` | `TABLE` | `TABLE` or `VIEW` |
-| `write_mode` | `WriteMode` | `APPEND` | How to write data. `VIEW` requires `ModelType.VIEW` |
-| `tags` | `set[str]` | `None` | Labels for filtering |
-| `cron` | `str` | `None` | Cron expression. Automatically infers `batch_size` |
+| `target` | `Target` | required | Defines where and how data is written |
+| `source` | `Source` | `None` | Defines where data is read from |
+| `bounds` | `Bounds` | `None` | Optional backfill begin/end bounds |
+| `batching` | `Batch` | `None` | Controls batch size and retries |
+| `tagging` | `Tags` | `None` | Controls tag auto-assembly |
 | `enabled` | `bool` | `True` | Whether the model is active |
-| `debug` | `bool` | `False` | Enables debug mode |
+| `debug` | `bool` | `False` | Pretty-prints the model at construction time |
 | `description` | `str` | `None` | Human-readable description |
-| `source_dsn` | `str` | `None` | DSN for the source connection |
-| `source_query` | `str` | `None` | Optional query to use instead of `source_entity` |
-| `partitioned_by` | `str` | `None` | Column name to partition by. Must exist in `columns` |
+| `**kwargs` | | | Extra metadata. Callable values are resolved with non-callable kwargs as arguments |
+
+### Target parameters
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `name` | `str` | required | Destination table name |
+| `schema` | `Schema` | `Schema()` | Destination schema |
+| `database` | `Database` | `None` | Target database. Required if `columns` is set |
+| `columns` | `list[PostgresColumn]` | `[]` | Column definitions. Required if `database` is set |
+| `model_type` | `ModelType` | `TABLE` | `TABLE` or `VIEW` |
+| `write_mode` | `WriteMode` | `APPEND` | How to write data |
+| `partitioned_by` | `str` | `None` | Column to partition by. Must exist in `columns` |
+| `dsn_env_var` | `str` | `None` | DSN env var for the target connection |
+
+### Source parameters
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `name` | `str` | required | Source table or entity name |
+| `schema` | `str` | `None` | Source schema |
+| `dsn_env_var` | `str` | `None` | DSN env var for the source connection |
+| `query` | `str` | `None` | Optional query override |
+
+### Bounds parameters
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
 | `begin` | `datetime` | `None` | Backfill start — must be UTC-aware |
 | `end` | `datetime` | `None` | Backfill end — must be UTC-aware |
+
+### Batch parameters
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `default` | `CronBatch` | `"0 0 * * *"` | Chunk size as a cron batch expression |
+| `lookback` | `int` | `None` | Extends interval start backwards by N cron-ticks |
 | `retries` | `int` | `None` | Retry count on failure |
-| `lookback` | `int` | `None` | Lookback window in batch units |
-| `tz_aware` | `bool` | `True` | Enforces UTC on `begin`/`end` |
-| `**kwargs` | | | Extra metadata. Callable values are resolved with non-callable kwargs as arguments |
 
 ### Computed attributes
 
 | Attribute | Description |
 |---|---|
-| `batch_size` | Inferred from `cron` if set, otherwise `None` |
-| `sensitive` | `True` if any column has `sensitive=True` |
-| `unique_columns` | Columns with `unique=True` — required for `UPDATE_INSERT` |
-| `partitioned_by_index` | `True` if `partitioned_by` is set |
+| `target.sensitive` | `True` if any column has `sensitive=True` |
+| `target.unique_columns` | Columns with `unique=True` — required for `UPDATE_INSERT` |
+| `target.partitioned_by_index` | `True` if `partitioned_by` is set |
+| `tags` | Auto-assembled from `name`, `target.schema.name`, and `"all"` |
 
+## Debug
+
+When `debug=True`, the model is pretty-printed at construction time. You can also call it manually at any point:
+
+```python
+model.pretty()
+```
 
 ## Write modes
 
 Read more [here](MODES.md)
+
 ```python
-from bollhav import WriteMode
+from bollhav.model.write_modes import WriteMode
 
 WriteMode.APPEND
 WriteMode.OVERWRITE_INSERT  # requires partitioned_by
+WriteMode.RECREATE_INSERT
 WriteMode.TRUNCATE_INSERT
 WriteMode.UPDATE_INSERT     # requires at least one column with unique=True
 WriteMode.VIEW              # requires ModelType.VIEW
 ```
 
-## UTC enforcement
-
-When `tz_aware=True` (default), `begin` and `end` must be UTC-aware. Naive or non-UTC datetimes raise `ValueError`.
-```python
-from datetime import datetime, timezone
-
-model = Model(
-    ...,
-    begin=datetime(2025, 1, 1, tzinfo=timezone.utc),
-    end=datetime(2025, 2, 1, tzinfo=timezone.utc),
-)
-```
-
-model.extra  # {"static": "production", "env": "env=production"}
-```
-
-## Batch intervals
-
-`Model.get_batch_intervals` splits a `TZInterval` into sub-intervals driven by the model's cron expression. Useful for chunked backfills.
-
-```python
-from datetime import datetime, timezone
-from bollhav.intervals import TZInterval
-
-interval = TZInterval(
-    since=datetime(2025, 1, 1, tzinfo=timezone.utc),
-    until=datetime(2025, 1, 1, 3, 0, tzinfo=timezone.utc),
-)
-
-batches = model.get_batch_intervals(interval)
-# With cron="0 * * * *":
-# [TZInterval(00:00, 01:00), TZInterval(01:00, 02:00), TZInterval(02:00, 03:00)]
-```
-
-Pass `cron_override` to use a different cron expression without changing the model config:
-```python
-batches = model.get_batch_intervals(interval, cron_override="*/15 * * * *")
-```
-
 ## Tag filtering
 
-Tags are automatically populated at init time. By default `name`, `schema`, and `"all"` are added.
+Tags are automatically assembled at init time. By default `name`, `schema`, and `"all"` are added.
 
 ```python
-model = ModelConfig(name="orders", source_entity="raw.orders", schema="public")
+model = Model(name="orders", target=Target(name="orders", schema=Schema(name="public")))
 model.tags  # {"orders", "public", "all"}
 ```
 
-Control which tags are auto-added:
+Control which tags are auto-added via `Tags`:
+
 ```python
-ModelConfig(..., name_add_to_tags=False, schema_add_to_tags=False, model_gets_all_tag=False)
+from bollhav.model.tags import Tags
+
+Model(..., tagging=Tags(name_add_to_tags=False, schema_add_to_tags=False, model_gets_all_tag=False))
 ```
 
 Use `match_models` to discover and filter model instances from a folder by tag expression:
 
 ```python
-from bollhav.match_models import match_models
+from bollhav.model.matching import match_models
 
 models = match_models(folder="src/models", tags="[orders|payments]")
 models = match_models(folder="src/models", tags="[public&reporting]")
