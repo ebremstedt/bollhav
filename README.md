@@ -4,12 +4,12 @@ Model definition framework that standardizes code at pipe and model level using 
 
 This library is very permissive by design. Use the model level without using pipe level. Or use both with a database implemetation, or make your own.
 
-- [Model](DOCS/MODEL.md)
-- [Pipe](DOCS/PIPE.md)
-- [Modes](DOCS/MODES.MD)
-    - [Postgres implementation](DOCS/POSTGRES.md)
+- [Model](bollhav/DOCS/MODEL.md)
+- [Pipe](bollhav/DOCS/PIPE.md)
+- [Modes](bollhav/DOCS/MODES.MD)
+    - [Postgres implementation](bollhav/DOCS/POSTGRES.md)
 
-Match which models to run using [tags](DOCS/TAGS.md) with examples [here](DOCS/MATCHING.md).
+Match which models to run using [tags](bollhav/DOCS/TAGS.md) with examples [here](bollhav/DOCS/MATCHING.md).
 
 ## Installation
 ```bash
