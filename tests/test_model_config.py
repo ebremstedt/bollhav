@@ -14,10 +14,6 @@ from bollhav.model.write_modes import WriteMode
 UTC = timezone.utc
 
 
-def execute():
-    pass
-
-
 def make_column(name: str, unique: bool = False, sensitive: bool = False) -> MagicMock:
     col = MagicMock()
     col.name = name
@@ -33,7 +29,6 @@ def make_db() -> MagicMock:
 def make_model(**overrides) -> Model:
     return Model(
         name=overrides.pop("name", "test_model"),
-        execute=overrides.pop("execute", execute),
         target=overrides.pop("target", Target(name="test_table")),
         source=overrides.pop("source", None),
         **overrides,

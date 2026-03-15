@@ -1,5 +1,3 @@
-from typing import Callable
-
 from bollhav.model.source import Source
 from bollhav.model.target import Target
 from bollhav.model.bounds import Bounds
@@ -11,7 +9,6 @@ class Model:
     def __init__(
         self,
         name: str,
-        execute: Callable,
         target: Target,
         source: Source | None = None,
         bounds: Bounds | None = None,
@@ -22,11 +19,6 @@ class Model:
         description: str | None = None,
         **kwargs,
     ):
-        if execute.__name__ != "execute":
-            raise ValueError(
-                f"Expected a function named 'execute', got '{execute.__name__}'"
-            )
-        self.execute = execute
         self.name = name
         self.source = source
         self.target = target

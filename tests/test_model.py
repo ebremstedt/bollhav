@@ -4,14 +4,9 @@ from bollhav.model.source import Source
 from bollhav.model.target import Target
 
 
-def execute():
-    pass
-
-
 def make_model(**overrides) -> Model:
     return Model(
         name=overrides.pop("name", "orders"),
-        execute=overrides.pop("execute", execute),
         target=overrides.pop("target", Target(name="orders")),
         source=overrides.pop("source", None),
         **overrides,
@@ -22,15 +17,6 @@ def test_model_stores_fields():
     m = make_model()
     assert m.name == "orders"
     assert m.source is None
-    assert m.execute is execute
-
-
-def test_execute_name_validated():
-    def not_execute():
-        pass
-
-    with pytest.raises(ValueError, match="Expected a function named 'execute'"):
-        make_model(execute=not_execute)
 
 
 def test_model_exposes_sub_configs():

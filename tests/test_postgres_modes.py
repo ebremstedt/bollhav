@@ -30,10 +30,6 @@ from bollhav.model.write_modes import WriteMode
 from bollhav.model.model_type import ModelType
 
 
-def execute():
-    pass
-
-
 def _col(
     name: str,
     data_type: PostgresType = PostgresType.TEXT,
@@ -65,7 +61,6 @@ def _model(
     cols = columns or [_col("id"), _col("val")]
     return Model(
         name="test_table",
-        execute=execute,
         source=Source(name="src", query=source_query),
         target=Target(
             name="test_table",
@@ -236,7 +231,6 @@ class TestUpdateInsert:
         ]
         model = Model(
             name="test_table",
-            execute=execute,
             source=Source(name="src"),
             target=Target(
                 name="test_table",
