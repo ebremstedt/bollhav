@@ -32,6 +32,11 @@ class Model:
             self.name, self.target.schema.name
         )
 
+        if self.debug:
+            print(f"tags ({self.name}):")
+            for tag in sorted(self.tags):
+                print(f"  - {tag}")
+
         for key, val in kwargs.items():
             if callable(val):
                 kwargs[key] = val(
