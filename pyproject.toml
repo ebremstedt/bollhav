@@ -7,7 +7,7 @@ authors = [
 description = "Standardizing models"
 readme = "README.md"
 requires-python = ">=3.11.0"
-license = "GPL-3"
+license = "GPL-3.0-or-later"
 dependencies = [
   "python-icron>=3.0.1",
   "polars>=0.20.0",
