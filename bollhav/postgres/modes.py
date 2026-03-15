@@ -39,19 +39,19 @@ def ensure_table(conn: psycopg.Connection, model: Model) -> None:
     conn.execute(
         sql.SQL("CREATE TABLE IF NOT EXISTS {schema}.{table} (\n{col_defs}\n)").format(
             schema=sql.Identifier(model.target.schema.resolved),
-            table=sql.Identifier(model.name),
+            table=sql.Identifier(model.target.name),
             col_defs=col_defs,
         )
     )
     if model.target.partitioned_by is not None:
-        index_name = f"{model.name}_{model.target.partitioned_by}_idx"
+        index_name = f"{model.target.name}_{model.target.partitioned_by}_idx"
         conn.execute(
             sql.SQL(
                 "CREATE INDEX IF NOT EXISTS {index} ON {schema}.{table} ({col})"
             ).format(
                 index=sql.Identifier(index_name),
                 schema=sql.Identifier(model.target.schema.resolved),
-                table=sql.Identifier(model.name),
+                table=sql.Identifier(model.target.name),
                 col=sql.Identifier(model.target.partitioned_by),
             )
         )
@@ -71,7 +71,7 @@ def append(
     col_names = sql.SQL(", ").join(sql.Identifier(c) for c in df.columns)
     query = sql.SQL("COPY {schema}.{table} ({cols}) FROM STDIN").format(
         schema=sql.Identifier(model.target.schema.resolved),
-        table=sql.Identifier(model.name),
+        table=sql.Identifier(model.target.name),
         cols=col_names,
     )
     with conn.cursor() as cursor:
@@ -105,7 +105,7 @@ def overwrite_insert(
                 "DELETE FROM {schema}.{table} WHERE {col} >= %s AND {col} < %s"
             ).format(
                 schema=sql.Identifier(model.target.schema.resolved),
-                table=sql.Identifier(model.name),
+                table=sql.Identifier(model.target.name),
                 col=sql.Identifier(model.target.partitioned_by),
             ),
             [since, until],
@@ -113,7 +113,7 @@ def overwrite_insert(
         col_names = sql.SQL(", ").join(sql.Identifier(c) for c in df.columns)
         copy_query = sql.SQL("COPY {schema}.{table} ({cols}) FROM STDIN").format(
             schema=sql.Identifier(model.target.schema.resolved),
-            table=sql.Identifier(model.name),
+            table=sql.Identifier(model.target.name),
             cols=col_names,
         )
         with conn.cursor().copy(copy_query) as copy:
@@ -130,14 +130,14 @@ def recreate_insert(
         conn.execute(
             sql.SQL("DROP TABLE IF EXISTS {schema}.{table}").format(
                 schema=sql.Identifier(model.target.schema.resolved),
-                table=sql.Identifier(model.name),
+                table=sql.Identifier(model.target.name),
             )
         )
         _ensure(conn=conn, model=model)
         col_names = sql.SQL(", ").join(sql.Identifier(c) for c in df.columns)
         copy_query = sql.SQL("COPY {schema}.{table} ({cols}) FROM STDIN").format(
             schema=sql.Identifier(model.target.schema.resolved),
-            table=sql.Identifier(model.name),
+            table=sql.Identifier(model.target.name),
             cols=col_names,
         )
         with conn.cursor().copy(copy_query) as copy:
@@ -155,13 +155,13 @@ def truncate_insert(
         conn.execute(
             sql.SQL("TRUNCATE TABLE {schema}.{table}").format(
                 schema=sql.Identifier(model.target.schema.resolved),
-                table=sql.Identifier(model.name),
+                table=sql.Identifier(model.target.name),
             )
         )
         col_names = sql.SQL(", ").join(sql.Identifier(c) for c in df.columns)
         copy_query = sql.SQL("COPY {schema}.{table} ({cols}) FROM STDIN").format(
             schema=sql.Identifier(model.target.schema.resolved),
-            table=sql.Identifier(model.name),
+            table=sql.Identifier(model.target.name),
             cols=col_names,
         )
         with conn.cursor().copy(copy_query) as copy:
@@ -172,7 +172,7 @@ def truncate_insert(
 def update_insert(conn: psycopg.Connection, model: Model, df: pl.DataFrame) -> None:
     _ensure(conn=conn, model=model)
     unique_columns = [col.name for col in model.target.unique_columns]
-    temp_table = f"temp_{model.name}"
+    temp_table = f"temp_{model.target.name}"
 
     col_names = sql.SQL(", ").join(
         sql.Identifier(col.name) for col in model.target.columns
@@ -221,7 +221,7 @@ def update_insert(conn: psycopg.Connection, model: Model, df: pl.DataFrame) -> N
                     "ON CONFLICT ({pk_cols}) DO UPDATE SET {update_set}"
                 ).format(
                     schema=sql.Identifier(model.target.schema.resolved),
-                    table=sql.Identifier(model.name),
+                    table=sql.Identifier(model.target.name),
                     cols=col_names,
                     temp=sql.Identifier(temp_table),
                     pk_cols=pk_cols,
@@ -251,7 +251,7 @@ def create_replace_view(
         conn.execute(
             sql.SQL("CREATE OR REPLACE VIEW {schema}.{view} AS {query}").format(
                 schema=sql.Identifier(model.target.schema.resolved),
-                view=sql.Identifier(model.name),
+                view=sql.Identifier(model.target.name),
                 query=sql.SQL(cast(LiteralString, model.source.query)),
             )
         )
