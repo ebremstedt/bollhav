@@ -43,9 +43,45 @@ class Model:
             self.pretty()
 
     def pretty(self) -> None:
-        from pprint import pprint
-
-        pprint(self.__dict__)
+        cols = self.target.columns
+        unique_cols = [c.name for c in self.target.unique_columns]
+        col_summary = ", ".join(
+            f"{c.name}*" if c.name in unique_cols else c.name for c in cols
+        )
+        lines = [
+            f"Model: {self.name}",
+            f"  enabled:       {self.enabled}",
+            f"  description:   {self.description}",
+            f"  tags:          {', '.join(sorted(self.tags))}",
+            f"",
+            f"  target:",
+            f"    name:        {self.target.name}",
+            f"    schema:      {self.target.schema.resolved}",
+            f"    write_mode:  {self.target.write_mode.value}",
+            f"    model_type:  {self.target.model_type.value}",
+            f"    partitioned: {self.target.partitioned_by}",
+            f"    columns ({len(cols)}): {col_summary}",
+        ]
+        if self.source:
+            lines += [
+                f"",
+                f"  source:",
+                f"    name:        {self.source.name}",
+                f"    schema:      {self.source.schema}",
+                f"    dsn_env_var: {self.source.dsn_env_var}",
+            ]
+        lines += [
+            f"",
+            f"  batching:",
+            f"    default:     {self.batching.default}",
+            f"    lookback:    {self.batching.lookback}",
+            f"    retries:     {self.batching.retries}",
+            f"",
+            f"  bounds:",
+            f"    begin:       {self.bounds.begin}",
+            f"    end:         {self.bounds.end}",
+        ]
+        print("\n".join(lines))
 
     def __repr__(self) -> str:
         return (
