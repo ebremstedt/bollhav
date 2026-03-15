@@ -33,9 +33,9 @@ class Model:
         )
 
         if self.debug:
-            print(f"tags ({self.name}):")
-            for tag in sorted(self.tags):
-                print(f"  - {tag}")
+            from pprint import pprint
+
+            pprint(self.__dict__)
 
         for key, val in kwargs.items():
             if callable(val):
