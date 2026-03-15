@@ -7,7 +7,7 @@ from bollhav.model.model import Model
 
 
 def _model_matches(model: Model, parsed: list[list[str | list[str]]]) -> bool:
-    return _tags_match(model.model_config.tags, parsed)
+    return _tags_match(model.tags, parsed)
 
 
 def _tags_match(model_tags: set[str], parsed: list[list[str | list[str]]]) -> bool:

@@ -3,7 +3,7 @@ from psycopg import sql
 import polars as pl
 from typing import cast, LiteralString
 from datetime import datetime, timedelta
-from bollhav.model.model_config import ModelConfig
+from bollhav.model.model import Model
 from bollhav.postgres import PostgresColumn
 
 
@@ -30,48 +30,48 @@ def ensure_schema(conn: psycopg.Connection, schema: str) -> None:
     )
 
 
-def ensure_table(conn: psycopg.Connection, model_config: ModelConfig) -> None:
+def ensure_table(conn: psycopg.Connection, model: Model) -> None:
     col_defs = sql.SQL(",\n").join(
         sql.SQL(_col_ddl(col))
-        for col in model_config.columns
+        for col in model.target.columns
         if isinstance(col, PostgresColumn)
     )
     conn.execute(
         sql.SQL("CREATE TABLE IF NOT EXISTS {schema}.{table} (\n{col_defs}\n)").format(
-            schema=sql.Identifier(model_config.schema),
-            table=sql.Identifier(model_config.name),
+            schema=sql.Identifier(model.target.schema.resolved),
+            table=sql.Identifier(model.name),
             col_defs=col_defs,
         )
     )
-    if model_config.partitioned_by is not None:
-        index_name = f"{model_config.name}_{model_config.partitioned_by}_idx"
+    if model.target.partitioned_by is not None:
+        index_name = f"{model.name}_{model.target.partitioned_by}_idx"
         conn.execute(
             sql.SQL(
                 "CREATE INDEX IF NOT EXISTS {index} ON {schema}.{table} ({col})"
             ).format(
                 index=sql.Identifier(index_name),
-                schema=sql.Identifier(model_config.schema),
-                table=sql.Identifier(model_config.name),
-                col=sql.Identifier(model_config.partitioned_by),
+                schema=sql.Identifier(model.target.schema.resolved),
+                table=sql.Identifier(model.name),
+                col=sql.Identifier(model.target.partitioned_by),
             )
         )
 
 
-def _ensure(conn: psycopg.Connection, model_config: ModelConfig) -> None:
-    ensure_schema(conn=conn, schema=model_config.schema)
-    ensure_table(conn=conn, model_config=model_config)
+def _ensure(conn: psycopg.Connection, model: Model) -> None:
+    ensure_schema(conn=conn, schema=model.target.schema.resolved)
+    ensure_table(conn=conn, model=model)
 
 
 def append(
     conn: psycopg.Connection,
-    model_config: ModelConfig,
+    model: Model,
     df: pl.DataFrame,
 ) -> None:
-    _ensure(conn=conn, model_config=model_config)
+    _ensure(conn=conn, model=model)
     col_names = sql.SQL(", ").join(sql.Identifier(c) for c in df.columns)
     query = sql.SQL("COPY {schema}.{table} ({cols}) FROM STDIN").format(
-        schema=sql.Identifier(model_config.schema),
-        table=sql.Identifier(model_config.name),
+        schema=sql.Identifier(model.target.schema.resolved),
+        table=sql.Identifier(model.name),
         cols=col_names,
     )
     with conn.cursor() as cursor:
@@ -87,35 +87,33 @@ def _assert_utc(dt: datetime, name: str) -> None:
 
 def overwrite_insert(
     conn: psycopg.Connection,
-    model_config: ModelConfig,
+    model: Model,
     df: pl.DataFrame,
     since: datetime,
     until: datetime,
 ) -> None:
     _assert_utc(dt=since, name=since.__str__())
     _assert_utc(dt=until, name=until.__str__())
-    _ensure(conn=conn, model_config=model_config)
+    _ensure(conn=conn, model=model)
 
-    if model_config.partitioned_by is None:
-        raise ValueError(
-            "The attribute model_config.partitioned_by must be set for OVERWRITE_INSERT"
-        )
+    if model.target.partitioned_by is None:
+        raise ValueError("model.target.partitioned_by must be set for OVERWRITE_INSERT")
 
     with conn.transaction():
         conn.execute(
             sql.SQL(
                 "DELETE FROM {schema}.{table} WHERE {col} >= %s AND {col} < %s"
             ).format(
-                schema=sql.Identifier(model_config.schema),
-                table=sql.Identifier(model_config.name),
-                col=sql.Identifier(model_config.partitioned_by),
+                schema=sql.Identifier(model.target.schema.resolved),
+                table=sql.Identifier(model.name),
+                col=sql.Identifier(model.target.partitioned_by),
             ),
             [since, until],
         )
         col_names = sql.SQL(", ").join(sql.Identifier(c) for c in df.columns)
         copy_query = sql.SQL("COPY {schema}.{table} ({cols}) FROM STDIN").format(
-            schema=sql.Identifier(model_config.schema),
-            table=sql.Identifier(model_config.name),
+            schema=sql.Identifier(model.target.schema.resolved),
+            table=sql.Identifier(model.name),
             cols=col_names,
         )
         with conn.cursor().copy(copy_query) as copy:
@@ -125,21 +123,21 @@ def overwrite_insert(
 
 def recreate_insert(
     conn: psycopg.Connection,
-    model_config: ModelConfig,
+    model: Model,
     df: pl.DataFrame,
 ) -> None:
     with conn.transaction():
         conn.execute(
             sql.SQL("DROP TABLE IF EXISTS {schema}.{table}").format(
-                schema=sql.Identifier(model_config.schema),
-                table=sql.Identifier(model_config.name),
+                schema=sql.Identifier(model.target.schema.resolved),
+                table=sql.Identifier(model.name),
             )
         )
-        _ensure(conn=conn, model_config=model_config)
+        _ensure(conn=conn, model=model)
         col_names = sql.SQL(", ").join(sql.Identifier(c) for c in df.columns)
         copy_query = sql.SQL("COPY {schema}.{table} ({cols}) FROM STDIN").format(
-            schema=sql.Identifier(model_config.schema),
-            table=sql.Identifier(model_config.name),
+            schema=sql.Identifier(model.target.schema.resolved),
+            table=sql.Identifier(model.name),
             cols=col_names,
         )
         with conn.cursor().copy(copy_query) as copy:
@@ -149,21 +147,21 @@ def recreate_insert(
 
 def truncate_insert(
     conn: psycopg.Connection,
-    model_config: ModelConfig,
+    model: Model,
     df: pl.DataFrame,
 ) -> None:
-    _ensure(conn=conn, model_config=model_config)
+    _ensure(conn=conn, model=model)
     with conn.transaction():
         conn.execute(
             sql.SQL("TRUNCATE TABLE {schema}.{table}").format(
-                schema=sql.Identifier(model_config.schema),
-                table=sql.Identifier(model_config.name),
+                schema=sql.Identifier(model.target.schema.resolved),
+                table=sql.Identifier(model.name),
             )
         )
         col_names = sql.SQL(", ").join(sql.Identifier(c) for c in df.columns)
         copy_query = sql.SQL("COPY {schema}.{table} ({cols}) FROM STDIN").format(
-            schema=sql.Identifier(model_config.schema),
-            table=sql.Identifier(model_config.name),
+            schema=sql.Identifier(model.target.schema.resolved),
+            table=sql.Identifier(model.name),
             cols=col_names,
         )
         with conn.cursor().copy(copy_query) as copy:
@@ -171,20 +169,18 @@ def truncate_insert(
                 copy.write_row(row)
 
 
-def update_insert(
-    conn: psycopg.Connection, model_config: ModelConfig, df: pl.DataFrame
-) -> None:
-    _ensure(conn=conn, model_config=model_config)
-    unique_columns = [col.name for col in model_config.unique_columns]
-    temp_table = f"temp_{model_config.name}"
+def update_insert(conn: psycopg.Connection, model: Model, df: pl.DataFrame) -> None:
+    _ensure(conn=conn, model=model)
+    unique_columns = [col.name for col in model.target.unique_columns]
+    temp_table = f"temp_{model.name}"
 
     col_names = sql.SQL(", ").join(
-        sql.Identifier(col.name) for col in model_config.columns
+        sql.Identifier(col.name) for col in model.target.columns
     )
     pk_cols = sql.SQL(", ").join(sql.Identifier(c) for c in unique_columns)
     update_set = sql.SQL(", ").join(
         sql.SQL("{col} = EXCLUDED.{col}").format(col=sql.Identifier(col.name))
-        for col in model_config.columns
+        for col in model.target.columns
         if col.name not in unique_columns
     )
     col_defs = sql.SQL(", ").join(
@@ -192,7 +188,7 @@ def update_insert(
             name=sql.Identifier(col.name),
             type=sql.SQL(col.data_type.value),
         )
-        for col in model_config.columns
+        for col in model.target.columns
     )
 
     try:
@@ -224,8 +220,8 @@ def update_insert(
                     "SELECT {cols} FROM {temp} t "
                     "ON CONFLICT ({pk_cols}) DO UPDATE SET {update_set}"
                 ).format(
-                    schema=sql.Identifier(model_config.schema),
-                    table=sql.Identifier(model_config.name),
+                    schema=sql.Identifier(model.target.schema.resolved),
+                    table=sql.Identifier(model.name),
                     cols=col_names,
                     temp=sql.Identifier(temp_table),
                     pk_cols=pk_cols,
@@ -243,19 +239,19 @@ def update_insert(
 
 def create_replace_view(
     conn: psycopg.Connection,
-    model_config: ModelConfig,
+    model: Model,
 ) -> None:
-    if model_config.source_query is None:
+    if model.source.query is None:
         raise ValueError(
-            f"The model_config.source_query attribute must be set for {model_config.write_mode.value}"
+            f"model.source.query must be set for {model.target.write_mode.value}"
         )
 
     with conn.transaction():
-        ensure_schema(conn, model_config.schema)
+        ensure_schema(conn, model.target.schema.resolved)
         conn.execute(
             sql.SQL("CREATE OR REPLACE VIEW {schema}.{view} AS {query}").format(
-                schema=sql.Identifier(model_config.schema),
-                view=sql.Identifier(model_config.name),
-                query=sql.SQL(cast(LiteralString, model_config.source_query)),
+                schema=sql.Identifier(model.target.schema.resolved),
+                view=sql.Identifier(model.name),
+                query=sql.SQL(cast(LiteralString, model.source.query)),
             )
         )
