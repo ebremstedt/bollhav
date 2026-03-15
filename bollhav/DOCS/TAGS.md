@@ -2,7 +2,7 @@
 
 # Tag Expression Filter
 
-Discovers and returns `execute` functions from Python modules in a folder recursively, filtered by a tag expression.
+Discovers and returns `Model` instances from Python modules in a folder recursively, filtered by a tag expression.
 
 ---
 
@@ -28,9 +28,6 @@ A model is included if it matches **any** group (outer OR).
 | `[xyz&abc]` | has `xyz` AND `abc` |
 | `[xyz&(c\|e)]` | has `xyz` AND (`c` OR `e`) |
 | `[wee\|x],[xyz&(c\|e)]` | matches first OR second group |
-
----
-
 
 ---
 
@@ -63,6 +60,6 @@ export TAGS="[wee|x],[xyz&(c|e)]"
 | `folder` | `str` | `src/models` | Path to folder containing model modules |
 | `tags` | `str` | required | Tag filter expression string |
 
-**Returns** `list[Callable]` — execute functions from matched modules.
+**Returns** `list[Model]` — matched model instances.
 
 **Raises** `ValueError` — if `tags` is not provided or the expression is invalid.
