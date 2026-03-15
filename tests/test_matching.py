@@ -14,7 +14,7 @@ from bollhav.model.matching import (
 
 def make_model(*tags: str) -> MagicMock:
     model = MagicMock()
-    model.model_config.tags = set(tags)
+    model.tags = set(tags)
     return model
 
 
@@ -140,7 +140,7 @@ def _write_model_file(path: Path, tags: list[str]) -> None:
         textwrap.dedent(f"""
         from unittest.mock import MagicMock
         model = MagicMock()
-        model.model_config.tags = {{{tag_str}}}
+        model.tags = {{{tag_str}}}
     """)
     )
 
@@ -202,7 +202,7 @@ def _write_model_list_file(path: Path, tags_per_model: list[list[str]]) -> None:
     for i, tags in enumerate(tags_per_model):
         tag_str = ", ".join(f'"{t}"' for t in tags)
         lines.append(f"m{i} = MagicMock()")
-        lines.append(f"m{i}.model_config.tags = {{{tag_str}}}")
+        lines.append(f"m{i}.tags = {{{tag_str}}}")
     list_str = ", ".join(f"m{i}" for i in range(len(tags_per_model)))
     lines.append(f"models = [{list_str}]")
     path.write_text("\n".join(lines))

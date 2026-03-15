@@ -2,8 +2,8 @@ from typing import Generator
 from functools import partial
 from psycopg import Connection
 import polars as pl
-from bollhav.model.write_modes import WriteMode
-from bollhav.model.model_config import ModelConfig
+from bollhav.model.target.write_modes import WriteMode
+from bollhav.model.model import Model
 from bollhav.postgres.modes import (
     recreate_insert,
     truncate_insert,
@@ -17,12 +17,12 @@ from datetime import datetime
 
 def write_dataframes(
     conn: Connection,
-    model_config: ModelConfig,
+    model: Model,
     df_gen: Generator[pl.DataFrame, None, None],
     since: datetime | None = None,
     until: datetime | None = None,
 ) -> None:
-    match model_config.write_mode:
+    match model.target.write_mode:
         case WriteMode.APPEND:
             write_function = append
         case WriteMode.RECREATE_INSERT:
@@ -36,22 +36,22 @@ def write_dataframes(
         case WriteMode.UPDATE_INSERT:
             write_function = update_insert
         case _:
-            raise ValueError(f"Unhandled write mode: {model_config.write_mode}")
+            raise ValueError(f"Unhandled write mode: {model.target.write_mode}")
     for df in df_gen:
         if len(df) == 0:
             continue
-        df = df.select([col.name for col in model_config.columns])
-        write_function(conn=conn, model_config=model_config, df=df)
+        df = df.select([col.name for col in model.target.columns])
+        write_function(conn=conn, model=model, df=df)
 
 
 def write(
     conn: Connection,
-    model_config: ModelConfig,
+    model: Model,
     df_gen: Generator[pl.DataFrame, None, None] | None = None,
     since: datetime | None = None,
     until: datetime | None = None,
 ) -> None:
-    if model_config.write_mode in (
+    if model.target.write_mode in (
         WriteMode.APPEND,
         WriteMode.RECREATE_INSERT,
         WriteMode.TRUNCATE_INSERT,
@@ -64,12 +64,12 @@ def write(
             )
         write_dataframes(
             conn=conn,
-            model_config=model_config,
+            model=model,
             df_gen=df_gen,
             since=since,
             until=until,
         )
-    if model_config.write_mode == WriteMode.VIEW:
+    if model.target.write_mode == WriteMode.VIEW:
         if df_gen:
             raise ValueError("Modes VIEW does not need a dataframe")
-        create_replace_view(conn=conn, model_config=model_config)
+        create_replace_view(conn=conn, model=model)

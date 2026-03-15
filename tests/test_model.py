@@ -1,39 +1,48 @@
-from datetime import datetime, timezone
+import pytest
 from bollhav.model.model import Model
-from bollhav.model.intervals import TZInterval
-from unittest.mock import MagicMock
-
-UTC = timezone.utc
+from bollhav.model.source import Source
+from bollhav.model.target import Target
 
 
-def dt(*args) -> datetime:
-    return datetime(*args, tzinfo=UTC)
+def execute():
+    pass
 
 
-def make_model(cron: str = "0 * * * *") -> Model:
-    config = MagicMock()
-    config.cron = cron
-    fn = MagicMock()
-    fn.__name__ = "execute"
-    return Model(model_config=config, execute=fn)
+def make_model(**overrides) -> Model:
+    return Model(
+        name=overrides.pop("name", "orders"),
+        execute=overrides.pop("execute", execute),
+        target=overrides.pop("target", Target(name="orders")),
+        source=overrides.pop("source", None),
+        **overrides,
+    )
 
 
-def make_interval(since: datetime, until: datetime) -> TZInterval:
-    return TZInterval(since=since, until=until)
+def test_model_stores_fields():
+    m = make_model()
+    assert m.name == "orders"
+    assert m.source is None
+    assert m.execute is execute
 
 
-def test_model_is_dataclass():
-    from dataclasses import fields
+def test_execute_name_validated():
+    def not_execute():
+        pass
 
-    field_names = {f.name for f in fields(Model)}
-    assert "model_config" in field_names
-    assert "execute" in field_names
+    with pytest.raises(ValueError, match="Expected a function named 'execute'"):
+        make_model(execute=not_execute)
 
 
-def test_model_stores_config_and_execute():
-    config = MagicMock()
-    fn = MagicMock()
-    fn.__name__ = "execute"
-    m = Model(model_config=config, execute=fn)
-    assert m.model_config is config
-    assert m.execute is fn
+def test_model_exposes_sub_configs():
+    from bollhav.model.schema import Schema
+    from bollhav.model.target import Target
+    from bollhav.model.batch import Batch
+    from bollhav.model.bounds import Bounds
+    from bollhav.model.tags import Tags
+
+    m = make_model()
+    assert isinstance(m.target.schema, Schema)
+    assert isinstance(m.target, Target)
+    assert isinstance(m.batching, Batch)
+    assert isinstance(m.bounds, Bounds)
+    assert isinstance(m.tags, set)

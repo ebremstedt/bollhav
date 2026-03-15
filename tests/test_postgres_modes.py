@@ -22,9 +22,16 @@ from bollhav.postgres.modes import (
     create_replace_view,
 )
 from bollhav.postgres.columns import PostgresColumn, PostgresType
-from bollhav.model.model_config import ModelConfig
+from bollhav.model.model import Model
+from bollhav.model.source import Source
+from bollhav.model.target import Target
+from bollhav.model.schema import Schema
 from bollhav.model.write_modes import WriteMode
 from bollhav.model.model_type import ModelType
+
+
+def execute():
+    pass
 
 
 def _col(
@@ -54,20 +61,23 @@ def _model(
     columns: list[PostgresColumn] | None = None,
     partitioned_by: str | None = None,
     source_query: str | None = None,
-) -> ModelConfig:
+) -> Model:
     cols = columns or [_col("id"), _col("val")]
-    return ModelConfig(
+    return Model(
         name="test_table",
-        source_entity="src",
-        schema="test_schema",
-        database=Database.POSTGRES,
-        schema_suffix="dev",
-        columns=cols,
-        write_mode=write_mode,
-        model_type=ModelType.TABLE if write_mode != WriteMode.VIEW else ModelType.VIEW,
-        partitioned_by=partitioned_by,
-        source_query=source_query,
-        use_schema_suffix=False,
+        execute=execute,
+        source=Source(name="src", query=source_query),
+        target=Target(
+            name="test_table",
+            schema=Schema(name="test_schema"),
+            database=Database.POSTGRES,
+            columns=cols,
+            write_mode=write_mode,
+            model_type=ModelType.TABLE
+            if write_mode != WriteMode.VIEW
+            else ModelType.VIEW,
+            partitioned_by=partitioned_by,
+        ),
     )
 
 
@@ -123,13 +133,13 @@ class TestEnsureSchema:
 class TestEnsureTable:
     def test_executes(self) -> None:
         conn = _conn()
-        ensure_table(conn=conn, model_config=_model())
+        ensure_table(conn=conn, model=_model())
         conn.execute.assert_called()
 
     def test_creates_index_when_partitioned(self) -> None:
         conn = _conn()
         model = _model(columns=[_col("id"), _col("ts")], partitioned_by="ts")
-        ensure_table(conn=conn, model_config=model)
+        ensure_table(conn=conn, model=model)
         assert conn.execute.call_count == 2
 
 
@@ -148,7 +158,7 @@ class TestAppend:
         cursor_ctx.__enter__ = MagicMock(return_value=cursor_mock)
         cursor_ctx.__exit__ = MagicMock(return_value=False)
         conn.cursor.return_value = cursor_ctx
-        append(conn=conn, model_config=_model(), df=df)
+        append(conn=conn, model=_model(), df=df)
         cursor_mock.copy.assert_called_once()
         copy_mock.write_row.assert_called_once_with((1, "a"))
 
@@ -162,9 +172,7 @@ class TestOverwriteInsert:
         since = datetime(2024, 1, 1, tzinfo=timezone.utc)
         until = datetime(2024, 1, 2, tzinfo=timezone.utc)
         with pytest.raises(ValueError, match="partitioned_by"):
-            overwrite_insert(
-                conn=conn, model_config=_model(), df=df, since=since, until=until
-            )
+            overwrite_insert(conn=conn, model=_model(), df=df, since=since, until=until)
 
     def test_raises_non_utc_since(self) -> None:
         conn = _conn()
@@ -174,9 +182,7 @@ class TestOverwriteInsert:
         since = datetime(2024, 1, 1)
         until = datetime(2024, 1, 2, tzinfo=timezone.utc)
         with pytest.raises(ValueError, match="UTC"):
-            overwrite_insert(
-                conn=conn, model_config=_model(), df=df, since=since, until=until
-            )
+            overwrite_insert(conn=conn, model=_model(), df=df, since=since, until=until)
 
     def test_raises_non_utc_until(self) -> None:
         conn = _conn()
@@ -186,9 +192,7 @@ class TestOverwriteInsert:
         since = datetime(2024, 1, 1, tzinfo=timezone.utc)
         until = datetime(2024, 1, 2)
         with pytest.raises(ValueError, match="UTC"):
-            overwrite_insert(
-                conn=conn, model_config=_model(), df=df, since=since, until=until
-            )
+            overwrite_insert(conn=conn, model=_model(), df=df, since=since, until=until)
 
 
 class TestRecreateInsert:
@@ -203,7 +207,7 @@ class TestRecreateInsert:
         cursor_mock = MagicMock()
         cursor_mock.copy.return_value = copy_mock
         conn.cursor.return_value.copy.return_value = copy_mock
-        recreate_insert(conn=conn, model_config=_model(), df=df)
+        recreate_insert(conn=conn, model=_model(), df=df)
         conn.transaction.assert_called_once()
 
 
@@ -217,14 +221,12 @@ class TestTruncateInsert:
         copy_mock.__enter__ = MagicMock(return_value=copy_mock)
         copy_mock.__exit__ = MagicMock(return_value=False)
         conn.cursor.return_value.copy.return_value = copy_mock
-        truncate_insert(conn=conn, model_config=_model(), df=df)
+        truncate_insert(conn=conn, model=_model(), df=df)
         conn.transaction.assert_called_once()
 
 
 class TestUpdateInsert:
     def test_requires_unique_columns(self) -> None:
-        # update_insert itself doesn't validate — WriteMode.UPDATE_INSERT does at ModelConfig init
-        # so we test that the query runs with unique columns present
         conn = _conn()
         import polars as pl
 
@@ -232,21 +234,23 @@ class TestUpdateInsert:
             _col("id", primary_key=True, nullable=False, unique=True),
             _col("val"),
         ]
-        model = ModelConfig(
+        model = Model(
             name="test_table",
-            source_entity="src",
-            schema="test_schema",
-            schema_suffix="dev",
-            columns=cols,
-            database=Database.POSTGRES,
-            write_mode=WriteMode.UPDATE_INSERT,
-            model_type=ModelType.TABLE,
-            use_schema_suffix=False,
+            execute=execute,
+            source=Source(name="src"),
+            target=Target(
+                name="test_table",
+                schema=Schema(name="test_schema"),
+                columns=cols,
+                database=Database.POSTGRES,
+                write_mode=WriteMode.UPDATE_INSERT,
+                model_type=ModelType.TABLE,
+            ),
         )
         df = pl.DataFrame({"id": [1], "val": ["a"]})
         copy_mock = MagicMock()
         copy_mock.__enter__ = MagicMock(return_value=copy_mock)
         copy_mock.__exit__ = MagicMock(return_value=False)
         conn.cursor.return_value.copy.return_value = copy_mock
-        update_insert(conn=conn, model_config=model, df=df)
+        update_insert(conn=conn, model=model, df=df)
         conn.transaction.assert_called_once()
