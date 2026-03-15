@@ -32,17 +32,20 @@ class Model:
             self.name, self.target.schema.name
         )
 
-        if self.debug:
-            from pprint import pprint
-
-            pprint(self.__dict__)
-
         for key, val in kwargs.items():
             if callable(val):
                 kwargs[key] = val(
                     **{k: v for k, v in kwargs.items() if not callable(v)}
                 )
         self.extra = kwargs
+
+        if self.debug:
+            self.pretty()
+
+    def pretty(self) -> None:
+        from pprint import pprint
+
+        pprint(self.__dict__)
 
     def __repr__(self) -> str:
         return (
