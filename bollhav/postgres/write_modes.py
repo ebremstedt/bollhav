@@ -2,7 +2,7 @@ from typing import Generator
 from functools import partial
 from psycopg import Connection
 import polars as pl
-from bollhav.model.target.write_modes import WriteMode
+from bollhav.model.write_modes import WriteMode
 from bollhav.model.model import Model
 from bollhav.postgres.modes import (
     recreate_insert,
