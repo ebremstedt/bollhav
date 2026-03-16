@@ -74,10 +74,11 @@ def append(
         table=sql.Identifier(model.target.name),
         cols=col_names,
     )
-    with conn.cursor() as cursor:
-        with cursor.copy(query) as copy:
-            for row in df.rows():
-                copy.write_row(row)
+    with conn.transaction():
+        with conn.cursor() as cursor:
+            with cursor.copy(query) as copy:
+                for row in df.rows():
+                    copy.write_row(row)
 
 
 def _assert_utc(dt: datetime, name: str) -> None:
