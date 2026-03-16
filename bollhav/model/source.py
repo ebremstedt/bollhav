@@ -8,3 +8,4 @@ class Source:
     partitioned_by: str | None = None
     dsn_env_var: str | None = None
     query: str | None = None
+    extra: dict | None = None
