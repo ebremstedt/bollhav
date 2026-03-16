@@ -19,6 +19,7 @@ class Target:
     partitioned_by: str | None = None
     dsn_env_var: str | None = None
     column_sorting: Callable | None = sort_columns
+    extra: dict | None = None
 
     sensitive: bool = field(init=False, default=False)
     unique_columns: list = field(init=False, default_factory=list)
