@@ -207,7 +207,7 @@ class TestRecreateInsert:
         cursor_mock.copy.return_value = copy_mock
         conn.cursor.return_value.copy.return_value = copy_mock
         recreate_insert(conn=conn, model=_model(), df=df)
-        conn.transaction.assert_called_once()
+        assert conn.transaction.call_count == 2
 
 
 class TestTruncateInsert:

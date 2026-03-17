@@ -57,9 +57,10 @@ def ensure_table(conn: psycopg.Connection, model: Model) -> None:
         )
 
 
-def _ensure(conn: psycopg.Connection, model: Model) -> None:
-    ensure_schema(conn=conn, schema=model.target.schema.resolved)
-    ensure_table(conn=conn, model=model)
+def ensure_schema_and_table(conn: psycopg.Connection, model: Model) -> None:
+    with conn.transaction():
+        ensure_schema(conn=conn, schema=model.target.schema.resolved)
+        ensure_table(conn=conn, model=model)
 
 
 def append(
@@ -74,7 +75,6 @@ def append(
         cols=col_names,
     )
     with conn.transaction():
-        _ensure(conn=conn, model=model)
         with conn.cursor() as cursor:
             with cursor.copy(query) as copy:
                 for row in df.rows():
@@ -97,7 +97,6 @@ def overwrite_insert(
     _assert_utc(dt=until, name=until.__str__())
 
     with conn.transaction():
-        _ensure(conn=conn, model=model)
         conn.execute(
             sql.SQL(
                 "DELETE FROM {schema}.{table} WHERE {col} >= %s AND {col} < %s"
@@ -131,7 +130,7 @@ def recreate_insert(
                 table=sql.Identifier(model.target.name),
             )
         )
-        _ensure(conn=conn, model=model)
+        ensure_schema_and_table(conn=conn, model=model)
         col_names = sql.SQL(", ").join(sql.Identifier(c) for c in df.columns)
         copy_query = sql.SQL("COPY {schema}.{table} ({cols}) FROM STDIN").format(
             schema=sql.Identifier(model.target.schema.resolved),
@@ -149,7 +148,6 @@ def truncate_insert(
     df: pl.DataFrame,
 ) -> None:
     with conn.transaction():
-        _ensure(conn=conn, model=model)
         conn.execute(
             sql.SQL("TRUNCATE TABLE {schema}.{table}").format(
                 schema=sql.Identifier(model.target.schema.resolved),
@@ -190,7 +188,6 @@ def update_insert(conn: psycopg.Connection, model: Model, df: pl.DataFrame) -> N
 
     try:
         with conn.transaction():
-            _ensure(conn=conn, model=model)
             # Cleanup leftover from a previous failed run where the finally block may not have reached
             conn.execute(
                 sql.SQL("DROP TABLE IF EXISTS {temp}").format(
