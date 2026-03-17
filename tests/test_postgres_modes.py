@@ -78,10 +78,10 @@ def _model(
 
 def _conn() -> MagicMock:
     conn = MagicMock()
+    conn.__enter__ = MagicMock(return_value=conn)
+    conn.__exit__ = MagicMock(return_value=False)
     conn.cursor.return_value.__enter__ = MagicMock(return_value=MagicMock())
     conn.cursor.return_value.__exit__ = MagicMock(return_value=False)
-    conn.transaction.return_value.__enter__ = MagicMock(return_value=None)
-    conn.transaction.return_value.__exit__ = MagicMock(return_value=False)
     return conn
 
 
@@ -203,7 +203,7 @@ class TestRecreateInsert:
         cursor_mock.copy.return_value = copy_mock
         conn.cursor.return_value.copy.return_value = copy_mock
         recreate_insert(conn=conn, model=_model(), df=df)
-        conn.transaction.assert_called_once()
+        conn.__enter__.assert_called_once()
 
 
 class TestTruncateInsert:
@@ -217,7 +217,7 @@ class TestTruncateInsert:
         copy_mock.__exit__ = MagicMock(return_value=False)
         conn.cursor.return_value.copy.return_value = copy_mock
         truncate_insert(conn=conn, model=_model(), df=df)
-        conn.transaction.assert_called_once()
+        conn.__enter__.assert_called_once()
 
 
 class TestUpdateInsert:
@@ -247,4 +247,4 @@ class TestUpdateInsert:
         copy_mock.__exit__ = MagicMock(return_value=False)
         conn.cursor.return_value.copy.return_value = copy_mock
         update_insert(conn=conn, model=model, df=df)
-        conn.transaction.assert_called_once()
+        conn.__enter__.assert_called_once()
