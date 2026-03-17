@@ -67,14 +67,14 @@ def append(
     model: Model,
     df: pl.DataFrame,
 ) -> None:
-    _ensure(conn=conn, model=model)
     col_names = sql.SQL(", ").join(sql.Identifier(c) for c in df.columns)
     query = sql.SQL("COPY {schema}.{table} ({cols}) FROM STDIN").format(
         schema=sql.Identifier(model.target.schema.resolved),
         table=sql.Identifier(model.target.name),
         cols=col_names,
     )
-    with conn.transaction():
+    with conn:
+        _ensure(conn=conn, model=model)
         with conn.cursor() as cursor:
             with cursor.copy(query) as copy:
                 for row in df.rows():
@@ -95,12 +95,12 @@ def overwrite_insert(
 ) -> None:
     _assert_utc(dt=since, name=since.__str__())
     _assert_utc(dt=until, name=until.__str__())
-    _ensure(conn=conn, model=model)
 
     if model.target.partitioned_by is None:
         raise ValueError("model.target.partitioned_by must be set for OVERWRITE_INSERT")
 
-    with conn.transaction():
+    with conn:
+        _ensure(conn=conn, model=model)
         conn.execute(
             sql.SQL(
                 "DELETE FROM {schema}.{table} WHERE {col} >= %s AND {col} < %s"
@@ -127,7 +127,7 @@ def recreate_insert(
     model: Model,
     df: pl.DataFrame,
 ) -> None:
-    with conn.transaction():
+    with conn:
         conn.execute(
             sql.SQL("DROP TABLE IF EXISTS {schema}.{table}").format(
                 schema=sql.Identifier(model.target.schema.resolved),
@@ -151,8 +151,8 @@ def truncate_insert(
     model: Model,
     df: pl.DataFrame,
 ) -> None:
-    _ensure(conn=conn, model=model)
-    with conn.transaction():
+    with conn:
+        _ensure(conn=conn, model=model)
         conn.execute(
             sql.SQL("TRUNCATE TABLE {schema}.{table}").format(
                 schema=sql.Identifier(model.target.schema.resolved),
@@ -171,7 +171,6 @@ def truncate_insert(
 
 
 def update_insert(conn: psycopg.Connection, model: Model, df: pl.DataFrame) -> None:
-    _ensure(conn=conn, model=model)
     unique_columns = [col.name for col in model.target.unique_columns]
     temp_table = f"temp_{model.target.name}"
 
@@ -193,7 +192,8 @@ def update_insert(conn: psycopg.Connection, model: Model, df: pl.DataFrame) -> N
     )
 
     try:
-        with conn.transaction():
+        with conn:
+            _ensure(conn=conn, model=model)
             # Cleanup leftover from a previous failed run where the finally block may not have reached
             conn.execute(
                 sql.SQL("DROP TABLE IF EXISTS {temp}").format(
@@ -247,7 +247,7 @@ def create_replace_view(
             f"model.source.query must be set for {model.target.write_mode.value}"
         )
 
-    with conn.transaction():
+    with conn:
         ensure_schema(conn, model.target.schema.resolved)
         conn.execute(
             sql.SQL("CREATE OR REPLACE VIEW {schema}.{view} AS {query}").format(
