@@ -58,6 +58,13 @@ class Target:
             raise ValueError(
                 "WriteMode.UPDATE_INSERT requires at least one column with unique=True"
             )
+        if (
+            self.write_mode == WriteMode.OVERWRITE_INSERT
+            and self.partitioned_by is None
+        ):
+            raise ValueError(
+                "WriteMode.OVERWRITE_INSERT requires partitioned_by to be set"
+            )
 
         if self.columns and self.column_sorting:
             col_names = [c.name for c in self.columns]

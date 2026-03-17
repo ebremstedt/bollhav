@@ -160,14 +160,18 @@ class TestAppend:
 
 class TestOverwriteInsert:
     def test_raises_without_partitioned_by(self) -> None:
-        conn = _conn()
-        import polars as pl
+        from bollhav.model.database import Database
+        from bollhav.model.schema import Schema
+        from bollhav.model.target import Target
 
-        df = pl.DataFrame({"id": [1], "val": ["a"]})
-        since = datetime(2024, 1, 1, tzinfo=timezone.utc)
-        until = datetime(2024, 1, 2, tzinfo=timezone.utc)
         with pytest.raises(ValueError, match="partitioned_by"):
-            overwrite_insert(conn=conn, model=_model(), df=df, since=since, until=until)
+            Target(
+                name="t",
+                schema=Schema(name="s"),
+                database=Database.POSTGRES,
+                columns=[_col("id"), _col("val")],
+                write_mode=WriteMode.OVERWRITE_INSERT,
+            )
 
     def test_raises_non_utc_since(self) -> None:
         conn = _conn()

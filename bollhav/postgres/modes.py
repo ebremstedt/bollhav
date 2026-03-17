@@ -96,9 +96,6 @@ def overwrite_insert(
     _assert_utc(dt=since, name=since.__str__())
     _assert_utc(dt=until, name=until.__str__())
 
-    if model.target.partitioned_by is None:
-        raise ValueError("model.target.partitioned_by must be set for OVERWRITE_INSERT")
-
     with conn.transaction():
         _ensure(conn=conn, model=model)
         conn.execute(
