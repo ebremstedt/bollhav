@@ -1,4 +1,5 @@
 import atexit
+import inspect
 from functools import wraps
 from typing import Callable
 import sys
@@ -53,15 +54,19 @@ def progress_bar(func: Callable) -> Callable:
 
     atexit.register(_on_exit)
 
+    sig = inspect.signature(func)
+
     @wraps(func)
     def wrapper(*args, **kwargs):
-        model = kwargs.get("model") or (args[1] if len(args) > 1 else None)
+        bound = sig.bind(*args, **kwargs)
+        bound.apply_defaults()
+        model = bound.arguments.get("model")
         model_name = (
             model.target.full_name
             if model and hasattr(model, "target") and hasattr(model.target, "full_name")
             else func.__name__
         )
-        batch_since = kwargs.get("batch_since") or (args[3] if len(args) > 3 else None)
+        batch_since = bound.arguments.get("batch_since")
 
         if model_name != state["current_model"]:
             if state["current_model"]:
