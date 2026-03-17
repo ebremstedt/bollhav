@@ -11,6 +11,7 @@ from bollhav.postgres.modes import (
     update_insert,
     create_replace_view,
     append,
+    ensure_schema_and_table,
 )
 from datetime import datetime
 
@@ -37,6 +38,7 @@ def write_dataframes(
             write_function = update_insert
         case _:
             raise ValueError(f"Unhandled write mode: {model.target.write_mode}")
+    ensure_schema_and_table(conn=conn, model=model)
     for df in df_gen:
         if len(df) == 0:
             continue
