@@ -14,7 +14,7 @@ from bollhav.postgres.modes import (
     update_insert,
     create_replace_view,
     append,
-    ensure_schema_and_table as _ensure_schema_and_table,
+    ensure_schema_and_table,
 )
 from datetime import datetime
 
@@ -25,7 +25,7 @@ def write_dataframes(
     df_gen: Generator[pl.DataFrame, None, None],
     since: datetime | None = None,
     until: datetime | None = None,
-    ensure_schema_and_table: bool = True,
+    create_if_missing: bool = True,
 ) -> None:
     match model.target.write_mode:
         case WriteMode.APPEND:
@@ -43,9 +43,9 @@ def write_dataframes(
         case _:
             raise ValueError(f"Unhandled write mode: {model.target.write_mode}")
 
-    if ensure_schema_and_table:
+    if create_if_missing:
         logger.debug("Ensuring schema and table for %s", model.target.full_name)
-        _ensure_schema_and_table(conn=conn, model=model)
+        ensure_schema_and_table(conn=conn, model=model)
 
     for df in df_gen:
         if len(df) == 0:
@@ -66,7 +66,7 @@ def write(
     df_gen: Generator[pl.DataFrame, None, None] | None = None,
     since: datetime | None = None,
     until: datetime | None = None,
-    ensure_schema_and_table: bool = True,
+    create_if_missing: bool = True,
 ) -> None:
     if model.target.write_mode in (
         WriteMode.APPEND,
@@ -85,7 +85,7 @@ def write(
             df_gen=df_gen,
             since=since,
             until=until,
-            ensure_schema_and_table=ensure_schema_and_table,
+            create_if_missing=create_if_missing,
         )
     if model.target.write_mode == WriteMode.VIEW:
         if df_gen:
