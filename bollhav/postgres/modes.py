@@ -193,51 +193,41 @@ def update_insert(conn: psycopg.Connection, model: Model, df: pl.DataFrame) -> N
         for col in model.target.columns
     )
 
-    try:
-        with conn.transaction():
-            # Cleanup leftover from a previous failed run where the finally block may not have reached
-            conn.execute(
-                sql.SQL("DROP TABLE IF EXISTS {temp}").format(
-                    temp=sql.Identifier(temp_table)
-                )
+    with conn.transaction():
+        # Cleanup leftover from a previous failed run
+        conn.execute(
+            sql.SQL("DROP TABLE IF EXISTS {temp}").format(
+                temp=sql.Identifier(temp_table)
             )
-            # ON COMMIT DROP handles cleanup on success, finally block handles cleanup on failure
-            conn.execute(
-                sql.SQL("CREATE TEMP TABLE {temp} ({col_defs}) ON COMMIT DROP").format(
-                    temp=sql.Identifier(temp_table),
-                    col_defs=col_defs,
-                )
+        )
+        conn.execute(
+            sql.SQL("CREATE TEMP TABLE {temp} ({col_defs}) ON COMMIT DROP").format(
+                temp=sql.Identifier(temp_table),
+                col_defs=col_defs,
             )
-            with conn.cursor().copy(
-                sql.SQL("COPY {temp} ({cols}) FROM STDIN").format(
-                    temp=sql.Identifier(temp_table),
-                    cols=col_names,
-                )
-            ) as copy:
-                for row in df.rows():
-                    copy.write_row(row)
-            conn.execute(
-                sql.SQL(
-                    "INSERT INTO {schema}.{table} ({cols}) "
-                    "SELECT {cols} FROM {temp} t "
-                    "ON CONFLICT ({pk_cols}) DO UPDATE SET {update_set}"
-                ).format(
-                    schema=sql.Identifier(model.target.schema.resolved),
-                    table=sql.Identifier(model.target.name),
-                    cols=col_names,
-                    temp=sql.Identifier(temp_table),
-                    pk_cols=pk_cols,
-                    update_set=update_set,
-                )
+        )
+        with conn.cursor().copy(
+            sql.SQL("COPY {temp} ({cols}) FROM STDIN").format(
+                temp=sql.Identifier(temp_table),
+                cols=col_names,
             )
-    finally:
-        # Guaranteed cleanup on both success and failure, covers cases where ON COMMIT DROP is insufficient
-        with conn.transaction():
-            conn.execute(
-                sql.SQL("DROP TABLE IF EXISTS {temp}").format(
-                    temp=sql.Identifier(temp_table)
-                )
+        ) as copy:
+            for row in df.rows():
+                copy.write_row(row)
+        conn.execute(
+            sql.SQL(
+                "INSERT INTO {schema}.{table} ({cols}) "
+                "SELECT {cols} FROM {temp} t "
+                "ON CONFLICT ({pk_cols}) DO UPDATE SET {update_set}"
+            ).format(
+                schema=sql.Identifier(model.target.schema.resolved),
+                table=sql.Identifier(model.target.name),
+                cols=col_names,
+                temp=sql.Identifier(temp_table),
+                pk_cols=pk_cols,
+                update_set=update_set,
             )
+        )
 
 
 def create_replace_view(

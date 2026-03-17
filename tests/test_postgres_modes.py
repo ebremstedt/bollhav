@@ -251,4 +251,4 @@ class TestUpdateInsert:
         copy_mock.__exit__ = MagicMock(return_value=False)
         conn.cursor.return_value.copy.return_value = copy_mock
         update_insert(conn=conn, model=model, df=df)
-        assert conn.transaction.call_count == 2
+        assert conn.transaction.call_count == 1
