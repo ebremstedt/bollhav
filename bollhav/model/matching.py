@@ -156,7 +156,7 @@ def match_models(
                     models.extend(matched)
                     for m in matched:
                         logger.debug("Matched model %r from %s", m.name, file)
-        logger.info("Found %d model(s) matching tags %r", len(models), tags)
+        logger.debug("Found %d model(s) matching tags %r", len(models), tags)
         return models
     finally:
         if added_to_path:
