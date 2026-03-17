@@ -225,11 +225,12 @@ def update_insert(conn: psycopg.Connection, model: Model, df: pl.DataFrame) -> N
             )
     finally:
         # Guaranteed cleanup on both success and failure, covers cases where ON COMMIT DROP is insufficient
-        conn.execute(
-            sql.SQL("DROP TABLE IF EXISTS {temp}").format(
-                temp=sql.Identifier(temp_table)
+        with conn.transaction():
+            conn.execute(
+                sql.SQL("DROP TABLE IF EXISTS {temp}").format(
+                    temp=sql.Identifier(temp_table)
+                )
             )
-        )
 
 
 def create_replace_view(

@@ -1,8 +1,11 @@
+import logging
 from bollhav.model.source import Source
 from bollhav.model.target import Target
 from bollhav.model.bounds import Bounds
 from bollhav.model.batch import Batch
 from bollhav.model.tags import Tags
+
+logger = logging.getLogger(__name__)
 
 
 class Model:
@@ -39,6 +42,7 @@ class Model:
                 )
         self.extra = kwargs
 
+        logger.debug("Initialized model %r (enabled=%s)", self.name, self.enabled)
         if self.debug:
             self.pretty()
 
@@ -81,7 +85,7 @@ class Model:
             f"    begin:       {self.bounds.begin}",
             f"    end:         {self.bounds.end}",
         ]
-        print("\n".join(lines))
+        logger.debug("\n".join(lines))
 
     def __repr__(self) -> str:
         return (

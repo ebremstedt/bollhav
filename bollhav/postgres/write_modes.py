@@ -1,9 +1,12 @@
+import logging
 from typing import Generator
 from functools import partial
 from psycopg import Connection
 import polars as pl
 from bollhav.model.write_modes import WriteMode
 from bollhav.model.model import Model
+
+logger = logging.getLogger(__name__)
 from bollhav.postgres.modes import (
     recreate_insert,
     truncate_insert,
@@ -38,11 +41,18 @@ def write_dataframes(
             write_function = update_insert
         case _:
             raise ValueError(f"Unhandled write mode: {model.target.write_mode}")
+    logger.info("Ensuring schema and table for %s", model.target.full_name)
     ensure_schema_and_table(conn=conn, model=model)
     for df in df_gen:
         if len(df) == 0:
             continue
         df = df.select([col.name for col in model.target.columns])
+        logger.debug(
+            "Writing %d rows to %s (%s)",
+            len(df),
+            model.target.full_name,
+            model.target.write_mode.value,
+        )
         write_function(conn=conn, model=model, df=df)
 
 

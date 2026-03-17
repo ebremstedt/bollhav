@@ -1,9 +1,12 @@
 import importlib.util
 import inspect
+import logging
 import re
 import sys
 from pathlib import Path
 from bollhav.model.model import Model
+
+logger = logging.getLogger(__name__)
 
 
 def _model_matches(model: Model, parsed: list[list[str | list[str]]]) -> bool:
@@ -126,6 +129,7 @@ def match_models(
     if not tags:
         raise ValueError("tags must be a non-empty expression.")
     parsed = _parse_tag_expression(tags)
+    logger.debug("Matching models in %r with tags %r", folder, tags)
     folder_path = Path(folder)
     parent_dir = str(folder_path.parent)
     added_to_path = False
@@ -135,6 +139,7 @@ def match_models(
     try:
         models = []
         for file in folder_path.rglob("*.py"):
+            logger.debug("Scanning %s", file)
             module_spec = importlib.util.spec_from_file_location(
                 name=file.stem, location=file
             )
@@ -145,8 +150,13 @@ def match_models(
             for _, obj in inspect.getmembers(module):
                 if isinstance(obj, Model) and _model_matches(obj, parsed):
                     models.append(obj)
+                    logger.debug("Matched model %r from %s", obj.name, file)
                 elif isinstance(obj, list) and all(isinstance(m, Model) for m in obj):
-                    models.extend(m for m in obj if _model_matches(m, parsed))
+                    matched = [m for m in obj if _model_matches(m, parsed)]
+                    models.extend(matched)
+                    for m in matched:
+                        logger.debug("Matched model %r from %s", m.name, file)
+        logger.info("Found %d model(s) matching tags %r", len(models), tags)
         return models
     finally:
         if added_to_path:
