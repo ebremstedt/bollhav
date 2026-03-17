@@ -73,7 +73,7 @@ def append(
         table=sql.Identifier(model.target.name),
         cols=col_names,
     )
-    with conn:
+    with conn.transaction():
         _ensure(conn=conn, model=model)
         with conn.cursor() as cursor:
             with cursor.copy(query) as copy:
@@ -99,7 +99,7 @@ def overwrite_insert(
     if model.target.partitioned_by is None:
         raise ValueError("model.target.partitioned_by must be set for OVERWRITE_INSERT")
 
-    with conn:
+    with conn.transaction():
         _ensure(conn=conn, model=model)
         conn.execute(
             sql.SQL(
@@ -127,7 +127,7 @@ def recreate_insert(
     model: Model,
     df: pl.DataFrame,
 ) -> None:
-    with conn:
+    with conn.transaction():
         conn.execute(
             sql.SQL("DROP TABLE IF EXISTS {schema}.{table}").format(
                 schema=sql.Identifier(model.target.schema.resolved),
@@ -151,7 +151,7 @@ def truncate_insert(
     model: Model,
     df: pl.DataFrame,
 ) -> None:
-    with conn:
+    with conn.transaction():
         _ensure(conn=conn, model=model)
         conn.execute(
             sql.SQL("TRUNCATE TABLE {schema}.{table}").format(
@@ -192,7 +192,7 @@ def update_insert(conn: psycopg.Connection, model: Model, df: pl.DataFrame) -> N
     )
 
     try:
-        with conn:
+        with conn.transaction():
             _ensure(conn=conn, model=model)
             # Cleanup leftover from a previous failed run where the finally block may not have reached
             conn.execute(
@@ -247,7 +247,7 @@ def create_replace_view(
             f"model.source.query must be set for {model.target.write_mode.value}"
         )
 
-    with conn:
+    with conn.transaction():
         ensure_schema(conn, model.target.schema.resolved)
         conn.execute(
             sql.SQL("CREATE OR REPLACE VIEW {schema}.{view} AS {query}").format(
