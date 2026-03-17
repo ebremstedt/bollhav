@@ -1,3 +1,4 @@
+import logging
 import psycopg
 from psycopg import sql
 import polars as pl
@@ -5,6 +6,8 @@ from typing import cast, LiteralString
 from datetime import datetime, timedelta
 from bollhav.model.model import Model
 from bollhav.postgres import PostgresColumn
+
+logger = logging.getLogger(__name__)
 
 
 def _col_ddl(col: PostgresColumn) -> LiteralString:
@@ -25,12 +28,16 @@ def _col_ddl(col: PostgresColumn) -> LiteralString:
 
 
 def ensure_schema(conn: psycopg.Connection, schema: str) -> None:
+    logger.debug("Ensuring schema: %s", schema)
     conn.execute(
         sql.SQL("CREATE SCHEMA IF NOT EXISTS {}").format(sql.Identifier(schema))
     )
 
 
 def ensure_table(conn: psycopg.Connection, model: Model) -> None:
+    logger.debug(
+        "Ensuring table: %s.%s", model.target.schema.resolved, model.target.name
+    )
     col_defs = sql.SQL(",\n").join(
         sql.SQL(_col_ddl(col))
         for col in model.target.columns
