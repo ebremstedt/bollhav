@@ -37,7 +37,10 @@ class PipeConfig:
     debug: bool = False
 
     def __str__(self) -> str:
-        return f"EnvConfig(tags={self.tags}, cron={self.latest}, backfill={self.backfill}, debug={self.debug}, use_schema_suffix={self.use_schema_suffix}, schema_suffix={self.schema_suffix})"
+        suffix_part = (
+            f", schema_suffix={self.schema_suffix}" if self.use_schema_suffix else ""
+        )
+        return f"EnvConfig(tags={self.tags}, cron={self.latest}, backfill={self.backfill}, debug={self.debug}, use_schema_suffix={self.use_schema_suffix}{suffix_part})"
 
     def debugprint(self, msg: str) -> None:
         if self.debug:
@@ -54,7 +57,8 @@ class PipeConfig:
         print(f"tags:             {self.tags}")
         print(f"debug:            {self.debug}")
         print(f"use_schema_suffix:{self.use_schema_suffix}")
-        print(f"schema_suffix:    {self.schema_suffix}")
+        if self.use_schema_suffix:
+            print(f"schema_suffix:    {self.schema_suffix}")
         if self.latest.enabled:
             print(f"latest.cron_batch:{self.latest.cron_batch}")
             print(f"latest.since:     {self.latest.since}")
