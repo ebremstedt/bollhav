@@ -57,8 +57,8 @@ class Model:
             f"  enabled:       {self.enabled}",
             f"  description:   {self.description}",
             f"  tags:          {', '.join(sorted(self.tags))}",
-            f"",
-            f"  target:",
+            "",
+            "  target:",
             f"    name:        {self.target.name}",
             f"    schema:      {self.target.schema.resolved}",
             f"    write_mode:  {self.target.write_mode.value}",
@@ -68,20 +68,20 @@ class Model:
         ]
         if self.source:
             lines += [
-                f"",
-                f"  source:",
+                "",
+                "  source:",
                 f"    name:        {self.source.name}",
                 f"    schema:      {self.source.schema}",
                 f"    dsn_env_var: {self.source.dsn_env_var}",
             ]
         lines += [
-            f"",
-            f"  batching:",
+            "",
+            "  batching:",
             f"    default:     {self.batching.default}",
             f"    lookback:    {self.batching.lookback}",
             f"    retries:     {self.batching.retries}",
-            f"",
-            f"  bounds:",
+            "",
+            "  bounds:",
             f"    begin:       {self.bounds.begin}",
             f"    end:         {self.bounds.end}",
         ]

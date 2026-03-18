@@ -1,6 +1,4 @@
-import pytest
 from bollhav.model.model import Model
-from bollhav.model.source import Source
 from bollhav.model.target import Target
 
 
@@ -24,7 +22,6 @@ def test_model_exposes_sub_configs():
     from bollhav.model.target import Target
     from bollhav.model.batch import Batch
     from bollhav.model.bounds import Bounds
-    from bollhav.model.tags import Tags
 
     m = make_model()
     assert isinstance(m.target.schema, Schema)
