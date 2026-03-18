@@ -1,5 +1,5 @@
-from datetime import datetime, timezone, timedelta
-from unittest.mock import MagicMock, patch, call
+from datetime import datetime, timezone
+from unittest.mock import MagicMock
 import pytest
 import sys
 
@@ -19,7 +19,6 @@ from bollhav.postgres.modes import (
     recreate_insert,
     truncate_insert,
     update_insert,
-    create_replace_view,
 )
 from bollhav.postgres.columns import PostgresColumn, PostgresType
 from bollhav.model.model import Model
