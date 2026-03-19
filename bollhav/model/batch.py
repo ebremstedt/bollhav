@@ -3,7 +3,7 @@ from datetime import datetime
 
 from icron import croniter
 from bollhav.model.intervals import TZInterval
-from roskarl import CronBatch, CronBatchExtended
+from roskarl import CronBatch, CronBatchExtended, CRON_BATCH_SHORTCUTS, CRON_BATCH_EXTENDED_SHORTCUTS
 
 
 @dataclass
@@ -33,6 +33,8 @@ class Batch:
         override: CronBatch | CronBatchExtended | None = None,
     ) -> list[TZInterval]:
         cron = override or self.default
+        raw = override or self.default
+        cron = CRON_BATCH_SHORTCUTS.get(raw) or CRON_BATCH_EXTENDED_SHORTCUTS.get(raw) or raw
         since = interval.since
         if self.lookback:
             it = croniter(cron, since)
