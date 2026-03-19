@@ -9,13 +9,13 @@ sys.modules["roskarl"] = roskarl_mock
 sys.modules["icron"] = MagicMock()
 sys.modules["cron"] = cron_mock
 
-from bollhav.pipe.pipe_config import (
+from bollhav.pipe.pipe_config import (  # noqa: E402
     PipeConfig,
     LatestConfig,
     BackfillConfig,
     load_pipe_config,
     with_pipe_config,
-)  # noqa: E402
+)
 
 DT_SINCE = datetime(2024, 1, 1, tzinfo=timezone.utc)
 DT_UNTIL = datetime(2024, 1, 2, tzinfo=timezone.utc)
