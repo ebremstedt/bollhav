@@ -1,6 +1,6 @@
 # bollhav
 
-Model definition framework that standardizes code at pipe and model level using the [model and pipe abstractions](ABSTRACTIONS.md).
+Model definition framework that standardizes code at pipe and model level using the [model and pipe abstractions](ABSTRACTIONS.md)
 
 This library is very permissive by design. Use the model level without using pipe level. Or use both with a database implemetation, or make your own.
 
