@@ -1,12 +1,11 @@
 import logging
+from datetime import datetime
 from typing import Generator
 from functools import partial
 from psycopg import Connection
 import polars as pl
 from bollhav.model.write_modes import WriteMode
 from bollhav.model.model import Model
-
-logger = logging.getLogger(__name__)
 from bollhav.postgres.modes import (
     recreate_insert,
     truncate_insert,
@@ -16,7 +15,8 @@ from bollhav.postgres.modes import (
     append,
     ensure_schema_and_table,
 )
-from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 
 def write_dataframes(

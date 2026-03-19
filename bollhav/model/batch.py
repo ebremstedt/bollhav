@@ -52,4 +52,3 @@ class Batch:
         if current < interval.until:
             intervals.append(TZInterval(current, interval.until))
         return intervals
-
