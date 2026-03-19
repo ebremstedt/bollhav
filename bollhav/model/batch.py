@@ -35,9 +35,11 @@ class Batch:
         cron = override or self.default
         since = interval.since
         if self.lookback:
-            it_back = croniter(cron, since)
-            for _ in range(self.lookback):
-                since = it_back.get_prev(datetime)
+            it = croniter(cron, since)
+            tick1 = it.get_next(datetime)
+            tick2 = it.get_next(datetime)
+            tick_size = tick2 - tick1
+            since = since - (tick_size * self.lookback)
         it = croniter(cron, since)
         intervals: list[TZInterval] = []
         current = since

@@ -1,5 +1,5 @@
-from datetime import datetime, timezone, timedelta
-from unittest.mock import MagicMock, patch, call
+from datetime import datetime, timezone
+from unittest.mock import MagicMock
 import pytest
 import sys
 
@@ -9,8 +9,8 @@ sys.modules["roskarl"] = roskarl_mock
 sys.modules["icron"] = MagicMock()
 sys.modules["cron"] = cron_mock
 
-from bollhav.model.database import Database
-from bollhav.postgres.modes import (
+from bollhav.model.database import Database  # noqa: E402
+from bollhav.postgres.modes import (  # noqa: E402
     _col_ddl,
     ensure_schema,
     ensure_table,
@@ -19,15 +19,14 @@ from bollhav.postgres.modes import (
     recreate_insert,
     truncate_insert,
     update_insert,
-    create_replace_view,
 )
-from bollhav.postgres.columns import PostgresColumn, PostgresType
-from bollhav.model.model import Model
-from bollhav.model.source import Source
-from bollhav.model.target import Target
-from bollhav.model.schema import Schema
-from bollhav.model.write_modes import WriteMode
-from bollhav.model.model_type import ModelType
+from bollhav.postgres.columns import PostgresColumn, PostgresType  # noqa: E402
+from bollhav.model.model import Model  # noqa: E402
+from bollhav.model.source import Source  # noqa: E402
+from bollhav.model.target import Target  # noqa: E402
+from bollhav.model.schema import Schema  # noqa: E402
+from bollhav.model.write_modes import WriteMode  # noqa: E402
+from bollhav.model.model_type import ModelType  # noqa: E402
 
 
 def _col(

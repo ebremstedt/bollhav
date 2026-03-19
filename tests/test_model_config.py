@@ -6,7 +6,6 @@ from bollhav.model.model import Model
 from bollhav.model.schema import Schema
 from bollhav.model.target import Target
 from bollhav.model.bounds import Bounds
-from bollhav.model.batch import Batch
 from bollhav.model.tags import Tags
 from bollhav.model.write_modes import WriteMode
 
