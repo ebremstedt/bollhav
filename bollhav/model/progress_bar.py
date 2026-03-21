@@ -18,11 +18,13 @@ def progress_bar(func: Callable) -> Callable:
     Call set_total before the batch loop to enable progress tracking:
         execute.set_total(len(intervals))
     """
-    state: dict[str, str | float | int] = {
+    state: dict[str, str | float | int | list] = {
         "current_model": "",
         "start": 0.0,
         "count": 0,
         "total": 0,
+        "batch_start": 0.0,
+        "batch_times": [],
     }
 
     def _write(msg: str, newline: bool = False) -> None:
@@ -30,13 +32,21 @@ def progress_bar(func: Callable) -> Callable:
         sys.stdout.write(f"\r{msg}   {suffix}")
         sys.stdout.flush()
 
+    def _avg_batch_time() -> str:
+        times = list(state["batch_times"])  # type: ignore[arg-type]
+        if not times:
+            return ""
+        avg = sum(times) / len(times)
+        return f" avg {avg:.1f}s"
+
     def _finish_current() -> None:
         elapsed = time.time() - float(state["start"])
         count = int(state["count"])
         total = int(state["total"])
         batch_str = f"{count}/{total}" if total else str(count)
+        batch_word = "batch" if count == 1 else "batches"
         _write(
-            f"✓ {state['current_model']}: finished ({elapsed:.1f}s, {batch_str} batches)",
+            f"✓ {state['current_model']}: finished ({elapsed:.1f}s, {batch_str} {batch_word}{_avg_batch_time()})",
             newline=True,
         )
 
@@ -74,13 +84,22 @@ def progress_bar(func: Callable) -> Callable:
             state["current_model"] = model_name
             state["start"] = time.time()
             state["count"] = 0
+            state["batch_times"] = []
+
+        batch_start = time.time()
+        prev_batch_start = float(state["batch_start"])
+        if prev_batch_start > 0:
+            state["batch_times"] = list(state["batch_times"]) + [
+                batch_start - prev_batch_start
+            ]  # type: ignore[operator]
+        state["batch_start"] = batch_start
 
         state["count"] = int(state["count"]) + 1
         count = int(state["count"])
         total = int(state["total"])
         date_part = f" ({batch_since.strftime('%Y-%m-%d')})" if batch_since else ""
         bar = _progress_bar(current=count, total=total)
-        _write(f"⏳ {model_name}: {bar}{date_part}")
+        _write(f"⏳ {model_name}: {bar}{date_part}{_avg_batch_time()}")
 
         return func(*args, **kwargs)
 
