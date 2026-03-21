@@ -3,11 +3,16 @@ import psycopg
 from psycopg import sql
 import polars as pl
 from typing import cast, LiteralString
-from datetime import datetime
+from datetime import datetime, timedelta
 from bollhav.model.model import Model
 from bollhav.postgres.schema import ensure_schema, ensure_schema_and_table
 
 logger = logging.getLogger(__name__)
+
+
+def _assert_utc(dt: datetime, name: str) -> None:
+    if dt.tzinfo is None or dt.utcoffset() != timedelta(0):
+        raise ValueError(f"{name} must be UTC, got {dt!r}")
 
 
 def append(
@@ -35,7 +40,8 @@ def overwrite_insert(
     since: datetime,
     until: datetime,
 ) -> None:
-
+    _assert_utc(since, "since")
+    _assert_utc(until, "until")
     with conn.transaction():
         conn.execute(
             sql.SQL(
