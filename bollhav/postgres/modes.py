@@ -19,8 +19,6 @@ def _col_ddl(col: PostgresColumn) -> LiteralString:
     constraints = ""
     if col.primary_key:
         constraints = " PRIMARY KEY"
-    elif col.unique:
-        constraints = " UNIQUE"
     null_clause = "NOT NULL" if not col.nullable else ""
     return cast(
         LiteralString, f'    "{col.name}" {pg_type}{constraints} {null_clause}'.rstrip()
