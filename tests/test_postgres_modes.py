@@ -104,7 +104,7 @@ class TestColDdl:
 
     def test_unique(self) -> None:
         result = _col_ddl(_col("my_col", unique=True))
-        assert "UNIQUE" in result
+        assert "UNIQUE" not in result
 
     def test_precision_and_scale(self) -> None:
         result = _col_ddl(
@@ -135,6 +135,14 @@ class TestEnsureTable:
         model = _model(columns=[_col("id"), _col("ts")], partitioned_by="ts")
         ensure_table(conn=conn, model=model)
         assert conn.execute.call_count == 2
+
+    def test_creates_composite_unique_constraint(self) -> None:
+        conn = _conn()
+        model = _model(
+            columns=[_col("a", unique=True), _col("b", unique=True), _col("val")]
+        )
+        ensure_table(conn=conn, model=model)
+        assert conn.execute.call_count == 2  # CREATE TABLE + composite UNIQUE
 
 
 class TestAppend:

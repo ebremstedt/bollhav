@@ -76,7 +76,7 @@ class PostgresColumn(DatabaseColumn):
     Args:
         data_type:   Postgres data type. Defaults to TEXT.
         primary_key: Marks column as primary key. Cannot be nullable.
-        unique:      Adds a UNIQUE constraint.
+        unique:      Marks column as part of the composite UNIQUE constraint.
         precision:   Total number of significant digits (NUMERIC/DECIMAL).
         scale:       Digits to the right of the decimal point.
         length:      Max character length (CHAR/VARCHAR).
