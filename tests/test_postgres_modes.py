@@ -10,10 +10,8 @@ sys.modules["icron"] = MagicMock()
 sys.modules["cron"] = cron_mock
 
 from bollhav.model.database import Database  # noqa: E402
+from bollhav.postgres.schema import _col_ddl, ensure_schema, ensure_table  # noqa: E402
 from bollhav.postgres.modes import (  # noqa: E402
-    _col_ddl,
-    ensure_schema,
-    ensure_table,
     append,
     overwrite_insert,
     recreate_insert,
