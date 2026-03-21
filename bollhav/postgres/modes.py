@@ -63,6 +63,31 @@ def ensure_table(conn: psycopg.Connection, model: Model) -> None:
             )
         )
 
+    unique_columns = [
+        col
+        for col in model.target.columns
+        if isinstance(col, PostgresColumn) and col.unique
+    ]
+    if unique_columns:
+        constraint_name = f"{model.target.name}_uq"
+        unique_col_ids = sql.SQL(", ").join(
+            sql.Identifier(col.name) for col in unique_columns
+        )
+        conn.execute(
+            sql.SQL("""
+                DO $$ BEGIN
+                    ALTER TABLE {schema}.{table}
+                    ADD CONSTRAINT {constraint} UNIQUE ({cols});
+                EXCEPTION WHEN duplicate_table THEN NULL;
+                END $$
+            """).format(
+                schema=sql.Identifier(model.target.schema.resolved),
+                table=sql.Identifier(model.target.name),
+                constraint=sql.Identifier(constraint_name),
+                cols=unique_col_ids,
+            )
+        )
+
 
 def ensure_schema_and_table(conn: psycopg.Connection, model: Model) -> None:
     with conn.transaction():
