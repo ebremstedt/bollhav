@@ -24,7 +24,12 @@ class Target:
     sensitive: bool = field(init=False, default=False)
     unique_columns: list = field(init=False, default_factory=list)
     partitioned_by_index: bool = field(init=False, default=False)
-    full_name: str = field(init=False, default="")
+
+    @property
+    def full_name(self) -> str:
+        return (
+            f"{self.schema.resolved}.{self.name}" if self.schema.resolved else self.name
+        )
 
     def __post_init__(self) -> None:
         if self.model_type == ModelType.VIEW and self.write_mode != WriteMode.VIEW:
@@ -71,7 +76,3 @@ class Target:
             sorted_names = self.column_sorting(col_names)
             name_to_col = {c.name: c for c in self.columns}
             self.columns = [name_to_col[n] for n in sorted_names]
-
-        self.full_name = (
-            f"{self.schema.resolved}.{self.name}" if self.schema.resolved else self.name
-        )
