@@ -1,8 +1,6 @@
 from bollhav.postgres.columns import PostgresColumn, PostgresType
+from bollhav.postgres.schema import ensure_schema, ensure_table, ensure_schema_and_table
 from bollhav.postgres.modes import (
-    ensure_schema,
-    ensure_table,
-    ensure_schema_and_table,
     append,
     overwrite_insert,
     recreate_insert,
