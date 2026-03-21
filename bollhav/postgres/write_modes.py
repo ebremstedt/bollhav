@@ -13,8 +13,8 @@ from bollhav.postgres.modes import (
     update_insert,
     create_replace_view,
     append,
-    ensure_schema_and_table,
 )
+from bollhav.postgres.schema import ensure_schema_and_table
 
 logger = logging.getLogger(__name__)
 
