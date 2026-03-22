@@ -33,7 +33,7 @@ def append(
                     copy.write_row(row)
 
 
-def overwrite_insert(
+def recreate_partition(
     conn: psycopg.Connection,
     model: Model,
     df: pl.DataFrame,
@@ -64,7 +64,7 @@ def overwrite_insert(
                 copy.write_row(row)
 
 
-def recreate_insert(
+def recreate_table_insert(
     conn: psycopg.Connection,
     model: Model,
     df: pl.DataFrame,
@@ -88,7 +88,7 @@ def recreate_insert(
                 copy.write_row(row)
 
 
-def truncate_insert(
+def truncate_table_insert(
     conn: psycopg.Connection,
     model: Model,
     df: pl.DataFrame,
@@ -111,7 +111,7 @@ def truncate_insert(
                 copy.write_row(row)
 
 
-def update_insert(conn: psycopg.Connection, model: Model, df: pl.DataFrame) -> None:
+def upsert_no_delete(conn: psycopg.Connection, model: Model, df: pl.DataFrame) -> None:
     unique_columns = [col.name for col in model.target.unique_columns]
     temp_table = f"temp_{model.target.name}"
 
