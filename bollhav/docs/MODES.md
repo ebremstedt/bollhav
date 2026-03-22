@@ -28,7 +28,7 @@ flowchart LR
 
 ## RECREATE_TABLE_INSERT
 
-Drops and recreates the table before inserting. Stronger than TRUNCATE_INSERT as it also resets the schema.
+Drops and recreates the table before inserting. Stronger than TRUNCATE_TABLE_INSERT as it also resets the schema.
 
 ```mermaid
 flowchart LR
@@ -54,7 +54,7 @@ flowchart LR
 - When a full schema reset is preferred over a simple truncate
 
 
-## TRUNCATE_INSERT
+## TRUNCATE_TABLE_INSERT
 
 Fully reloads the table on every run. Wipes everything first, then inserts.
 
@@ -184,7 +184,7 @@ flowchart LR
 | Mode | Inserts | Updates | Deletes | Notes |
 |---|---|---|---|---|
 | `APPEND` | ✅ | ❌ | ❌ | No deduplication |
-| `TRUNCATE_INSERT` | ✅ | ❌ | ✅ | Full reload every run |
+| `TRUNCATE_TABLE_INSERT` | ✅ | ❌ | ✅ | Full reload every run |
 | `UPDATE_INSERT` | ✅ | ✅ | ❌ | Safe upsert |
 | `RECREATE_PARTITION` | ✅ | ✅ | ✅ | Deletes matches first |
 | `MERGE` | ✅ | ✅ | ✅ | Requires Postgres 15+ |

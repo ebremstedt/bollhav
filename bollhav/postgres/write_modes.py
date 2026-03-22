@@ -50,7 +50,7 @@ def write_dataframes(
             write_function = append
         case WriteMode.RECREATE_TABLE_INSERT:
             write_function = recreate_insert
-        case WriteMode.TRUNCATE_INSERT:
+        case WriteMode.TRUNCATE_TABLE_INSERT:
             write_function = truncate_insert
         case WriteMode.RECREATE_PARTITION:
             if since is None or until is None:
@@ -106,13 +106,13 @@ def write(
     if model.target.write_mode in (
         WriteMode.APPEND,
         WriteMode.RECREATE_TABLE_INSERT,
-        WriteMode.TRUNCATE_INSERT,
+        WriteMode.TRUNCATE_TABLE_INSERT,
         WriteMode.RECREATE_PARTITION,
         WriteMode.UPDATE_INSERT,
     ):
         if not df_gen:
             raise ValueError(
-                "Modes APPEND, RECREATE_TABLE_INSERT, TRUNCATE_INSERT, RECREATE_PARTITION, UPDATE_INSERT need a dataframe"
+                "Modes APPEND, RECREATE_TABLE_INSERT, TRUNCATE_TABLE_INSERT, RECREATE_PARTITION, UPDATE_INSERT need a dataframe"
             )
         write_dataframes(
             conn=conn,

@@ -119,7 +119,7 @@ from bollhav.model.write_modes import WriteMode
 WriteMode.APPEND
 WriteMode.RECREATE_PARTITION     # requires partitioned_by
 WriteMode.RECREATE_TABLE_INSERT
-WriteMode.TRUNCATE_INSERT
+WriteMode.TRUNCATE_TABLE_INSERT
 WriteMode.UPDATE_INSERT          # requires at least one column with unique=True
 WriteMode.VIEW                   # requires ModelType.VIEW
 ```
