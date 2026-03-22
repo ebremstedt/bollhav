@@ -88,7 +88,7 @@ model = Model(
 
 | Parameter | Type | Default | Description |
 |---|---|---|---|
-| `default` | `CronBatch` | `"0 0 * * *"` | Chunk size as a cron batch expression |
+| `default` | `BatchExpression` | `"0 0 * * *"` | Chunk size as a batch expression |
 | `lookback` | `int` | `None` | Extends interval start backwards by N cron-ticks |
 | `retries` | `int` | `None` | Retry count on failure |
 

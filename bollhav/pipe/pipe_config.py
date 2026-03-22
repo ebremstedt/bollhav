@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from roskarl import (
     env_var_bool,
-    env_var_cron_batch,
+    env_var_batch_expression,
     env_var,
     env_var_iso8601_datetime,
 )
@@ -16,7 +16,7 @@ class LatestConfig:
     enabled: bool
     since: datetime | None
     until: datetime | None
-    cron_batch: str | None
+    batch_expression: str | None
 
 
 @dataclass
@@ -24,7 +24,7 @@ class BackfillConfig:
     enabled: bool
     since: datetime | None
     until: datetime | None
-    cron_batch: str | None
+    batch_expression: str | None
 
 
 @dataclass
@@ -60,13 +60,13 @@ class PipeConfig:
         if self.use_schema_suffix:
             print(f"schema_suffix:    {self.schema_suffix}")
         if self.latest.enabled:
-            print(f"latest.cron_batch:{self.latest.cron_batch}")
+            print(f"latest.batch_expression:{self.latest.batch_expression}")
             print(f"latest.since:     {self.latest.since}")
             print(f"latest.until:     {self.latest.until}")
         if self.backfill.enabled:
             print(f"backfill.since:   {self.backfill.since}")
             print(f"backfill.until:   {self.backfill.until}")
-            print(f"backfill.cron_batch:{self.backfill.cron_batch}")
+            print(f"backfill.batch_expression:{self.backfill.batch_expression}")
 
 
 def load_pipe_config() -> PipeConfig:
@@ -75,19 +75,21 @@ def load_pipe_config() -> PipeConfig:
     if latest_enabled and backfill_enabled:
         raise ValueError("LATEST_ENABLED and BACKFILL_ENABLED cannot both be true")
 
-    latest_cron_batch = env_var_cron_batch(name="LATEST_CRON_BATCH")
+    latest_batch_expression = env_var_batch_expression(name="LATEST_CRON_BATCH")
     if not latest_enabled:
-        latest_cron_batch = None
+        latest_batch_expression = None
 
     cron_since, cron_until = (
-        _resolve_cron_interval(latest_cron_batch) if latest_cron_batch else (None, None)
+        _resolve_cron_interval(latest_batch_expression)
+        if latest_batch_expression
+        else (None, None)
     )
 
     return PipeConfig(
         tags=env_var(name="TAGS", required=True),
         latest=LatestConfig(
             enabled=latest_enabled,
-            cron_batch=latest_cron_batch,
+            batch_expression=latest_batch_expression,
             since=cron_since,
             until=cron_until,
         ),
@@ -99,7 +101,7 @@ def load_pipe_config() -> PipeConfig:
             until=env_var_iso8601_datetime(name="BACKFILL_UNTIL")
             if backfill_enabled
             else None,
-            cron_batch=env_var_cron_batch(name="BACKFILL_CRON_BATCH")
+            batch_expression=env_var_batch_expression(name="BACKFILL_CRON_BATCH")
             if backfill_enabled
             else None,
         ),

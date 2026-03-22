@@ -3,7 +3,7 @@ from datetime import datetime
 
 from icron import croniter
 from bollhav.model.intervals import TZInterval
-from roskarl import CronBatch, CronBatchExtended
+from roskarl import BatchExpression, BatchExpressionExtended
 
 
 @dataclass
@@ -23,23 +23,24 @@ class Batch:
     `retries` is the number of times a failed chunk should be retried.
     """
 
-    default: CronBatch | CronBatchExtended = "0 0 * * *"
+    default: BatchExpression | BatchExpressionExtended = "@daily"
     lookback: int | None = None
     retries: int | None = None
 
-    def infer_intervals_from_cron_batch(
+    def infer_intervals(
         self,
-        interval: TZInterval,
-        override: CronBatch | CronBatchExtended | None = None,
+        since: datetime,
+        until: datetime,
+        override: BatchExpression | BatchExpressionExtended | None = None,
     ) -> list[TZInterval]:
         cron = override or self.default
-        since = interval.since
         if self.lookback:
             it = croniter(cron, since)
             tick1 = it.get_next(datetime)
             tick2 = it.get_next(datetime)
             tick_size = tick2 - tick1
             since = since - (tick_size * self.lookback)
+        interval = TZInterval(since=since, until=until)
         it = croniter(cron, since)
         intervals: list[TZInterval] = []
         current = since
