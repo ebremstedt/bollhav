@@ -97,7 +97,7 @@ model = Model(
 | Attribute | Description |
 |---|---|
 | `target.sensitive` | `True` if any column has `sensitive=True` |
-| `target.unique_columns` | Columns with `unique=True` — required for `UPDATE_INSERT` |
+| `target.unique_columns` | Columns with `unique=True` — required for `UPSERT_NO_DELETE` |
 | `target.partitioned_by_index` | `True` if `partitioned_by` is set |
 | `tags` | Auto-assembled from `name`, `target.schema.name`, and `"all"` |
 
@@ -120,7 +120,7 @@ WriteMode.APPEND
 WriteMode.RECREATE_PARTITION     # requires partitioned_by
 WriteMode.RECREATE_TABLE_INSERT
 WriteMode.TRUNCATE_TABLE_INSERT
-WriteMode.UPDATE_INSERT          # requires at least one column with unique=True
+WriteMode.UPSERT_NO_DELETE          # requires at least one column with unique=True
 WriteMode.VIEW                   # requires ModelType.VIEW
 ```
 

@@ -41,7 +41,7 @@ Runs `TRUNCATE TABLE` then `COPY`. All in one transaction.
 
 Requires `since` and `until` (UTC-aware datetimes) and `target.partitioned_by` to be set. Deletes rows where the partition column is `>= since AND < until`, then uses `COPY`. All in one transaction. IDEMPOTENT.
 
-## UPDATE_INSERT
+## UPSERT_NO_DELETE
 
 Loads data into a temp table via `COPY`, then runs `INSERT ... ON CONFLICT (...) DO UPDATE SET ...`. Requires `target.unique_columns` to be set. The temp table is dropped on commit.
 

@@ -77,7 +77,7 @@ def test_update_insert_without_unique_columns_raises():
             name="test_table",
             database=make_db(),
             columns=[make_column("id"), make_column("ts")],
-            write_mode=WriteMode.UPDATE_INSERT,
+            write_mode=WriteMode.UPSERT_NO_DELETE,
         )
 
 
@@ -185,9 +185,9 @@ def test_update_insert_with_unique_column_ok():
         name="test_table",
         database=make_db(),
         columns=[make_column("id", unique=True), make_column("name")],
-        write_mode=WriteMode.UPDATE_INSERT,
+        write_mode=WriteMode.UPSERT_NO_DELETE,
     )
-    assert t.write_mode == WriteMode.UPDATE_INSERT
+    assert t.write_mode == WriteMode.UPSERT_NO_DELETE
 
 
 # --- Column sorting ---
