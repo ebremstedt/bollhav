@@ -21,7 +21,7 @@ class TestParseExpression:
         ]
 
     def test_single_tag_reload(self):
-        result = parse_expression("[!foo]")
+        result = parse_expression("[r:foo]")
         assert result == [
             PotentialTagGroup(tags=[PotentialTagMatch(candidates=["foo"], reload=True)])
         ]
@@ -54,7 +54,7 @@ class TestParseExpression:
         ]
 
     def test_or_with_reload(self):
-        result = parse_expression("[!(foo|bar)]")
+        result = parse_expression("[r:(foo|bar)]")
         assert result == [
             PotentialTagGroup(
                 tags=[PotentialTagMatch(candidates=["foo", "bar"], reload=True)]
@@ -62,7 +62,7 @@ class TestParseExpression:
         ]
 
     def test_group_reload_applies_to_all_tags(self):
-        result = parse_expression("![foo & bar]")
+        result = parse_expression("r:[foo & bar]")
         assert result == [
             PotentialTagGroup(
                 tags=[
@@ -73,7 +73,7 @@ class TestParseExpression:
         ]
 
     def test_and_mixed_reload(self):
-        result = parse_expression("[!foo & bar]")
+        result = parse_expression("[r:foo & bar]")
         assert result == [
             PotentialTagGroup(
                 tags=[
@@ -119,22 +119,22 @@ class TestReloadFlag:
         assert all(t.reload is False for t in parsed[0].tags)
 
     def test_tag_level_reload(self):
-        parsed = parse_expression("[!foo & bar]")
+        parsed = parse_expression("[r:foo & bar]")
         foo, bar = parsed[0].tags
         assert foo.reload is True
         assert bar.reload is False
 
     def test_group_level_reload_sets_all(self):
-        parsed = parse_expression("![foo & bar]")
+        parsed = parse_expression("r:[foo & bar]")
         assert all(t.reload is True for t in parsed[0].tags)
 
     def test_or_group_reload(self):
-        parsed = parse_expression("[!(foo|bar)]")
+        parsed = parse_expression("[r:(foo|bar)]")
         assert parsed[0].tags[0].reload is True
         assert parsed[0].tags[0].candidates == ["foo", "bar"]
 
     def test_mixed_groups_reload(self):
-        parsed = parse_expression("[!foo][bar]")
+        parsed = parse_expression("[r:foo][bar]")
         assert parsed[0].tags[0].reload is True
         assert parsed[1].tags[0].reload is False
 

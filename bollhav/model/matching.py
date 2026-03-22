@@ -60,10 +60,10 @@ def match_models(
     Scan a folder recursively for Python modules, discover all Model instances,
     and return those whose tags match the given tag expression.
 
-    Each result is a (model, reload) tuple. reload is True if the matched expression included !.
+    Each result is a (model, reload) tuple. reload is True if the matched expression included r:.
 
     Usage:
-        for model, reload in match_models(folder="src/models", tags="[!sales & finance]"):
+        for model, reload in match_models(folder="src/models", tags="[r:sales & finance]"):
             ...
 
     Tag expression syntax:
@@ -72,9 +72,9 @@ def match_models(
         [foo | bar]             match if model has "foo" or "bar"
         [(foo | bar) & baz]     match if model has ("foo" or "bar") and "baz"
         [foo][bar]              match if model has "foo" or "bar" (separate groups)
-        [!foo]                  match "foo", reload=True
-        [!(foo | bar)]          match "foo" or "bar", reload=True
-        ![foo & bar]            match "foo" and "bar", reload=True for all
+        [r:foo]                 match "foo", reload=True
+        [r:(foo | bar)]         match "foo" or "bar", reload=True
+        r:[foo & bar]           match "foo" and "bar", reload=True for all
 
     Raises:
         ValueError: If tags is not provided or the expression is invalid.
