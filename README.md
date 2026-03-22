@@ -1,15 +1,20 @@
 # bollhav
 
-Model definition framework that standardizes code at pipe and model level using the [model and pipe abstractions](ABSTRACTIONS.md)
+Model definition framework that standardizes code at pipe and model level using the model and pipe [abstractions](bollhav/docs/ABSTRACTIONS.md)
 
-This library is very permissive by design. Use the model level without using pipe level. Or use both with a database implemetation, or make your own.
+This library
+- is permissive by design
+- is designed with ✨developer experience✨ in mind.
 
-- [Model](bollhav/DOCS/MODEL.md)
-- [Pipe](bollhav/DOCS/PIPE.md)
-- [Modes](bollhav/DOCS/MODES.MD)
-    - [Postgres implementation](bollhav/DOCS/POSTGRES.md)
+Concepts
+- [Model](bollhav/docs/MODEL.md)
+- [Pipe](bollhav/docs/PIPE.md)
+- [Tags](bollhav/docs/TAGS.md)
+    - [examples](bollhav/docs/MATCHING.md)
+- [Modes](bollhav/docs/MODES.md)
+    - [Postgres implementation](bollhav/docs/POSTGRES.md)
 
-Match which models to run using [tags](bollhav/DOCS/TAGS.md) with examples [here](bollhav/DOCS/MATCHING.md).
+
 
 ## Installation
 ```bash
