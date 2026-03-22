@@ -5,6 +5,20 @@ from icron import croniter
 from bollhav.model.intervals import TZInterval
 from roskarl import BatchExpression, BatchExpressionExtended
 
+_CRON_ALIASES = {
+    "@hourly": "0 * * * *",
+    "@daily": "0 0 * * *",
+    "@midnight": "0 0 * * *",
+    "@weekly": "0 0 * * 0",
+    "@monthly": "0 0 1 * *",
+    "@yearly": "0 0 1 1 *",
+    "@annually": "0 0 1 1 *",
+}
+
+
+def _resolve_cron(expr: str) -> str:
+    return _CRON_ALIASES.get(expr, expr)
+
 
 @dataclass
 class Batch:
@@ -37,7 +51,7 @@ class Batch:
     ) -> list[TZInterval]:
         if until is None:
             until = datetime.now(tz=timezone.utc)
-        cron = batch_expression_override or self.default
+        cron = _resolve_cron(batch_expression_override or self.default)
         if self.lookback:
             it = croniter(cron, since)
             tick1 = it.get_next(datetime)
