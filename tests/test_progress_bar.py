@@ -87,6 +87,22 @@ def test_total_does_not_bleed_across_models():
     assert "3/3" in lines_b[0], f"Expected 3/3 in step_b line, got: {lines_b[0]}"
 
 
+def test_finished_elapsed_uses_ms_for_sub_second():
+    @progress_bar
+    def execute(model, batch_since=None):
+        pass
+
+    execute.set_total(1)
+    execute(model=make_mock_model("fast"))
+
+    output = finish_captured(execute)
+    lines = [l for l in output.splitlines() if "fast: finished" in l]
+    assert lines, "fast finished line not found"
+    # elapsed should be sub-second in a test, so must show ms not 0.0s
+    assert "0.0s" not in lines[0], f"Got 0.0s instead of ms: {lines[0]}"
+    assert "ms" in lines[0], f"Expected ms unit in: {lines[0]}"
+
+
 def test_model_without_set_total_shows_count_only():
     @progress_bar
     def execute(model, batch_since=None):
