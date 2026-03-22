@@ -38,7 +38,9 @@ def progress_bar(func: Callable) -> Callable:
         if not times:
             return ""
         avg = sum(times) / len(times)
-        return f" avg {avg:.1f}s"
+        if avg >= 1:
+            return f" avg {avg:.1f}s"
+        return f" avg {avg * 1000:.0f}ms"
 
     def _finish_current() -> None:
         elapsed = time.time() - float(state["start"])
