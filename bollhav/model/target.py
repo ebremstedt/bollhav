@@ -59,9 +59,9 @@ class Target:
         )
         self.partitioned_by_index = self.partitioned_by is not None
 
-        if self.write_mode == WriteMode.UPDATE_INSERT and not self.unique_columns:
+        if self.write_mode == WriteMode.UPSERT_NO_DELETE and not self.unique_columns:
             raise ValueError(
-                "WriteMode.UPDATE_INSERT requires at least one column with unique=True"
+                "WriteMode.UPSERT_NO_DELETE requires at least one column with unique=True"
             )
         if (
             self.write_mode == WriteMode.RECREATE_PARTITION

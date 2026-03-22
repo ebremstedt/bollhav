@@ -246,7 +246,7 @@ class TestUpdateInsert:
                 schema=Schema(name="test_schema"),
                 columns=cols,
                 database=Database.POSTGRES,
-                write_mode=WriteMode.UPDATE_INSERT,
+                write_mode=WriteMode.UPSERT_NO_DELETE,
                 model_type=ModelType.TABLE,
             ),
         )

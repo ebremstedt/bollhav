@@ -74,7 +74,7 @@ flowchart LR
 - When the dataset is quite small, so reloading it completely is fine
 - When we want to make sure that deletes from source are included
 
-## UPDATE_INSERT
+## UPSERT_NO_DELETE
 
 Updates rows that already exist, inserts rows that don't. Never deletes.
 
@@ -185,7 +185,7 @@ flowchart LR
 |---|---|---|---|---|
 | `APPEND` | ✅ | ❌ | ❌ | No deduplication |
 | `TRUNCATE_TABLE_INSERT` | ✅ | ❌ | ✅ | Full reload every run |
-| `UPDATE_INSERT` | ✅ | ✅ | ❌ | Safe upsert |
+| `UPSERT_NO_DELETE` | ✅ | ✅ | ❌ | Safe upsert |
 | `RECREATE_PARTITION` | ✅ | ✅ | ✅ | Deletes matches first |
 | `MERGE` | ✅ | ✅ | ✅ | Requires Postgres 15+ |
 | `VIEW` | ❌ | ❌ | ❌ | Updates view definition only |

@@ -56,7 +56,7 @@ def write_dataframes(
             if since is None or until is None:
                 raise ValueError("Since and until must be set for RECREATE_PARTITION")
             write_function = partial(overwrite_insert, since=since, until=until)
-        case WriteMode.UPDATE_INSERT:
+        case WriteMode.UPSERT_NO_DELETE:
             write_function = update_insert
         case _:
             raise ValueError(f"Unhandled write mode: {model.target.write_mode}")
@@ -108,11 +108,11 @@ def write(
         WriteMode.RECREATE_TABLE_INSERT,
         WriteMode.TRUNCATE_TABLE_INSERT,
         WriteMode.RECREATE_PARTITION,
-        WriteMode.UPDATE_INSERT,
+        WriteMode.UPSERT_NO_DELETE,
     ):
         if not df_gen:
             raise ValueError(
-                "Modes APPEND, RECREATE_TABLE_INSERT, TRUNCATE_TABLE_INSERT, RECREATE_PARTITION, UPDATE_INSERT need a dataframe"
+                "Modes APPEND, RECREATE_TABLE_INSERT, TRUNCATE_TABLE_INSERT, RECREATE_PARTITION, UPSERT_NO_DELETE need a dataframe"
             )
         write_dataframes(
             conn=conn,
