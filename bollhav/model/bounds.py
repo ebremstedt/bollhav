@@ -1,8 +1,8 @@
-from dataclasses import dataclass, field
-from datetime import datetime, date
+from dataclasses import dataclass
+from datetime import datetime
 
 
 @dataclass
 class Bounds:
     begin: datetime | None = None
-    end: date = field(default_factory=date.today)
+    end: datetime | None = None
