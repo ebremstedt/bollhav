@@ -42,6 +42,11 @@ def progress_bar(func: Callable) -> Callable:
             return f" avg {avg:.1f}s"
         return f" avg {avg * 1000:.0f}ms"
 
+    def _format_elapsed(elapsed: float) -> str:
+        if elapsed >= 1:
+            return f"{elapsed:.1f}s"
+        return f"{elapsed * 1000:.0f}ms"
+
     def _finish_current() -> None:
         elapsed = time.time() - float(state["start"])
         count = int(state["count"])
@@ -49,7 +54,7 @@ def progress_bar(func: Callable) -> Callable:
         batch_str = f"{count}/{total}" if total else str(count)
         batch_word = "batch" if count == 1 else "batches"
         _write(
-            f"✓ {state['current_model']}: finished ({elapsed:.1f}s, {batch_str} {batch_word}{_avg_batch_time()})",
+            f"✓ {state['current_model']}: finished ({_format_elapsed(elapsed)}, {batch_str} {batch_word}{_avg_batch_time()})",
             newline=True,
         )
         state["current_model"] = ""
