@@ -1,163 +1,108 @@
 import importlib.util
 import inspect
 import logging
-import re
 import sys
+from contextlib import contextmanager
 from pathlib import Path
+from bollhav.model.tagexpr import PotentialTagGroup, parse_expression, group_matches
 from bollhav.model.model import Model
 
 logger = logging.getLogger(__name__)
 
 
-def _model_matches(model: Model, parsed: list[list[str | list[str]]]) -> bool:
-    return _tags_match(model.tags, parsed)
+def _model_matches(
+    model: Model, potential_tag_groups: list[PotentialTagGroup]
+) -> tuple[Model, bool] | None:
+    for group in potential_tag_groups:
+        if group_matches(model.tags, group.tags):
+            return model, any(tag.reload for tag in group.tags)
+    return None
 
 
-def _tags_match(model_tags: set[str], parsed: list[list[str | list[str]]]) -> bool:
-    return any(_group_matches(model_tags, group) for group in parsed)
+def _load_module(file: Path):
+    spec = importlib.util.spec_from_file_location(name=file.stem, location=file)
+    if spec is None or spec.loader is None:
+        logger.debug("Could not load module spec for %s, skipping", file)
+        return None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
-def _group_matches(model_tags: set[str], group: list[str | list[str]]) -> bool:
-    for term in group:
-        if isinstance(term, list):
-            if not any(t in model_tags for t in term):
-                return False
-        else:
-            if term not in model_tags:
-                return False
-    return True
+def _models_from_module(module) -> list[Model]:
+    models = []
+    for _, obj in inspect.getmembers(module):
+        if isinstance(obj, Model):
+            models.append(obj)
+        elif isinstance(obj, list) and all(isinstance(m, Model) for m in obj):
+            models.extend(obj)
+    return models
 
 
-def _parse_tag_expression(expr: str) -> list[list[str | list[str]]]:
-    groups = re.findall(r"\[([^\]]+)\]", expr)
-    if not groups:
-        raise ValueError(f"Invalid tag expression: {expr!r}. Must use [group] syntax.")
-
-    parsed = []
-    for group in groups:
-        terms = group.split("&")
-        parsed_terms = []
-        for term in terms:
-            or_match = re.fullmatch(r"\(([^)]+)\)", term.strip())
-            if or_match:
-                parsed_terms.append(or_match.group(1).split("|"))
-            elif "|" in term:
-                parsed_terms.append(term.split("|"))
-            else:
-                parsed_terms.append(term.strip())
-        parsed.append(parsed_terms)
-
-    return parsed
+@contextmanager
+def _with_sys_path(folder_path: Path):
+    parent_dir = str(folder_path.parent)
+    added = parent_dir not in sys.path
+    if added:
+        sys.path.insert(0, parent_dir)
+    try:
+        yield
+    finally:
+        if added:
+            sys.path.remove(parent_dir)
 
 
 def match_models(
     folder: str = "src/models",
     tags: str | None = None,
-) -> list[Model]:
+) -> list[tuple[Model, bool]]:
     """
-    Discover and return execute functions from Python modules in a folder recursively,
-    filtered by a tag expression.
+    Scan a folder recursively for Python modules, discover all Model instances,
+    and return those whose tags match the given tag expression.
 
-    This can match either a declared model or a declared list of models, or both!
+    Each result is a (model, reload) tuple. reload is True if the matched expression included !.
 
-    TAG EXPRESSION SYNTAX
-    =====================
+    Usage:
+        for model, reload in match_models(folder="src/models", tags="[!sales & finance]"):
+            ...
 
-    Tags are matched against the `tags` attribute on each module's `model` object.
-    The expression must be passed as a string using the syntax described below.
-
-    GROUPS
-    ------
-    A group is wrapped in square brackets: [expression]
-    Multiple groups are separated by commas: [group1],[group2]
-
-    A model is included if it matches ANY group (outer OR).
-
-        [wee],[xyz]         # match if model has "wee" OR "xyz"
-
-    OR WITHIN A GROUP
-    -----------------
-    Use | to express OR within a group.
-    A model matches the group if it has ANY of the tags.
-
-        [wee|x]             # match if model has "wee" OR "x"
-
-    AND WITHIN A GROUP
-    ------------------
-    Use & to express AND within a group.
-    A model matches the group if it has ALL of the terms.
-
-        [xyz&abc]           # match if model has "xyz" AND "abc"
-
-    AND WITH OR SUB-EXPRESSION
-    --------------------------
-    Use parentheses to group OR terms within an AND expression.
-    Only one level of parentheses is supported.
-
-        [xyz&(c|e)]         # match if model has "xyz" AND ("c" OR "e")
-
-    COMBINING
-    ---------
-    Groups can be combined freely with commas.
-
-        [wee|x],[xyz&(c|e)] # match if:
-                            #   model has "wee" OR "x"
-                            #   OR model has "xyz" AND ("c" OR "e")
-
-    ENVIRONMENT VARIABLE
-    --------------------
-    The expression is typically sourced from an environment variable:
-
-        export TAGS="[wee|x],[xyz&(c|e)]"
-
-    LIMITATIONS
-    -----------
-    - Square brackets are required around every group
-    - Only one level of parentheses is supported
-    - & and | cannot be mixed at the top level without parentheses
-
-    Args:
-        folder: Path to the folder containing model modules. Defaults to "src/models".
-        tags: Tag filter expression string. Must be provided.
-
-    Returns:
-        List of callable execute functions from matched modules.
+    Tag expression syntax:
+        [foo]                   match if model has tag "foo"
+        [foo & bar]             match if model has both "foo" and "bar"
+        [foo | bar]             match if model has "foo" or "bar"
+        [(foo | bar) & baz]     match if model has ("foo" or "bar") and "baz"
+        [foo][bar]              match if model has "foo" or "bar" (separate groups)
+        [!foo]                  match "foo", reload=True
+        [!(foo | bar)]          match "foo" or "bar", reload=True
+        ![foo & bar]            match "foo" and "bar", reload=True for all
 
     Raises:
         ValueError: If tags is not provided or the expression is invalid.
     """
     if not tags:
         raise ValueError("tags must be a non-empty expression.")
-    parsed = _parse_tag_expression(tags)
-    logger.debug("Matching models in %r with tags %r", folder, tags)
+
+    potential_tag_groups = parse_expression(tags)
     folder_path = Path(folder)
-    parent_dir = str(folder_path.parent)
-    added_to_path = False
-    if parent_dir not in sys.path:
-        sys.path.insert(0, parent_dir)
-        added_to_path = True
-    try:
-        models = []
+    logger.debug("Matching models in %r with tags %r", folder, tags)
+
+    results = []
+    with _with_sys_path(folder_path):
         for file in folder_path.rglob("*.py"):
             logger.debug("Scanning %s", file)
-            module_spec = importlib.util.spec_from_file_location(
-                name=file.stem, location=file
-            )
-            if module_spec is None or module_spec.loader is None:
+            module = _load_module(file)
+            if module is None:
                 continue
-            module = importlib.util.module_from_spec(spec=module_spec)
-            module_spec.loader.exec_module(module)
-            for _, obj in inspect.getmembers(module):
-                if isinstance(obj, Model) and _model_matches(obj, parsed):
-                    models.append(obj)
-                    logger.debug("Matched model %r from %s", obj.name, file)
-                elif isinstance(obj, list) and all(isinstance(m, Model) for m in obj):
-                    matched = [m for m in obj if _model_matches(m, parsed)]
-                    models.extend(matched)
-                    for m in matched:
-                        logger.debug("Matched model %r from %s", m.name, file)
-        logger.debug("Found %d model(s) matching tags %r", len(models), tags)
-        return models
-    finally:
-        if added_to_path:
-            sys.path.remove(parent_dir)
+            for model in _models_from_module(module):
+                result = _model_matches(model, potential_tag_groups)
+                if result:
+                    results.append(result)
+                    logger.debug(
+                        "Matched model %r from %s (reload=%s)",
+                        model.name,
+                        file,
+                        result[1],
+                    )
+
+    logger.debug("Found %d model(s) matching tags %r", len(results), tags)
+    return results

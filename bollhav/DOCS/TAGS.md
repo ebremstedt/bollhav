@@ -1,65 +1,39 @@
-[README.md](..README.md)
+[README.md](../../README.md)
 
-# Tag Expression Filter
+# Tags
 
-Discovers and returns `Model` instances from Python modules in a folder recursively, filtered by a tag expression.
-
----
-
-## Tag Expression Syntax
-
-Tags are matched against the `tags` attribute on each module's `model` object.
-
-### Structure
-```
-[group1],[group2],[group3]
-```
-
-A model is included if it matches **any** group (outer OR).
-
----
-
-### Group Types
+A model is included if it matches **any** group. Groups are OR'd together.
 
 | Syntax | Meaning |
 |--------|---------|
-| `[wee]` | has tag `wee` |
-| `[wee\|x]` | has `wee` OR `x` |
-| `[xyz&abc]` | has `xyz` AND `abc` |
-| `[xyz&(c\|e)]` | has `xyz` AND (`c` OR `e`) |
-| `[wee\|x],[xyz&(c\|e)]` | matches first OR second group |
+| `[foo]` | has tag `foo` |
+| `[foo & bar]` | has `foo` AND `bar` |
+| `[foo\|bar]` | has `foo` OR `bar` |
+| `[(foo\|bar) & baz]` | has (`foo` OR `bar`) AND `baz` |
+| `[foo][bar]` | has `foo` OR `bar` (separate groups) |
 
----
+### Reload flag (`!`)
 
-### Examples
-```bash
-# Match models tagged "wee" or "x"
-export TAGS="[wee|x]"
+Prefix `!` to mark matched models for reload:
 
-# Match models tagged "xyz" AND ("c" OR "e")
-export TAGS="[xyz&(c|e)]"
+| Syntax | Meaning |
+|--------|---------|
+| `[!foo]` | match `foo`, reload |
+| `[!foo & bar]` | match `foo` AND `bar`, reload |
+| `[!(foo\|bar)]` | match `foo` OR `bar`, reload |
+| `![foo & bar]` | match `foo` AND `bar`, reload for all |
 
-# Combined
-export TAGS="[wee|x],[xyz&(c|e)]"
+Group-level `!` (outside the brackets) applies to all tags inside. Tag-level `!` applies only to that tag.
+
+
+## Usage
+
+```python
+for model, reload in match_models(folder="src/models", tags="[!sales & finance]"):
+    if reload:
+        interval = (model.bounds.begin, model.bounds.end)
+    else:
+        interval = ...  # use your default incremental interval
 ```
 
----
-
-## Limitations
-
-- Square brackets are required around every group
-- Only one level of parentheses is supported
-- `&` and `|` cannot be mixed at the top level without parentheses
-
----
-
-## Parameters
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `folder` | `str` | `src/models` | Path to folder containing model modules |
-| `tags` | `str` | required | Tag filter expression string |
-
-**Returns** `list[Model]` — matched model instances.
-
-**Raises** `ValueError` — if `tags` is not provided or the expression is invalid.
+Each result is a `(model, reload)` tuple. `reload` is `True` if the matched expression included `!`.
