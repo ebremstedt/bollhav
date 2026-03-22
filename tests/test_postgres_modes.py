@@ -186,7 +186,9 @@ class TestOverwriteInsert:
         since = datetime(2024, 1, 1)
         until = datetime(2024, 1, 2, tzinfo=timezone.utc)
         with pytest.raises(ValueError, match="UTC"):
-            recreate_partition(conn=conn, model=_model(), df=df, since=since, until=until)
+            recreate_partition(
+                conn=conn, model=_model(), df=df, since=since, until=until
+            )
 
     def test_raises_non_utc_until(self) -> None:
         conn = _conn()
@@ -196,7 +198,9 @@ class TestOverwriteInsert:
         since = datetime(2024, 1, 1, tzinfo=timezone.utc)
         until = datetime(2024, 1, 2)
         with pytest.raises(ValueError, match="UTC"):
-            recreate_partition(conn=conn, model=_model(), df=df, since=since, until=until)
+            recreate_partition(
+                conn=conn, model=_model(), df=df, since=since, until=until
+            )
 
 
 class TestRecreateInsert:
