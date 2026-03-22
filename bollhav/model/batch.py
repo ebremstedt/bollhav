@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 
 from icron import croniter
 from bollhav.model.intervals import TZInterval
@@ -30,11 +30,13 @@ class Batch:
     def infer_intervals(
         self,
         since: datetime,
-        until: datetime,
+        until: datetime | None,
         batch_expression_override: BatchExpression
         | BatchExpressionExtended
         | None = None,
     ) -> list[TZInterval]:
+        if until is None:
+            until = datetime.now(tz=timezone.utc)
         cron = batch_expression_override or self.default
         if self.lookback:
             it = croniter(cron, since)
