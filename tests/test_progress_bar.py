@@ -1,0 +1,104 @@
+import io
+import sys
+
+from bollhav.model.progress_bar import progress_bar
+
+
+def make_mock_model(name: str):
+    class Target:
+        full_name = name
+
+    class Model:
+        target = Target()
+
+    return Model()
+
+
+def finish_captured(execute) -> str:
+    buf = io.StringIO()
+    old = sys.stdout
+    sys.stdout = buf
+    try:
+        execute.finish()
+    finally:
+        sys.stdout = old
+    return buf.getvalue()
+
+
+def test_single_model_correct_count():
+    @progress_bar
+    def execute(model, batch_since=None):
+        pass
+
+    execute.set_total(3)
+    model = make_mock_model("orders")
+    execute(model=model)
+    execute(model=model)
+    execute(model=model)
+
+    output = finish_captured(execute)
+    assert "orders: finished" in output
+    assert "3/3" in output
+
+
+def test_total_does_not_bleed_across_models():
+    """
+    Regression: set_total for the *next* model must not corrupt the
+    finished-line of the *previous* model.
+
+    Sequence that triggered the bug:
+      1. model_a runs N batches  (set_total=N)
+      2. set_total(M) is called for model_b   ← used to overwrite state["total"]
+      3. first batch of model_b fires          ← _finish_current printed N/M (wrong)
+    """
+
+    @progress_bar
+    def execute(model, batch_since=None):
+        pass
+
+    model_a = make_mock_model("step_a")
+    model_b = make_mock_model("step_b")
+
+    execute.set_total(5)
+    for _ in range(5):
+        execute(model=model_a)
+
+    # Simulate the problematic ordering: set_total for b BEFORE first b batch
+    execute.set_total(3)
+
+    buf = io.StringIO()
+    old = sys.stdout
+    sys.stdout = buf
+    for _ in range(3):
+        execute(model=model_b)
+    execute.finish()
+    sys.stdout = old
+
+    output = buf.getvalue()
+
+    # step_a must finish with 5/5, NOT 5/3
+    lines = [l for l in output.splitlines() if "step_a: finished" in l]
+    assert lines, "step_a finished line not found"
+    assert "5/5" in lines[0], f"Expected 5/5 in step_a line, got: {lines[0]}"
+
+    # step_b must finish with 3/3, NOT 3/<some other total>
+    lines_b = [l for l in output.splitlines() if "step_b: finished" in l]
+    assert lines_b, "step_b finished line not found"
+    assert "3/3" in lines_b[0], f"Expected 3/3 in step_b line, got: {lines_b[0]}"
+
+
+def test_model_without_set_total_shows_count_only():
+    @progress_bar
+    def execute(model, batch_since=None):
+        pass
+
+    model_a = make_mock_model("no_total")
+    for _ in range(4):
+        execute(model=model_a)
+
+    output = finish_captured(execute)
+    lines = [l for l in output.splitlines() if "no_total: finished" in l]
+    assert lines, "no_total finished line not found"
+    # total was never set, so it should just show "4 batches" (no slash)
+    assert "4/0" not in lines[0]
+    assert "4 batches" in lines[0] or "4/" not in lines[0]

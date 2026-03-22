@@ -23,6 +23,7 @@ def progress_bar(func: Callable) -> Callable:
         "start": 0.0,
         "count": 0,
         "total": 0,
+        "finish_total": 0,
         "batch_start": 0.0,
         "batch_times": [],
     }
@@ -42,13 +43,14 @@ def progress_bar(func: Callable) -> Callable:
     def _finish_current() -> None:
         elapsed = time.time() - float(state["start"])
         count = int(state["count"])
-        total = int(state["total"])
+        total = int(state["finish_total"])
         batch_str = f"{count}/{total}" if total else str(count)
         batch_word = "batch" if count == 1 else "batches"
         _write(
             f"✓ {state['current_model']}: finished ({elapsed:.1f}s, {batch_str} {batch_word}{_avg_batch_time()})",
             newline=True,
         )
+        state["current_model"] = ""
 
     def _progress_bar(current: int, total: int, width: int = 20) -> str:
         if total == 0:
@@ -84,6 +86,7 @@ def progress_bar(func: Callable) -> Callable:
             state["current_model"] = model_name
             state["start"] = time.time()
             state["count"] = 0
+            state["finish_total"] = 0
             state["batch_times"] = []
 
         batch_start = time.time()
@@ -95,6 +98,7 @@ def progress_bar(func: Callable) -> Callable:
         state["batch_start"] = batch_start
 
         state["count"] = int(state["count"]) + 1
+        state["finish_total"] = int(state["total"])
         count = int(state["count"])
         total = int(state["total"])
         date_part = f" ({batch_since.strftime('%Y-%m-%d')})" if batch_since else ""
@@ -107,4 +111,5 @@ def progress_bar(func: Callable) -> Callable:
         state["total"] = total
 
     wrapper.set_total = set_total  # type: ignore[attr-defined]
+    wrapper.finish = _finish_current  # type: ignore[attr-defined]
     return wrapper
