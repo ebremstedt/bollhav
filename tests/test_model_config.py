@@ -69,7 +69,7 @@ def test_partitioned_by_unknown_column_raises():
         )
 
 
-def test_update_insert_without_unique_columns_raises():
+def test_upsert_no_delete_without_unique_columns_raises():
     with pytest.raises(
         ValueError, match="requires at least one column with unique=True"
     ):
@@ -180,7 +180,7 @@ def test_unique_columns_extracted():
     assert t.unique_columns[0].name == "id"
 
 
-def test_update_insert_with_unique_column_ok():
+def test_upsert_no_delete_with_unique_column_ok():
     t = Target(
         name="test_table",
         database=make_db(),

@@ -13,10 +13,10 @@ from bollhav.model.database import Database  # noqa: E402
 from bollhav.postgres.schema import _col_ddl, ensure_schema, ensure_table  # noqa: E402
 from bollhav.postgres.modes import (  # noqa: E402
     append,
-    overwrite_insert,
-    recreate_insert,
-    truncate_insert,
-    update_insert,
+    recreate_partition,
+    recreate_table_insert,
+    truncate_table_insert,
+    upsert_no_delete,
 )
 from bollhav.postgres.columns import PostgresColumn, PostgresType  # noqa: E402
 from bollhav.model.model import Model  # noqa: E402
@@ -186,7 +186,7 @@ class TestOverwriteInsert:
         since = datetime(2024, 1, 1)
         until = datetime(2024, 1, 2, tzinfo=timezone.utc)
         with pytest.raises(ValueError, match="UTC"):
-            overwrite_insert(conn=conn, model=_model(), df=df, since=since, until=until)
+            recreate_partition(conn=conn, model=_model(), df=df, since=since, until=until)
 
     def test_raises_non_utc_until(self) -> None:
         conn = _conn()
@@ -196,7 +196,7 @@ class TestOverwriteInsert:
         since = datetime(2024, 1, 1, tzinfo=timezone.utc)
         until = datetime(2024, 1, 2)
         with pytest.raises(ValueError, match="UTC"):
-            overwrite_insert(conn=conn, model=_model(), df=df, since=since, until=until)
+            recreate_partition(conn=conn, model=_model(), df=df, since=since, until=until)
 
 
 class TestRecreateInsert:
@@ -211,7 +211,7 @@ class TestRecreateInsert:
         cursor_mock = MagicMock()
         cursor_mock.copy.return_value = copy_mock
         conn.cursor.return_value.copy.return_value = copy_mock
-        recreate_insert(conn=conn, model=_model(), df=df)
+        recreate_table_insert(conn=conn, model=_model(), df=df)
         assert conn.transaction.call_count == 2
 
 
@@ -225,7 +225,7 @@ class TestTruncateInsert:
         copy_mock.__enter__ = MagicMock(return_value=copy_mock)
         copy_mock.__exit__ = MagicMock(return_value=False)
         conn.cursor.return_value.copy.return_value = copy_mock
-        truncate_insert(conn=conn, model=_model(), df=df)
+        truncate_table_insert(conn=conn, model=_model(), df=df)
         conn.transaction.assert_called_once()
 
 
@@ -255,5 +255,5 @@ class TestUpdateInsert:
         copy_mock.__enter__ = MagicMock(return_value=copy_mock)
         copy_mock.__exit__ = MagicMock(return_value=False)
         conn.cursor.return_value.copy.return_value = copy_mock
-        update_insert(conn=conn, model=model, df=df)
+        upsert_no_delete(conn=conn, model=model, df=df)
         assert conn.transaction.call_count == 1
