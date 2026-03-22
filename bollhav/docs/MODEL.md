@@ -92,6 +92,18 @@ model = Model(
 | `lookback` | `int` | `None` | Extends interval start backwards by N cron-ticks |
 | `retries` | `int` | `None` | Retry count on failure |
 
+### Batch methods
+
+#### `infer_intervals(since, until, batch_expression_override=None) -> list[TZInterval]`
+
+Splits the `[since, until]` window into a list of `TZInterval` chunks according to the batch expression.
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `since` | `datetime` | required | Start of the window |
+| `until` | `datetime` | required | End of the window |
+| `batch_expression_override` | `BatchExpression \| BatchExpressionExtended \| None` | `None` | Overrides `default` for this call |
+
 ### Computed attributes
 
 | Attribute | Description |

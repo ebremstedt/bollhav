@@ -31,9 +31,11 @@ class Batch:
         self,
         since: datetime,
         until: datetime,
-        override: BatchExpression | BatchExpressionExtended | None = None,
+        batch_expression_override: BatchExpression
+        | BatchExpressionExtended
+        | None = None,
     ) -> list[TZInterval]:
-        cron = override or self.default
+        cron = batch_expression_override or self.default
         if self.lookback:
             it = croniter(cron, since)
             tick1 = it.get_next(datetime)

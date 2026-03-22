@@ -57,8 +57,8 @@ def _make_patches(
             "SCHEMA_SUFFIX": schema_suffix,
         }.get(name, default),
         "bollhav.pipe.pipe_config.env_var_batch_expression": lambda name: {
-            "LATEST_CRON_BATCH": cron_expr,
-            "BACKFILL_CRON_BATCH": backfill_cron,
+            "LATEST_BATCH_EXPRESSION": cron_expr,
+            "BACKFILL_BATCH_EXPRESSION": backfill_cron,
         }.get(name),
         "bollhav.pipe.pipe_config.env_var_iso8601_datetime": lambda name: {
             "BACKFILL_SINCE": backfill_since,

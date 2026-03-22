@@ -75,7 +75,7 @@ def load_pipe_config() -> PipeConfig:
     if latest_enabled and backfill_enabled:
         raise ValueError("LATEST_ENABLED and BACKFILL_ENABLED cannot both be true")
 
-    latest_batch_expression = env_var_batch_expression(name="LATEST_CRON_BATCH")
+    latest_batch_expression = env_var_batch_expression(name="LATEST_BATCH_EXPRESSION")
     if not latest_enabled:
         latest_batch_expression = None
 
@@ -101,7 +101,7 @@ def load_pipe_config() -> PipeConfig:
             until=env_var_iso8601_datetime(name="BACKFILL_UNTIL")
             if backfill_enabled
             else None,
-            batch_expression=env_var_batch_expression(name="BACKFILL_CRON_BATCH")
+            batch_expression=env_var_batch_expression(name="BACKFILL_BATCH_EXPRESSION")
             if backfill_enabled
             else None,
         ),
