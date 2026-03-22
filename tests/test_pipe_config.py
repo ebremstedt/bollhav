@@ -22,11 +22,13 @@ DT_UNTIL = datetime(2024, 1, 2, tzinfo=timezone.utc)
 
 
 def _base_latest(enabled: bool = False) -> LatestConfig:
-    return LatestConfig(enabled=enabled, cron_batch=None, since=None, until=None)
+    return LatestConfig(enabled=enabled, batch_expression=None, since=None, until=None)
 
 
 def _base_backfill(enabled: bool = False) -> BackfillConfig:
-    return BackfillConfig(enabled=enabled, since=None, until=None, cron_batch=None)
+    return BackfillConfig(
+        enabled=enabled, since=None, until=None, batch_expression=None
+    )
 
 
 def _make_patches(
@@ -54,7 +56,7 @@ def _make_patches(
             "TAGS": tags,
             "SCHEMA_SUFFIX": schema_suffix,
         }.get(name, default),
-        "bollhav.pipe.pipe_config.env_var_cron_batch": lambda name: {
+        "bollhav.pipe.pipe_config.env_var_batch_expression": lambda name: {
             "LATEST_CRON_BATCH": cron_expr,
             "BACKFILL_CRON_BATCH": backfill_cron,
         }.get(name),
@@ -84,8 +86,8 @@ class TestLoadPipeConfig:
                 patches["bollhav.pipe.pipe_config.env_var"],
             ),
             patch(
-                "bollhav.pipe.pipe_config.env_var_cron_batch",
-                patches["bollhav.pipe.pipe_config.env_var_cron_batch"],
+                "bollhav.pipe.pipe_config.env_var_batch_expression",
+                patches["bollhav.pipe.pipe_config.env_var_batch_expression"],
             ),
             patch(
                 "bollhav.pipe.pipe_config.env_var_iso8601_datetime",
@@ -116,11 +118,11 @@ class TestLoadPipeConfig:
         assert cfg.latest.enabled is True
         assert cfg.latest.since == DT_SINCE
         assert cfg.latest.until == DT_UNTIL
-        assert cfg.latest.cron_batch == "0 0 * * *"
+        assert cfg.latest.batch_expression == "0 0 * * *"
 
     def test_latest_disabled_clears_cron(self) -> None:
         cfg = self._run(latest_enabled=False, cron_expr="0 0 * * *")
-        assert cfg.latest.cron_batch is None
+        assert cfg.latest.batch_expression is None
         assert cfg.latest.since is None
         assert cfg.latest.until is None
 
@@ -134,13 +136,13 @@ class TestLoadPipeConfig:
         assert cfg.backfill.enabled is True
         assert cfg.backfill.since == DT_SINCE
         assert cfg.backfill.until == DT_UNTIL
-        assert cfg.backfill.cron_batch == "0 6 * * *"
+        assert cfg.backfill.batch_expression == "0 6 * * *"
 
     def test_backfill_disabled_clears_fields(self) -> None:
         cfg = self._run(backfill_enabled=False)
         assert cfg.backfill.since is None
         assert cfg.backfill.until is None
-        assert cfg.backfill.cron_batch is None
+        assert cfg.backfill.batch_expression is None
 
     def test_use_schema_suffix_false_clears_suffix(self) -> None:
         cfg = self._run(use_schema_suffix=False)
@@ -166,8 +168,8 @@ class TestWithPipeConfig:
                 patches["bollhav.pipe.pipe_config.env_var"],
             ),
             patch(
-                "bollhav.pipe.pipe_config.env_var_cron_batch",
-                patches["bollhav.pipe.pipe_config.env_var_cron_batch"],
+                "bollhav.pipe.pipe_config.env_var_batch_expression",
+                patches["bollhav.pipe.pipe_config.env_var_batch_expression"],
             ),
             patch(
                 "bollhav.pipe.pipe_config.env_var_iso8601_datetime",

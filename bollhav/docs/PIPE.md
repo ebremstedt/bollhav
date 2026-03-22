@@ -20,7 +20,7 @@ Required if LATEST_ENABLED=True
 
 | Variable | Type | Description |
 |---|---|---|
-| **LATEST_CRON_BATCH** | CronBatch | CronBatch expression to chunk the data into intervals e.g. **0 * * * \*** |
+| **LATEST_CRON_BATCH** | BatchExpression | BatchExpression expression to chunk the data into intervals e.g. **0 * * * \*** |
 
 
 ## Backfill
@@ -30,7 +30,7 @@ Required if BACKFILL_ENABLED=True
 |---|---|---|
 | **BACKFILL_SINCE** | ISO 8601 datetime | Start of backfill window |
 | **BACKFILL_UNTIL** | ISO 8601 datetime | End of backfill window |
-| **BACKFILL_CRON_BATCH** | CronBatch | CronBatch expression to chunk the data into intervals e.g. **0 * * * \*** |
+| **BACKFILL_CRON_BATCH** | BatchExpression | BatchExpression expression to chunk the data into intervals e.g. **0 * * * \*** |
 
 
 ## PipeConfig fields
@@ -42,11 +42,11 @@ Required if BACKFILL_ENABLED=True
 | `schema_suffix` | `str` | From `SCHEMA_SUFFIX` |
 | `use_schema_suffix` | `bool` | From `USE_SCHEMA_SUFFIX` |
 | `latest.enabled` | `bool` | From `LATEST_ENABLED` |
-| `latest.cron_batch` | `str \| None` | From `LATEST_CRON_BATCH` |
-| `latest.since` | `datetime \| None` | Resolved from `latest.cron_batch` |
-| `latest.until` | `datetime \| None` | Resolved from `latest.cron_batch` |
+| `latest.batch_expression` | `str \| None` | From `LATEST_CRON_BATCH` |
+| `latest.since` | `datetime \| None` | Resolved from `latest.batch_expression` |
+| `latest.until` | `datetime \| None` | Resolved from `latest.batch_expression` |
 | `backfill.enabled` | `bool` | From `BACKFILL_ENABLED` |
-| `backfill.cron_batch` | `str \| None` | From `BACKFILL_CRON_BATCH` |
+| `backfill.batch_expression` | `str \| None` | From `BACKFILL_CRON_BATCH` |
 | `backfill.since` | `datetime \| None` | From `BACKFILL_SINCE` |
 | `backfill.until` | `datetime \| None` | From `BACKFILL_UNTIL` |
 
