@@ -33,7 +33,7 @@ Uses `COPY ... FROM STDIN` inside a transaction. No deduplication or conflict ha
 
 Runs `DROP TABLE IF EXISTS`, recreates the table via `ensure_schema_and_table`, then uses `COPY`. All in one transaction.
 
-## TRUNCATE_INSERT
+## TRUNCATE_TABLE_INSERT
 
 Runs `TRUNCATE TABLE` then `COPY`. All in one transaction.
 
