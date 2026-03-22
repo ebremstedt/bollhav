@@ -24,14 +24,14 @@ def _parse_candidates(part: str) -> list[str]:
 
 def _parse_potential_match(part: str, group_reload: bool) -> PotentialTagMatch:
     part = part.strip()
-    reload = group_reload or part.startswith("!")
-    if part.startswith("!"):
-        part = part[1:]
+    reload = group_reload or part.startswith("r:")
+    if part.startswith("r:"):
+        part = part[2:]
     return PotentialTagMatch(candidates=_parse_candidates(part), reload=reload)
 
 
 def _parse_group(bang: str, group_content: str) -> PotentialTagGroup:
-    group_reload = bang == "!"
+    group_reload = bang == "r:"
     tags = [
         _parse_potential_match(part, group_reload) for part in group_content.split("&")
     ]
@@ -39,7 +39,7 @@ def _parse_group(bang: str, group_content: str) -> PotentialTagGroup:
 
 
 def parse_expression(expr: str) -> list[PotentialTagGroup]:
-    groups = re.findall(r"(!?)\[([^\]]+)\]", expr)
+    groups = re.findall(r"(r:)?\[([^\]]+)\]", expr)
     if not groups:
         raise ValueError(f"Invalid tag expression: {expr!r}. Must use [group] syntax.")
     return [_parse_group(bang, content) for bang, content in groups]

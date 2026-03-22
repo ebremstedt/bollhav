@@ -28,17 +28,17 @@ def test_model_does_not_match_when_tag_absent():
 
 def test_model_matches_with_reload_tag_level():
     model = make_model("sales")
-    assert _model_matches(model, parse_expression("[!sales]")) == (model, True)
+    assert _model_matches(model, parse_expression("[r:sales]")) == (model, True)
 
 
 def test_model_matches_with_reload_group_level():
     model = make_model("sales")
-    assert _model_matches(model, parse_expression("![sales]")) == (model, True)
+    assert _model_matches(model, parse_expression("r:[sales]")) == (model, True)
 
 
 def test_model_matches_with_reload_paren_level():
     model = make_model("finance")
-    assert _model_matches(model, parse_expression("[!(sales|finance)]")) == (
+    assert _model_matches(model, parse_expression("[r:(sales|finance)]")) == (
         model,
         True,
     )
@@ -46,12 +46,12 @@ def test_model_matches_with_reload_paren_level():
 
 def test_model_reload_true_if_any_matching_group_has_reload():
     model = make_model("sales")
-    assert _model_matches(model, parse_expression("[!sales],[other]")) == (model, True)
+    assert _model_matches(model, parse_expression("[r:sales][other]")) == (model, True)
 
 
 def test_model_no_reload_when_matched_group_has_no_reload():
     model = make_model("finance")
-    assert _model_matches(model, parse_expression("[!sales],[finance]")) == (
+    assert _model_matches(model, parse_expression("[r:sales][finance]")) == (
         model,
         False,
     )
