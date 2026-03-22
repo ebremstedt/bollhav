@@ -117,11 +117,11 @@ Read more [here](MODES.md)
 from bollhav.model.write_modes import WriteMode
 
 WriteMode.APPEND
-WriteMode.OVERWRITE_INSERT  # requires partitioned_by
-WriteMode.RECREATE_INSERT
+WriteMode.RECREATE_PARTITION     # requires partitioned_by
+WriteMode.RECREATE_TABLE_INSERT
 WriteMode.TRUNCATE_INSERT
-WriteMode.UPDATE_INSERT     # requires at least one column with unique=True
-WriteMode.VIEW              # requires ModelType.VIEW
+WriteMode.UPDATE_INSERT          # requires at least one column with unique=True
+WriteMode.VIEW                   # requires ModelType.VIEW
 ```
 
 ## Tag filtering
@@ -140,27 +140,3 @@ from bollhav.model.tags import Tags
 
 Model(..., tagging=Tags(name_add_to_tags=False, schema_add_to_tags=False, model_gets_all_tag=False))
 ```
-
-Use `match_models` to discover and filter model instances from a folder by tag expression:
-
-```python
-from bollhav.model.matching import match_models
-
-models = match_models(folder="src/models", tags="[orders|payments]")
-models = match_models(folder="src/models", tags="[public&reporting]")
-models = match_models(folder="src/models", tags="[public&(orders|payments)]")
-```
-
-### Tag expression syntax
-
-| Syntax | Meaning |
-|---|---|
-| `[tag]` | model has `tag` |
-| `[a\|b]` | model has `a` OR `b` |
-| `[a&b]` | model has `a` AND `b` |
-| `[a&(b\|c)]` | model has `a` AND (`b` OR `c`) |
-| `[g1],[g2]` | matches `g1` OR `g2` (comma = outer OR) |
-
-Square brackets are required around every group. Only one level of parentheses is supported.
-
----

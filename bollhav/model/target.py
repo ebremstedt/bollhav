@@ -64,11 +64,11 @@ class Target:
                 "WriteMode.UPDATE_INSERT requires at least one column with unique=True"
             )
         if (
-            self.write_mode == WriteMode.OVERWRITE_INSERT
+            self.write_mode == WriteMode.RECREATE_PARTITION
             and self.partitioned_by is None
         ):
             raise ValueError(
-                "WriteMode.OVERWRITE_INSERT requires partitioned_by to be set"
+                "WriteMode.RECREATE_PARTITION requires partitioned_by to be set"
             )
 
         if self.columns and self.column_sorting:

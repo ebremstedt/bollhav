@@ -26,7 +26,7 @@ flowchart LR
 - We want to save rows immediately (as to not break our pipeline, like in raw)
 - Duplicates are okay
 
-## RECREATE_INSERT
+## RECREATE_TABLE_INSERT
 
 Drops and recreates the table before inserting. Stronger than TRUNCATE_INSERT as it also resets the schema.
 
@@ -102,7 +102,7 @@ flowchart LR
 - This relies on a unique key constraint
 - NOT IDEMPOTENT
 
-## OVERWRITE_INSERT
+## RECREATE_PARTITION
 
 Deletes matching rows first, then inserts all incoming rows fresh. Effectively a targeted replace.
 
@@ -186,6 +186,6 @@ flowchart LR
 | `APPEND` | ✅ | ❌ | ❌ | No deduplication |
 | `TRUNCATE_INSERT` | ✅ | ❌ | ✅ | Full reload every run |
 | `UPDATE_INSERT` | ✅ | ✅ | ❌ | Safe upsert |
-| `OVERWRITE_INSERT` | ✅ | ✅ | ✅ | Deletes matches first |
+| `RECREATE_PARTITION` | ✅ | ✅ | ✅ | Deletes matches first |
 | `MERGE` | ✅ | ✅ | ✅ | Requires Postgres 15+ |
 | `VIEW` | ❌ | ❌ | ❌ | Updates view definition only |

@@ -29,7 +29,7 @@ See [MODES.md](MODES.md) for the general concepts. Below describes the Postgres-
 
 Uses `COPY ... FROM STDIN` inside a transaction. No deduplication or conflict handling.
 
-## RECREATE_INSERT
+## RECREATE_TABLE_INSERT
 
 Runs `DROP TABLE IF EXISTS`, recreates the table via `ensure_schema_and_table`, then uses `COPY`. All in one transaction.
 
@@ -37,7 +37,7 @@ Runs `DROP TABLE IF EXISTS`, recreates the table via `ensure_schema_and_table`, 
 
 Runs `TRUNCATE TABLE` then `COPY`. All in one transaction.
 
-## OVERWRITE_INSERT
+## RECREATE_PARTITION
 
 Requires `since` and `until` (UTC-aware datetimes) and `target.partitioned_by` to be set. Deletes rows where the partition column is `>= since AND < until`, then uses `COPY`. All in one transaction. IDEMPOTENT.
 
