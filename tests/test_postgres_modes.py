@@ -175,7 +175,7 @@ class TestOverwriteInsert:
                 schema=Schema(name="s"),
                 database=Database.POSTGRES,
                 columns=[_col("id"), _col("val")],
-                write_mode=WriteMode.OVERWRITE_INSERT,
+                write_mode=WriteMode.RECREATE_PARTITION,
             )
 
     def test_raises_non_utc_since(self) -> None:

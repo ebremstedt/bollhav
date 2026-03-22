@@ -27,16 +27,34 @@ def write_dataframes(
     until: datetime | None = None,
     create_if_missing: bool = True,
 ) -> None:
+    """Write a stream of DataFrames to a Postgres table using the model's write mode.
+
+    Iterates over `df_gen` and writes each non-empty DataFrame according to
+    `model.target.write_mode`. Empty frames are skipped. Columns are reordered
+    to match the model definition before writing.
+
+    Args:
+        conn: Active psycopg connection.
+        model: Model describing the target table and write behaviour.
+        df_gen: Generator yielding DataFrames to write.
+        since: Start of the overwrite window (UTC). Required for RECREATE_PARTITION.
+        until: End of the overwrite window (UTC, exclusive). Required for RECREATE_PARTITION.
+        create_if_missing: If True, create the schema and table before writing.
+
+    Raises:
+        ValueError: If `since`/`until` are missing for RECREATE_PARTITION, or if the
+            write mode is not handled.
+    """
     match model.target.write_mode:
         case WriteMode.APPEND:
             write_function = append
-        case WriteMode.RECREATE_INSERT:
+        case WriteMode.RECREATE_TABLE_INSERT:
             write_function = recreate_insert
         case WriteMode.TRUNCATE_INSERT:
             write_function = truncate_insert
-        case WriteMode.OVERWRITE_INSERT:
+        case WriteMode.RECREATE_PARTITION:
             if since is None or until is None:
-                raise ValueError("Since and until must be set for OVERWRITE_INSERT")
+                raise ValueError("Since and until must be set for RECREATE_PARTITION")
             write_function = partial(overwrite_insert, since=since, until=until)
         case WriteMode.UPDATE_INSERT:
             write_function = update_insert
@@ -68,16 +86,33 @@ def write(
     until: datetime | None = None,
     create_if_missing: bool = True,
 ) -> None:
+    """Write data to Postgres using the write mode defined on the model.
+
+    Routes to `write_dataframes` for table-based modes, or `create_replace_view`
+    for VIEW mode. Validates that a DataFrame generator is provided (or not) as
+    appropriate for the selected mode.
+
+    Args:
+        conn: Active psycopg connection.
+        model: Model describing the target and write behaviour.
+        df_gen: Generator yielding DataFrames. Required for all non-VIEW modes.
+        since: Start of the overwrite window (UTC). Required for RECREATE_PARTITION.
+        until: End of the overwrite window (UTC, exclusive). Required for RECREATE_PARTITION.
+        create_if_missing: If True, create the schema and table before writing.
+
+    Raises:
+        ValueError: If `df_gen` is missing for a table mode, or provided for VIEW mode.
+    """
     if model.target.write_mode in (
         WriteMode.APPEND,
-        WriteMode.RECREATE_INSERT,
+        WriteMode.RECREATE_TABLE_INSERT,
         WriteMode.TRUNCATE_INSERT,
-        WriteMode.OVERWRITE_INSERT,
+        WriteMode.RECREATE_PARTITION,
         WriteMode.UPDATE_INSERT,
     ):
         if not df_gen:
             raise ValueError(
-                "Modes APPEND, RECREATE_INSERT, TRUNCATE_INSERT, OVERWRITE_INSERT, UPDATE_INSERT need a dataframe"
+                "Modes APPEND, RECREATE_TABLE_INSERT, TRUNCATE_INSERT, RECREATE_PARTITION, UPDATE_INSERT need a dataframe"
             )
         write_dataframes(
             conn=conn,
