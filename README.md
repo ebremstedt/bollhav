@@ -14,8 +14,8 @@ Concepts
 - [Modes](bollhav/docs/MODES.md)
 
 Implementations:
-    - [Postgres](bollhav/docs/POSTGRES.md)
-    - [MSSQL](bollhav/docs/MSSQL.md)
+- [Postgres](bollhav/docs/POSTGRES.md)
+- [MSSQL](bollhav/docs/MSSQL.md)
 
 
 
