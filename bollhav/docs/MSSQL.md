@@ -72,7 +72,7 @@ See [MODES.md](MODES.md) for general concepts. Below describes the MSSQL-specifi
 
 ## TRUNCATE_TABLE_INSERT
 
-Runs `TRUNCATE TABLE` then bulk-inserts all rows using `cursor.fast_executemany`. Committed in one transaction.
+Runs `TRUNCATE TABLE` then bulk inserts all rows using `cursor.fast_executemany`. Committed in one transaction.
 
 ```python
 from bollhav.mssql import write
