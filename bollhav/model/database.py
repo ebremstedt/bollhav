@@ -5,6 +5,7 @@ from enum import Enum
 class Database(Enum):
     POSTGRES = "POSTGRES"
     PARQUET = "PARQUET"
+    MSSQL = "MSSQL"
 
 
 @dataclass
