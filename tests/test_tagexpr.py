@@ -3,7 +3,6 @@ from bollhav.model.tagexpr import (
     PotentialTagMatch,
     PotentialTagGroup,
     parse_expression,
-    group_matches,
     tags_match,
 )
 

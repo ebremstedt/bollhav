@@ -4,7 +4,7 @@ Model definition framework that standardizes code at pipe and model level using 
 
 This library
 - is permissive by design
-- is designed with ✨developer experience✨ in mind.
+- is designed with ✨developer experience✨ in mind
 
 Concepts
 - [Model](bollhav/docs/MODEL.md)
@@ -12,7 +12,10 @@ Concepts
 - [Tags](bollhav/docs/TAGS.md)
     - [examples](bollhav/docs/MATCHING.md)
 - [Modes](bollhav/docs/MODES.md)
-    - [Postgres implementation](bollhav/docs/POSTGRES.md)
+
+Implementations:
+    - [Postgres](bollhav/docs/POSTGRES.md)
+    - [MSSQL](bollhav/docs/MSSQL.md)
 
 
 
