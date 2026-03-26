@@ -1,7 +1,12 @@
+from __future__ import annotations
+
 import logging
-import pyodbc
+from typing import TYPE_CHECKING, Generator
+
+if TYPE_CHECKING:
+    import pyodbc
+
 import polars as pl
-from typing import Generator
 from bollhav.model.model import Model
 from bollhav.model.write_modes import WriteMode
 from bollhav.mssql.modes import merge, truncate_write, create_replace_view
