@@ -12,8 +12,10 @@ Concepts
 - [Tags](bollhav/docs/TAGS.md)
     - [examples](bollhav/docs/MATCHING.md)
 - [Modes](bollhav/docs/MODES.md)
-    - [Postgres implementation](bollhav/docs/POSTGRES.md)
-    - [MSSQL implementation](bollhav/docs/MSSQL.md)
+
+Implementations:
+    - [Postgres](bollhav/docs/POSTGRES.md)
+    - [MSSQL](bollhav/docs/MSSQL.md)
 
 
 
