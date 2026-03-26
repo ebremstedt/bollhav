@@ -1,11 +1,5 @@
-from __future__ import annotations
-
 import logging
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    import pyodbc
-
+import pyodbc
 from bollhav.model.model import Model
 from bollhav.mssql.columns import MssqlColumn
 
