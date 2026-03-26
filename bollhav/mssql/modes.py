@@ -1,7 +1,12 @@
+from __future__ import annotations
+
 import logging
-import pyodbc
+from typing import TYPE_CHECKING, cast, LiteralString
+
+if TYPE_CHECKING:
+    import pyodbc
+
 import polars as pl
-from typing import cast, LiteralString
 from bollhav.model.model import Model
 from bollhav.mssql.columns import MssqlColumn
 from bollhav.mssql.schema import _b, _col_type
