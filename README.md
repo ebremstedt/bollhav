@@ -4,7 +4,7 @@ Model definition framework that standardizes code at pipe and model level using 
 
 This library
 - is permissive by design
-- is designed with ✨developer experience✨ in mind.
+- is designed with ✨developer experience✨ in mind
 
 Concepts
 - [Model](bollhav/docs/MODEL.md)
