@@ -56,10 +56,12 @@ def _make_patches(
             "TAGS": tags,
             "SCHEMA_SUFFIX": schema_suffix,
         }.get(name, default),
-        "bollhav.pipe.pipe_config.env_var_batch_expression": lambda name: {
-            "LATEST_BATCH_EXPRESSION": cron_expr,
-            "BACKFILL_BATCH_EXPRESSION": backfill_cron,
-        }.get(name),
+        "bollhav.pipe.pipe_config.env_var_batch_expression": lambda name, should_print_unset=True: (
+            {
+                "LATEST_BATCH_EXPRESSION": cron_expr,
+                "BACKFILL_BATCH_EXPRESSION": backfill_cron,
+            }.get(name)
+        ),
         "bollhav.pipe.pipe_config.env_var_iso8601_datetime": lambda name: {
             "BACKFILL_SINCE": backfill_since,
             "BACKFILL_UNTIL": backfill_until,
