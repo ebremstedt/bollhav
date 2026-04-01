@@ -54,19 +54,34 @@ class PipeConfig:
         if not self.use_schema_suffix:
             self.schema_suffix = ""
 
-        print(f"tags:             {self.tags}")
-        print(f"debug:            {self.debug}")
-        print(f"use_schema_suffix:{self.use_schema_suffix}")
+        def _row(key: str, val: str) -> None:
+            print(f"  {key:<10}{val}")
+
+        def _date(dt: datetime | None) -> str:
+            return dt.strftime("%Y-%m-%d") if dt else "—"
+
+        print("── pipe ────────────────────")
+        _row("tags", self.tags or "—")
+        _row("debug", "on" if self.debug else "off")
         if self.use_schema_suffix:
-            print(f"schema_suffix:    {self.schema_suffix}")
+            _row("suffix", self.schema_suffix)
         if self.latest.enabled:
-            print(f"latest.batch_expression:{self.latest.batch_expression}")
-            print(f"latest.since:     {self.latest.since}")
-            print(f"latest.until:     {self.latest.until}")
-        if self.backfill.enabled:
-            print(f"backfill.since:   {self.backfill.since}")
-            print(f"backfill.until:   {self.backfill.until}")
-            print(f"backfill.batch_expression:{self.backfill.batch_expression}")
+            _row(
+                "mode",
+                f"latest  {_date(self.latest.since)} → {_date(self.latest.until)}",
+            )
+            if self.latest.batch_expression:
+                _row("batch", self.latest.batch_expression)
+        elif self.backfill.enabled:
+            _row(
+                "mode",
+                f"backfill  {_date(self.backfill.since)} → {_date(self.backfill.until)}",
+            )
+            if self.backfill.batch_expression:
+                _row("batch", self.backfill.batch_expression)
+        else:
+            _row("mode", "off")
+        print("────────────────────────────")
 
 
 def load_pipe_config() -> PipeConfig:
@@ -75,7 +90,9 @@ def load_pipe_config() -> PipeConfig:
     if latest_enabled and backfill_enabled:
         raise ValueError("LATEST_ENABLED and BACKFILL_ENABLED cannot both be true")
 
-    latest_batch_expression = env_var_batch_expression(name="LATEST_BATCH_EXPRESSION")
+    latest_batch_expression = env_var_batch_expression(
+        name="LATEST_BATCH_EXPRESSION", should_print_unset=False
+    )
     if not latest_enabled:
         latest_batch_expression = None
 
@@ -101,7 +118,9 @@ def load_pipe_config() -> PipeConfig:
             until=env_var_iso8601_datetime(name="BACKFILL_UNTIL")
             if backfill_enabled
             else None,
-            batch_expression=env_var_batch_expression(name="BACKFILL_BATCH_EXPRESSION")
+            batch_expression=env_var_batch_expression(
+                name="BACKFILL_BATCH_EXPRESSION", should_print_unset=False
+            )
             if backfill_enabled
             else None,
         ),

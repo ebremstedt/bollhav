@@ -19,6 +19,10 @@ Implementations:
 
 
 
+# Demo
+
+![output](output.gif)
+
 ## Installation
 ```bash
 pip install bollhav
