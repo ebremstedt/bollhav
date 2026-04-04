@@ -17,8 +17,6 @@ Implementations:
 - [Postgres](bollhav/docs/POSTGRES.md)
 - [MSSQL](bollhav/docs/MSSQL.md)
 
-
-
 # Demo
 
 ![demo](demo.gif)
@@ -37,7 +35,7 @@ export BACKFILL_UNTIL=2024-01-11T00:00:00Z
 python main.py
 ```
 
-See [examples/README.md](examples/README.md) for the full setup and available options.
+See [examples/README.md](examples/README.md) for the full setup and available options
 
 ## Installation
 ```bash
