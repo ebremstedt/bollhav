@@ -21,7 +21,7 @@ Implementations:
 
 # Demo
 
-![output](output.gif)
+![demo](demo.gif)
 
 ## Examples
 
