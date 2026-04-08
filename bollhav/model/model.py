@@ -59,6 +59,7 @@ class Model:
             f"  enabled:       {self.enabled}",
             f"  description:   {self.description}",
             f"  tags:          {', '.join(sorted(self.tags))}",
+            f"  upstream:      {', '.join(self.upstream) if self.upstream else '(none)'}",
             "",
             "  target:",
             f"    name:        {self.target.name}",
@@ -101,6 +102,7 @@ class Model:
             f"enabled={self.enabled}, "
             f"debug={self.debug}, "
             f"description={self.description!r}, "
+            f"upstream={self.upstream!r}, "
             f"extra={self.extra!r})"
         )
 
