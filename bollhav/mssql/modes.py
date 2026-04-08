@@ -15,6 +15,14 @@ def _bulk_insert(
     cols = ", ".join(_b(c) for c in col_names)
     placeholders = ", ".join(["?"] * len(col_names))
     cursor.fast_executemany = True
+    sizes = []
+    for col in col_names:
+        if df[col].dtype == pl.String:
+            max_len = df[col].str.len_bytes().max()
+            sizes.append((pyodbc.SQL_WVARCHAR, max(max_len or 0, 1), 0))
+        else:
+            sizes.append(None)
+    cursor.setinputsizes(sizes)
     cursor.executemany(
         f"INSERT INTO {target} ({cols}) VALUES ({placeholders})", df.rows()
     )
