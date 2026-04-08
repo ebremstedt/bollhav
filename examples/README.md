@@ -40,7 +40,7 @@ export BACKFILL_SINCE=2024-01-01T00:00:00Z
 export BACKFILL_UNTIL=2024-01-11T00:00:00Z
 
 # optional
-export SCHEMA_SUFFIX=dev      # appended to target schema, e.g. cosmic_raw → cosmic_raw_dev
+export SCHEMA_SUFFIX=dev     # appended to target schema, e.g. cosmic_raw → cosmic_raw_dev
 export DEBUG=false
 ```
 
