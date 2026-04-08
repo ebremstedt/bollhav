@@ -53,6 +53,7 @@ model = Model(
 | `enabled` | `bool` | `True` | Whether the model is active |
 | `debug` | `bool` | `False` | Pretty-prints the model at construction time |
 | `description` | `str` | `None` | Human-readable description |
+| `upstream` | `list[str]` | `None` | Names of models that must run before this one |
 | `**kwargs` | | | Extra metadata. Callable values are resolved with non-callable kwargs as arguments |
 
 ### Target parameters
@@ -112,6 +113,27 @@ Splits the `[since, until]` window into a list of `TZInterval` chunks according 
 | `target.unique_columns` | Columns with `unique=True` — required for `UPSERT_NO_DELETE` |
 | `target.partitioned_by_index` | `True` if `partitioned_by` is set |
 | `tags` | Auto-assembled from `name`, `target.schema.name`, and `"all"` |
+
+## Upstream dependencies
+
+Models can declare dependencies on other models using the `upstream` parameter. When `match_models` returns results, they are topologically sorted so that upstream models always appear before their dependents.
+
+```python
+raw_orders = Model(
+    name="raw_orders",
+    target=Target(name="raw_orders"),
+)
+
+enriched_orders = Model(
+    name="enriched_orders",
+    target=Target(name="enriched_orders"),
+    upstream=["raw_orders"],
+)
+```
+
+If a matched model depends on an upstream model that is not in the matched set, `match_models` raises a `ValueError`. This ensures you never accidentally run a model without its dependencies.
+
+Circular dependencies are also detected and raise a `ValueError`.
 
 ## Debug
 
