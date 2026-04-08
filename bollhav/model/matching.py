@@ -15,7 +15,7 @@ def _model_matches(
     model: Model, potential_tag_groups: list[PotentialTagGroup]
 ) -> tuple[Model, bool] | None:
     for group in potential_tag_groups:
-        if group_matches(model.tags, group.tags):
+        if group_matches(model.tags, group):
             return model, any(tag.reload for tag in group.tags)
     return None
 

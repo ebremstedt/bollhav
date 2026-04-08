@@ -104,6 +104,58 @@ class TestParseExpression:
             )
         ]
 
+    def test_single_tag_negate(self):
+        result = parse_expression("[not:foo]")
+        assert result == [
+            PotentialTagGroup(
+                tags=[PotentialTagMatch(candidates=["foo"], reload=False, negate=True)]
+            )
+        ]
+
+    def test_negate_with_and(self):
+        result = parse_expression("[all & not:debug]")
+        assert result == [
+            PotentialTagGroup(
+                tags=[
+                    PotentialTagMatch(candidates=["all"], reload=False, negate=False),
+                    PotentialTagMatch(candidates=["debug"], reload=False, negate=True),
+                ]
+            )
+        ]
+
+    def test_negate_or_group(self):
+        result = parse_expression("[not:(foo|bar)]")
+        assert result == [
+            PotentialTagGroup(
+                tags=[
+                    PotentialTagMatch(
+                        candidates=["foo", "bar"], reload=False, negate=True
+                    )
+                ]
+            )
+        ]
+
+    def test_group_level_negate(self):
+        result = parse_expression("not:[foo & bar]")
+        assert result == [
+            PotentialTagGroup(
+                tags=[
+                    PotentialTagMatch(candidates=["foo"], reload=False, negate=False),
+                    PotentialTagMatch(candidates=["bar"], reload=False, negate=False),
+                ],
+                negate=True,
+            )
+        ]
+
+    def test_group_level_reload_and_negate(self):
+        result = parse_expression("r:not:[foo]")
+        assert result == [
+            PotentialTagGroup(
+                tags=[PotentialTagMatch(candidates=["foo"], reload=True, negate=False)],
+                negate=True,
+            )
+        ]
+
     def test_invalid_expression_raises(self):
         with pytest.raises(ValueError):
             parse_expression("foo & bar")
@@ -184,3 +236,60 @@ class TestTagsMatch:
 
     def test_extra_model_tags_still_match(self):
         assert tags_match({"foo", "bar", "baz"}, parse_expression("[foo]")) is True
+
+    def test_negate_excludes_tag(self):
+        assert (
+            tags_match({"foo", "debug"}, parse_expression("[foo & not:debug]")) is False
+        )
+
+    def test_negate_allows_without_tag(self):
+        assert tags_match({"foo"}, parse_expression("[foo & not:debug]")) is True
+
+    def test_negate_or_excludes_any(self):
+        assert (
+            tags_match({"foo", "bar"}, parse_expression("[foo & not:(bar|baz)]"))
+            is False
+        )
+        assert (
+            tags_match({"foo", "baz"}, parse_expression("[foo & not:(bar|baz)]"))
+            is False
+        )
+
+    def test_negate_or_allows_without(self):
+        assert tags_match({"foo"}, parse_expression("[foo & not:(bar|baz)]")) is True
+
+    def test_group_level_negate_inverts_all(self):
+        assert tags_match({"foo", "bar"}, parse_expression("not:[foo & bar]")) is False
+        assert tags_match({"foo"}, parse_expression("not:[foo & bar]")) is True
+        assert tags_match({"baz"}, parse_expression("not:[foo & bar]")) is True
+
+    def test_negate_only(self):
+        assert tags_match({"foo"}, parse_expression("[not:foo]")) is False
+        assert tags_match({"bar"}, parse_expression("[not:foo]")) is True
+
+    def test_negate_across_groups(self):
+        # groups are OR'd: match if group 1 OR group 2 matches
+        assert tags_match({"foo"}, parse_expression("[foo][not:bar]")) is True
+        assert tags_match({"bar"}, parse_expression("[foo][not:bar]")) is False
+        assert tags_match({"baz"}, parse_expression("[foo][not:bar]")) is True
+        assert tags_match({"foo", "bar"}, parse_expression("[foo][not:bar]")) is True
+
+    def test_reload_and_negate_tag_level(self):
+        # r:sales & not:debug — match sales without debug, reload matched
+        parsed = parse_expression("[r:sales & not:debug]")
+        assert tags_match({"sales"}, parsed) is True
+        assert tags_match({"sales", "debug"}, parsed) is False
+        assert tags_match({"debug"}, parsed) is False
+        # reload flag should be set on the sales tag
+        assert parsed[0].tags[0].reload is True
+        assert parsed[0].tags[1].negate is True
+
+    def test_reload_and_negate_group_level(self):
+        # r:not:[foo] — match everything without foo, reload all
+        parsed = parse_expression("r:not:[foo]")
+        assert tags_match({"bar"}, parsed) is True
+        assert tags_match({"foo"}, parsed) is False
+        assert tags_match({"baz", "qux"}, parsed) is True
+        # group should have both reload and negate
+        assert parsed[0].negate is True
+        assert parsed[0].tags[0].reload is True
