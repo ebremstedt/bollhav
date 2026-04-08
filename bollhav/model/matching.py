@@ -6,6 +6,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from bollhav.model.tagexpr import PotentialTagGroup, parse_expression, group_matches
 from bollhav.model.model import Model
+from bollhav.model.ordering import topological_sort
 
 logger = logging.getLogger(__name__)
 
@@ -86,7 +87,7 @@ def match_models(
     folder_path = Path(folder)
     logger.debug("Matching models in %r with tags %r", folder, tags)
 
-    results = []
+    results: list[tuple[Model, bool]] = []
     with _with_sys_path(folder_path):
         for file in folder_path.rglob("*.py"):
             logger.debug("Scanning %s", file)
@@ -105,4 +106,4 @@ def match_models(
                     )
 
     logger.debug("Found %d model(s) matching tags %r", len(results), tags)
-    return results
+    return topological_sort(results)

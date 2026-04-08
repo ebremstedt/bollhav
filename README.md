@@ -8,6 +8,7 @@ This library
 
 Concepts
 - [Model](bollhav/docs/MODEL.md)
+  - [Upstream dependencies](bollhav/docs/MODEL.md#upstream-dependencies)
 - [Pipe](bollhav/docs/PIPE.md)
 - [Tags](bollhav/docs/TAGS.md)
     - [examples](bollhav/docs/MATCHING.md)
