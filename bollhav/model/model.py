@@ -20,6 +20,7 @@ class Model:
         enabled: bool = True,
         debug: bool = False,
         description: str | None = None,
+        upstream: list[str] | None = None,
         **kwargs,
     ):
         self.name = name
@@ -30,6 +31,7 @@ class Model:
         self.enabled = enabled
         self.debug = debug
         self.description = description
+        self.upstream: list[str] = upstream or []
 
         self.tags: set[str] = (tagging or Tags()).assemble(
             self.name, self.target.schema.name

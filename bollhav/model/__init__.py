@@ -3,7 +3,7 @@ from bollhav.model.intervals import TZInterval
 from bollhav.model.matching import match_models
 from bollhav.model.model import Model
 from bollhav.model.model_type import ModelType
-from bollhav.model.sorting import sort_columns
+from bollhav.model.column_sorting import sort_columns
 from bollhav.model.write_modes import WriteMode
 from bollhav.model.schema import Schema
 from bollhav.model.source import Source
