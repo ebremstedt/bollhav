@@ -4,7 +4,7 @@ from typing import Callable
 from bollhav.model.database import Database, DatabaseColumn
 from bollhav.model.model_type import ModelType
 from bollhav.model.write_modes import WriteMode
-from bollhav.model.sorting import sort_columns
+from bollhav.model.column_sorting import sort_columns
 from bollhav.model.schema import Schema
 
 
