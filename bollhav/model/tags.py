@@ -1,4 +1,11 @@
+import re
 from dataclasses import dataclass, field
+
+
+def _split_pascal(s: str) -> list[str]:
+    return [
+        part.lower() for part in re.findall(r"[A-Z][a-z]*|[a-z]+|[0-9]+", s) if part
+    ]
 
 
 @dataclass
@@ -7,8 +14,10 @@ class Tags:
     name_add_to_tags: bool = True
     schema_add_to_tags: bool = True
     model_gets_all_tag: bool = True
-    unkebab_name_for_tags: bool = True
-    unkebab_schema_for_tags: bool = True
+    unsnake_name_for_tags: bool = True
+    unsnake_schema_for_tags: bool = True
+    unpascal_name_for_tags: bool = False
+    unpascal_schema_for_tags: bool = False
 
     def assemble(self, name: str, schema: str) -> set[str]:
         result = set(self.tags)
@@ -18,8 +27,12 @@ class Tags:
             result.add(schema)
         if self.model_gets_all_tag:
             result.add("all")
-        if self.unkebab_schema_for_tags:
+        if self.unsnake_schema_for_tags:
             result.update(schema.split("_"))
-        if self.unkebab_name_for_tags:
+        if self.unsnake_name_for_tags:
             result.update(name.split("_"))
+        if self.unpascal_name_for_tags:
+            result.update(_split_pascal(name))
+        if self.unpascal_schema_for_tags:
+            result.update(_split_pascal(schema))
         return result
