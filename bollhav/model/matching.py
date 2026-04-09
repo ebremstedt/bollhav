@@ -89,6 +89,7 @@ def match_models(
     logger.debug("Matching models in %r with tags %r", folder, tags)
 
     results: list[tuple[Model, bool]] = []
+    total_models = 0
     with _with_sys_path(folder_path):
         for file in folder_path.rglob("*.py"):
             logger.debug("Scanning %s", file)
@@ -96,6 +97,7 @@ def match_models(
             if module is None:
                 continue
             for model in _models_from_module(module):
+                total_models += 1
                 result = _model_matches(model, potential_tag_groups)
                 if result:
                     results.append(result)
@@ -106,5 +108,12 @@ def match_models(
                         result[1],
                     )
 
-    logger.debug("Found %d model(s) matching tags %r", len(results), tags)
+    if total_models == 0:
+        logger.error("No models found in folder: %s", folder)
+    elif not results:
+        logger.error(
+            "No models matched tags: %s (out of %d discovered)", tags, total_models
+        )
+    else:
+        logger.debug("Found %d model(s) matching tags %r", len(results), tags)
     return topological_sort(results, upstream_mode=upstream_mode)
