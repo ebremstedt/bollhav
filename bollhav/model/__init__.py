@@ -1,6 +1,7 @@
 from bollhav.model.database import Database, DatabaseColumn
 from bollhav.model.intervals import TZInterval
 from bollhav.model.matching import match_models
+from bollhav.model.ordering import UpstreamMode
 from bollhav.model.model import Model
 from bollhav.model.model_type import ModelType
 from bollhav.model.column_sorting import sort_columns
@@ -19,6 +20,7 @@ __all__ = [
     "DatabaseColumn",
     "TZInterval",
     "match_models",
+    "UpstreamMode",
     "Model",
     "ModelType",
     "sort_columns",

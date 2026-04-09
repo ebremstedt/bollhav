@@ -1,14 +1,32 @@
 from collections import deque
+from enum import Enum
 from bollhav.model.model import Model
+from bollhav.model.write_modes import WriteMode
+
+
+class UpstreamMode(Enum):
+    ENFORCE = "enforce"
+    IGNORE_VIEWS = "ignore_views"
+    IGNORE_COMPLETELY = "ignore_completely"
+
+
+def _is_view(model: Model) -> bool:
+    return getattr(model.target, "write_mode", None) == WriteMode.VIEW
 
 
 def topological_sort(
     results: list[tuple[Model, bool]],
+    upstream_mode: UpstreamMode = UpstreamMode.ENFORCE,
 ) -> list[tuple[Model, bool]]:
+    if upstream_mode == UpstreamMode.IGNORE_COMPLETELY:
+        return results
+
     by_name = {model.name: (model, reload) for model, reload in results}
     matched_names = set(by_name)
 
     def _upstream(model: Model) -> list[str]:
+        if upstream_mode == UpstreamMode.IGNORE_VIEWS and _is_view(model):
+            return []
         return getattr(model, "upstream", []) or []
 
     for model, _ in results:

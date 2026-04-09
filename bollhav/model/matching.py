@@ -6,7 +6,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from bollhav.model.tagexpr import PotentialTagGroup, parse_expression, group_matches
 from bollhav.model.model import Model
-from bollhav.model.ordering import topological_sort
+from bollhav.model.ordering import topological_sort, UpstreamMode
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +56,7 @@ def _with_sys_path(folder_path: Path):
 def match_models(
     folder: str = "src/models",
     tags: str | None = None,
+    upstream_mode: UpstreamMode = UpstreamMode.ENFORCE,
 ) -> list[tuple[Model, bool]]:
     """
     Scan a folder recursively for Python modules, discover all Model instances,
@@ -106,4 +107,4 @@ def match_models(
                     )
 
     logger.debug("Found %d model(s) matching tags %r", len(results), tags)
-    return topological_sort(results)
+    return topological_sort(results, upstream_mode=upstream_mode)

@@ -1,13 +1,17 @@
 from unittest.mock import MagicMock
 import pytest
 
-from bollhav.model.ordering import topological_sort
+from bollhav.model.ordering import topological_sort, UpstreamMode
+from bollhav.model.write_modes import WriteMode
 
 
-def make_model(name: str, upstream: list[str] | None = None) -> MagicMock:
+def make_model(
+    name: str, upstream: list[str] | None = None, write_mode=WriteMode.APPEND
+) -> MagicMock:
     model = MagicMock()
     model.name = name
     model.upstream = upstream or []
+    model.target.write_mode = write_mode
     return model
 
 
@@ -98,3 +102,66 @@ def test_self_referencing_raises():
     a = make_model("a", upstream=["a"])
     with pytest.raises(ValueError, match="Circular dependency"):
         topological_sort([(a, False)])
+
+
+# --- views skip upstream ---
+
+
+def test_view_ignores_upstream():
+    a = make_model("a")
+    v = make_model("v", upstream=["a"], write_mode=WriteMode.VIEW)
+    result = topological_sort([(v, False)], upstream_mode=UpstreamMode.IGNORE_VIEWS)
+    assert names(result) == ["v"]
+
+
+def test_view_does_not_require_upstream_in_matched_set():
+    v = make_model("v", upstream=["missing"], write_mode=WriteMode.VIEW)
+    result = topological_sort([(v, False)], upstream_mode=UpstreamMode.IGNORE_VIEWS)
+    assert names(result) == ["v"]
+
+
+def test_view_not_ordered_after_upstream():
+    a = make_model("a")
+    v = make_model("v", upstream=["a"], write_mode=WriteMode.VIEW)
+    result = topological_sort(
+        [(v, False), (a, False)], upstream_mode=UpstreamMode.IGNORE_VIEWS
+    )
+    assert names(result) == ["a", "v"]
+
+
+# --- upstream_mode=enforce ---
+
+
+def test_enforce_mode_requires_view_upstream():
+    v = make_model("v", upstream=["missing"], write_mode=WriteMode.VIEW)
+    with pytest.raises(ValueError, match="unmatched upstream"):
+        topological_sort([(v, False)], upstream_mode=UpstreamMode.ENFORCE)
+
+
+def test_enforce_mode_orders_views():
+    a = make_model("a")
+    v = make_model("v", upstream=["a"], write_mode=WriteMode.VIEW)
+    result = topological_sort(
+        [(v, False), (a, False)], upstream_mode=UpstreamMode.ENFORCE
+    )
+    assert names(result) == ["a", "v"]
+
+
+# --- upstream_mode=ignore ---
+
+
+def test_ignore_mode_skips_sorting():
+    b = make_model("b", upstream=["a"])
+    a = make_model("a")
+    result = topological_sort(
+        [(b, False), (a, False)], upstream_mode=UpstreamMode.IGNORE_COMPLETELY
+    )
+    assert names(result) == ["b", "a"]
+
+
+def test_ignore_mode_allows_missing_upstream():
+    b = make_model("b", upstream=["missing"])
+    result = topological_sort(
+        [(b, False)], upstream_mode=UpstreamMode.IGNORE_COMPLETELY
+    )
+    assert names(result) == ["b"]
