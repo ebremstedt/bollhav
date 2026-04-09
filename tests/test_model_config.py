@@ -149,6 +149,64 @@ def test_all_tag_not_added_when_disabled():
     assert "all" not in m.tags
 
 
+def test_unsnake_name_splits_on_underscore():
+    m = make_model(name="my_cool_model")
+    assert "my" in m.tags
+    assert "cool" in m.tags
+    assert "model" in m.tags
+
+
+def test_unsnake_schema_splits_on_underscore():
+    m = make_model(target=Target(name="test_table", schema=Schema(name="my_schema")))
+    assert "my" in m.tags
+    assert "schema" in m.tags
+
+
+def test_unsnake_name_disabled():
+    m = make_model(name="my_cool_model", tagging=Tags(unsnake_name_for_tags=False))
+    assert "my" not in m.tags
+    assert "cool" not in m.tags
+
+
+def test_unsnake_schema_disabled():
+    m = make_model(
+        target=Target(name="test_table", schema=Schema(name="my_schema")),
+        tagging=Tags(unsnake_schema_for_tags=False),
+    )
+    assert "my" not in m.tags
+
+
+def test_unpascal_name_off_by_default():
+    m = make_model(name="MyModel")
+    # unpascal is off by default, so "my" and "model" should not be added
+    # (unsnake splits on _, which won't split PascalCase)
+    assert "my" not in m.tags
+    assert "MyModel" in m.tags
+
+
+def test_unpascal_name_splits_pascal_case():
+    m = make_model(name="MyCoolModel", tagging=Tags(unpascal_name_for_tags=True))
+    assert "my" in m.tags
+    assert "cool" in m.tags
+    assert "model" in m.tags
+
+
+def test_unpascal_schema_splits_pascal_case():
+    m = make_model(
+        target=Target(name="test_table", schema=Schema(name="MySchema")),
+        tagging=Tags(unpascal_schema_for_tags=True),
+    )
+    assert "my" in m.tags
+    assert "schema" in m.tags
+
+
+def test_unpascal_schema_off_by_default():
+    m = make_model(
+        target=Target(name="test_table", schema=Schema(name="MySchema")),
+    )
+    assert "my" not in m.tags
+
+
 # --- Target columns ---
 
 
