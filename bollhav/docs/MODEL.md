@@ -135,6 +135,62 @@ If a matched model depends on an upstream model that is not in the matched set, 
 
 Circular dependencies are also detected and raise a `ValueError`.
 
+### Upstream mode
+
+The `upstream_mode` parameter controls how upstream dependencies are enforced. It can be set via the `UPSTREAM` environment variable or passed directly to `match_models`.
+
+| Mode | Value | Description |
+|---|---|---|
+| `ENFORCE` | `enforce` | All upstream dependencies must be present and are ordered (default) |
+| `IGNORE_VIEWS` | `ignore_views` | Views skip upstream checks; tables are still enforced |
+| `IGNORE_COMPLETELY` | `ignore_completely` | No ordering or validation, models returned as-is |
+
+```bash
+export UPSTREAM=ignore_views
+```
+
+```python
+from bollhav.model import match_models, UpstreamMode
+
+match_models(folder="src/models", tags="[all]", upstream_mode=UpstreamMode.IGNORE_VIEWS)
+```
+
+Given these models:
+
+```mermaid
+graph LR
+    A[raw_orders<br/>TABLE] --> B[enriched_orders<br/>TABLE]
+    A --> V[orders_view<br/>VIEW]
+    B --> V
+```
+
+Each mode behaves differently:
+
+```mermaid
+graph TD
+    subgraph "ENFORCE (default)"
+        direction LR
+        E1[raw_orders] --> E2[enriched_orders]
+        E1 --> E3[orders_view]
+        E2 --> E3
+        E4[All upstream must<br/>be in matched set]
+    end
+
+    subgraph "IGNORE_VIEWS"
+        direction LR
+        IV1[raw_orders] --> IV2[enriched_orders]
+        IV3[orders_view runs<br/>without requiring<br/>upstream in matched set]
+    end
+
+    subgraph "IGNORE_COMPLETELY"
+        direction LR
+        IC1[raw_orders]
+        IC2[enriched_orders]
+        IC3[orders_view]
+        IC4[No ordering.<br/>Returned as discovered]
+    end
+```
+
 ## Debug
 
 When `debug=True`, the model is pretty-printed at construction time. You can also call it manually at any point:

@@ -9,6 +9,7 @@ from roskarl import (
 from functools import wraps
 from typing import Callable
 from bollhav.pipe.cron import _resolve_cron_interval
+from bollhav.model.ordering import UpstreamMode
 
 
 @dataclass
@@ -35,6 +36,7 @@ class PipeConfig:
     schema_suffix: str
     use_schema_suffix: bool = True
     debug: bool = False
+    upstream_mode: UpstreamMode = UpstreamMode.ENFORCE
 
     def __str__(self) -> str:
         suffix_part = (
@@ -81,7 +83,19 @@ class PipeConfig:
                 _row("batch", self.backfill.batch_expression)
         else:
             _row("mode", "off")
+        if self.upstream_mode != UpstreamMode.ENFORCE:
+            _row("upstream", self.upstream_mode.value)
         print("────────────────────────────")
+
+
+def _resolve_upstream_mode() -> UpstreamMode:
+    raw = env_var(name="UPSTREAM", should_print_unset=False)
+    if raw is None:
+        return UpstreamMode.ENFORCE
+    valid = {m.value: m for m in UpstreamMode}
+    if raw not in valid:
+        raise ValueError(f"UPSTREAM must be one of {list(valid.keys())}, got {raw!r}")
+    return valid[raw]
 
 
 def load_pipe_config() -> PipeConfig:
@@ -127,6 +141,7 @@ def load_pipe_config() -> PipeConfig:
         debug=env_var_bool(name="DEBUG", default=False),
         use_schema_suffix=env_var_bool(name="USE_SCHEMA_SUFFIX", default=True),
         schema_suffix=env_var(name="SCHEMA_SUFFIX", default=""),
+        upstream_mode=_resolve_upstream_mode(),
     )
 
 

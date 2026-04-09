@@ -16,6 +16,7 @@ from bollhav.pipe.pipe_config import (  # noqa: E402
     load_pipe_config,
     with_pipe_config,
 )
+from bollhav.model.ordering import UpstreamMode
 
 DT_SINCE = datetime(2024, 1, 1, tzinfo=timezone.utc)
 DT_UNTIL = datetime(2024, 1, 2, tzinfo=timezone.utc)
@@ -44,6 +45,7 @@ def _make_patches(
     backfill_until: datetime | None = None,
     backfill_cron: str | None = None,
     cron_interval: tuple[datetime, datetime] = (DT_SINCE, DT_UNTIL),
+    upstream: str | None = None,
 ) -> dict:
     return {
         "bollhav.pipe.pipe_config.env_var_bool": lambda name, default=False: {
@@ -52,10 +54,13 @@ def _make_patches(
             "DEBUG": debug,
             "USE_SCHEMA_SUFFIX": use_schema_suffix,
         }.get(name, default),
-        "bollhav.pipe.pipe_config.env_var": lambda name, required=False, default=None: {
-            "TAGS": tags,
-            "SCHEMA_SUFFIX": schema_suffix,
-        }.get(name, default),
+        "bollhav.pipe.pipe_config.env_var": lambda name, required=False, default=None, should_print_unset=True: (
+            {
+                "TAGS": tags,
+                "SCHEMA_SUFFIX": schema_suffix,
+                "UPSTREAM": upstream,
+            }.get(name, default)
+        ),
         "bollhav.pipe.pipe_config.env_var_batch_expression": lambda name, should_print_unset=True: (
             {
                 "LATEST_BATCH_EXPRESSION": cron_expr,
@@ -149,6 +154,26 @@ class TestLoadPipeConfig:
     def test_use_schema_suffix_false_clears_suffix(self) -> None:
         cfg = self._run(use_schema_suffix=False)
         assert cfg.schema_suffix == ""
+
+    def test_upstream_defaults_to_enforce(self) -> None:
+        cfg = self._run()
+        assert cfg.upstream_mode == UpstreamMode.ENFORCE
+
+    def test_upstream_ignore_views(self) -> None:
+        cfg = self._run(upstream="ignore_views")
+        assert cfg.upstream_mode == UpstreamMode.IGNORE_VIEWS
+
+    def test_upstream_ignore_completely(self) -> None:
+        cfg = self._run(upstream="ignore_completely")
+        assert cfg.upstream_mode == UpstreamMode.IGNORE_COMPLETELY
+
+    def test_upstream_enforce(self) -> None:
+        cfg = self._run(upstream="enforce")
+        assert cfg.upstream_mode == UpstreamMode.ENFORCE
+
+    def test_upstream_invalid_raises(self) -> None:
+        with pytest.raises(ValueError, match="UPSTREAM must be one of"):
+            self._run(upstream="bogus")
 
 
 class TestWithPipeConfig:
