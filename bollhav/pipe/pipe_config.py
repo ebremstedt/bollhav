@@ -58,7 +58,7 @@ class PipeConfig:
             print(f"  {key:<10}{val}")
 
         def _date(dt: datetime | None) -> str:
-            return dt.strftime("%Y-%m-%d") if dt else "—"
+            return dt.isoformat() if dt else "—"
 
         print("── pipe ────────────────────")
         _row("tags", self.tags or "—")
