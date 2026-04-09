@@ -8,8 +8,11 @@ def topological_sort(
     by_name = {model.name: (model, reload) for model, reload in results}
     matched_names = set(by_name)
 
+    def _upstream(model: Model) -> list[str]:
+        return getattr(model, "upstream", []) or []
+
     for model, _ in results:
-        missing = [dep for dep in model.upstream if dep not in matched_names]
+        missing = [dep for dep in _upstream(model) if dep not in matched_names]
         if missing:
             raise ValueError(
                 f"Model {model.name!r} depends on unmatched upstream model(s): {missing}"
@@ -19,7 +22,7 @@ def topological_sort(
     dependents: dict[str, list[str]] = {name: [] for name in by_name}
 
     for model, _ in results:
-        for dep in model.upstream:
+        for dep in _upstream(model):
             in_degree[model.name] += 1
             dependents[dep].append(model.name)
 
