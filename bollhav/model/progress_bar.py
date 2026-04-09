@@ -83,6 +83,8 @@ def progress_bar(func: Callable) -> Callable:
 
     def _finish_current() -> None:
         _stop_spinner()
+        sys.stdout.write("\r\033[K")
+        sys.stdout.flush()
         elapsed = time.time() - float(state["start"])
         count = int(state["count"])
         total = int(state["finish_total"])
