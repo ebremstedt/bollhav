@@ -18,10 +18,10 @@ class PotentialTagGroup:
 def _parse_candidates(part: str) -> list[str]:
     or_match = re.fullmatch(r"\(([^)]+)\)", part)
     if or_match:
-        return or_match.group(1).split("|")
+        return [c.strip() for c in or_match.group(1).split("|")]
     if "|" in part:
-        return part.split("|")
-    return [part]
+        return [c.strip() for c in part.split("|")]
+    return [part.strip()]
 
 
 def _parse_potential_match(part: str, group_reload: bool) -> PotentialTagMatch:

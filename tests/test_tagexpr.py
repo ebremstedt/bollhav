@@ -156,6 +156,33 @@ class TestParseExpression:
             )
         ]
 
+    def test_spaces_in_tag_names_are_trimmed(self):
+        result = parse_expression("[ foo & bar ]")
+        assert result == [
+            PotentialTagGroup(
+                tags=[
+                    PotentialTagMatch(candidates=["foo"], reload=False),
+                    PotentialTagMatch(candidates=["bar"], reload=False),
+                ]
+            )
+        ]
+
+    def test_spaces_in_or_candidates_are_trimmed(self):
+        result = parse_expression("[foo | bar]")
+        assert result == [
+            PotentialTagGroup(
+                tags=[PotentialTagMatch(candidates=["foo", "bar"], reload=False)]
+            )
+        ]
+
+    def test_spaces_in_parens_or_candidates_are_trimmed(self):
+        result = parse_expression("[(foo | bar)]")
+        assert result == [
+            PotentialTagGroup(
+                tags=[PotentialTagMatch(candidates=["foo", "bar"], reload=False)]
+            )
+        ]
+
     def test_invalid_expression_raises(self):
         with pytest.raises(ValueError):
             parse_expression("foo & bar")
