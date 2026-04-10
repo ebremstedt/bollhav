@@ -57,6 +57,12 @@ def test_model_no_reload_when_matched_group_has_no_reload():
     )
 
 
+def test_disabled_model_does_not_match():
+    model = make_model("wee", "all")
+    model.enabled = False
+    assert _model_matches(model, parse_expression("[wee]")) is None
+
+
 # --- match_models ---
 
 

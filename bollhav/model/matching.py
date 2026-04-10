@@ -14,6 +14,9 @@ logger = logging.getLogger(__name__)
 def _model_matches(
     model: Model, potential_tag_groups: list[PotentialTagGroup]
 ) -> tuple[Model, bool] | None:
+    if not model.enabled:
+        logger.debug("Skipping model %r because it is disabled", model.name)
+        return None
     for group in potential_tag_groups:
         if group_matches(model.tags, group):
             return model, any(tag.reload for tag in group.tags)
