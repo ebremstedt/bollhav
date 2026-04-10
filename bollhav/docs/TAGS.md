@@ -58,3 +58,13 @@ for model, reload in match_models(folder="src/models", tags="[r:sales & finance]
 ```
 
 Each result is a `(model, reload)` tuple. `reload` is `True` if the matched expression included `r:`.
+
+## Why not regex?
+
+Tag expressions exist because regex is a poor fit for model selection:
+
+- **Reload is a first-class concept.** The `r:` prefix ties reload intent directly to the selection. With regex you would need a second mechanism (a separate flag, a naming convention, a wrapper) to express "match these models *and* reload them."
+- **Multiple groups are trivial.** `[sales][finance]` reads as "sales or finance." The regex equivalent (`sales|finance`) looks simple in this case, but combining OR across groups with AND within groups gets unwieldy fast — `(?=.*foo)(?=.*bar)|baz` is not something you want in an environment variable.
+- **Negation is explicit.** `[all & not:debug]` says exactly what it means. Regex negation (`^(?!.*debug).*$`) is easy to get wrong and hard to read at a glance.
+- **Fewer mistakes.** Regex has footguns everywhere — unescaped dots, greedy quantifiers, anchoring issues. Tag expressions have a small surface area: tags, `&`, `|`, `not:`, `r:`, and brackets. If it parses, it does what you expect.
+- **Environment-variable friendly.** Tag expressions are short, readable strings that work well as `TAGS=...` values. Complex regex patterns with special characters are awkward to pass through shell environments and easy to break with quoting issues.
