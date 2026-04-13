@@ -21,7 +21,7 @@ def _bulk_insert(
             max_len = df[col].str.len_bytes().max()
             sizes.append((pyodbc.SQL_WVARCHAR, max(max_len or 0, 1), 0))
         elif df[col].dtype == pl.Binary:
-            max_len = df[col].bin.lengths().max()
+            max_len = df[col].bin.size().max()
             sizes.append((pyodbc.SQL_VARBINARY, max(max_len or 0, 1), 0))
         else:
             sizes.append(None)
