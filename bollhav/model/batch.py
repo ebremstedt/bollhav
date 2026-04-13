@@ -44,9 +44,12 @@ class Batch:
     """
     Controls how a time interval is split into smaller chunks for processing.
 
-    `batch_expression` is a cron batch expression that defines the chunk size. For example,
+    `batch_expression` is a cron expression that defines the chunk size. For example,
     "0 * * * *" means each chunk is one hour, "0 0 * * *" means one day.
-    A pipeline can pass an override at runtime, but this is the fallback.
+    Can be overridden at runtime via the pipe's batch expression.
+
+    `tz` is the timezone used for interval resolution. Defaults to UTC.
+    Can be overridden at runtime via `TIMEZONE_OVERRIDE`.
 
     `lookback` extends the start of the interval backwards by N cron-ticks.
     If the cron is hourly and lookback is 3, processing starts 3 hours before

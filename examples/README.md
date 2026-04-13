@@ -34,14 +34,22 @@ export TAGS="[all]"
 export USE_SCHEMA_SUFFIX=false
 
 # pick one: latest or backfill (not both)
-export LATEST_ENABLED=false
-export BACKFILL_ENABLED=true
-export BACKFILL_SINCE=2024-01-01T00:00:00Z
-export BACKFILL_UNTIL=2024-01-11T00:00:00Z
+
+# latest — resolves the most recent complete interval from the model's
+#           batch expression (or LATEST_BATCH_EXPRESSION override)
+export LATEST_ENABLED=true
+# export LATEST_BATCH_EXPRESSION="0 * * * *"  # optional override
+
+# backfill — explicit time window
+# export BACKFILL_ENABLED=true
+# export BACKFILL_SINCE=2024-01-01T00:00:00Z
+# export BACKFILL_UNTIL=2024-01-11T00:00:00Z
+# export BACKFILL_BATCH_EXPRESSION="0 0 * * *"  # optional
 
 # optional
-export SCHEMA_SUFFIX=dev     # appended to target schema, e.g. cosmic_raw → cosmic_raw_dev
+export SCHEMA_SUFFIX=dev       # appended to target schema, e.g. cosmic_raw → cosmic_raw_dev
 export DEBUG=false
+# export TIMEZONE_OVERRIDE=Europe/Stockholm  # overrides model timezone for all models
 ```
 
 ```bash
