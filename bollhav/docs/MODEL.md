@@ -77,6 +77,7 @@ model = Model(
 | `schema` | `str` | `None` | Source schema |
 | `dsn_env_var` | `str` | `None` | DSN env var for the source connection |
 | `query` | `str` | `None` | Optional query override |
+| `infer_schema_length` | `int` | `None` | Passed to polars as `infer_schema_length`. Max rows to scan for schema inference. `None` scans all rows (can be slow) |
 
 ### Bounds parameters
 
