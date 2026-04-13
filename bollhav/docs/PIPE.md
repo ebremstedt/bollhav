@@ -43,8 +43,6 @@ Required if BACKFILL_ENABLED=True
 | `use_schema_suffix` | `bool` | From `USE_SCHEMA_SUFFIX` |
 | `latest.enabled` | `bool` | From `LATEST_ENABLED` |
 | `latest.batch_expression` | `str \| None` | From `LATEST_BATCH_EXPRESSION` |
-| `latest.since` | `datetime \| None` | Resolved from `latest.batch_expression` |
-| `latest.until` | `datetime \| None` | Resolved from `latest.batch_expression` |
 | `backfill.enabled` | `bool` | From `BACKFILL_ENABLED` |
 | `backfill.batch_expression` | `str \| None` | From `BACKFILL_BATCH_EXPRESSION` |
 | `backfill.since` | `datetime \| None` | From `BACKFILL_SINCE` |

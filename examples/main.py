@@ -27,14 +27,12 @@ def main(pipe: PipeConfig) -> None:
         model.target.schema.suffix = pipe.schema_suffix
 
         intervals = model.batching.infer_intervals(
-            since=(pipe.backfill.since or pipe.latest.since)
-            if not reload
-            else model.bounds.begin,
-            until=(pipe.backfill.until or pipe.latest.until)
-            if not reload
-            else model.bounds.end,
-            batch_expression_override=pipe.backfill.batch_expression
-            or pipe.latest.batch_expression,
+            since=pipe.backfill.since if not reload else model.bounds.begin,
+            until=pipe.backfill.until if not reload else model.bounds.end,
+            batch_expression=pipe.backfill.batch_expression
+            or pipe.latest.batch_expression
+            or model.batching.batch_expression,
+            latest=pipe.latest.enabled and not reload,
         )
 
         execute.set_total(len(intervals))

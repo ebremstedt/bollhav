@@ -8,15 +8,12 @@ from roskarl import (
 )
 from functools import wraps
 from typing import Callable
-from bollhav.pipe.cron import _resolve_cron_interval
 from bollhav.model.ordering import UpstreamMode
 
 
 @dataclass
 class LatestConfig:
     enabled: bool
-    since: datetime | None
-    until: datetime | None
     batch_expression: str | None
 
 
@@ -70,7 +67,7 @@ class PipeConfig:
         if self.latest.enabled:
             _row(
                 "mode",
-                f"latest  {_date(self.latest.since)} → {_date(self.latest.until)}",
+                "latest (interval inferred from model config or batch expression override)",
             )
             if self.latest.batch_expression:
                 _row("batch", self.latest.batch_expression)
@@ -105,24 +102,16 @@ def load_pipe_config() -> PipeConfig:
         raise ValueError("LATEST_ENABLED and BACKFILL_ENABLED cannot both be true")
 
     latest_batch_expression = env_var_batch_expression(
-        name="LATEST_BATCH_EXPRESSION", should_print_unset=False
+        name="LATEST_BATCH_EXPRESSION", should_print_unset=latest_enabled
     )
     if not latest_enabled:
         latest_batch_expression = None
-
-    cron_since, cron_until = (
-        _resolve_cron_interval(latest_batch_expression)
-        if latest_batch_expression
-        else (None, None)
-    )
 
     return PipeConfig(
         tags=env_var(name="TAGS", required=True),
         latest=LatestConfig(
             enabled=latest_enabled,
             batch_expression=latest_batch_expression,
-            since=cron_since,
-            until=cron_until,
         ),
         backfill=BackfillConfig(
             enabled=backfill_enabled,
@@ -133,7 +122,7 @@ def load_pipe_config() -> PipeConfig:
             if backfill_enabled
             else None,
             batch_expression=env_var_batch_expression(
-                name="BACKFILL_BATCH_EXPRESSION", should_print_unset=False
+                name="BACKFILL_BATCH_EXPRESSION", should_print_unset=backfill_enabled
             )
             if backfill_enabled
             else None,

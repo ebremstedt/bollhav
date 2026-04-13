@@ -17,5 +17,5 @@ customers = Model(
         begin=datetime(2024, 1, 1, tzinfo=timezone.utc),
         end=datetime(2024, 1, 11, tzinfo=timezone.utc),
     ),
-    batching=Batch(default="@daily"),
+    batching=Batch(batch_expression="@daily"),
 )

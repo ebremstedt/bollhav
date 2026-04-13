@@ -1,9 +1,12 @@
+import logging
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from icron import croniter
 from bollhav.model.intervals import TZInterval
 from roskarl import BatchExpression, BatchExpressionExtended
+
+logger = logging.getLogger(__name__)
 
 _CRON_ALIASES = {
     "@hourly": "0 * * * *",
@@ -20,12 +23,26 @@ def _resolve_cron(expr: str) -> str:
     return _CRON_ALIASES.get(expr, expr)
 
 
+def _resolve_cron_interval(expression: str) -> tuple[datetime, datetime]:
+    now = datetime.now(tz=timezone.utc)
+    cron = croniter(expression, now - timedelta(days=2))
+    ticks = []
+    while True:
+        tick = cron.get_next(datetime)
+        if tick >= now:
+            break
+        ticks.append(tick)
+    since = ticks[-2]
+    until = ticks[-1]
+    return since, until
+
+
 @dataclass
 class Batch:
     """
     Controls how a time interval is split into smaller chunks for processing.
 
-    `default` is a cron batch expression that defines the chunk size. For example,
+    `batch_expression` is a cron batch expression that defines the chunk size. For example,
     "0 * * * *" means each chunk is one hour, "0 0 * * *" means one day.
     A pipeline can pass an override at runtime, but this is the fallback.
 
@@ -37,21 +54,20 @@ class Batch:
     `retries` is the number of times a failed chunk should be retried.
     """
 
-    default: BatchExpression | BatchExpressionExtended = "@daily"
+    batch_expression: BatchExpression | BatchExpressionExtended = "@daily"
     lookback: int | None = None
     retries: int | None = None
 
     def infer_intervals(
         self,
-        since: datetime,
+        since: datetime | None,
         until: datetime | None,
-        batch_expression_override: BatchExpression
-        | BatchExpressionExtended
-        | None = None,
+        batch_expression: BatchExpression | BatchExpressionExtended,
+        latest: bool = False,
     ) -> list[TZInterval]:
-        if until is None:
-            until = datetime.now(tz=timezone.utc)
-        cron = _resolve_cron(batch_expression_override or self.default)
+        cron = _resolve_cron(batch_expression)
+        if latest:
+            since, until = _resolve_cron_interval(cron)
         if self.lookback:
             it = croniter(cron, since)
             tick1 = it.get_next(datetime)

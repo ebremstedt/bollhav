@@ -80,7 +80,7 @@ class Model:
         lines += [
             "",
             "  batching:",
-            f"    default:     {self.batching.default}",
+            f"    expression:  {self.batching.batch_expression}",
             f"    lookback:    {self.batching.lookback}",
             f"    retries:     {self.batching.retries}",
             "",
