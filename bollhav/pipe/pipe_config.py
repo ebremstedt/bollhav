@@ -107,6 +107,12 @@ def load_pipe_config() -> PipeConfig:
 
     tz_override = _resolve_tz_override()
 
+    def _backfill_dt(name: str) -> datetime | None:
+        if not backfill_enabled:
+            return None
+        dt = env_var_iso8601_datetime(name=name)
+        return _apply_tz(dt, tz_override) if tz_override else dt
+
     return PipeConfig(
         tags=env_var(name="TAGS", required=True),
         latest=LatestConfig(
@@ -115,20 +121,8 @@ def load_pipe_config() -> PipeConfig:
         ),
         backfill=BackfillConfig(
             enabled=backfill_enabled,
-            since=_apply_tz(
-                env_var_iso8601_datetime(name="BACKFILL_SINCE"), tz_override
-            )
-            if backfill_enabled and tz_override
-            else env_var_iso8601_datetime(name="BACKFILL_SINCE")
-            if backfill_enabled
-            else None,
-            until=_apply_tz(
-                env_var_iso8601_datetime(name="BACKFILL_UNTIL"), tz_override
-            )
-            if backfill_enabled and tz_override
-            else env_var_iso8601_datetime(name="BACKFILL_UNTIL")
-            if backfill_enabled
-            else None,
+            since=_backfill_dt("BACKFILL_SINCE"),
+            until=_backfill_dt("BACKFILL_UNTIL"),
             batch_expression=env_var_batch_expression(
                 name="BACKFILL_BATCH_EXPRESSION", should_print_unset=False
             )
