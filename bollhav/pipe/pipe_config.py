@@ -51,7 +51,7 @@ class PipeConfig:
             self.schema_suffix = ""
 
         def _row(key: str, val: str) -> None:
-            print(f"  {key:<10}{val}")
+            print(f"  {key:<16}{val}")
 
         def _date(dt: datetime | None) -> str:
             return dt.isoformat() if dt else "—"
@@ -64,19 +64,14 @@ class PipeConfig:
         if self.use_schema_suffix:
             _row("suffix", self.schema_suffix)
         if self.latest.enabled:
-            _row(
-                "mode",
-                "latest (interval inferred from model config or batch expression override)",
-            )
-            if self.latest.batch_expression:
-                _row("batch", self.latest.batch_expression)
+            _row("mode", "latest")
+            _row("batch override", self.latest.batch_expression or "unset")
         elif self.backfill.enabled:
             _row(
                 "mode",
                 f"backfill  {_date(self.backfill.since)} → {_date(self.backfill.until)}",
             )
-            if self.backfill.batch_expression:
-                _row("batch", self.backfill.batch_expression)
+            _row("batch override", self.backfill.batch_expression or "unset")
         else:
             _row("mode", "off")
         if self.upstream_mode != UpstreamMode.ENFORCE:
@@ -101,7 +96,7 @@ def load_pipe_config() -> PipeConfig:
         raise ValueError("LATEST_ENABLED and BACKFILL_ENABLED cannot both be true")
 
     latest_batch_expression = env_var_batch_expression(
-        name="LATEST_BATCH_EXPRESSION", should_print_unset=latest_enabled
+        name="LATEST_BATCH_EXPRESSION", should_print_unset=False
     )
     if not latest_enabled:
         latest_batch_expression = None
@@ -131,7 +126,7 @@ def load_pipe_config() -> PipeConfig:
             if backfill_enabled
             else None,
             batch_expression=env_var_batch_expression(
-                name="BACKFILL_BATCH_EXPRESSION", should_print_unset=backfill_enabled
+                name="BACKFILL_BATCH_EXPRESSION", should_print_unset=False
             )
             if backfill_enabled
             else None,
