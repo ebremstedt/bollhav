@@ -89,13 +89,14 @@ model = Model(
 
 | Parameter | Type | Default | Description |
 |---|---|---|---|
-| `default` | `BatchExpression` | `"0 0 * * *"` | Chunk size as a batch expression |
+| `batch_expression` | `BatchExpression` | `"@daily"` | Chunk size as a batch expression |
+| `tz` | `tzinfo` | `timezone.utc` | Timezone used for interval resolution |
 | `lookback` | `int` | `None` | Extends interval start backwards by N cron-ticks |
 | `retries` | `int` | `None` | Retry count on failure |
 
 ### Batch methods
 
-#### `infer_intervals(since, until, batch_expression, latest=False) -> list[TZInterval]`
+#### `infer_intervals(since, until, batch_expression, latest=False, tz_override=None) -> list[TZInterval]`
 
 Splits the `[since, until]` window into a list of `TZInterval` chunks according to the batch expression. When `latest=True`, `since` and `until` are inferred from the batch expression and the current time.
 
@@ -105,6 +106,7 @@ Splits the `[since, until]` window into a list of `TZInterval` chunks according 
 | `until` | `datetime \| None` | required | End of the window |
 | `batch_expression` | `BatchExpression \| BatchExpressionExtended` | required | The batch expression to use |
 | `latest` | `bool` | `False` | When `True`, resolves the latest complete interval from the cron expression |
+| `tz_override` | `tzinfo \| None` | `None` | Overrides the model's `tz` when set (used by `TIMEZONE_OVERRIDE`) |
 
 ### Computed attributes
 
