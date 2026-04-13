@@ -35,7 +35,7 @@ model = Model(
     ),
     source=Source(name="raw.orders"),
     bounds=Bounds(begin=datetime(2024, 1, 1, tzinfo=timezone.utc)),
-    batching=Batch(default="0 * * * *"),
+    batching=Batch(batch_expression="0 * * * *"),
     debug=True,
 )
 ```
@@ -95,15 +95,16 @@ model = Model(
 
 ### Batch methods
 
-#### `infer_intervals(since, until, batch_expression_override=None) -> list[TZInterval]`
+#### `infer_intervals(since, until, batch_expression, latest=False) -> list[TZInterval]`
 
-Splits the `[since, until]` window into a list of `TZInterval` chunks according to the batch expression.
+Splits the `[since, until]` window into a list of `TZInterval` chunks according to the batch expression. When `latest=True`, `since` and `until` are inferred from the batch expression and the current time.
 
 | Parameter | Type | Default | Description |
 |---|---|---|---|
-| `since` | `datetime` | required | Start of the window |
-| `until` | `datetime` | required | End of the window |
-| `batch_expression_override` | `BatchExpression \| BatchExpressionExtended \| None` | `None` | Overrides `default` for this call |
+| `since` | `datetime \| None` | required | Start of the window |
+| `until` | `datetime \| None` | required | End of the window |
+| `batch_expression` | `BatchExpression \| BatchExpressionExtended` | required | The batch expression to use |
+| `latest` | `bool` | `False` | When `True`, resolves the latest complete interval from the cron expression |
 
 ### Computed attributes
 

@@ -106,7 +106,7 @@ def test_defaults():
     assert m.target.write_mode == WriteMode.APPEND
     assert m.enabled is True
     assert m.debug is False
-    assert m.batching.default == "@daily"
+    assert m.batching.batch_expression == "@daily"
     assert m.target.sensitive is False
     assert m.target.unique_columns == []
     assert m.batching.retries is None

@@ -23,7 +23,7 @@ DT_UNTIL = datetime(2024, 1, 2, tzinfo=timezone.utc)
 
 
 def _base_latest(enabled: bool = False) -> LatestConfig:
-    return LatestConfig(enabled=enabled, batch_expression=None, since=None, until=None)
+    return LatestConfig(enabled=enabled, batch_expression=None)
 
 
 def _base_backfill(enabled: bool = False) -> BackfillConfig:
@@ -44,7 +44,6 @@ def _make_patches(
     backfill_since: datetime | None = None,
     backfill_until: datetime | None = None,
     backfill_cron: str | None = None,
-    cron_interval: tuple[datetime, datetime] = (DT_SINCE, DT_UNTIL),
     upstream: str | None = None,
 ) -> dict:
     return {
@@ -71,9 +70,6 @@ def _make_patches(
             "BACKFILL_SINCE": backfill_since,
             "BACKFILL_UNTIL": backfill_until,
         }.get(name),
-        "bollhav.pipe.pipe_config._resolve_cron_interval": MagicMock(
-            return_value=cron_interval
-        ),
     }
 
 
@@ -100,10 +96,6 @@ class TestLoadPipeConfig:
                 "bollhav.pipe.pipe_config.env_var_iso8601_datetime",
                 patches["bollhav.pipe.pipe_config.env_var_iso8601_datetime"],
             ),
-            patch(
-                "bollhav.pipe.pipe_config._resolve_cron_interval",
-                patches["bollhav.pipe.pipe_config._resolve_cron_interval"],
-            ),
         ):
             return load_pipe_config()
 
@@ -120,18 +112,14 @@ class TestLoadPipeConfig:
         ):
             self._run(latest_enabled=True, backfill_enabled=True)
 
-    def test_latest_resolves_cron_interval(self) -> None:
+    def test_latest_stores_batch_expression(self) -> None:
         cfg = self._run(latest_enabled=True, cron_expr="0 0 * * *")
         assert cfg.latest.enabled is True
-        assert cfg.latest.since == DT_SINCE
-        assert cfg.latest.until == DT_UNTIL
         assert cfg.latest.batch_expression == "0 0 * * *"
 
-    def test_latest_disabled_clears_cron(self) -> None:
+    def test_latest_disabled_clears_batch_expression(self) -> None:
         cfg = self._run(latest_enabled=False, cron_expr="0 0 * * *")
         assert cfg.latest.batch_expression is None
-        assert cfg.latest.since is None
-        assert cfg.latest.until is None
 
     def test_backfill_populates_fields(self) -> None:
         cfg = self._run(
@@ -201,10 +189,6 @@ class TestWithPipeConfig:
             patch(
                 "bollhav.pipe.pipe_config.env_var_iso8601_datetime",
                 patches["bollhav.pipe.pipe_config.env_var_iso8601_datetime"],
-            ),
-            patch(
-                "bollhav.pipe.pipe_config._resolve_cron_interval",
-                patches["bollhav.pipe.pipe_config._resolve_cron_interval"],
             ),
         ):
             my_func()
