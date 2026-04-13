@@ -102,7 +102,7 @@ def progress_bar(func: Callable) -> Callable:
         filled = int(width * current / total)
         bar = "█" * filled + "░" * (width - filled)
         pct = current / total * 100
-        return f"{bar} {pct:.0f}% {current}/{total}"
+        return f"{bar} {pct:.2f}".rstrip("0").rstrip(".") + f"% {current}/{total}"
 
     def _on_exit() -> None:
         if state["current_model"]:
