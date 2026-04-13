@@ -39,6 +39,21 @@ def _resolve_cron_interval(
     return since, until
 
 
+def _chunk_interval(cron: str, since: datetime, until: datetime) -> list[TZInterval]:
+    it = croniter(cron, since)
+    intervals: list[TZInterval] = []
+    current = since
+    while True:
+        tick = it.get_next(datetime)
+        if tick >= until:
+            break
+        intervals.append(TZInterval(current, tick))
+        current = tick
+    if current < until:
+        intervals.append(TZInterval(current, until))
+    return intervals
+
+
 @dataclass
 class Batch:
     """
@@ -64,6 +79,13 @@ class Batch:
     lookback: int | None = None
     retries: int | None = None
 
+    def _apply_lookback(self, cron: str, since: datetime) -> datetime:
+        it = croniter(cron, since)
+        tick1 = it.get_next(datetime)
+        tick2 = it.get_next(datetime)
+        tick_size = tick2 - tick1
+        return since - (tick_size * self.lookback)
+
     def infer_intervals(
         self,
         since: datetime | None,
@@ -77,21 +99,5 @@ class Batch:
         if latest:
             since, until = _resolve_cron_interval(cron, tz=tz)
         if self.lookback:
-            it = croniter(cron, since)
-            tick1 = it.get_next(datetime)
-            tick2 = it.get_next(datetime)
-            tick_size = tick2 - tick1
-            since = since - (tick_size * self.lookback)
-        interval = TZInterval(since=since, until=until)
-        it = croniter(cron, since)
-        intervals: list[TZInterval] = []
-        current = since
-        while True:
-            tick = it.get_next(datetime)
-            if tick >= interval.until:
-                break
-            intervals.append(TZInterval(current, tick))
-            current = tick
-        if current < interval.until:
-            intervals.append(TZInterval(current, interval.until))
-        return intervals
+            since = self._apply_lookback(cron, since)
+        return _chunk_interval(cron, since, until)
