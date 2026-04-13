@@ -52,6 +52,7 @@ def progress_bar(func: Callable) -> Callable:
         "finish_total": 0,
         "batch_start": 0.0,
         "batch_times": [],
+        "name_width": 60,
         "spinner_index": 0,
         "spinner_msg": "",
     }
@@ -120,9 +121,15 @@ def progress_bar(func: Callable) -> Callable:
         elapsed = time.time() - float(state["start"])
         count = int(state["count"])
         total = int(state["finish_total"])
-        batch_str = f"{count}/{total}" if total else str(count)
+        if total:
+            total_width = len(str(total))
+            batch_str = f"{count:>{total_width}}/{total}"
+        else:
+            batch_str = str(count)
+        name = state["current_model"]
+        w = max(int(state["name_width"]), len(name))
         _write(
-            f"✓ {state['current_model']} done {_format_duration(elapsed)} {batch_str}{_avg_batch_time()}",
+            f"✓ {name:<{w}} {_format_duration(elapsed)} {batch_str}{_avg_batch_time()}",
             newline=True,
         )
         state["current_model"] = ""
@@ -168,7 +175,8 @@ def progress_bar(func: Callable) -> Callable:
         count = int(state["count"])
         total = int(state["total"])
         bar = _format_progress(current=count, total=total)
-        msg = f"{model_name} {bar}{_avg_batch_time()}{_eta()}"
+        w = max(int(state["name_width"]), len(model_name))
+        msg = f"{model_name:<{w}} {bar}{_avg_batch_time()}{_eta()}"
         if _spinner_thread[0] is None:
             _start_spinner(msg)
         else:
@@ -179,6 +187,10 @@ def progress_bar(func: Callable) -> Callable:
     def set_total(total: int) -> None:
         state["total"] = total
 
+    def set_name_width(width: int) -> None:
+        state["name_width"] = width
+
     wrapper.set_total = set_total  # type: ignore[attr-defined]
+    wrapper.set_name_width = set_name_width  # type: ignore[attr-defined]
     wrapper.finish = _finish_current  # type: ignore[attr-defined]
     return wrapper
