@@ -53,6 +53,7 @@ def progress_bar(func: Callable) -> Callable:
         "batch_start": 0.0,
         "batch_times": [],
         "name_width": 60,
+        "batch_width": 0,
         "spinner_index": 0,
         "spinner_msg": "",
     }
@@ -126,10 +127,11 @@ def progress_bar(func: Callable) -> Callable:
             batch_str = f"{count:>{total_width}}/{total}"
         else:
             batch_str = str(count)
+        bw = max(int(state["batch_width"]), len(batch_str))
         name = state["current_model"]
         w = max(int(state["name_width"]), len(name))
         _write(
-            f"✓ {name:<{w}} {_format_duration(elapsed)} {batch_str}{_avg_batch_time()}",
+            f"✓ {name:<{w}} {_format_duration(elapsed)} {batch_str:>{bw}}{_avg_batch_time()}",
             newline=True,
         )
         state["current_model"] = ""
@@ -186,6 +188,9 @@ def progress_bar(func: Callable) -> Callable:
 
     def set_total(total: int) -> None:
         state["total"] = total
+        # e.g. "25/25" = 5 chars, track max across all models
+        tw = len(str(total)) * 2 + 1
+        state["batch_width"] = max(int(state["batch_width"]), tw)
 
     def set_name_width(width: int) -> None:
         state["name_width"] = width
