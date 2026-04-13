@@ -10,13 +10,14 @@ def make_model(
 ) -> MagicMock:
     model = MagicMock()
     model.name = name
+    model.target.full_name = name
     model.upstream = upstream or []
     model.target.write_mode = write_mode
     return model
 
 
 def names(results):
-    return [m.name for m, _ in results]
+    return [m.target.full_name for m, _ in results]
 
 
 # --- no dependencies ---

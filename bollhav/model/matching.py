@@ -15,7 +15,7 @@ def _model_matches(
     model: Model, potential_tag_groups: list[PotentialTagGroup]
 ) -> tuple[Model, bool] | None:
     if not model.enabled:
-        logger.debug("Skipping model %r because it is disabled", model.name)
+        logger.debug("Skipping model %r because it is disabled", model.target.full_name)
         return None
     for group in potential_tag_groups:
         if group_matches(model.tags, group):
@@ -93,6 +93,7 @@ def match_models(
 
     results: list[tuple[Model, bool]] = []
     total_models = 0
+    seen: dict[str, Path] = {}
     with _with_sys_path(folder_path):
         for file in folder_path.rglob("*.py"):
             logger.debug("Scanning %s", file)
@@ -100,13 +101,20 @@ def match_models(
             if module is None:
                 continue
             for model in _models_from_module(module):
+                full_name = model.target.full_name
+                if full_name in seen:
+                    raise ValueError(
+                        f"Duplicate model {full_name!r} found in {file} "
+                        f"(already defined in {seen[full_name]})"
+                    )
+                seen[full_name] = file
                 total_models += 1
                 result = _model_matches(model, potential_tag_groups)
                 if result:
                     results.append(result)
                     logger.debug(
                         "Matched model %r from %s (reload=%s)",
-                        model.name,
+                        full_name,
                         file,
                         result[1],
                     )

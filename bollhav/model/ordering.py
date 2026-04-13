@@ -21,7 +21,7 @@ def topological_sort(
     if upstream_mode == UpstreamMode.IGNORE_COMPLETELY:
         return results
 
-    by_name = {model.name: (model, reload) for model, reload in results}
+    by_name = {model.target.full_name: (model, reload) for model, reload in results}
     matched_names = set(by_name)
 
     def _upstream(model: Model) -> list[str]:
@@ -33,7 +33,7 @@ def topological_sort(
         missing = [dep for dep in _upstream(model) if dep not in matched_names]
         if missing:
             raise ValueError(
-                f"Model {model.name!r} depends on unmatched upstream model(s): {missing}"
+                f"Model {model.target.full_name!r} depends on unmatched upstream model(s): {missing}"
             )
 
     in_degree: dict[str, int] = {name: 0 for name in by_name}
@@ -41,8 +41,8 @@ def topological_sort(
 
     for model, _ in results:
         for dep in _upstream(model):
-            in_degree[model.name] += 1
-            dependents[dep].append(model.name)
+            in_degree[model.target.full_name] += 1
+            dependents[dep].append(model.target.full_name)
 
     queue = deque(sorted(name for name, deg in in_degree.items() if deg == 0))
     ordered: list[tuple[Model, bool]] = []
@@ -56,7 +56,7 @@ def topological_sort(
                 queue.append(dependent)
 
     if len(ordered) != len(results):
-        remaining = matched_names - {m.name for m, _ in ordered}
+        remaining = matched_names - {m.target.full_name for m, _ in ordered}
         raise ValueError(f"Circular dependency detected among: {remaining}")
 
     return ordered

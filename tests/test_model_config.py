@@ -27,7 +27,6 @@ def make_db() -> MagicMock:
 
 def make_model(**overrides) -> Model:
     return Model(
-        name=overrides.pop("name", "test_model"),
         target=overrides.pop("target", Target(name="test_table")),
         source=overrides.pop("source", None),
         **overrides,
@@ -118,7 +117,7 @@ def test_defaults():
 
 def test_name_added_to_tags_by_default():
     m = make_model()
-    assert "test_model" in m.tags
+    assert "test_table" in m.tags
 
 
 def test_schema_added_to_tags_by_default():
@@ -133,7 +132,7 @@ def test_all_tag_added_by_default():
 
 def test_name_not_added_to_tags_when_disabled():
     m = make_model(tagging=Tags(name_add_to_tags=False))
-    assert "test_model" not in m.tags
+    assert "test_table" not in m.tags
 
 
 def test_schema_not_added_to_tags_when_disabled():
@@ -150,10 +149,10 @@ def test_all_tag_not_added_when_disabled():
 
 
 def test_unsnake_name_splits_on_underscore():
-    m = make_model(name="my_cool_model")
+    m = make_model(target=Target(name="my_cool_table"))
     assert "my" in m.tags
     assert "cool" in m.tags
-    assert "model" in m.tags
+    assert "table" in m.tags
 
 
 def test_unsnake_schema_splits_on_underscore():
@@ -163,7 +162,9 @@ def test_unsnake_schema_splits_on_underscore():
 
 
 def test_unsnake_name_disabled():
-    m = make_model(name="my_cool_model", tagging=Tags(unsnake_name_for_tags=False))
+    m = make_model(
+        target=Target(name="my_cool_table"), tagging=Tags(unsnake_name_for_tags=False)
+    )
     assert "my" not in m.tags
     assert "cool" not in m.tags
 
@@ -177,18 +178,20 @@ def test_unsnake_schema_disabled():
 
 
 def test_unpascal_name_off_by_default():
-    m = make_model(name="MyModel")
-    # unpascal is off by default, so "my" and "model" should not be added
+    m = make_model(target=Target(name="MyTable"))
+    # unpascal is off by default, so "my" and "table" should not be added
     # (unsnake splits on _, which won't split PascalCase)
     assert "my" not in m.tags
-    assert "MyModel" in m.tags
+    assert "MyTable" in m.tags
 
 
 def test_unpascal_name_splits_pascal_case():
-    m = make_model(name="MyCoolModel", tagging=Tags(unpascal_name_for_tags=True))
+    m = make_model(
+        target=Target(name="MyCoolTable"), tagging=Tags(unpascal_name_for_tags=True)
+    )
     assert "my" in m.tags
     assert "cool" in m.tags
-    assert "model" in m.tags
+    assert "table" in m.tags
 
 
 def test_unpascal_schema_splits_pascal_case():
@@ -315,7 +318,7 @@ def test_callable_extra_kwarg_resolved():
 
 def test_repr_contains_name():
     m = make_model()
-    assert "test_model" in repr(m)
+    assert "test_table" in repr(m)
 
 
 # --- __eq__ ---
@@ -328,8 +331,8 @@ def test_eq_same_config():
 
 
 def test_eq_different_config():
-    m1 = make_model(name="a")
-    m2 = make_model(name="b")
+    m1 = make_model(target=Target(name="a"))
+    m2 = make_model(target=Target(name="b"))
     assert m1 != m2
 
 

@@ -4,7 +4,6 @@ from bollhav.model import Model, Source, Target, Schema, WriteMode, Tags, Bounds
 # TRUNCATE_TABLE_INSERT — wipes the table then bulk inserts fresh data every run.
 # Good for dimension tables or reference data that are small enough to fully reload.
 customers = Model(
-    name="customers",
     source=Source(name="customers"),
     target=Target(
         name="customers",

@@ -4,7 +4,6 @@ from bollhav.model.target import Target
 
 def make_model(**overrides) -> Model:
     return Model(
-        name=overrides.pop("name", "orders"),
         target=overrides.pop("target", Target(name="orders")),
         source=overrides.pop("source", None),
         **overrides,
@@ -13,7 +12,7 @@ def make_model(**overrides) -> Model:
 
 def test_model_stores_fields():
     m = make_model()
-    assert m.name == "orders"
+    assert m.target.name == "orders"
     assert m.source is None
 
 

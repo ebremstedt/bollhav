@@ -11,7 +11,6 @@ logger = logging.getLogger(__name__)
 class Model:
     def __init__(
         self,
-        name: str,
         target: Target,
         source: Source | None = None,
         bounds: Bounds | None = None,
@@ -23,7 +22,6 @@ class Model:
         upstream: list[str] | None = None,
         **kwargs,
     ):
-        self.name = name
         self.source = source
         self.target = target
         self.bounds = bounds or Bounds()
@@ -34,7 +32,7 @@ class Model:
         self.upstream: list[str] = upstream or []
 
         self.tags: set[str] = (tagging or Tags()).assemble(
-            self.name, self.target.schema.name
+            self.target.name, self.target.schema.name
         )
 
         for key, val in kwargs.items():
@@ -44,7 +42,9 @@ class Model:
                 )
         self.extra = kwargs
 
-        logger.debug("Initialized model %r (enabled=%s)", self.name, self.enabled)
+        logger.debug(
+            "Initialized model %r (enabled=%s)", self.target.full_name, self.enabled
+        )
         if self.debug:
             self.pretty()
 
@@ -55,7 +55,7 @@ class Model:
             f"{c.name}*" if c.name in unique_cols else c.name for c in cols
         )
         lines = [
-            f"Model: {self.name}",
+            f"Model: {self.target.full_name}",
             f"  enabled:       {self.enabled}",
             f"  description:   {self.description}",
             f"  tags:          {', '.join(sorted(self.tags))}",
@@ -93,7 +93,7 @@ class Model:
     def __repr__(self) -> str:
         return (
             f"Model("
-            f"name={self.name!r}, "
+            f"name={self.target.full_name!r}, "
             f"source={self.source!r}, "
             f"target={self.target!r}, "
             f"bounds={self.bounds!r}, "

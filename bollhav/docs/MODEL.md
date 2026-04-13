@@ -20,7 +20,6 @@ from bollhav.postgres.columns import PostgresColumn, PostgresType
 from bollhav.model.database import Database
 
 model = Model(
-    name="orders",
     target=Target(
         name="orders",
         schema=Schema(name="public"),
@@ -44,7 +43,6 @@ model = Model(
 
 | Parameter | Type | Default | Description |
 |---|---|---|---|
-| `name` | `str` | required | Unique identifier for the model |
 | `target` | `Target` | required | Defines where and how data is written |
 | `source` | `Source` | `None` | Defines where data is read from |
 | `bounds` | `Bounds` | `None` | Optional backfill begin/end bounds |
@@ -124,12 +122,10 @@ Models can declare dependencies on other models using the `upstream` parameter. 
 
 ```python
 raw_orders = Model(
-    name="raw_orders",
     target=Target(name="raw_orders"),
 )
 
 enriched_orders = Model(
-    name="enriched_orders",
     target=Target(name="enriched_orders"),
     upstream=["raw_orders"],
 )
@@ -223,7 +219,7 @@ WriteMode.VIEW                   # requires ModelType.VIEW
 Tags are automatically assembled at init time. By default `name`, `schema`, and `"all"` are added.
 
 ```python
-model = Model(name="orders", target=Target(name="orders", schema=Schema(name="public")))
+model = Model(target=Target(name="orders", schema=Schema(name="public")))
 model.tags  # {"orders", "public", "all"}
 ```
 
