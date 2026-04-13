@@ -1,15 +1,45 @@
 from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
-from unittest.mock import patch
 
 import pytest
 from time_machine import travel
 
-from bollhav.model.batch import Batch, _resolve_cron_interval
+from bollhav.model.batch import (
+    Batch,
+    _resolve_cron,
+    _resolve_cron_interval,
+    _chunk_interval,
+)
 
 
 CET = ZoneInfo("Europe/Stockholm")
 UTC = timezone.utc
+
+
+class TestResolveCron:
+    def test_hourly_alias(self) -> None:
+        assert _resolve_cron("@hourly") == "0 * * * *"
+
+    def test_daily_alias(self) -> None:
+        assert _resolve_cron("@daily") == "0 0 * * *"
+
+    def test_midnight_alias(self) -> None:
+        assert _resolve_cron("@midnight") == "0 0 * * *"
+
+    def test_weekly_alias(self) -> None:
+        assert _resolve_cron("@weekly") == "0 0 * * 0"
+
+    def test_monthly_alias(self) -> None:
+        assert _resolve_cron("@monthly") == "0 0 1 * *"
+
+    def test_yearly_alias(self) -> None:
+        assert _resolve_cron("@yearly") == "0 0 1 1 *"
+
+    def test_annually_alias(self) -> None:
+        assert _resolve_cron("@annually") == "0 0 1 1 *"
+
+    def test_raw_expression_passed_through(self) -> None:
+        assert _resolve_cron("0 6 * * *") == "0 6 * * *"
 
 
 class TestResolveCronInterval:
@@ -22,9 +52,6 @@ class TestResolveCronInterval:
     @travel(datetime(2024, 6, 15, 14, 35, tzinfo=UTC))
     def test_cet_hourly(self) -> None:
         since, until = _resolve_cron_interval("0 * * * *", tz=CET)
-        # 14:35 UTC = 16:35 CET, so last complete CET hour is 15:00-16:00 CET
-        assert since.tzinfo is not None
-        assert until.tzinfo is not None
         assert since == datetime(2024, 6, 15, 15, 0, tzinfo=CET)
         assert until == datetime(2024, 6, 15, 16, 0, tzinfo=CET)
 
@@ -39,6 +66,59 @@ class TestResolveCronInterval:
         since, until = _resolve_cron_interval("0 * * * *")
         assert since == datetime(2024, 6, 15, 13, 0, tzinfo=UTC)
         assert until == datetime(2024, 6, 15, 14, 0, tzinfo=UTC)
+
+
+class TestChunkInterval:
+    def test_hourly_chunks_over_three_hours(self) -> None:
+        since = datetime(2024, 6, 15, 10, 0, tzinfo=UTC)
+        until = datetime(2024, 6, 15, 13, 0, tzinfo=UTC)
+        intervals = _chunk_interval("0 * * * *", since, until)
+        assert len(intervals) == 3
+        assert intervals[0].since == datetime(2024, 6, 15, 10, 0, tzinfo=UTC)
+        assert intervals[0].until == datetime(2024, 6, 15, 11, 0, tzinfo=UTC)
+        assert intervals[1].since == datetime(2024, 6, 15, 11, 0, tzinfo=UTC)
+        assert intervals[1].until == datetime(2024, 6, 15, 12, 0, tzinfo=UTC)
+        assert intervals[2].since == datetime(2024, 6, 15, 12, 0, tzinfo=UTC)
+        assert intervals[2].until == datetime(2024, 6, 15, 13, 0, tzinfo=UTC)
+
+    def test_single_chunk(self) -> None:
+        since = datetime(2024, 6, 15, 10, 0, tzinfo=UTC)
+        until = datetime(2024, 6, 15, 11, 0, tzinfo=UTC)
+        intervals = _chunk_interval("0 * * * *", since, until)
+        assert len(intervals) == 1
+        assert intervals[0].since == since
+        assert intervals[0].until == until
+
+    def test_partial_trailing_chunk(self) -> None:
+        since = datetime(2024, 6, 15, 10, 0, tzinfo=UTC)
+        until = datetime(2024, 6, 15, 11, 30, tzinfo=UTC)
+        intervals = _chunk_interval("0 * * * *", since, until)
+        assert len(intervals) == 2
+        assert intervals[0].until == datetime(2024, 6, 15, 11, 0, tzinfo=UTC)
+        assert intervals[1].since == datetime(2024, 6, 15, 11, 0, tzinfo=UTC)
+        assert intervals[1].until == datetime(2024, 6, 15, 11, 30, tzinfo=UTC)
+
+    def test_daily_chunks(self) -> None:
+        since = datetime(2024, 6, 15, 0, 0, tzinfo=UTC)
+        until = datetime(2024, 6, 17, 0, 0, tzinfo=UTC)
+        intervals = _chunk_interval("0 0 * * *", since, until)
+        assert len(intervals) == 2
+
+
+class TestApplyLookback:
+    def test_lookback_shifts_since_backwards(self) -> None:
+        batch = Batch(batch_expression="@hourly", lookback=3)
+        result = batch._apply_lookback(
+            "0 * * * *", datetime(2024, 6, 15, 14, 0, tzinfo=UTC)
+        )
+        assert result == datetime(2024, 6, 15, 11, 0, tzinfo=UTC)
+
+    def test_lookback_daily(self) -> None:
+        batch = Batch(batch_expression="@daily", lookback=2)
+        result = batch._apply_lookback(
+            "0 0 * * *", datetime(2024, 6, 15, 0, 0, tzinfo=UTC)
+        )
+        assert result == datetime(2024, 6, 13, 0, 0, tzinfo=UTC)
 
 
 class TestInferIntervalsTimezone:
@@ -73,7 +153,6 @@ class TestInferIntervalsTimezone:
             tz_override=UTC,
         )
         assert len(intervals) == 1
-        # Override to UTC, so should get UTC intervals despite model being CET
         assert intervals[0].since == datetime(2024, 6, 15, 13, 0, tzinfo=UTC)
         assert intervals[0].until == datetime(2024, 6, 15, 14, 0, tzinfo=UTC)
 
@@ -90,3 +169,38 @@ class TestInferIntervalsTimezone:
         assert len(intervals) == 1
         assert intervals[0].since == datetime(2024, 6, 15, 15, 0, tzinfo=CET)
         assert intervals[0].until == datetime(2024, 6, 15, 16, 0, tzinfo=CET)
+
+
+class TestInferIntervalsLookback:
+    @travel(datetime(2024, 6, 15, 14, 35, tzinfo=UTC))
+    def test_latest_with_lookback(self) -> None:
+        batch = Batch(batch_expression="@hourly", lookback=3)
+        intervals = batch.infer_intervals(
+            since=None, until=None, batch_expression="0 * * * *", latest=True
+        )
+        # Latest interval is 13:00-14:00, lookback=3 shifts since to 10:00
+        assert intervals[0].since == datetime(2024, 6, 15, 10, 0, tzinfo=UTC)
+        assert intervals[-1].until == datetime(2024, 6, 15, 14, 0, tzinfo=UTC)
+        assert len(intervals) == 4
+
+    def test_backfill_with_lookback(self) -> None:
+        batch = Batch(batch_expression="@hourly", lookback=2)
+        intervals = batch.infer_intervals(
+            since=datetime(2024, 6, 15, 12, 0, tzinfo=UTC),
+            until=datetime(2024, 6, 15, 14, 0, tzinfo=UTC),
+            batch_expression="0 * * * *",
+        )
+        # since=12:00, lookback=2 shifts to 10:00, until stays 14:00
+        assert intervals[0].since == datetime(2024, 6, 15, 10, 0, tzinfo=UTC)
+        assert intervals[-1].until == datetime(2024, 6, 15, 14, 0, tzinfo=UTC)
+        assert len(intervals) == 4
+
+    def test_no_lookback(self) -> None:
+        batch = Batch(batch_expression="@hourly")
+        intervals = batch.infer_intervals(
+            since=datetime(2024, 6, 15, 12, 0, tzinfo=UTC),
+            until=datetime(2024, 6, 15, 14, 0, tzinfo=UTC),
+            batch_expression="0 * * * *",
+        )
+        assert intervals[0].since == datetime(2024, 6, 15, 12, 0, tzinfo=UTC)
+        assert len(intervals) == 2
