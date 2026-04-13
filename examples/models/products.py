@@ -4,7 +4,6 @@ from bollhav.model import Model, Source, Target, Schema, WriteMode, Tags, Bounds
 # APPEND — rows are added every run, nothing is ever removed or deduplicated.
 # Good for event streams or audit logs where you want the full history.
 products = Model(
-    name="products",
     source=Source(name="products"),
     target=Target(
         name="products",

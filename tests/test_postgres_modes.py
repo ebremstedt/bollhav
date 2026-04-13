@@ -57,7 +57,6 @@ def _model(
 ) -> Model:
     cols = columns or [_col("id"), _col("val")]
     return Model(
-        name="test_table",
         source=Source(name="src", query=source_query),
         target=Target(
             name="test_table",
@@ -243,7 +242,6 @@ class TestUpdateInsert:
             _col("val"),
         ]
         model = Model(
-            name="test_table",
             source=Source(name="src"),
             target=Target(
                 name="test_table",

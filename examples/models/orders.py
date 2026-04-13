@@ -4,7 +4,6 @@ from bollhav.model import Model, Source, Target, Schema, WriteMode, Tags, Bounds
 # RECREATE_TABLE_INSERT — drops and recreates the table then inserts.
 # Good for tables whose schema might change between runs, or when truncate is not available.
 orders = Model(
-    name="orders",
     source=Source(name="orders"),
     target=Target(
         name="orders",
