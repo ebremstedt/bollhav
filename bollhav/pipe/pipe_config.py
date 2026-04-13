@@ -58,24 +58,28 @@ class PipeConfig:
 
         print("── pipe ────────────────────")
         _row("tags", self.tags or "—")
-        if self.tz_override:
-            _row("tz", str(self.tz_override))
-        _row("debug", "on" if self.debug else "off")
-        if self.use_schema_suffix:
-            _row("suffix", self.schema_suffix)
         if self.latest.enabled:
             _row("mode", "latest")
-            _row("batch override", self.latest.batch_expression or "unset")
         elif self.backfill.enabled:
             _row(
                 "mode",
                 f"backfill  {_date(self.backfill.since)} → {_date(self.backfill.until)}",
             )
-            _row("batch override", self.backfill.batch_expression or "unset")
         else:
             _row("mode", "off")
+        _row("debug", "on" if self.debug else "off")
+        if self.use_schema_suffix:
+            _row("suffix", self.schema_suffix)
         if self.upstream_mode != UpstreamMode.ENFORCE:
             _row("upstream", self.upstream_mode.value)
+        if self.latest.enabled or self.backfill.enabled:
+            _row("tz override", str(self.tz_override) if self.tz_override else "unset")
+            batch_expr = (
+                self.latest.batch_expression
+                if self.latest.enabled
+                else self.backfill.batch_expression
+            )
+            _row("batch override", batch_expr or "unset")
         print("────────────────────────────")
 
 
