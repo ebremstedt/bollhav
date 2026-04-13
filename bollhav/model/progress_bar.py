@@ -9,6 +9,29 @@ import time
 _SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
 
 
+def _format_duration(secs: float) -> str:
+    if secs < 60:
+        if secs >= 1:
+            return f"{secs:>5.1f}s"
+        return f"{secs * 1000:>4.0f}ms"
+    mins = secs / 60
+    if mins < 60:
+        return f"{mins:>5.1f}m"
+    hours = mins / 60
+    return f"{hours:>5.1f}h"
+
+
+def _format_progress(current: int, total: int, width: int = 20) -> str:
+    if total == 0:
+        return f"{'░' * width} {current}/???"
+    filled = int(width * current / total)
+    bar = "█" * filled + "░" * (width - filled)
+    pct = current / total * 100
+    pct_str = f"{pct:.2f}".rstrip("0").rstrip(".")
+    total_width = len(str(total))
+    return f"{bar} {pct_str:>6}% {current:>{total_width}}/{total}"
+
+
 def progress_bar(func: Callable) -> Callable:
     """
     log_execution decorator — two modes:
@@ -73,17 +96,6 @@ def progress_bar(func: Callable) -> Callable:
             return None
         return sum(times) / len(times)
 
-    def _format_duration(secs: float) -> str:
-        if secs < 60:
-            if secs >= 1:
-                return f"{secs:>5.1f}s"
-            return f"{secs * 1000:>4.0f}ms"
-        mins = secs / 60
-        if mins < 60:
-            return f"{mins:>5.1f}m"
-        hours = mins / 60
-        return f"{hours:>5.1f}h"
-
     def _avg_batch_time() -> str:
         avg = _avg_batch_seconds()
         if avg is None:
@@ -114,16 +126,6 @@ def progress_bar(func: Callable) -> Callable:
             newline=True,
         )
         state["current_model"] = ""
-
-    def _progress_bar(current: int, total: int, width: int = 20) -> str:
-        if total == 0:
-            return f"{'░' * width} {current}/???"
-        filled = int(width * current / total)
-        bar = "█" * filled + "░" * (width - filled)
-        pct = current / total * 100
-        pct_str = f"{pct:.2f}".rstrip("0").rstrip(".")
-        total_width = len(str(total))
-        return f"{bar} {pct_str:>6}% {current:>{total_width}}/{total}"
 
     def _on_exit() -> None:
         if state["current_model"]:
@@ -165,7 +167,7 @@ def progress_bar(func: Callable) -> Callable:
         state["finish_total"] = int(state["total"])
         count = int(state["count"])
         total = int(state["total"])
-        bar = _progress_bar(current=count, total=total)
+        bar = _format_progress(current=count, total=total)
         msg = f"{model_name} {bar}{_avg_batch_time()}{_eta()}"
         if _spinner_thread[0] is None:
             _start_spinner(msg)

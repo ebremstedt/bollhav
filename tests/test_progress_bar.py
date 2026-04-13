@@ -1,7 +1,7 @@
 import io
 import sys
 
-from bollhav.model.progress_bar import progress_bar
+from bollhav.model.progress_bar import progress_bar, _format_duration, _format_progress
 
 
 def make_mock_model(name: str):
@@ -118,3 +118,19 @@ def test_model_without_set_total_shows_count_only():
     # total was never set, so it should just show "4 batches" (no slash)
     assert "4/0" not in lines[0]
     assert "4/" not in lines[0]
+
+
+def test_format_duration_fixed_width():
+    values = [0.001, 0.01, 0.1, 0.5, 1.0, 9.9, 59.9, 60, 120, 599, 3600, 36000]
+    lengths = [len(_format_duration(v)) for v in values]
+    assert all(l == lengths[0] for l in lengths), (
+        f"Widths vary: {list(zip(values, [_format_duration(v) for v in values]))}"
+    )
+
+
+def test_format_progress_fixed_width():
+    total = 100
+    lengths = [len(_format_progress(i, total)) for i in range(1, total + 1)]
+    assert all(l == lengths[0] for l in lengths), (
+        f"Widths vary: {list(zip(range(1, total + 1), lengths))}"
+    )
