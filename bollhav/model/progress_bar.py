@@ -113,7 +113,7 @@ def progress_bar(func: Callable) -> Callable:
         total = int(state["finish_total"])
         batch_str = f"{count}/{total}" if total else str(count)
         _write(
-            f"✓ {state['current_model']}: done ({_format_elapsed(elapsed)}, {batch_str}{_avg_batch_time()})",
+            f"✓ {state['current_model']} done ({_format_elapsed(elapsed)}, {batch_str}{_avg_batch_time()})",
             newline=True,
         )
         state["current_model"] = ""
@@ -167,7 +167,7 @@ def progress_bar(func: Callable) -> Callable:
         count = int(state["count"])
         total = int(state["total"])
         bar = _progress_bar(current=count, total=total)
-        msg = f"{model_name}: {bar}{_avg_batch_time()}{_eta()}"
+        msg = f"{model_name} {bar}{_avg_batch_time()}{_eta()}"
         if _spinner_thread[0] is None:
             _start_spinner(msg)
         else:

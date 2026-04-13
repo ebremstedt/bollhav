@@ -37,7 +37,7 @@ def test_single_model_correct_count():
     execute(model=model)
 
     output = finish_captured(execute)
-    assert "orders: done" in output
+    assert "orders done" in output
     assert "3/3" in output
 
 
@@ -77,12 +77,12 @@ def test_total_does_not_bleed_across_models():
     output = buf.getvalue()
 
     # step_a must finish with 5/5, NOT 5/3
-    lines = [line for line in output.splitlines() if "step_a: done" in line]
+    lines = [line for line in output.splitlines() if "step_a done" in line]
     assert lines, "step_a finished line not found"
     assert "5/5" in lines[0], f"Expected 5/5 in step_a line, got: {lines[0]}"
 
     # step_b must finish with 3/3, NOT 3/<some other total>
-    lines_b = [line for line in output.splitlines() if "step_b: done" in line]
+    lines_b = [line for line in output.splitlines() if "step_b done" in line]
     assert lines_b, "step_b finished line not found"
     assert "3/3" in lines_b[0], f"Expected 3/3 in step_b line, got: {lines_b[0]}"
 
@@ -96,7 +96,7 @@ def test_finished_elapsed_uses_ms_for_sub_second():
     execute(model=make_mock_model("fast"))
 
     output = finish_captured(execute)
-    lines = [line for line in output.splitlines() if "fast: done" in line]
+    lines = [line for line in output.splitlines() if "fast done" in line]
     assert lines, "fast finished line not found"
     # elapsed should be sub-second in a test, so must show ms not 0.0s
     assert "0.0s" not in lines[0], f"Got 0.0s instead of ms: {lines[0]}"
@@ -113,7 +113,7 @@ def test_model_without_set_total_shows_count_only():
         execute(model=model_a)
 
     output = finish_captured(execute)
-    lines = [line for line in output.splitlines() if "no_total: done" in line]
+    lines = [line for line in output.splitlines() if "no_total done" in line]
     assert lines, "no_total finished line not found"
     # total was never set, so it should just show "4 batches" (no slash)
     assert "4/0" not in lines[0]
