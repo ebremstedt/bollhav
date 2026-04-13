@@ -30,7 +30,7 @@ _DATA: dict[str, list[dict]] = {
 
 def read(model: Model, since: datetime, until: datetime) -> pl.DataFrame:  # noqa: ARG001
     time.sleep(model.extra.get("batch_sleep") or random.uniform(0.2, 0.35))
-    source_name = model.source.name if model.source else model.name
+    source_name = model.source.name if model.source else model.target.name
     rows = _DATA.get(source_name, [])
     schema = _SCHEMAS.get(source_name, {})
     return pl.DataFrame(rows, schema=schema)
