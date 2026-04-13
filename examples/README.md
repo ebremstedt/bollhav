@@ -26,44 +26,15 @@ pip install bollhav polars
 
 ## Running
 
-Export the environment variables, then run:
-
+Latest mode:
 ```bash
-# required
-export TAGS="[all]"
-export USE_SCHEMA_SUFFIX=false
-
-# pick one: latest or backfill (not both)
-
-# latest — resolves the most recent complete interval from the model's
-#           batch expression (or LATEST_BATCH_EXPRESSION override)
-export LATEST_ENABLED=true
-# export LATEST_BATCH_EXPRESSION="0 * * * *"  # optional override
-
-# backfill — explicit time window
-# export BACKFILL_ENABLED=true
-# export BACKFILL_SINCE=2024-01-01T00:00:00Z
-# export BACKFILL_UNTIL=2024-01-11T00:00:00Z
-# export BACKFILL_BATCH_EXPRESSION="0 0 * * *"  # optional
-
-# optional
-export SCHEMA_SUFFIX=dev       # appended to target schema, e.g. cosmic_raw → cosmic_raw_dev
-export DEBUG=false
-# export TIMEZONE_OVERRIDE=Europe/Stockholm  # overrides model timezone for all models
+TAGS="[all]" USE_SCHEMA_SUFFIX=false LATEST_ENABLED=true python examples/main.py
 ```
 
+Backfill mode:
 ```bash
-cd examples
-python main.py
+TAGS="[all]" USE_SCHEMA_SUFFIX=false BACKFILL_ENABLED=true BACKFILL_SINCE=2024-01-01T00:00:00Z BACKFILL_UNTIL=2024-01-11T00:00:00Z python examples/main.py
 ```
-
-**Common `TAGS` values:**
-
-| Expression            | Selects                         |
-|-----------------------|---------------------------------|
-| `[all]`               | every model                     |
-| `[customers]`         | only `customers`                |
-| `[products \| orders]`| `products` or `orders`          |
 
 ## Write modes
 
