@@ -67,14 +67,37 @@ def progress_bar(func: Callable) -> Callable:
             _spinner_thread[0].join()
             _spinner_thread[0] = None
 
-    def _avg_batch_time() -> str:
+    def _avg_batch_seconds() -> float | None:
         times = list(state["batch_times"])  # type: ignore[arg-type]
         if not times:
+            return None
+        return sum(times) / len(times)
+
+    def _avg_batch_time() -> str:
+        avg = _avg_batch_seconds()
+        if avg is None:
             return ""
-        avg = sum(times) / len(times)
         if avg >= 1:
             return f" á {avg:.1f}s"
         return f" á {avg * 1000:.0f}ms"
+
+    def _eta() -> str:
+        avg = _avg_batch_seconds()
+        if avg is None:
+            return ""
+        total = int(state["total"])
+        count = int(state["count"])
+        remaining = total - count
+        if remaining <= 0:
+            return ""
+        secs = avg * remaining
+        if secs < 60:
+            return f" ~{secs:.0f}s left"
+        mins = secs / 60
+        if mins < 60:
+            return f" ~{mins:.1f}m left"
+        hours = mins / 60
+        return f" ~{hours:.1f}h left"
 
     def _format_elapsed(elapsed: float) -> str:
         if elapsed >= 1:
@@ -90,7 +113,7 @@ def progress_bar(func: Callable) -> Callable:
         total = int(state["finish_total"])
         batch_str = f"{count}/{total}" if total else str(count)
         _write(
-            f"✓ {state['current_model']}: done ({_format_elapsed(elapsed)}, {batch_str} {_avg_batch_time()})",
+            f"✓ {state['current_model']}: done ({_format_elapsed(elapsed)}, {batch_str}{_avg_batch_time()})",
             newline=True,
         )
         state["current_model"] = ""
@@ -121,7 +144,6 @@ def progress_bar(func: Callable) -> Callable:
             if model and hasattr(model, "target") and hasattr(model.target, "full_name")
             else func.__name__
         )
-        batch_since = bound.arguments.get("batch_since")
 
         if model_name != state["current_model"]:
             if state["current_model"]:
@@ -144,9 +166,8 @@ def progress_bar(func: Callable) -> Callable:
         state["finish_total"] = int(state["total"])
         count = int(state["count"])
         total = int(state["total"])
-        date_part = f" ({batch_since.strftime('%Y-%m-%d')})" if batch_since else ""
         bar = _progress_bar(current=count, total=total)
-        msg = f"{model_name}: {bar}{date_part}{_avg_batch_time()}"
+        msg = f"{model_name}: {bar}{_avg_batch_time()}{_eta()}"
         if _spinner_thread[0] is None:
             _start_spinner(msg)
         else:

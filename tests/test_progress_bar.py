@@ -27,7 +27,7 @@ def finish_captured(execute) -> str:
 
 def test_single_model_correct_count():
     @progress_bar
-    def execute(model, batch_since=None):
+    def execute(model):
         pass
 
     execute.set_total(3)
@@ -53,7 +53,7 @@ def test_total_does_not_bleed_across_models():
     """
 
     @progress_bar
-    def execute(model, batch_since=None):
+    def execute(model):
         pass
 
     model_a = make_mock_model("step_a")
@@ -89,7 +89,7 @@ def test_total_does_not_bleed_across_models():
 
 def test_finished_elapsed_uses_ms_for_sub_second():
     @progress_bar
-    def execute(model, batch_since=None):
+    def execute(model):
         pass
 
     execute.set_total(1)
@@ -105,7 +105,7 @@ def test_finished_elapsed_uses_ms_for_sub_second():
 
 def test_model_without_set_total_shows_count_only():
     @progress_bar
-    def execute(model, batch_since=None):
+    def execute(model):
         pass
 
     model_a = make_mock_model("no_total")
