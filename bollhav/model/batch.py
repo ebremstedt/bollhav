@@ -1,6 +1,6 @@
 import logging
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone, tzinfo
 
 from icron import croniter
 from bollhav.model.intervals import TZInterval
@@ -23,8 +23,10 @@ def _resolve_cron(expr: str) -> str:
     return _CRON_ALIASES.get(expr, expr)
 
 
-def _resolve_cron_interval(expression: str) -> tuple[datetime, datetime]:
-    now = datetime.now(tz=timezone.utc)
+def _resolve_cron_interval(
+    expression: str, tz: tzinfo = timezone.utc
+) -> tuple[datetime, datetime]:
+    now = datetime.now(tz=tz)
     cron = croniter(expression, now - timedelta(days=2))
     ticks = []
     while True:
@@ -55,6 +57,7 @@ class Batch:
     """
 
     batch_expression: BatchExpression | BatchExpressionExtended = "@daily"
+    tz: tzinfo = timezone.utc
     lookback: int | None = None
     retries: int | None = None
 
@@ -64,10 +67,12 @@ class Batch:
         until: datetime | None,
         batch_expression: BatchExpression | BatchExpressionExtended,
         latest: bool = False,
+        tz_override: tzinfo | None = None,
     ) -> list[TZInterval]:
+        tz = tz_override or self.tz
         cron = _resolve_cron(batch_expression)
         if latest:
-            since, until = _resolve_cron_interval(cron)
+            since, until = _resolve_cron_interval(cron, tz=tz)
         if self.lookback:
             it = croniter(cron, since)
             tick1 = it.get_next(datetime)

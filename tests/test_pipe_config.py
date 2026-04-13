@@ -96,6 +96,10 @@ class TestLoadPipeConfig:
                 "bollhav.pipe.pipe_config.env_var_iso8601_datetime",
                 patches["bollhav.pipe.pipe_config.env_var_iso8601_datetime"],
             ),
+            patch(
+                "bollhav.pipe.tz.env_var",
+                patches["bollhav.pipe.pipe_config.env_var"],
+            ),
         ):
             return load_pipe_config()
 
@@ -189,6 +193,10 @@ class TestWithPipeConfig:
             patch(
                 "bollhav.pipe.pipe_config.env_var_iso8601_datetime",
                 patches["bollhav.pipe.pipe_config.env_var_iso8601_datetime"],
+            ),
+            patch(
+                "bollhav.pipe.tz.env_var",
+                patches["bollhav.pipe.pipe_config.env_var"],
             ),
         ):
             my_func()
