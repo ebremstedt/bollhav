@@ -73,13 +73,22 @@ def progress_bar(func: Callable) -> Callable:
             return None
         return sum(times) / len(times)
 
+    def _format_duration(secs: float) -> str:
+        if secs < 60:
+            if secs >= 1:
+                return f"{secs:>5.1f}s"
+            return f"{secs * 1000:>4.0f}ms"
+        mins = secs / 60
+        if mins < 60:
+            return f"{mins:>5.1f}m"
+        hours = mins / 60
+        return f"{hours:>5.1f}h"
+
     def _avg_batch_time() -> str:
         avg = _avg_batch_seconds()
         if avg is None:
             return ""
-        if avg >= 1:
-            return f" á {avg:.1f}s"
-        return f" á {avg * 1000:.0f}ms"
+        return f" á {_format_duration(avg)}"
 
     def _eta() -> str:
         avg = _avg_batch_seconds()
@@ -90,19 +99,7 @@ def progress_bar(func: Callable) -> Callable:
         remaining = total - count
         if remaining <= 0:
             return ""
-        secs = avg * remaining
-        if secs < 60:
-            return f" ~{secs:.0f}s left"
-        mins = secs / 60
-        if mins < 60:
-            return f" ~{mins:.1f}m left"
-        hours = mins / 60
-        return f" ~{hours:.1f}h left"
-
-    def _format_elapsed(elapsed: float) -> str:
-        if elapsed >= 1:
-            return f"{elapsed:.1f}s"
-        return f"{elapsed * 1000:.0f}ms"
+        return f" ~{_format_duration(avg * remaining)} left"
 
     def _finish_current() -> None:
         _stop_spinner()
@@ -113,7 +110,7 @@ def progress_bar(func: Callable) -> Callable:
         total = int(state["finish_total"])
         batch_str = f"{count}/{total}" if total else str(count)
         _write(
-            f"✓ {state['current_model']} done ({_format_elapsed(elapsed)}, {batch_str}{_avg_batch_time()})",
+            f"✓ {state['current_model']} done {_format_duration(elapsed)} {batch_str}{_avg_batch_time()}",
             newline=True,
         )
         state["current_model"] = ""
@@ -125,7 +122,8 @@ def progress_bar(func: Callable) -> Callable:
         bar = "█" * filled + "░" * (width - filled)
         pct = current / total * 100
         pct_str = f"{pct:.2f}".rstrip("0").rstrip(".")
-        return f"{bar} {pct_str:>6}% {current}/{total}"
+        total_width = len(str(total))
+        return f"{bar} {pct_str:>6}% {current:>{total_width}}/{total}"
 
     def _on_exit() -> None:
         if state["current_model"]:
