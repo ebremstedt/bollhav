@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, tzinfo
 from roskarl import (
     env_var_bool,
     env_var_batch_expression,
@@ -9,6 +9,7 @@ from roskarl import (
 from functools import wraps
 from typing import Callable
 from bollhav.model.ordering import UpstreamMode
+from bollhav.pipe.tz import _resolve_tz_override, _apply_tz
 
 
 @dataclass
@@ -31,6 +32,7 @@ class PipeConfig:
     latest: LatestConfig
     backfill: BackfillConfig
     schema_suffix: str
+    tz_override: tzinfo | None = None
     use_schema_suffix: bool = True
     debug: bool = False
     upstream_mode: UpstreamMode = UpstreamMode.ENFORCE
@@ -40,11 +42,6 @@ class PipeConfig:
             f", schema_suffix={self.schema_suffix}" if self.use_schema_suffix else ""
         )
         return f"EnvConfig(tags={self.tags}, cron={self.latest}, backfill={self.backfill}, debug={self.debug}, use_schema_suffix={self.use_schema_suffix}{suffix_part})"
-
-    def debugprint(self, msg: str) -> None:
-        if self.debug:
-            ts = datetime.now(tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
-            print(f"{ts} {msg}")
 
     def __post_init__(self) -> None:
         if self.use_schema_suffix and self.schema_suffix == "":
@@ -61,6 +58,8 @@ class PipeConfig:
 
         print("── pipe ────────────────────")
         _row("tags", self.tags or "—")
+        if self.tz_override:
+            _row("tz", str(self.tz_override))
         _row("debug", "on" if self.debug else "off")
         if self.use_schema_suffix:
             _row("suffix", self.schema_suffix)
@@ -107,6 +106,8 @@ def load_pipe_config() -> PipeConfig:
     if not latest_enabled:
         latest_batch_expression = None
 
+    tz_override = _resolve_tz_override()
+
     return PipeConfig(
         tags=env_var(name="TAGS", required=True),
         latest=LatestConfig(
@@ -115,10 +116,18 @@ def load_pipe_config() -> PipeConfig:
         ),
         backfill=BackfillConfig(
             enabled=backfill_enabled,
-            since=env_var_iso8601_datetime(name="BACKFILL_SINCE")
+            since=_apply_tz(
+                env_var_iso8601_datetime(name="BACKFILL_SINCE"), tz_override
+            )
+            if backfill_enabled and tz_override
+            else env_var_iso8601_datetime(name="BACKFILL_SINCE")
             if backfill_enabled
             else None,
-            until=env_var_iso8601_datetime(name="BACKFILL_UNTIL")
+            until=_apply_tz(
+                env_var_iso8601_datetime(name="BACKFILL_UNTIL"), tz_override
+            )
+            if backfill_enabled and tz_override
+            else env_var_iso8601_datetime(name="BACKFILL_UNTIL")
             if backfill_enabled
             else None,
             batch_expression=env_var_batch_expression(
@@ -127,6 +136,7 @@ def load_pipe_config() -> PipeConfig:
             if backfill_enabled
             else None,
         ),
+        tz_override=tz_override,
         debug=env_var_bool(name="DEBUG", default=False),
         use_schema_suffix=env_var_bool(name="USE_SCHEMA_SUFFIX", default=True),
         schema_suffix=env_var(name="SCHEMA_SUFFIX", default=""),

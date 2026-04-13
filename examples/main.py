@@ -33,6 +33,7 @@ def main(pipe: PipeConfig) -> None:
             or pipe.latest.batch_expression
             or model.batching.batch_expression,
             latest=pipe.latest.enabled and not reload,
+            tz_override=pipe.tz_override,
         )
 
         execute.set_total(len(intervals))
