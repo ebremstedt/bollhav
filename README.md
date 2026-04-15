@@ -13,6 +13,7 @@ Concepts
 - [Tags](bollhav/docs/TAGS.md)
     - [examples](bollhav/docs/MATCHING.md)
 - [Modes](bollhav/docs/MODES.md)
+- [Progress Bar](bollhav/docs/PROGRESS_BAR.md)
 
 Implementations:
 - [Postgres](bollhav/docs/POSTGRES.md)

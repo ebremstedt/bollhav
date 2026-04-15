@@ -1,4 +1,5 @@
 import io
+import os
 import sys
 
 from bollhav.model.progress_bar import progress_bar, _format_duration, _format_progress
@@ -134,3 +135,52 @@ def test_format_progress_fixed_width():
     assert all(l == lengths[0] for l in lengths), (
         f"Widths vary: {list(zip(range(1, total + 1), lengths))}"
     )
+
+
+def test_batch_level_shows_finish_lines(monkeypatch):
+    monkeypatch.setenv("PROGRESS_BAR", "batch")
+    from bollhav.model.progress_bar import progress_bar as pb
+
+    @pb
+    def execute(model):
+        pass
+
+    model_a = make_mock_model("alpha")
+    execute.set_total(2)
+    execute(model=model_a)
+    execute(model=model_a)
+
+    output = finish_captured(execute)
+    assert "✓" in output
+    assert "alpha" in output
+    assert "2/2" in output
+
+
+def test_minimal_level_shows_summary(monkeypatch):
+    monkeypatch.setenv("PROGRESS_BAR", "minimal")
+    from bollhav.model.progress_bar import progress_bar as pb
+
+    @pb
+    def execute(model):
+        pass
+
+    model_a = make_mock_model("first")
+    model_b = make_mock_model("second")
+
+    execute.set_total(2)
+    execute(model=model_a)
+    execute(model=model_a)
+    execute.set_total(1)
+    execute(model=model_b)
+
+    buf = io.StringIO()
+    old = sys.stdout
+    sys.stdout = buf
+    try:
+        execute.finish()
+    finally:
+        sys.stdout = old
+    output = buf.getvalue()
+
+    assert "2 models done" in output
+    assert "✓" in output

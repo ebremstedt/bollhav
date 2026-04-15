@@ -9,6 +9,7 @@ from roskarl import (
 from functools import wraps
 from typing import Callable
 from bollhav.model.ordering import UpstreamMode
+from bollhav.model.progress_bar import _get_progress_level
 from bollhav.pipe.tz import _resolve_tz_override, _apply_tz
 
 
@@ -57,6 +58,7 @@ class PipeConfig:
             return dt.isoformat() if dt else "—"
 
         print("── pipe ────────────────────")
+        _row("progress", _get_progress_level().value)
         _row("tags", self.tags or "—")
         if self.latest.enabled:
             _row("mode", "latest")

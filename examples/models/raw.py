@@ -48,3 +48,35 @@ shipment_events = Model(
     ),
     batching=Batch(batch_expression="@daily"),
 )
+
+exchange_rates = Model(
+    source=Source(name="exchange_rates"),
+    target=Target(
+        name="exchange_rates",
+        schema=Schema(name="warehouse_raw"),
+        write_mode=WriteMode.APPEND,
+    ),
+    tagging=Tags(tags={"raw"}),
+    batch_sleep=0.03,
+    bounds=Bounds(
+        begin=datetime(2024, 1, 1, tzinfo=timezone.utc),
+        end=datetime(2024, 1, 21, tzinfo=timezone.utc),
+    ),
+    batching=Batch(batch_expression="@daily"),
+)
+
+audit_log = Model(
+    source=Source(name="audit_log"),
+    target=Target(
+        name="audit_log",
+        schema=Schema(name="warehouse_raw"),
+        write_mode=WriteMode.APPEND,
+    ),
+    tagging=Tags(tags={"raw"}),
+    batch_sleep=0.06,
+    bounds=Bounds(
+        begin=datetime(2024, 1, 1, tzinfo=timezone.utc),
+        end=datetime(2024, 1, 8, tzinfo=timezone.utc),
+    ),
+    batching=Batch(batch_expression="@daily"),
+)

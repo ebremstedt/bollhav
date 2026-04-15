@@ -12,7 +12,7 @@ from bollhav.model.target import Target
 from bollhav.model.bounds import Bounds
 from bollhav.model.batch import Batch
 from bollhav.model.tags import Tags
-from bollhav.model.progress_bar import progress_bar
+from bollhav.model.progress_bar import progress_bar, ProgressLevel
 
 __all__ = [
     "WriteMode",
@@ -31,4 +31,5 @@ __all__ = [
     "Batch",
     "Tags",
     "progress_bar",
+    "ProgressLevel",
 ]
