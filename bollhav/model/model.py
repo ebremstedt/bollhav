@@ -1,6 +1,9 @@
+from __future__ import annotations
+
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, tzinfo
+from typing import TYPE_CHECKING
 
 from icron import croniter
 from bollhav.model.source import Source
@@ -9,8 +12,10 @@ from bollhav.model.bounds import Bounds
 from bollhav.model.batch import Batch, _resolve_cron, _chunk_interval
 from bollhav.model.intervals import TZInterval
 from bollhav.model.tags import Tags
-from bollhav.pipe.pipe_config import PipeConfig
 from roskarl import BatchExpression, BatchExpressionExtended
+
+if TYPE_CHECKING:
+    from bollhav.pipe.pipe_config import PipeConfig
 
 logger = logging.getLogger(__name__)
 

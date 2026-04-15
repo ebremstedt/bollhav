@@ -30,14 +30,8 @@ from bollhav.model import match_models
 
 @with_pipe_config
 def main(pipe: PipeConfig):
-    for model, reload in match_models(tags=pipe.tags, folder="src/models"):
-        if reload:
-            interval = (model.bounds.begin, model.bounds.end)
-        else:
-            interval = model.infer_intervals(
-                since=None, until=None,
-                batch_expression=pipe.latest.batch_expression,
-                latest=True,
-            )
-        execute(model, interval, ...)
+    for model in match_models(tags=pipe.tags, folder="src/models"):
+        intervals = model.infer_intervals(pipe)
+        for interval in intervals:
+            execute(model, interval, ...)
 ```
