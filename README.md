@@ -21,7 +21,7 @@ Implementations:
 
 # Demo
 
-![demo](demo.gif)
+![demo](bollhav/docs/batch_recording.gif)
 
 ## Examples
 

@@ -14,7 +14,6 @@ Prints a single summary line when all models are done.
 
 Best for production — no per-model or per-batch output, no spinning animation. One line total.
 
-<!-- ![minimal](gifs/progress_minimal.gif) -->
 
 ### `model` (default)
 
@@ -28,7 +27,7 @@ Prints one line per completed model.
 
 Each line shows: model name, total elapsed time, batches completed, and average batch duration. No spinning animation.
 
-<!-- ![model](gifs/progress_model.gif) -->
+![model](model_recording.gif)
 
 ### `batch`
 
@@ -41,7 +40,7 @@ Shows a live spinner with per-batch progress, then a finish line per model.
 
 The spinner animates at 0.3s intervals. In a terminal it overwrites the same line. In logged output (e.g. CI/CD) each spinner frame becomes its own line — use `model` or `minimal` in production to avoid noisy logs.
 
-<!-- ![batch](gifs/progress_batch.gif) -->
+![batch](batch_recording.gif)
 
 ## Usage
 
