@@ -21,13 +21,13 @@ def _is_view(model: Model) -> bool:
 
 
 def topological_sort(
-    results: list[tuple[Model, bool]],
+    results: list[Model],
     upstream_mode: UpstreamMode = UpstreamMode.ENFORCE,
-) -> list[tuple[Model, bool]]:
+) -> list[Model]:
     if upstream_mode == UpstreamMode.IGNORE_COMPLETELY:
         return results
 
-    by_name = {model.target.full_name: (model, reload) for model, reload in results}
+    by_name = {model.target.full_name: model for model in results}
     matched_names = set(by_name)
 
     def _upstream(model: Model) -> list[str]:
@@ -35,7 +35,7 @@ def topological_sort(
             return []
         return getattr(model, "upstream", []) or []
 
-    for model, _ in results:
+    for model in results:
         missing = [dep for dep in _upstream(model) if dep not in matched_names]
         if missing:
             raise ValueError(
@@ -45,13 +45,13 @@ def topological_sort(
     in_degree: dict[str, int] = {name: 0 for name in by_name}
     dependents: dict[str, list[str]] = {name: [] for name in by_name}
 
-    for model, _ in results:
+    for model in results:
         for dep in _upstream(model):
             in_degree[model.target.full_name] += 1
             dependents[dep].append(model.target.full_name)
 
     queue = deque(sorted(name for name, deg in in_degree.items() if deg == 0))
-    ordered: list[tuple[Model, bool]] = []
+    ordered: list[Model] = []
 
     while queue:
         name = queue.popleft()
@@ -62,7 +62,7 @@ def topological_sort(
                 queue.append(dependent)
 
     if len(ordered) != len(results):
-        remaining = matched_names - {m.target.full_name for m, _ in ordered}
+        remaining = matched_names - {m.target.full_name for m in ordered}
         raise ValueError(f"Circular dependency detected among: {remaining}")
 
     return ordered
