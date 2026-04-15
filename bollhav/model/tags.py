@@ -18,6 +18,7 @@ class Tags:
     unsnake_schema_for_tags: bool = True
     unpascal_name_for_tags: bool = False
     unpascal_schema_for_tags: bool = False
+    full_name_add_to_tags: bool = True
 
     def assemble(self, name: str, schema: str) -> set[str]:
         result = set(self.tags)
@@ -27,6 +28,8 @@ class Tags:
             result.add(schema)
         if self.model_gets_all_tag:
             result.add("all")
+        if self.full_name_add_to_tags and schema:
+            result.add(f"{schema}.{name}")
         if self.unsnake_schema_for_tags:
             result.update(schema.split("_"))
         if self.unsnake_name_for_tags:
