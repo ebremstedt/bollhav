@@ -3,21 +3,42 @@ import pyodbc
 import polars as pl
 from typing import cast, LiteralString
 from bollhav.model.model import Model
-from bollhav.mssql.columns import MssqlColumn
+from bollhav.mssql.columns import MssqlColumn, MssqlType
 from bollhav.mssql.schema import _b, _col_type
 
 logger = logging.getLogger(__name__)
 
 
 def _bulk_insert(
-    cursor: pyodbc.Cursor, target: str, col_names: list[str], df: pl.DataFrame
+    cursor: pyodbc.Cursor,
+    target: str,
+    col_names: list[str],
+    df: pl.DataFrame,
+    columns: list[MssqlColumn] | None = None,
 ) -> None:
     cols = ", ".join(_b(c) for c in col_names)
     placeholders = ", ".join(["?"] * len(col_names))
     cursor.fast_executemany = True
+    if columns:
+        _set_input_sizes(cursor, columns)
     cursor.executemany(
         f"INSERT INTO {target} ({cols}) VALUES ({placeholders})", df.rows()
     )
+
+
+_VARCHAR_TYPES = {MssqlType.NVARCHAR, MssqlType.VARCHAR}
+
+
+def _set_input_sizes(cursor: pyodbc.Cursor, columns: list[MssqlColumn]) -> None:
+    """Pre-allocate buffer sizes for string columns to avoid truncation
+    when fast_executemany infers too-small buffers from the first row."""
+    sizes = []
+    for col in columns:
+        if col.data_type in _VARCHAR_TYPES and col.length is None:
+            sizes.append((pyodbc.SQL_WVARCHAR, 0, 0))
+        else:
+            sizes.append(0)
+    cursor.setinputsizes(sizes)
 
 
 def merge(conn: pyodbc.Connection, model: Model, df: pl.DataFrame) -> None:
@@ -41,7 +62,7 @@ def merge(conn: pyodbc.Connection, model: Model, df: pl.DataFrame) -> None:
     cursor = conn.cursor()
     cursor.execute(f"IF OBJECT_ID('tempdb..{temp}') IS NOT NULL DROP TABLE {temp}")
     cursor.execute(f"CREATE TABLE {temp} ({col_defs})")
-    _bulk_insert(cursor, temp, all_col_names, df)
+    _bulk_insert(cursor, temp, all_col_names, df, columns=mssql_cols)
 
     if non_unique_col_names:
         update_set = ", ".join(
@@ -67,8 +88,11 @@ def truncate_write(conn: pyodbc.Connection, model: Model, df: pl.DataFrame) -> N
     all_col_names = [c.name for c in model.target.columns]
 
     cursor = conn.cursor()
+    mssql_cols = [c for c in model.target.columns if isinstance(c, MssqlColumn)]
     cursor.execute(f"TRUNCATE TABLE {_b(schema)}.{_b(table)}")
-    _bulk_insert(cursor, f"{_b(schema)}.{_b(table)}", all_col_names, df)
+    _bulk_insert(
+        cursor, f"{_b(schema)}.{_b(table)}", all_col_names, df, columns=mssql_cols
+    )
     cursor.commit()
 
 
