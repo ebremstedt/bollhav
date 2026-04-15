@@ -13,7 +13,7 @@ Standardizes code at the **pipe** level by preloading the variables below:
 | **DEBUG** | bool | no | Enables timestamped debug prints |
 | **TIMEZONE_OVERRIDE** | string | no | IANA timezone (e.g. `Europe/Stockholm`) that overrides all model timezones |
 | **LATEST_ENABLED** | bool | no | Enables latest mode, cannot be True along with **BACKFILL_ENABLED** |
-| **BACKFILL_ENABLED** | bool | no | Enables backfill mode, cannot be True along with **LATEST_ENABLED** |
+| **BACKFILL_ENABLED** | bool | no | Enables backfill mode, defaults to **True** when **LATEST_ENABLED** is not set. Cannot be True along with **LATEST_ENABLED** |
 
 
 ## Latest mode

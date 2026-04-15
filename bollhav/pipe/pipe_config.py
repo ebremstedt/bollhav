@@ -97,7 +97,7 @@ def _resolve_upstream_mode() -> UpstreamMode:
 
 def load_pipe_config() -> PipeConfig:
     latest_enabled = env_var_bool(name="LATEST_ENABLED", default=False)
-    backfill_enabled = env_var_bool(name="BACKFILL_ENABLED", default=False)
+    backfill_enabled = env_var_bool(name="BACKFILL_ENABLED", default=not latest_enabled)
     if latest_enabled and backfill_enabled:
         raise ValueError("LATEST_ENABLED and BACKFILL_ENABLED cannot both be true")
 
