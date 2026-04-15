@@ -27,16 +27,18 @@ def _resolve_cron_interval(
     expression: str, tz: tzinfo = timezone.utc
 ) -> tuple[datetime, datetime]:
     now = datetime.now(tz=tz)
-    cron = croniter(expression, now - timedelta(days=2))
-    ticks = []
+    probe = croniter(expression, now)
+    tick1 = probe.get_next(datetime)
+    tick2 = probe.get_next(datetime)
+    interval_size = tick2 - tick1
+    it = croniter(expression, now - (interval_size * 3))
+    prev, curr = None, None
     while True:
-        tick = cron.get_next(datetime)
+        tick = it.get_next(datetime)
         if tick >= now:
             break
-        ticks.append(tick)
-    since = ticks[-2]
-    until = ticks[-1]
-    return since, until
+        prev, curr = curr, tick
+    return prev, curr
 
 
 def _chunk_interval(cron: str, since: datetime, until: datetime) -> list[TZInterval]:
@@ -78,36 +80,3 @@ class Batch:
     tz: tzinfo = timezone.utc
     lookback: int | None = None
     retries: int | None = None
-
-    def _apply_lookback(self, cron: str, since: datetime) -> datetime:
-        it = croniter(cron, since)
-        tick1 = it.get_next(datetime)
-        tick2 = it.get_next(datetime)
-        tick_size = tick2 - tick1
-        return since - (tick_size * self.lookback)
-
-    def infer_intervals(
-        self,
-        since: datetime | None,
-        until: datetime | None,
-        batch_expression: BatchExpression | BatchExpressionExtended,
-        latest: bool = False,
-        tz_override: tzinfo | None = None,
-    ) -> list[TZInterval]:
-        """Resolve and chunk a time interval for processing.
-
-        In latest mode, since/until are inferred from the batch expression
-        and current time. In backfill mode, since is required. If until is
-        None, it defaults to datetime.now in the batch's timezone (or
-        tz_override if set).
-        """
-        tz = tz_override or self.tz
-        cron = _resolve_cron(batch_expression)
-        if latest:
-            since, until = _resolve_cron_interval(cron, tz=tz)
-        if until is None:
-            until = datetime.now(tz=tz)
-            logger.info("until not set, defaulting to now (%s)", until)
-        if self.lookback:
-            since = self._apply_lookback(cron, since)
-        return _chunk_interval(cron, since, until)

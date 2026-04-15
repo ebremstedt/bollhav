@@ -93,17 +93,17 @@ model = Model(
 | `lookback` | `int` | `None` | Extends interval start backwards by N cron-ticks |
 | `retries` | `int` | `None` | Retry count on failure |
 
-### Batch methods
+### Model methods
 
-#### `infer_intervals(since, until, batch_expression, latest=False, tz_override=None) -> list[TZInterval]`
+#### `infer_intervals(since, until, batch_expression=None, latest=False, tz_override=None) -> list[TZInterval]`
 
-Splits the `[since, until]` window into a list of `TZInterval` chunks according to the batch expression. When `latest=True`, `since` and `until` are inferred from the batch expression and the current time.
+Splits the `[since, until]` window into a list of `TZInterval` chunks according to the batch expression. When `latest=True`, `since` and `until` are inferred from the batch expression and the current time. If `until` is `None`, it defaults to the end of the last complete interval based on the model's batch expression and timezone. `batch_expression` defaults to the model's own batch expression when not provided.
 
 | Parameter | Type | Default | Description |
 |---|---|---|---|
 | `since` | `datetime \| None` | required | Start of the window |
-| `until` | `datetime \| None` | required | End of the window |
-| `batch_expression` | `BatchExpression \| BatchExpressionExtended` | required | The batch expression to use |
+| `until` | `datetime \| None` | required | End of the window. If `None`, resolves to last complete interval boundary using the model's batch expression and timezone |
+| `batch_expression` | `BatchExpression \| BatchExpressionExtended \| None` | `None` | Overrides the model's batch expression when set |
 | `latest` | `bool` | `False` | When `True`, resolves the latest complete interval from the cron expression |
 | `tz_override` | `tzinfo \| None` | `None` | Overrides the model's `tz` when set (used by `TIMEZONE_OVERRIDE`) |
 
