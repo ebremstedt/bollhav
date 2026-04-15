@@ -1,4 +1,5 @@
 import logging
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, tzinfo
 
 from icron import croniter
@@ -12,6 +13,13 @@ from bollhav.pipe.pipe_config import PipeConfig
 from roskarl import BatchExpression, BatchExpressionExtended
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class Runtime:
+    """Runtime state set during matching — not part of the model definition."""
+
+    reload: bool = False
 
 
 class Model:
@@ -37,6 +45,7 @@ class Model:
         self.description = description
         self.upstream: list[str] = upstream or []
 
+        self.runtime = Runtime()
         self.tags: set[str] = (tagging or Tags()).assemble(
             self.target.name, self.target.schema.name
         )
@@ -153,7 +162,6 @@ class Model:
     def infer_intervals(
         self,
         pipe: PipeConfig,
-        reload_model: bool = False,
     ) -> list[TZInterval] | None:
         """Resolve and chunk a time interval into TZIntervals.
 
@@ -163,7 +171,7 @@ class Model:
 
         Three modes, evaluated in this order:
 
-        1. latest (pipe.latest.enabled and not reload_model)
+        1. latest (pipe.latest.enabled and not runtime.reload)
            Both since and until are inferred by finding the last two
            cron ticks before now:
 
@@ -183,7 +191,7 @@ class Model:
 
                 Jun 15-16 is still in progress -> Jun 14-15.
 
-        2. reload_model
+        2. runtime.reload
            since = model.bounds.begin
            until = model.bounds.end, or last complete interval end:
 
@@ -199,7 +207,7 @@ class Model:
                    (same fallback table as reload_model above)
         """
 
-        latest = pipe.latest.enabled and not reload_model
+        latest = pipe.latest.enabled and not self.runtime.reload
 
         tz = pipe.tz_override or self.batching.tz
         batch_expression = (
@@ -209,7 +217,7 @@ class Model:
         if latest:
             interval = self.latest_complete_interval(batch_expression, tz)
             since, until = interval.since, interval.until
-        elif reload_model:
+        elif self.runtime.reload:
             since = self.bounds.begin
             until = (
                 self.bounds.end or self.latest_complete_interval(batch_expression).until

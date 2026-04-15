@@ -13,13 +13,14 @@ logger = logging.getLogger(__name__)
 
 def _model_matches(
     model: Model, potential_tag_groups: list[PotentialTagGroup]
-) -> tuple[Model, bool] | None:
+) -> Model | None:
     if not model.enabled:
         logger.debug("Skipping model %r because it is disabled", model.target.full_name)
         return None
     for group in potential_tag_groups:
         if group_matches(model.tags, group):
-            return model, any(tag.reload for tag in group.tags)
+            model.runtime.reload = any(tag.reload for tag in group.tags)
+            return model
     return None
 
 
@@ -60,15 +61,15 @@ def match_models(
     folder: str = "src/models",
     tags: str | None = None,
     upstream_mode: UpstreamMode = UpstreamMode.ENFORCE,
-) -> list[tuple[Model, bool]]:
+) -> list[Model]:
     """
     Scan a folder recursively for Python modules, discover all Model instances,
     and return those whose tags match the given tag expression.
 
-    Each result is a (model, reload) tuple. reload is True if the matched expression included r:.
+    Runtime state (e.g. reload) is set on model.runtime during matching.
 
     Usage:
-        for model, reload in match_models(folder="src/models", tags="[r:sales & finance]"):
+        for model in match_models(folder="src/models", tags="[r:sales & finance]"):
             ...
 
     Tag expression syntax:
@@ -91,7 +92,7 @@ def match_models(
     folder_path = Path(folder)
     logger.debug("Matching models in %r with tags %r", folder, tags)
 
-    results: list[tuple[Model, bool]] = []
+    results: list[Model] = []
     total_models = 0
     seen: dict[str, Path] = {}
     with _with_sys_path(folder_path):
@@ -116,7 +117,7 @@ def match_models(
                         "Matched model %r from %s (reload=%s)",
                         full_name,
                         file,
-                        result[1],
+                        model.runtime.reload,
                     )
 
     if total_models == 0:
