@@ -8,6 +8,8 @@ _SCHEMAS: dict[str, dict[str, pl.DataType]] = {
     "products": {"id": pl.Int64, "name": pl.String, "price": pl.Float64},
     "customers": {"id": pl.Int64, "name": pl.String, "email": pl.String},
     "orders": {"id": pl.Int64, "customer_id": pl.Int64, "total": pl.Float64},
+    "exchange_rates": {"currency": pl.String, "rate": pl.Float64},
+    "audit_log": {"id": pl.Int64, "action": pl.String},
 }
 
 _DATA: dict[str, list[dict]] = {
@@ -24,6 +26,14 @@ _DATA: dict[str, list[dict]] = {
         {"id": 101, "customer_id": 1, "total": 24.98},
         {"id": 102, "customer_id": 2, "total": 4.49},
         {"id": 103, "customer_id": 1, "total": 14.99},
+    ],
+    "exchange_rates": [
+        {"currency": "EUR", "rate": 0.92},
+        {"currency": "GBP", "rate": 0.79},
+    ],
+    "audit_log": [
+        {"id": 1, "action": "login"},
+        {"id": 2, "action": "update"},
     ],
 }
 

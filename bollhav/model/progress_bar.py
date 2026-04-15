@@ -1,12 +1,45 @@
 import atexit
 import inspect
+import os
 import threading
+from dataclasses import dataclass, field
+from enum import Enum
 from functools import wraps
 from typing import Callable
 import sys
 import time
 
 _SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+_SPINNER_INTERVAL = 0.1
+
+
+class ProgressLevel(Enum):
+    MINIMAL = "minimal"
+    MODEL = "model"
+    BATCH = "batch"
+
+
+def _get_progress_level() -> ProgressLevel:
+    raw = os.environ.get("PROGRESS_BAR", "model").lower()
+    try:
+        return ProgressLevel(raw)
+    except ValueError:
+        return ProgressLevel.MODEL
+
+
+@dataclass
+class _State:
+    current_model: str = ""
+    start: float = 0.0
+    count: int = 0
+    total: int = 0
+    finish_total: int = 0
+    batch_times: list[float] = field(default_factory=list)
+    name_width: int = 60
+    batch_width: int = 0
+    models_done: int = 0
+    overall_start: float = 0.0
+    finished: bool = False
 
 
 def _format_duration(secs: float) -> str:
@@ -34,57 +67,61 @@ def _format_progress(current: int, total: int, width: int = 20) -> str:
 
 def progress_bar(func: Callable) -> Callable:
     """
-    log_execution decorator — two modes:
+    Execution decorator with three display levels (set via PROGRESS_BAR env var).
 
+    PROGRESS_BAR=minimal
+        ✓ 3 models done  5.2s
 
-    ⏳ model: ░░░░░░░░░░░░░░░░░░░░ 3/??? (2026-01-03) (Without set_total)
+    PROGRESS_BAR=model  (default)
+        ✓ customers       110ms 3/3 á  36ms
+        ✓ orders          1.2s  9/9 á 130ms
+        ✓ products        4.5s 25/25 á 180ms
 
-    ⏳ model: █████████░░░░░░░░░░░ 45% 3/9 (2026-01-03) (With set_total)
-
-    Call set_total before the batch loop to enable progress tracking:
-        execute.set_total(len(intervals))
+    PROGRESS_BAR=batch
+        ⠋ customers  █████████░░░░░░░░░░░ 45% 3/9 á 130ms ~1.2s left
+        ✓ customers       1.2s  9/9 á 130ms
+        ⠋ orders     ██░░░░░░░░░░░░░░░░░░ 12% 3/25 á 180ms ~4.0s left
+        ✓ orders          4.5s 25/25 á 180ms
+        ...
     """
-    state: dict[str, str | float | int | list] = {
-        "current_model": "",
-        "start": 0.0,
-        "count": 0,
-        "total": 0,
-        "finish_total": 0,
-        "batch_start": 0.0,
-        "batch_times": [],
-        "name_width": 60,
-        "batch_width": 0,
-        "spinner_index": 0,
-        "spinner_msg": "",
-    }
-    _spinner_thread: list[threading.Thread | None] = [None]
-    _spinner_stop = threading.Event()
+    level = _get_progress_level()
+    s = _State()
+
+    # ── stdout helpers ──────────────────────────────────────────────
 
     def _write(msg: str, newline: bool = False) -> None:
         suffix = "\n" if newline else ""
         sys.stdout.write(f"\r{msg}   {suffix}")
         sys.stdout.flush()
 
+    def _clear_line() -> None:
+        sys.stdout.write("\r\033[K")
+        sys.stdout.flush()
+
+    # ── spinner (batch mode only) ───────────────────────────────────
+
+    _spinner_thread: list[threading.Thread | None] = [None]
+    _spinner_stop = threading.Event()
+    _spinner_msg: list[str] = [""]
+
     def _spin() -> None:
         i = 0
         while not _spinner_stop.is_set():
             frame = _SPINNER_FRAMES[i % len(_SPINNER_FRAMES)]
-            msg = state["spinner_msg"]
-            if msg:
-                sys.stdout.write(f"\r{frame} {msg}   ")
+            if _spinner_msg[0]:
+                sys.stdout.write(f"\r{frame} {_spinner_msg[0]}   ")
                 sys.stdout.flush()
             i += 1
-            _spinner_stop.wait(0.1)
+            _spinner_stop.wait(_SPINNER_INTERVAL)
 
     def _start_spinner(msg: str) -> None:
         _spinner_stop.clear()
-        state["spinner_msg"] = msg
+        _spinner_msg[0] = msg
+        sys.stdout.write(f"\r{_SPINNER_FRAMES[0]} {msg}   ")
+        sys.stdout.flush()
         t = threading.Thread(target=_spin, daemon=True)
         _spinner_thread[0] = t
         t.start()
-
-    def _update_spinner(msg: str) -> None:
-        state["spinner_msg"] = msg
 
     def _stop_spinner() -> None:
         _spinner_stop.set()
@@ -92,110 +129,140 @@ def progress_bar(func: Callable) -> Callable:
             _spinner_thread[0].join()
             _spinner_thread[0] = None
 
+    # ── batch timing ────────────────────────────────────────────────
+
     def _avg_batch_seconds() -> float | None:
-        times = list(state["batch_times"])  # type: ignore[arg-type]
-        if not times:
-            return None
-        return sum(times) / len(times)
+        return sum(s.batch_times) / len(s.batch_times) if s.batch_times else None
 
-    def _avg_batch_time() -> str:
+    def _avg_batch_str() -> str:
+        avg = _avg_batch_seconds()
+        return f" á {_format_duration(avg)}" if avg is not None else ""
+
+    def _eta_str() -> str:
         avg = _avg_batch_seconds()
         if avg is None:
             return ""
-        return f" á {_format_duration(avg)}"
+        remaining = s.total - s.count
+        return f" ~{_format_duration(avg * remaining)} left" if remaining > 0 else ""
 
-    def _eta() -> str:
-        avg = _avg_batch_seconds()
-        if avg is None:
-            return ""
-        total = int(state["total"])
-        count = int(state["count"])
-        remaining = total - count
-        if remaining <= 0:
-            return ""
-        return f" ~{_format_duration(avg * remaining)} left"
+    # ── batch count formatting ──────────────────────────────────────
+
+    def _batch_count_str() -> str:
+        if s.finish_total:
+            tw = len(str(s.finish_total))
+            return f"{s.count:>{tw}}/{s.finish_total}"
+        return str(s.count)
+
+    # ── model lifecycle ─────────────────────────────────────────────
+
+    def _resolve_model_name(args, kwargs) -> str:
+        bound = sig.bind(*args, **kwargs)
+        bound.apply_defaults()
+        model = bound.arguments.get("model")
+        if model and hasattr(model, "target") and hasattr(model.target, "full_name"):
+            return model.target.full_name
+        return func.__name__
+
+    def _begin_model(name: str) -> None:
+        s.current_model = name
+        s.start = time.time()
+        s.count = 0
+        s.finish_total = 0
+        s.batch_times = []
+        if level == ProgressLevel.BATCH:
+            _update_batch_display(name)
 
     def _finish_current() -> None:
-        _stop_spinner()
-        sys.stdout.write("\r\033[K")
-        sys.stdout.flush()
-        elapsed = time.time() - float(state["start"])
-        count = int(state["count"])
-        total = int(state["finish_total"])
-        if total:
-            total_width = len(str(total))
-            batch_str = f"{count:>{total_width}}/{total}"
-        else:
-            batch_str = str(count)
-        bw = max(int(state["batch_width"]), len(batch_str))
-        name = state["current_model"]
-        w = max(int(state["name_width"]), len(name))
+        if not s.current_model:
+            return
+
+        s.models_done += 1
+
+        if level == ProgressLevel.MINIMAL:
+            s.current_model = ""
+            return
+
+        if level == ProgressLevel.BATCH:
+            _stop_spinner()
+
+        _clear_line()
+
+        name = s.current_model
+        w = max(s.name_width, len(name))
+        elapsed = _format_duration(time.time() - s.start)
+        bw = max(s.batch_width, len(_batch_count_str()))
+
         _write(
-            f"✓ {name:<{w}} {_format_duration(elapsed)} {batch_str:>{bw}}{_avg_batch_time()}",
+            f"✓ {name:<{w}} {elapsed} {_batch_count_str():>{bw}}{_avg_batch_str()}",
             newline=True,
         )
-        state["current_model"] = ""
+        s.current_model = ""
 
-    def _on_exit() -> None:
-        if state["current_model"]:
-            _finish_current()
+    # ── batch-level spinner update ──────────────────────────────────
 
-    atexit.register(_on_exit)
+    def _update_batch_display(model_name: str) -> None:
+        bar = _format_progress(current=s.count, total=s.total)
+        w = max(s.name_width, len(model_name))
+        msg = f"{model_name:<{w}} {bar}{_avg_batch_str()}{_eta_str()}"
+
+        if _spinner_thread[0] is None:
+            _start_spinner(msg)
+        else:
+            _spinner_msg[0] = msg
+
+    # ── main wrapper ────────────────────────────────────────────────
 
     sig = inspect.signature(func)
 
     @wraps(func)
     def wrapper(*args, **kwargs):
-        bound = sig.bind(*args, **kwargs)
-        bound.apply_defaults()
-        model = bound.arguments.get("model")
-        model_name = (
-            model.target.full_name
-            if model and hasattr(model, "target") and hasattr(model.target, "full_name")
-            else func.__name__
-        )
+        if not s.overall_start:
+            s.overall_start = time.time()
 
-        if model_name != state["current_model"]:
-            if state["current_model"]:
-                _finish_current()
-            state["current_model"] = model_name
-            state["start"] = time.time()
-            state["count"] = 0
-            state["finish_total"] = 0
-            state["batch_times"] = []
+        model_name = _resolve_model_name(args, kwargs)
+
+        if model_name != s.current_model:
+            _finish_current()
+            _begin_model(model_name)
 
         batch_start = time.time()
-        prev_batch_start = float(state["batch_start"])
-        if prev_batch_start > 0:
-            state["batch_times"] = list(state["batch_times"]) + [
-                batch_start - prev_batch_start
-            ]  # type: ignore[operator]
-        state["batch_start"] = batch_start
+        result = func(*args, **kwargs)
 
-        state["count"] = int(state["count"]) + 1
-        state["finish_total"] = int(state["total"])
-        count = int(state["count"])
-        total = int(state["total"])
-        bar = _format_progress(current=count, total=total)
-        w = max(int(state["name_width"]), len(model_name))
-        msg = f"{model_name:<{w}} {bar}{_avg_batch_time()}{_eta()}"
-        if _spinner_thread[0] is None:
-            _start_spinner(msg)
-        else:
-            _update_spinner(msg)
+        s.batch_times.append(time.time() - batch_start)
+        s.count += 1
+        s.finish_total = s.total
 
-        return func(*args, **kwargs)
+        if level == ProgressLevel.BATCH:
+            _update_batch_display(model_name)
+
+        return result
+
+    # ── public api ──────────────────────────────────────────────────
 
     def set_total(total: int) -> None:
-        state["total"] = total
-        # e.g. "25/25" = 5 chars, track max across all models
+        s.total = total
         tw = len(str(total)) * 2 + 1
-        state["batch_width"] = max(int(state["batch_width"]), tw)
+        s.batch_width = max(s.batch_width, tw)
 
     def set_name_width(width: int) -> None:
-        state["name_width"] = width
+        s.name_width = width
+
+    def finish() -> None:
+        if s.finished:
+            return
+        _finish_current()
+        if level == ProgressLevel.MINIMAL and s.models_done > 0:
+            _clear_line()
+            elapsed = time.time() - s.overall_start if s.overall_start else 0
+            _write(
+                f"✓ {s.models_done} models done {_format_duration(elapsed)}",
+                newline=True,
+            )
+        s.finished = True
+
+    atexit.register(finish)
 
     wrapper.set_total = set_total  # type: ignore[attr-defined]
     wrapper.set_name_width = set_name_width  # type: ignore[attr-defined]
-    wrapper.finish = _finish_current  # type: ignore[attr-defined]
+    wrapper.finish = finish  # type: ignore[attr-defined]
     return wrapper
