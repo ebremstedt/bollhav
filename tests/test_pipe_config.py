@@ -32,10 +32,13 @@ def _base_backfill(enabled: bool = False) -> BackfillConfig:
     )
 
 
+_UNSET = object()
+
+
 def _make_patches(
     *,
     latest_enabled: bool = False,
-    backfill_enabled: bool = False,
+    backfill_enabled: object = _UNSET,
     tags: str = "mytag",
     schema_suffix: str = "dev",
     use_schema_suffix: bool = True,
@@ -46,13 +49,17 @@ def _make_patches(
     backfill_cron: str | None = None,
     upstream: str | None = None,
 ) -> dict:
+    bool_map: dict = {
+        "LATEST_ENABLED": latest_enabled,
+        "DEBUG": debug,
+        "USE_SCHEMA_SUFFIX": use_schema_suffix,
+    }
+    if backfill_enabled is not _UNSET:
+        bool_map["BACKFILL_ENABLED"] = backfill_enabled
     return {
-        "bollhav.pipe.pipe_config.env_var_bool": lambda name, default=False: {
-            "LATEST_ENABLED": latest_enabled,
-            "BACKFILL_ENABLED": backfill_enabled,
-            "DEBUG": debug,
-            "USE_SCHEMA_SUFFIX": use_schema_suffix,
-        }.get(name, default),
+        "bollhav.pipe.pipe_config.env_var_bool": lambda name, default=False: (
+            bool_map.get(name, default)
+        ),
         "bollhav.pipe.pipe_config.env_var": lambda name, required=False, default=None, should_print_unset=True: (
             {
                 "TAGS": tags,
@@ -108,7 +115,7 @@ class TestLoadPipeConfig:
         assert cfg.tags == "mytag"
         assert cfg.schema_suffix == "dev"
         assert cfg.latest.enabled is False
-        assert cfg.backfill.enabled is False
+        assert cfg.backfill.enabled is True
 
     def test_raises_when_both_enabled(self) -> None:
         with pytest.raises(
