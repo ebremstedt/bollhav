@@ -28,15 +28,7 @@ def main(pipe: PipeConfig) -> None:
     for model, reload in matches:
         model.target.schema.suffix = pipe.schema_suffix
 
-        intervals = model.batching.infer_intervals(
-            since=pipe.backfill.since if not reload else model.bounds.begin,
-            until=pipe.backfill.until if not reload else model.bounds.end,
-            batch_expression=pipe.backfill.batch_expression
-            or pipe.latest.batch_expression
-            or model.batching.batch_expression,
-            latest=pipe.latest.enabled and not reload,
-            tz_override=pipe.tz_override,
-        )
+        intervals = model.infer_intervals(pipe, reload_model=reload)
 
         execute.set_total(len(intervals))
         for interval in intervals:

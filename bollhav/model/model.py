@@ -1,9 +1,15 @@
 import logging
+from datetime import datetime, timedelta, tzinfo
+
+from icron import croniter
 from bollhav.model.source import Source
 from bollhav.model.target import Target
 from bollhav.model.bounds import Bounds
-from bollhav.model.batch import Batch
+from bollhav.model.batch import Batch, _resolve_cron, _chunk_interval
+from bollhav.model.intervals import TZInterval
 from bollhav.model.tags import Tags
+from bollhav.pipe.pipe_config import PipeConfig
+from roskarl import BatchExpression, BatchExpressionExtended
 
 logger = logging.getLogger(__name__)
 
@@ -105,6 +111,121 @@ class Model:
             f"upstream={self.upstream!r}, "
             f"extra={self.extra!r})"
         )
+
+    def latest_complete_interval(
+        self,
+        batch_expression_override: BatchExpression
+        | BatchExpressionExtended
+        | None = None,
+        tz_override: tzinfo | None = None,
+    ) -> TZInterval:
+        """Return the last complete interval as a TZInterval.
+
+        Uses the provided batch expression and timezone if set,
+        otherwise falls back to the model's own."""
+        cron_expression = _resolve_cron(
+            batch_expression_override or self.batching.batch_expression
+        )
+        tz = tz_override or self.batching.tz
+        now = datetime.now(tz=tz)
+        # Get two ticks from now to measure the interval size, then seed
+        # far enough back to guarantee at least two ticks before now.
+        probe = croniter(cron_expression, now)
+        tick1 = probe.get_next(datetime)
+        tick2 = probe.get_next(datetime)
+        interval_size = tick2 - tick1
+        it = croniter(cron_expression, now - (interval_size * 3))
+        prev, curr = None, None
+        while True:
+            tick = it.get_next(datetime)
+            if tick >= now:
+                break
+            prev, curr = curr, tick
+        return TZInterval(prev, curr)
+
+    def _apply_lookback(self, cron_expression: str, since: datetime) -> datetime:
+        it = croniter(cron_expression, since)
+        tick1 = it.get_next(datetime)
+        tick2 = it.get_next(datetime)
+        tick_size = tick2 - tick1
+        return since - (tick_size * self.batching.lookback)
+
+    def infer_intervals(
+        self,
+        pipe: PipeConfig,
+        reload_model: bool = False,
+    ) -> list[TZInterval] | None:
+        """Resolve and chunk a time interval into TZIntervals.
+
+        Resolution order:
+            batch_expression:  pipe override > model's own batch expression
+            timezone:          pipe tz_override > model's own timezone
+
+        Three modes, evaluated in this order:
+
+        1. latest (pipe.latest.enabled and not reload_model)
+           Both since and until are inferred by finding the last two
+           cron ticks before now:
+
+            @hourly, now is 2024-06-15 14:35 UTC:
+
+                ticks: ... 12:00  13:00  14:00  [14:35]  15:00
+                                  ^^^^^  ^^^^^
+                                  since  until
+
+                14:00-15:00 is still in progress -> 13:00-14:00.
+
+            @daily, now is 2024-06-15 14:35 UTC:
+
+                ticks: ... Jun 13  Jun 14  Jun 15  [14:35]  Jun 16
+                                   ^^^^^^  ^^^^^^
+                                   since   until
+
+                Jun 15-16 is still in progress -> Jun 14-15.
+
+        2. reload_model
+           since = model.bounds.begin
+           until = model.bounds.end, or last complete interval end:
+
+            expression  | until resolves to
+            ------------|---------------------
+            @hourly     | 2024-06-15 14:00 UTC
+            @daily      | 2024-06-15 00:00 UTC
+            @weekly     | 2024-06-09 00:00 UTC
+
+        3. backfill (default)
+           since = pipe.backfill.since
+           until = pipe.backfill.until, or last complete interval end
+                   (same fallback table as reload_model above)
+        """
+
+        latest = pipe.latest.enabled and not reload_model
+
+        tz = pipe.tz_override or self.batching.tz
+        batch_expression = (
+            pipe.batch_expression_override or self.batching.batch_expression
+        )
+
+        if latest:
+            interval = self.latest_complete_interval(batch_expression, tz)
+            since, until = interval.since, interval.until
+        elif reload_model:
+            since = self.bounds.begin
+            until = (
+                self.bounds.end or self.latest_complete_interval(batch_expression).until
+            )
+        else:
+            since = pipe.backfill.since
+            until = (
+                pipe.backfill.until
+                or self.latest_complete_interval(batch_expression).until
+            )
+
+        cron_expression = _resolve_cron(batch_expression)
+        if self.batching.lookback:
+            since = self._apply_lookback(cron_expression, since)
+
+        return _chunk_interval(cron_expression, since, until)
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, Model):

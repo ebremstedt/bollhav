@@ -23,13 +23,11 @@ DT_UNTIL = datetime(2024, 1, 2, tzinfo=timezone.utc)
 
 
 def _base_latest(enabled: bool = False) -> LatestConfig:
-    return LatestConfig(enabled=enabled, batch_expression=None)
+    return LatestConfig(enabled=enabled)
 
 
 def _base_backfill(enabled: bool = False) -> BackfillConfig:
-    return BackfillConfig(
-        enabled=enabled, since=None, until=None, batch_expression=None
-    )
+    return BackfillConfig(enabled=enabled, since=None, until=None)
 
 
 _UNSET = object()
@@ -43,10 +41,9 @@ def _make_patches(
     schema_suffix: str = "dev",
     use_schema_suffix: bool = True,
     debug: bool = False,
-    cron_expr: str | None = None,
+    batch_expression_override: str | None = None,
     backfill_since: datetime | None = None,
     backfill_until: datetime | None = None,
-    backfill_cron: str | None = None,
     upstream: str | None = None,
 ) -> dict:
     bool_map: dict = {
@@ -69,8 +66,7 @@ def _make_patches(
         ),
         "bollhav.pipe.pipe_config.env_var_batch_expression": lambda name, should_print_unset=True: (
             {
-                "LATEST_BATCH_EXPRESSION": cron_expr,
-                "BACKFILL_BATCH_EXPRESSION": backfill_cron,
+                "BATCH_EXPRESSION_OVERRIDE": batch_expression_override,
             }.get(name)
         ),
         "bollhav.pipe.pipe_config.env_var_iso8601_datetime": lambda name: {
@@ -123,32 +119,28 @@ class TestLoadPipeConfig:
         ):
             self._run(latest_enabled=True, backfill_enabled=True)
 
-    def test_latest_stores_batch_expression(self) -> None:
-        cfg = self._run(latest_enabled=True, cron_expr="0 0 * * *")
-        assert cfg.latest.enabled is True
-        assert cfg.latest.batch_expression == "0 0 * * *"
+    def test_batch_expression_override_stored(self) -> None:
+        cfg = self._run(batch_expression_override="0 0 * * *")
+        assert cfg.batch_expression_override == "0 0 * * *"
 
-    def test_latest_disabled_clears_batch_expression(self) -> None:
-        cfg = self._run(latest_enabled=False, cron_expr="0 0 * * *")
-        assert cfg.latest.batch_expression is None
+    def test_batch_expression_override_defaults_to_none(self) -> None:
+        cfg = self._run()
+        assert cfg.batch_expression_override is None
 
     def test_backfill_populates_fields(self) -> None:
         cfg = self._run(
             backfill_enabled=True,
             backfill_since=DT_SINCE,
             backfill_until=DT_UNTIL,
-            backfill_cron="0 6 * * *",
         )
         assert cfg.backfill.enabled is True
         assert cfg.backfill.since == DT_SINCE
         assert cfg.backfill.until == DT_UNTIL
-        assert cfg.backfill.batch_expression == "0 6 * * *"
 
     def test_backfill_disabled_clears_fields(self) -> None:
         cfg = self._run(backfill_enabled=False)
         assert cfg.backfill.since is None
         assert cfg.backfill.until is None
-        assert cfg.backfill.batch_expression is None
 
     def test_use_schema_suffix_false_clears_suffix(self) -> None:
         cfg = self._run(use_schema_suffix=False)

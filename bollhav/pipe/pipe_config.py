@@ -16,7 +16,6 @@ from bollhav.pipe.tz import _resolve_tz_override, _apply_tz
 @dataclass
 class LatestConfig:
     enabled: bool
-    batch_expression: str | None
 
 
 @dataclass
@@ -24,7 +23,6 @@ class BackfillConfig:
     enabled: bool
     since: datetime | None
     until: datetime | None
-    batch_expression: str | None
 
 
 @dataclass
@@ -33,6 +31,7 @@ class PipeConfig:
     latest: LatestConfig
     backfill: BackfillConfig
     schema_suffix: str
+    batch_expression_override: str | None = None
     tz_override: tzinfo | None = None
     use_schema_suffix: bool = True
     debug: bool = False
@@ -76,12 +75,7 @@ class PipeConfig:
             _row("upstream", self.upstream_mode.value)
         if self.latest.enabled or self.backfill.enabled:
             _row("tz override", str(self.tz_override) if self.tz_override else "unset")
-            batch_expr = (
-                self.latest.batch_expression
-                if self.latest.enabled
-                else self.backfill.batch_expression
-            )
-            _row("batch override", batch_expr or "unset")
+            _row("batch override", self.batch_expression_override or "unset")
         print("────────────────────────────")
 
 
@@ -101,12 +95,6 @@ def load_pipe_config() -> PipeConfig:
     if latest_enabled and backfill_enabled:
         raise ValueError("LATEST_ENABLED and BACKFILL_ENABLED cannot both be true")
 
-    latest_batch_expression = env_var_batch_expression(
-        name="LATEST_BATCH_EXPRESSION", should_print_unset=False
-    )
-    if not latest_enabled:
-        latest_batch_expression = None
-
     tz_override = _resolve_tz_override()
 
     def _backfill_dt(name: str) -> datetime | None:
@@ -117,19 +105,14 @@ def load_pipe_config() -> PipeConfig:
 
     return PipeConfig(
         tags=env_var(name="TAGS", required=True),
-        latest=LatestConfig(
-            enabled=latest_enabled,
-            batch_expression=latest_batch_expression,
-        ),
+        latest=LatestConfig(enabled=latest_enabled),
         backfill=BackfillConfig(
             enabled=backfill_enabled,
             since=_backfill_dt("BACKFILL_SINCE"),
             until=_backfill_dt("BACKFILL_UNTIL"),
-            batch_expression=env_var_batch_expression(
-                name="BACKFILL_BATCH_EXPRESSION", should_print_unset=False
-            )
-            if backfill_enabled
-            else None,
+        ),
+        batch_expression_override=env_var_batch_expression(
+            name="BATCH_EXPRESSION_OVERRIDE", should_print_unset=False
         ),
         tz_override=tz_override,
         debug=env_var_bool(name="DEBUG", default=False),

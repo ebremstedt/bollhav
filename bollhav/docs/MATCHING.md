@@ -34,9 +34,9 @@ def main(pipe: PipeConfig):
         if reload:
             interval = (model.bounds.begin, model.bounds.end)
         else:
-            interval = model.batching.infer_intervals(
+            interval = model.infer_intervals(
                 since=None, until=None,
-                batch_expression=pipe.latest.batch_expression or model.batching.batch_expression,
+                batch_expression=pipe.latest.batch_expression,
                 latest=True,
             )
         execute(model, interval, ...)

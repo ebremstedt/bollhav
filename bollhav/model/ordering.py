@@ -1,7 +1,13 @@
+from __future__ import annotations
+
 from collections import deque
 from enum import Enum
-from bollhav.model.model import Model
+from typing import TYPE_CHECKING
+
 from bollhav.model.write_modes import WriteMode
+
+if TYPE_CHECKING:
+    from bollhav.model.model import Model
 
 
 class UpstreamMode(Enum):
