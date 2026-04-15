@@ -210,6 +210,26 @@ def test_unpascal_schema_off_by_default():
     assert "my" not in m.tags
 
 
+def test_full_name_added_to_tags_by_default():
+    m = make_model(
+        target=Target(name="poop", schema=Schema(name="cha_clean")),
+    )
+    assert "cha_clean.poop" in m.tags
+
+
+def test_full_name_not_added_when_no_schema():
+    m = make_model(target=Target(name="poop"))
+    assert ".poop" not in m.tags
+
+
+def test_full_name_not_added_when_disabled():
+    m = make_model(
+        target=Target(name="poop", schema=Schema(name="cha_clean")),
+        tagging=Tags(full_name_add_to_tags=False),
+    )
+    assert "cha_clean.poop" not in m.tags
+
+
 # --- Target columns ---
 
 
