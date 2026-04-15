@@ -23,12 +23,12 @@ def main(pipe: PipeConfig) -> None:
     setup_logging(debug=pipe.debug)
     matches = match_models(folder=MODELS_DIR, tags=pipe.tags)
 
-    execute.set_name_width(max(len(m.target.full_name) for m, _ in matches))
+    execute.set_name_width(max(len(m.target.full_name) for m in matches))
 
-    for model, reload in matches:
+    for model in matches:
         model.target.schema.suffix = pipe.schema_suffix
 
-        intervals = model.infer_intervals(pipe, reload_model=reload)
+        intervals = model.infer_intervals(pipe)
 
         execute.set_total(len(intervals))
         for interval in intervals:
