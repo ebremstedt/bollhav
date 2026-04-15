@@ -204,3 +204,48 @@ class TestInferIntervalsLookback:
         )
         assert intervals[0].since == datetime(2024, 6, 15, 12, 0, tzinfo=UTC)
         assert len(intervals) == 2
+
+
+class TestInferIntervalsNoneInputs:
+    @travel(datetime(2024, 6, 15, 14, 35, tzinfo=UTC))
+    def test_until_none_defaults_to_now(self) -> None:
+        batch = Batch(batch_expression="@hourly")
+        intervals = batch.infer_intervals(
+            since=datetime(2024, 6, 15, 12, 0, tzinfo=UTC),
+            until=None,
+            batch_expression="0 * * * *",
+        )
+        assert intervals[0].since == datetime(2024, 6, 15, 12, 0, tzinfo=UTC)
+        assert intervals[-1].until == datetime(2024, 6, 15, 14, 35, tzinfo=UTC)
+
+    def test_since_none_without_latest_raises(self) -> None:
+        batch = Batch(batch_expression="@hourly")
+        with pytest.raises(TypeError):
+            batch.infer_intervals(
+                since=None,
+                until=datetime(2024, 6, 15, 14, 0, tzinfo=UTC),
+                batch_expression="0 * * * *",
+            )
+
+    @travel(datetime(2024, 6, 15, 14, 35, tzinfo=UTC))
+    def test_both_none_without_latest_raises(self) -> None:
+        batch = Batch(batch_expression="@hourly")
+        with pytest.raises(TypeError):
+            batch.infer_intervals(
+                since=None,
+                until=None,
+                batch_expression="0 * * * *",
+            )
+
+    @travel(datetime(2024, 6, 15, 14, 35, tzinfo=UTC))
+    def test_both_none_with_latest_resolves(self) -> None:
+        batch = Batch(batch_expression="@hourly")
+        intervals = batch.infer_intervals(
+            since=None,
+            until=None,
+            batch_expression="0 * * * *",
+            latest=True,
+        )
+        assert len(intervals) == 1
+        assert intervals[0].since == datetime(2024, 6, 15, 13, 0, tzinfo=UTC)
+        assert intervals[0].until == datetime(2024, 6, 15, 14, 0, tzinfo=UTC)

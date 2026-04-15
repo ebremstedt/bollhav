@@ -94,10 +94,20 @@ class Batch:
         latest: bool = False,
         tz_override: tzinfo | None = None,
     ) -> list[TZInterval]:
+        """Resolve and chunk a time interval for processing.
+
+        In latest mode, since/until are inferred from the batch expression
+        and current time. In backfill mode, since is required. If until is
+        None, it defaults to datetime.now in the batch's timezone (or
+        tz_override if set).
+        """
         tz = tz_override or self.tz
         cron = _resolve_cron(batch_expression)
         if latest:
             since, until = _resolve_cron_interval(cron, tz=tz)
+        if until is None:
+            until = datetime.now(tz=tz)
+            logger.info("until not set, defaulting to now (%s)", until)
         if self.lookback:
             since = self._apply_lookback(cron, since)
         return _chunk_interval(cron, since, until)
