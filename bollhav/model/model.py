@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
 from datetime import datetime, timedelta, tzinfo
 from typing import TYPE_CHECKING
 
@@ -11,6 +10,7 @@ from bollhav.model.target import Target
 from bollhav.model.bounds import Bounds
 from bollhav.model.batch import Batch, _resolve_cron, _chunk_interval
 from bollhav.model.intervals import TZInterval
+from bollhav.model.runtime_override import RuntimeOverride
 from bollhav.model.tags import Tags
 from roskarl import BatchExpression, BatchExpressionExtended
 
@@ -18,13 +18,6 @@ if TYPE_CHECKING:
     from bollhav.pipe.pipe_config import PipeConfig
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass
-class Runtime:
-    """Runtime state set during matching — not part of the model definition."""
-
-    reload: bool = False
 
 
 class Model:
@@ -49,8 +42,7 @@ class Model:
         self.debug = debug
         self.description = description
         self.upstream: list[str] = upstream or []
-
-        self.runtime = Runtime()
+        self.runtime_override = RuntimeOverride()
         self.tags: set[str] = (tagging or Tags()).assemble(
             self.target.name, self.target.schema.name
         )
@@ -171,8 +163,8 @@ class Model:
         """Resolve and chunk a time interval into TZIntervals.
 
         Resolution order:
-            batch_expression:  pipe override > model's own batch expression
-            timezone:          pipe tz_override > model's own timezone
+            batch_expression:  runtime override > model's own batch expression
+            timezone:          runtime tz_override > model's own timezone
 
         Three modes, evaluated in this order:
 
@@ -212,29 +204,26 @@ class Model:
                    (same fallback table as reload_model above)
         """
 
-        latest = pipe.latest.enabled and not self.runtime.reload
+        latest = pipe.latest.enabled and not self.runtime_override.reload
 
-        tz = pipe.tz_override or self.batching.tz
-        batch_expression = (
-            pipe.batch_expression_override or self.batching.batch_expression
+        tz = self.runtime_override.tz or self.batching.tz
+        batchexpr = (
+            self.runtime_override.batch_expression or self.batching.batch_expression
         )
 
         if latest:
-            interval = self.latest_complete_interval(batch_expression, tz)
+            interval = self.latest_complete_interval(batchexpr, tz)
             since, until = interval.since, interval.until
-        elif self.runtime.reload:
+        elif self.runtime_override.reload:
             since = self.bounds.begin
-            until = (
-                self.bounds.end or self.latest_complete_interval(batch_expression).until
-            )
+            until = self.bounds.end or self.latest_complete_interval(batchexpr).until
         else:
             since = pipe.backfill.since
             until = (
-                pipe.backfill.until
-                or self.latest_complete_interval(batch_expression).until
+                pipe.backfill.until or self.latest_complete_interval(batchexpr).until
             )
 
-        cron_expression = _resolve_cron(batch_expression)
+        cron_expression = _resolve_cron(batchexpr)
         if self.batching.lookback:
             since = self._apply_lookback(cron_expression, since)
 

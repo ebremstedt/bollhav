@@ -26,7 +26,8 @@ def main(pipe: PipeConfig) -> None:
     execute.set_name_width(max(len(m.target.full_name) for m in matches))
 
     for model in matches:
-        model.target.schema.suffix = pipe.schema_suffix
+        model.runtime_override.apply_pipe(pipe)
+        model.target.schema.suffix = model.runtime_override.schema_suffix
 
         intervals = model.infer_intervals(pipe)
 
