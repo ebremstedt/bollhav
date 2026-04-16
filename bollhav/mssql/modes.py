@@ -30,6 +30,7 @@ def _bulk_insert(
 _VARCHAR_TYPES = {MssqlType.NVARCHAR, MssqlType.VARCHAR}
 _DATETIME_TYPES = {MssqlType.DATETIME, MssqlType.DATETIME2, MssqlType.DATETIMEOFFSET}
 _DATE_TYPES = {MssqlType.DATE}
+_BINARY_TYPES = {MssqlType.VARBINARY_MAX}
 
 
 def _set_input_sizes(cursor: pyodbc.Cursor, columns: list[MssqlColumn]) -> None:
@@ -43,6 +44,8 @@ def _set_input_sizes(cursor: pyodbc.Cursor, columns: list[MssqlColumn]) -> None:
             sizes.append((pyodbc.SQL_TYPE_TIMESTAMP, 27, 7))
         elif col.data_type in _DATE_TYPES:
             sizes.append((pyodbc.SQL_TYPE_DATE, 10, 0))
+        elif col.data_type in _BINARY_TYPES:
+            sizes.append((pyodbc.SQL_VARBINARY, 0, 0))
         else:
             sizes.append(0)
     cursor.setinputsizes(sizes)
