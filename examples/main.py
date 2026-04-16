@@ -29,7 +29,7 @@ def main(pipe: PipeConfig) -> None:
         model.runtime_override.apply_pipe(pipe)
         model.target.schema.suffix = model.runtime_override.schema_suffix
 
-        intervals = model.infer_intervals(pipe)
+        intervals = model.infer_intervals()
 
         execute.set_total(len(intervals))
         for interval in intervals:
