@@ -21,9 +21,15 @@ UTC = timezone.utc
 
 
 def _model(
-    batch_expression="@hourly", tz=UTC, lookback=None, retries=None, bounds=None
+    batch_expression="@hourly",
+    tz=UTC,
+    lookback=None,
+    retries=None,
+    bounds=None,
+    batch_expression_override=None,
+    tz_override=None,
 ) -> Model:
-    return Model(
+    m = Model(
         target=Target(name="test"),
         batching=Batch(
             batch_expression=batch_expression,
@@ -33,6 +39,9 @@ def _model(
         ),
         bounds=bounds,
     )
+    m.runtime_override.batch_expression = batch_expression_override
+    m.runtime_override.tz = tz_override
+    return m
 
 
 def _pipe(
@@ -40,8 +49,6 @@ def _pipe(
     latest_enabled=False,
     backfill_since=None,
     backfill_until=None,
-    batch_expression_override=None,
-    tz_override=None,
 ) -> PipeConfig:
     return PipeConfig(
         tags="test",
@@ -52,8 +59,6 @@ def _pipe(
             until=backfill_until,
         ),
         schema_suffix="dev",
-        batch_expression_override=batch_expression_override,
-        tz_override=tz_override,
     )
 
 
@@ -162,7 +167,7 @@ class TestApplyLookback:
         assert result == datetime(2024, 6, 13, 0, 0, tzinfo=UTC)
 
 
-class TestLastCompleteInterval:
+class TestLatestCompleteInterval:
     @travel(datetime(2024, 6, 15, 14, 35, tzinfo=UTC))
     def test_hourly(self) -> None:
         model = _model(batch_expression="@hourly", tz=UTC)
@@ -204,8 +209,10 @@ class TestLastCompleteInterval:
 class TestInferIntervalsTimezone:
     @travel(datetime(2024, 6, 15, 14, 35, tzinfo=UTC))
     def test_latest_uses_model_tz(self) -> None:
-        model = _model(batch_expression="@hourly", tz=CET)
-        pipe = _pipe(latest_enabled=True, batch_expression_override="0 * * * *")
+        model = _model(
+            batch_expression="@hourly", tz=CET, batch_expression_override="0 * * * *"
+        )
+        pipe = _pipe(latest_enabled=True)
         intervals = model.infer_intervals(pipe)
         assert len(intervals) == 1
         assert intervals[0].since == datetime(2024, 6, 15, 15, 0, tzinfo=CET)
@@ -213,8 +220,10 @@ class TestInferIntervalsTimezone:
 
     @travel(datetime(2024, 6, 15, 14, 35, tzinfo=UTC))
     def test_latest_uses_utc_by_default(self) -> None:
-        model = _model(batch_expression="@hourly")
-        pipe = _pipe(latest_enabled=True, batch_expression_override="0 * * * *")
+        model = _model(
+            batch_expression="@hourly", batch_expression_override="0 * * * *"
+        )
+        pipe = _pipe(latest_enabled=True)
         intervals = model.infer_intervals(pipe)
         assert len(intervals) == 1
         assert intervals[0].since == datetime(2024, 6, 15, 13, 0, tzinfo=UTC)
@@ -222,10 +231,13 @@ class TestInferIntervalsTimezone:
 
     @travel(datetime(2024, 6, 15, 14, 35, tzinfo=UTC))
     def test_tz_override_takes_precedence_over_model_tz(self) -> None:
-        model = _model(batch_expression="@hourly", tz=CET)
-        pipe = _pipe(
-            latest_enabled=True, batch_expression_override="0 * * * *", tz_override=UTC
+        model = _model(
+            batch_expression="@hourly",
+            tz=CET,
+            batch_expression_override="0 * * * *",
+            tz_override=UTC,
         )
+        pipe = _pipe(latest_enabled=True)
         intervals = model.infer_intervals(pipe)
         assert len(intervals) == 1
         assert intervals[0].since == datetime(2024, 6, 15, 13, 0, tzinfo=UTC)
@@ -233,10 +245,13 @@ class TestInferIntervalsTimezone:
 
     @travel(datetime(2024, 6, 15, 14, 35, tzinfo=UTC))
     def test_tz_override_none_falls_back_to_model(self) -> None:
-        model = _model(batch_expression="@hourly", tz=CET)
-        pipe = _pipe(
-            latest_enabled=True, batch_expression_override="0 * * * *", tz_override=None
+        model = _model(
+            batch_expression="@hourly",
+            tz=CET,
+            batch_expression_override="0 * * * *",
+            tz_override=None,
         )
+        pipe = _pipe(latest_enabled=True)
         intervals = model.infer_intervals(pipe)
         assert len(intervals) == 1
         assert intervals[0].since == datetime(2024, 6, 15, 15, 0, tzinfo=CET)
@@ -246,8 +261,12 @@ class TestInferIntervalsTimezone:
 class TestInferIntervalsLookback:
     @travel(datetime(2024, 6, 15, 14, 35, tzinfo=UTC))
     def test_latest_with_lookback(self) -> None:
-        model = _model(batch_expression="@hourly", lookback=3)
-        pipe = _pipe(latest_enabled=True, batch_expression_override="0 * * * *")
+        model = _model(
+            batch_expression="@hourly",
+            lookback=3,
+            batch_expression_override="0 * * * *",
+        )
+        pipe = _pipe(latest_enabled=True)
         intervals = model.infer_intervals(pipe)
         # Latest interval is 13:00-14:00, lookback=3 shifts since to 10:00
         assert intervals[0].since == datetime(2024, 6, 15, 10, 0, tzinfo=UTC)
@@ -255,11 +274,14 @@ class TestInferIntervalsLookback:
         assert len(intervals) == 4
 
     def test_backfill_with_lookback(self) -> None:
-        model = _model(batch_expression="@hourly", lookback=2)
+        model = _model(
+            batch_expression="@hourly",
+            lookback=2,
+            batch_expression_override="0 * * * *",
+        )
         pipe = _pipe(
             backfill_since=datetime(2024, 6, 15, 12, 0, tzinfo=UTC),
             backfill_until=datetime(2024, 6, 15, 14, 0, tzinfo=UTC),
-            batch_expression_override="0 * * * *",
         )
         intervals = model.infer_intervals(pipe)
         # since=12:00, lookback=2 shifts to 10:00, until stays 14:00
@@ -268,11 +290,12 @@ class TestInferIntervalsLookback:
         assert len(intervals) == 4
 
     def test_no_lookback(self) -> None:
-        model = _model(batch_expression="@hourly")
+        model = _model(
+            batch_expression="@hourly", batch_expression_override="0 * * * *"
+        )
         pipe = _pipe(
             backfill_since=datetime(2024, 6, 15, 12, 0, tzinfo=UTC),
             backfill_until=datetime(2024, 6, 15, 14, 0, tzinfo=UTC),
-            batch_expression_override="0 * * * *",
         )
         intervals = model.infer_intervals(pipe)
         assert intervals[0].since == datetime(2024, 6, 15, 12, 0, tzinfo=UTC)
@@ -282,10 +305,11 @@ class TestInferIntervalsLookback:
 class TestInferIntervalsNoneInputs:
     @travel(datetime(2024, 6, 15, 14, 35, tzinfo=UTC))
     def test_until_none_defaults_to_last_complete_hourly(self) -> None:
-        model = _model(batch_expression="@hourly")
+        model = _model(
+            batch_expression="@hourly", batch_expression_override="0 * * * *"
+        )
         pipe = _pipe(
             backfill_since=datetime(2024, 6, 15, 12, 0, tzinfo=UTC),
-            batch_expression_override="0 * * * *",
         )
         intervals = model.infer_intervals(pipe)
         assert intervals[0].since == datetime(2024, 6, 15, 12, 0, tzinfo=UTC)
@@ -295,10 +319,9 @@ class TestInferIntervalsNoneInputs:
 
     @travel(datetime(2024, 6, 15, 14, 35, tzinfo=UTC))
     def test_until_none_defaults_to_last_complete_daily(self) -> None:
-        model = _model(batch_expression="@daily")
+        model = _model(batch_expression="@daily", batch_expression_override="0 0 * * *")
         pipe = _pipe(
             backfill_since=datetime(2024, 6, 14, 0, 0, tzinfo=UTC),
-            batch_expression_override="0 0 * * *",
         )
         intervals = model.infer_intervals(pipe)
         # 14:35 on June 15 means last complete daily interval ends at June 15 00:00
@@ -308,13 +331,16 @@ class TestInferIntervalsNoneInputs:
 
     @travel(datetime(2024, 6, 15, 14, 35, tzinfo=UTC))
     def test_until_none_uses_model_tz_not_override(self) -> None:
-        # Model is daily in CET; pipe overrides tz to UTC.
+        # Model is daily in CET; runtime overrides tz to UTC.
         # until=None should resolve using the model's tz (CET), not the override.
-        model = _model(batch_expression="@daily", tz=CET)
-        pipe = _pipe(
-            backfill_since=datetime(2024, 6, 14, 0, 0, tzinfo=CET),
+        model = _model(
+            batch_expression="@daily",
+            tz=CET,
             batch_expression_override="0 0 * * *",
             tz_override=UTC,
+        )
+        pipe = _pipe(
+            backfill_since=datetime(2024, 6, 14, 0, 0, tzinfo=CET),
         )
         intervals = model.infer_intervals(pipe)
         # 14:35 UTC = 16:35 CET, last complete daily in CET is June 15 00:00 CET
@@ -322,12 +348,15 @@ class TestInferIntervalsNoneInputs:
 
     @travel(datetime(2024, 6, 15, 14, 35, tzinfo=UTC))
     def test_until_none_uses_provided_batch_expression_first(self) -> None:
-        # Model is daily, but pipe overrides batch expression to hourly.
+        # Model is daily, but runtime overrides batch expression to hourly.
         # until=None should resolve using the provided expression (hourly).
-        model = _model(batch_expression="@daily", tz=UTC)
+        model = _model(
+            batch_expression="@daily",
+            tz=UTC,
+            batch_expression_override="0 * * * *",  # hourly override
+        )
         pipe = _pipe(
             backfill_since=datetime(2024, 6, 15, 12, 0, tzinfo=UTC),
-            batch_expression_override="0 * * * *",  # hourly override
         )
         intervals = model.infer_intervals(pipe)
         # Hourly: last complete boundary at 14:00, not daily 00:00
@@ -335,7 +364,7 @@ class TestInferIntervalsNoneInputs:
 
     @travel(datetime(2024, 6, 15, 14, 35, tzinfo=UTC))
     def test_until_none_falls_back_to_model_batch_expression(self) -> None:
-        # No batch expression provided, falls back to model's @daily.
+        # No batch expression override, falls back to model's @daily.
         model = _model(batch_expression="@daily", tz=UTC)
         pipe = _pipe(
             backfill_since=datetime(2024, 6, 14, 0, 0, tzinfo=UTC),
@@ -345,25 +374,30 @@ class TestInferIntervalsNoneInputs:
         assert intervals[-1].until == datetime(2024, 6, 15, 0, 0, tzinfo=UTC)
 
     def test_since_none_without_latest_raises(self) -> None:
-        model = _model(batch_expression="@hourly")
+        model = _model(
+            batch_expression="@hourly", batch_expression_override="0 * * * *"
+        )
         pipe = _pipe(
             backfill_until=datetime(2024, 6, 15, 14, 0, tzinfo=UTC),
-            batch_expression_override="0 * * * *",
         )
         with pytest.raises(TypeError):
             model.infer_intervals(pipe)
 
     @travel(datetime(2024, 6, 15, 14, 35, tzinfo=UTC))
     def test_both_none_without_latest_raises(self) -> None:
-        model = _model(batch_expression="@hourly")
-        pipe = _pipe(batch_expression_override="0 * * * *")
+        model = _model(
+            batch_expression="@hourly", batch_expression_override="0 * * * *"
+        )
+        pipe = _pipe()
         with pytest.raises(TypeError):
             model.infer_intervals(pipe)
 
     @travel(datetime(2024, 6, 15, 14, 35, tzinfo=UTC))
     def test_both_none_with_latest_resolves(self) -> None:
-        model = _model(batch_expression="@hourly")
-        pipe = _pipe(latest_enabled=True, batch_expression_override="0 * * * *")
+        model = _model(
+            batch_expression="@hourly", batch_expression_override="0 * * * *"
+        )
+        pipe = _pipe(latest_enabled=True)
         intervals = model.infer_intervals(pipe)
         assert len(intervals) == 1
         assert intervals[0].since == datetime(2024, 6, 15, 13, 0, tzinfo=UTC)

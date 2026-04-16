@@ -19,7 +19,7 @@ def _model_matches(
         return None
     for group in potential_tag_groups:
         if group_matches(model.tags, group):
-            model.runtime.reload = any(tag.reload for tag in group.tags)
+            model.runtime_override.reload = any(tag.reload for tag in group.tags)
             return model
     return None
 
@@ -66,7 +66,7 @@ def match_models(
     Scan a folder recursively for Python modules, discover all Model instances,
     and return those whose tags match the given tag expression.
 
-    Runtime state (e.g. reload) is set on model.runtime during matching.
+    Runtime state (e.g. reload) is set on model.runtime_override during matching.
 
     Usage:
         for model in match_models(folder="src/models", tags="[r:sales & finance]"):
@@ -117,7 +117,7 @@ def match_models(
                         "Matched model %r from %s (reload=%s)",
                         full_name,
                         file,
-                        model.runtime.reload,
+                        model.runtime_override.reload,
                     )
 
     if total_models == 0:
