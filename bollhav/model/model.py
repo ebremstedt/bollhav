@@ -55,11 +55,6 @@ class Model:
             self.target.name, self.target.schema.name
         )
 
-        for key, val in kwargs.items():
-            if callable(val):
-                kwargs[key] = val(
-                    **{k: v for k, v in kwargs.items() if not callable(v)}
-                )
         self.extra = kwargs
 
         logger.debug(
@@ -133,7 +128,12 @@ class Model:
         | None = None,
         tz_override: tzinfo | None = None,
     ) -> TZInterval:
-        """Return the last complete interval as a TZInterval.
+        """Return the most recent fully elapsed interval as a TZInterval.
+
+        "Complete" means the interval's entire time window has passed.
+        An in-progress interval is never returned — e.g. at 14:35 with
+        an hourly expression, the 14:00-15:00 interval is still running,
+        so this returns 13:00-14:00.
 
         Uses the provided batch expression and timezone if set,
         otherwise falls back to the model's own."""

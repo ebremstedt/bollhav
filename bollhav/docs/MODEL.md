@@ -95,17 +95,24 @@ model = Model(
 
 ### Model methods
 
-#### `infer_intervals(since, until, batch_expression=None, latest=False, tz_override=None) -> list[TZInterval]`
+#### `infer_intervals(pipe) -> list[TZInterval]`
 
-Splits the `[since, until]` window into a list of `TZInterval` chunks according to the batch expression. When `latest=True`, `since` and `until` are inferred from the batch expression and the current time. If `until` is `None`, it defaults to the end of the last complete interval based on the model's batch expression and timezone. `batch_expression` defaults to the model's own batch expression when not provided.
+Resolves and chunks a time interval into `TZInterval`s. Mode, batch expression, timezone, and time window are derived from the `PipeConfig` and the model's own settings.
+
+| Parameter | Type | Description |
+|---|---|---|
+| `pipe` | `PipeConfig` | The pipe configuration |
+
+Three modes, evaluated in order: **latest** (if `pipe.latest.enabled`), **reload** (if `model.runtime.reload`), **backfill** (default). See the `infer_intervals` docstring for full details.
+
+#### `latest_complete_interval(batch_expression_override=None, tz_override=None) -> TZInterval`
+
+Returns the most recent fully elapsed interval. An in-progress interval is never returned.
 
 | Parameter | Type | Default | Description |
 |---|---|---|---|
-| `since` | `datetime \| None` | required | Start of the window |
-| `until` | `datetime \| None` | required | End of the window. If `None`, resolves to last complete interval boundary using the model's batch expression and timezone |
-| `batch_expression` | `BatchExpression \| BatchExpressionExtended \| None` | `None` | Overrides the model's batch expression when set |
-| `latest` | `bool` | `False` | When `True`, resolves the latest complete interval from the cron expression |
-| `tz_override` | `tzinfo \| None` | `None` | Overrides the model's `tz` when set (used by `TIMEZONE_OVERRIDE`) |
+| `batch_expression_override` | `BatchExpression \| None` | `None` | Overrides the model's batch expression |
+| `tz_override` | `tzinfo \| None` | `None` | Overrides the model's timezone |
 
 ### Computed attributes
 

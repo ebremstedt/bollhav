@@ -325,14 +325,6 @@ def test_extra_kwargs_stored():
     assert m.extra["custom_key"] == "custom_value"
 
 
-def test_callable_extra_kwarg_resolved():
-    m = make_model(
-        static_val="hello",
-        dynamic_val=lambda static_val: static_val + "_world",
-    )
-    assert m.extra["dynamic_val"] == "hello_world"
-
-
 # --- __repr__ ---
 
 
