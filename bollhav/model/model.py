@@ -23,6 +23,7 @@ class Model:
         batching: Batch | None = None,
         tagging: Tags | None = None,
         enabled: bool = True,
+        unfiltered: bool = False,
         debug: bool = False,
         description: str | None = None,
         upstream: list[str] | None = None,
@@ -33,6 +34,7 @@ class Model:
         self.bounds = bounds or Bounds()
         self.batching = batching or Batch()
         self.enabled = enabled
+        self.unfiltered = unfiltered
         self.debug = debug
         self.description = description
         self.upstream: list[str] = upstream or []
@@ -197,6 +199,9 @@ class Model:
            until = runtime_override.until, or latest complete interval end
                    (same fallback table as reload above)
         """
+        if self.unfiltered:
+            return [None]
+
         rt = self.runtime_override
         tz = rt.tz or self.batching.tz
         batchexpr = rt.batch_expression or self.batching.batch_expression
