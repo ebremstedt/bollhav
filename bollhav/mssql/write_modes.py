@@ -15,6 +15,7 @@ def write_dataframes(
     model: Model,
     df_gen: Generator[pl.DataFrame, None, None],
     create_if_missing: bool = True,
+    fast_executemany: bool = True,
 ) -> None:
     match model.target.write_mode:
         case WriteMode.UPSERT_NO_DELETE:
@@ -39,7 +40,7 @@ def write_dataframes(
             model.target.full_name,
             model.target.write_mode.value,
         )
-        write_function(conn=conn, model=model, df=df)
+        write_function(conn=conn, model=model, df=df, fast_executemany=fast_executemany)
 
 
 def write(
@@ -47,6 +48,7 @@ def write(
     model: Model,
     df_gen: Generator[pl.DataFrame, None, None] | None = None,
     create_if_missing: bool = True,
+    fast_executemany: bool = True,
 ) -> None:
     if model.target.write_mode == WriteMode.VIEW:
         if df_gen:
@@ -63,4 +65,5 @@ def write(
         model=model,
         df_gen=df_gen,
         create_if_missing=create_if_missing,
+        fast_executemany=fast_executemany,
     )

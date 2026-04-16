@@ -15,11 +15,12 @@ def _bulk_insert(
     col_names: list[str],
     df: pl.DataFrame,
     columns: list[MssqlColumn] | None = None,
+    fast: bool = True,
 ) -> None:
     cols = ", ".join(_b(c) for c in col_names)
     placeholders = ", ".join(["?"] * len(col_names))
-    cursor.fast_executemany = True
-    if columns:
+    cursor.fast_executemany = fast
+    if fast and columns:
         _set_input_sizes(cursor, columns)
     cursor.executemany(
         f"INSERT INTO {target} ({cols}) VALUES ({placeholders})", df.rows()
@@ -27,21 +28,32 @@ def _bulk_insert(
 
 
 _VARCHAR_TYPES = {MssqlType.NVARCHAR, MssqlType.VARCHAR}
+_DATETIME_TYPES = {MssqlType.DATETIME, MssqlType.DATETIME2, MssqlType.DATETIMEOFFSET}
+_DATE_TYPES = {MssqlType.DATE}
 
 
 def _set_input_sizes(cursor: pyodbc.Cursor, columns: list[MssqlColumn]) -> None:
-    """Pre-allocate buffer sizes for string columns to avoid truncation
-    when fast_executemany infers too-small buffers from the first row."""
+    """Pre-allocate buffer sizes to avoid truncation and type mismatches
+    when fast_executemany infers types from the first row."""
     sizes = []
     for col in columns:
         if col.data_type in _VARCHAR_TYPES and col.length is None:
             sizes.append((pyodbc.SQL_WVARCHAR, 0, 0))
+        elif col.data_type in _DATETIME_TYPES:
+            sizes.append((pyodbc.SQL_TYPE_TIMESTAMP, 27, 7))
+        elif col.data_type in _DATE_TYPES:
+            sizes.append((pyodbc.SQL_TYPE_DATE, 10, 0))
         else:
             sizes.append(0)
     cursor.setinputsizes(sizes)
 
 
-def merge(conn: pyodbc.Connection, model: Model, df: pl.DataFrame) -> None:
+def merge(
+    conn: pyodbc.Connection,
+    model: Model,
+    df: pl.DataFrame,
+    fast_executemany: bool = True,
+) -> None:
     """Upsert into target using MSSQL MERGE via a temp staging table."""
     schema = model.target.schema.resolved
     table = model.target.name
@@ -62,7 +74,9 @@ def merge(conn: pyodbc.Connection, model: Model, df: pl.DataFrame) -> None:
     cursor = conn.cursor()
     cursor.execute(f"IF OBJECT_ID('tempdb..{temp}') IS NOT NULL DROP TABLE {temp}")
     cursor.execute(f"CREATE TABLE {temp} ({col_defs})")
-    _bulk_insert(cursor, temp, all_col_names, df, columns=mssql_cols)
+    _bulk_insert(
+        cursor, temp, all_col_names, df, columns=mssql_cols, fast=fast_executemany
+    )
 
     if non_unique_col_names:
         update_set = ", ".join(
@@ -81,7 +95,12 @@ def merge(conn: pyodbc.Connection, model: Model, df: pl.DataFrame) -> None:
     cursor.commit()
 
 
-def truncate_write(conn: pyodbc.Connection, model: Model, df: pl.DataFrame) -> None:
+def truncate_write(
+    conn: pyodbc.Connection,
+    model: Model,
+    df: pl.DataFrame,
+    fast_executemany: bool = True,
+) -> None:
     """Truncate target table then bulk insert."""
     schema = model.target.schema.resolved
     table = model.target.name
@@ -91,7 +110,12 @@ def truncate_write(conn: pyodbc.Connection, model: Model, df: pl.DataFrame) -> N
     mssql_cols = [c for c in model.target.columns if isinstance(c, MssqlColumn)]
     cursor.execute(f"TRUNCATE TABLE {_b(schema)}.{_b(table)}")
     _bulk_insert(
-        cursor, f"{_b(schema)}.{_b(table)}", all_col_names, df, columns=mssql_cols
+        cursor,
+        f"{_b(schema)}.{_b(table)}",
+        all_col_names,
+        df,
+        columns=mssql_cols,
+        fast=fast_executemany,
     )
     cursor.commit()
 
