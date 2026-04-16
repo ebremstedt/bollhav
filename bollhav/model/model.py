@@ -1,8 +1,5 @@
-from __future__ import annotations
-
 import logging
 from datetime import datetime, timedelta, tzinfo
-from typing import TYPE_CHECKING
 
 from icron import croniter
 from bollhav.model.source import Source
@@ -13,9 +10,6 @@ from bollhav.model.intervals import TZInterval
 from bollhav.model.runtime_override import RuntimeOverride
 from bollhav.model.tags import Tags
 from roskarl import BatchExpression, BatchExpressionExtended
-
-if TYPE_CHECKING:
-    from bollhav.pipe.pipe_config import PipeConfig
 
 logger = logging.getLogger(__name__)
 
@@ -156,19 +150,19 @@ class Model:
         tick_size = tick2 - tick1
         return since - (tick_size * self.batching.lookback)
 
-    def infer_intervals(
-        self,
-        pipe: PipeConfig,
-    ) -> list[TZInterval] | None:
+    def infer_intervals(self) -> list[TZInterval]:
         """Resolve and chunk a time interval into TZIntervals.
 
+        All inputs come from the model's own settings and runtime_override.
+        Call runtime_override.apply_pipe(pipe) before calling this method.
+
         Resolution order:
-            batch_expression:  runtime override > model's own batch expression
-            timezone:          runtime tz_override > model's own timezone
+            batch_expression:  runtime_override > model's own batch expression
+            timezone:          runtime_override > model's own timezone
 
         Three modes, evaluated in this order:
 
-        1. latest (pipe.latest.enabled and not runtime.reload)
+        1. latest (runtime_override.latest)
            Both since and until are inferred by finding the last two
            cron ticks before now:
 
@@ -188,9 +182,9 @@ class Model:
 
                 Jun 15-16 is still in progress -> Jun 14-15.
 
-        2. runtime.reload
+        2. reload (runtime_override.reload)
            since = model.bounds.begin
-           until = model.bounds.end, or last complete interval end:
+           until = model.bounds.end, or latest complete interval end:
 
             expression  | until resolves to
             ------------|---------------------
@@ -199,29 +193,23 @@ class Model:
             @weekly     | 2024-06-09 00:00 UTC
 
         3. backfill (default)
-           since = pipe.backfill.since
-           until = pipe.backfill.until, or last complete interval end
-                   (same fallback table as reload_model above)
+           since = runtime_override.since
+           until = runtime_override.until, or latest complete interval end
+                   (same fallback table as reload above)
         """
+        rt = self.runtime_override
+        tz = rt.tz or self.batching.tz
+        batchexpr = rt.batch_expression or self.batching.batch_expression
 
-        latest = pipe.latest.enabled and not self.runtime_override.reload
-
-        tz = self.runtime_override.tz or self.batching.tz
-        batchexpr = (
-            self.runtime_override.batch_expression or self.batching.batch_expression
-        )
-
-        if latest:
+        if rt.latest:
             interval = self.latest_complete_interval(batchexpr, tz)
             since, until = interval.since, interval.until
-        elif self.runtime_override.reload:
+        elif rt.reload:
             since = self.bounds.begin
             until = self.bounds.end or self.latest_complete_interval(batchexpr).until
         else:
-            since = pipe.backfill.since
-            until = (
-                pipe.backfill.until or self.latest_complete_interval(batchexpr).until
-            )
+            since = rt.since
+            until = rt.until or self.latest_complete_interval(batchexpr).until
 
         cron_expression = _resolve_cron(batchexpr)
         if self.batching.lookback:
