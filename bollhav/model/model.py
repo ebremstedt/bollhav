@@ -1,5 +1,8 @@
+from __future__ import annotations
+
 import logging
 from datetime import datetime, tzinfo
+from typing import TYPE_CHECKING
 
 from icron import croniter
 from bollhav.model.source import Source
@@ -10,6 +13,9 @@ from bollhav.model.intervals import TZInterval
 from bollhav.model.runtime_override import RuntimeOverride
 from bollhav.model.tags import Tags
 from roskarl import BatchExpression, BatchExpressionExtended
+
+if TYPE_CHECKING:
+    from bollhav.pipe.pipe_config import PipeConfig
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +54,13 @@ class Model:
         )
         if self.debug:
             self.pretty()
+
+    def apply_pipe(self, pipe: PipeConfig) -> None:
+        """Apply pipe-level config to this model — sets runtime_override state
+        and propagates the schema suffix to the target. Call before
+        infer_intervals()."""
+        self.runtime_override.apply_pipe(pipe)
+        self.target.schema.suffix = self.runtime_override.schema_suffix
 
     def pretty(self) -> None:
         cols = self.target.columns
