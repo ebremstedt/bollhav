@@ -32,6 +32,7 @@ class PipeConfig:
     backfill: BackfillConfig
     schema_suffix: str
     batch_expression_override: str | None = None
+    window_expression_override: str | None = None
     tz_override: tzinfo | None = None
     use_schema_suffix: bool = True
     debug: bool = False
@@ -49,6 +50,12 @@ class PipeConfig:
 
         if not self.use_schema_suffix:
             self.schema_suffix = ""
+
+        if self.window_expression_override and not self.latest.enabled:
+            raise ValueError(
+                "WINDOW_EXPRESSION_OVERRIDE only applies when LATEST_ENABLED=True — "
+                "in backfill mode since/until are set explicitly and no window is inferred"
+            )
 
         def _row(key: str, val: str) -> None:
             print(f"  {key:<16}{val}")
@@ -76,6 +83,8 @@ class PipeConfig:
         if self.latest.enabled or self.backfill.enabled:
             _row("tz override", str(self.tz_override) if self.tz_override else "unset")
             _row("batch override", self.batch_expression_override or "unset")
+        if self.latest.enabled:
+            _row("window override", self.window_expression_override or "unset")
         print("────────────────────────────")
 
 
@@ -113,6 +122,9 @@ def load_pipe_config() -> PipeConfig:
         ),
         batch_expression_override=env_var_batch_expression(
             name="BATCH_EXPRESSION_OVERRIDE", should_print_unset=False
+        ),
+        window_expression_override=env_var_batch_expression(
+            name="WINDOW_EXPRESSION_OVERRIDE", should_print_unset=False
         ),
         tz_override=tz_override,
         debug=env_var_bool(name="DEBUG", default=False),

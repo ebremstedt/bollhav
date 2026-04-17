@@ -172,9 +172,21 @@ class Model:
         All inputs come from the model's own settings and runtime_override.
         Call runtime_override.apply_pipe(pipe) before calling this method.
 
+        Two cron expressions are resolved:
+            batch_expression   defines the chunk size — how the resolved interval
+                               is split into TZIntervals for processing. Used in
+                               all three modes, and as the fallback tick when
+                               resolving an open-ended `until` in reload/backfill.
+            window_expression  defines the scope for `latest` mode only — the
+                               outer interval to catch up on. Defaults to
+                               `batch_expression` when unset. Irrelevant for
+                               reload/backfill, which get bounds explicitly.
+
         Resolution order:
-            batch_expression:  runtime_override > model's own batch expression
-            timezone:          runtime_override > model's own timezone
+            batch_expression:   runtime_override > model's own batch expression
+            window_expression:  runtime_override > model's own window expression
+                                > batch_expression (fallback; latest mode only)
+            timezone:           runtime_override > model's own timezone
 
         Three modes, evaluated in this order:
 
@@ -221,7 +233,10 @@ class Model:
         batchexpr = rt.batch_expression or self.batching.batch_expression
 
         if rt.latest:
-            interval = self.latest_complete_interval(batchexpr, tz)
+            windowexpr = (
+                rt.window_expression or self.batching.window_expression or batchexpr
+            )
+            interval = self.latest_complete_interval(windowexpr, tz)
             since, until = interval.since, interval.until
         elif rt.reload:
             if self.bounds.begin is None:

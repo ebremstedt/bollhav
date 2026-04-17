@@ -1,4 +1,4 @@
-[back to README](..README.md)
+[back to README](../../README.md)
 
 # Model
 
@@ -88,22 +88,45 @@ model = Model(
 
 | Parameter | Type | Default | Description |
 |---|---|---|---|
-| `batch_expression` | `BatchExpression` | `"@daily"` | Chunk size as a batch expression |
+| `batch_expression` | `BatchExpression` | `"@daily"` | Chunk size — how an interval is split into `TZInterval`s for processing |
+| `window_expression` | `BatchExpression \| None` | `None` | Scope for `latest` mode — "one of what" counts as the latest complete unit. When `None`, falls back to `batch_expression` (one chunk = one scope, pre-window behaviour). Ignored in reload/backfill, which use explicit since/until |
 | `tz` | `tzinfo` | `timezone.utc` | Timezone used for interval resolution |
 | `lookback` | `int` | `None` | Extends interval start backwards by N cron-ticks |
 | `retries` | `int` | `None` | Retry count on failure |
 
+#### `batch_expression` vs `window_expression`
+
+Two cron expressions that do different jobs:
+
+- **`window_expression`** — the OUTER scope ("catch up on one full DAY")
+- **`batch_expression`** — the INNER chunks ("split that into 15-min WRITES")
+
+`window_expression` is consulted only in `latest` mode. For `reload`/`backfill` the since/until are explicit and the window is irrelevant.
+
+```
+assume now = 2024-06-15 14:35 UTC
+
+window="@daily", batch="*/15 * * * *"  → 96 × 15-min chunks covering yesterday
+window="@daily", batch="@hourly"       → 24 × hourly chunks covering yesterday
+window unset (== batch), batch="@hourly" → 1 × hourly chunk (13:00→14:00)
+```
+
+```python
+batching=Batch(
+    batch_expression="*/15 * * * *",   # chunk into 15-min pieces
+    window_expression="@daily",         # scope = one full day
+)
+```
+
+When `LATEST_ENABLED=True`, `infer_intervals()` returns 96 `TZInterval`s covering yesterday 00:00 → today 00:00.
+
 ### Model methods
 
-#### `infer_intervals(pipe) -> list[TZInterval]`
+#### `infer_intervals() -> list[TZInterval] | list[None]`
 
-Resolves and chunks a time interval into `TZInterval`s. Mode, batch expression, timezone, and time window are derived from the `PipeConfig` and the model's own settings.
+Resolves and chunks a time interval into `TZInterval`s. Mode, batch/window expressions, timezone, and time window are derived from the model's own settings and its `runtime_override` — so call `model.runtime_override.apply_pipe(pipe)` before invoking this. Returns `[None]` when `model.source.is_unfiltered` — signalling to callers that no interval filtering should be applied.
 
-| Parameter | Type | Description |
-|---|---|---|
-| `pipe` | `PipeConfig` | The pipe configuration |
-
-Three modes, evaluated in order: **latest** (if `pipe.latest.enabled`), **reload** (if `model.runtime.reload`), **backfill** (default). See the `infer_intervals` docstring for full details.
+Three modes, evaluated in order: **latest** (if `model.runtime_override.latest`), **reload** (if `model.runtime_override.reload`), **backfill** (default). See the `infer_intervals` docstring for full details.
 
 #### `latest_complete_interval(batch_expression_override=None, tz_override=None) -> TZInterval`
 
