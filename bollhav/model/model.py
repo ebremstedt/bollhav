@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime, timedelta, tzinfo
+from datetime import datetime, tzinfo
 
 from icron import croniter
 from bollhav.model.source import Source
@@ -150,8 +150,11 @@ class Model:
         tick_size = tick2 - tick1
         return since - (tick_size * self.batching.lookback)
 
-    def infer_intervals(self) -> list[TZInterval]:
+    def infer_intervals(self) -> list[TZInterval] | list[None]:
         """Resolve and chunk a time interval into TZIntervals.
+
+        Returns `[None]` when the source is marked `is_unfiltered` — signalling
+        to callers that no interval filtering should be applied to the read.
 
         All inputs come from the model's own settings and runtime_override.
         Call runtime_override.apply_pipe(pipe) before calling this method.

@@ -1,4 +1,4 @@
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -13,7 +13,6 @@ from bollhav.model.batch import (
 from bollhav.model.intervals import TZInterval
 from bollhav.model.model import Model
 from bollhav.model.target import Target
-from bollhav.model.bounds import Bounds
 
 
 CET = ZoneInfo("Europe/Stockholm")
