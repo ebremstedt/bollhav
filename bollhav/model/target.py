@@ -31,6 +31,14 @@ class Target:
             f"{self.schema.resolved}.{self.name}" if self.schema.resolved else self.name
         )
 
+    @property
+    def is_view(self) -> bool:
+        return self.model_type == ModelType.VIEW
+
+    @property
+    def is_table(self) -> bool:
+        return self.model_type == ModelType.TABLE
+
     def __post_init__(self) -> None:
         if self.model_type == ModelType.VIEW and self.write_mode != WriteMode.VIEW:
             raise ValueError("ModelType.VIEW must use WriteMode.VIEW")
