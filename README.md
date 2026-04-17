@@ -23,24 +23,9 @@ Implementations:
 
 ![demo](bollhav/docs/batch_recording.gif)
 
-## Examples
+## Explore the features
 
-A self-contained mock pipeline in [examples/](examples/) demonstrates the full bollhav pattern — models, pipes, tag matching, and write modes — without any database connections.
-
-```bash
-cd examples
-
-# backfill mode
-TAGS="[all]" USE_SCHEMA_SUFFIX=false BACKFILL_ENABLED=true \
-  BACKFILL_SINCE=2024-01-01T00:00:00Z BACKFILL_UNTIL=2024-01-11T00:00:00Z \
-  python main.py
-
-# latest mode (resolves the most recent complete interval from the batch expression)
-TAGS="[all]" USE_SCHEMA_SUFFIX=false LATEST_ENABLED=true \
-  python main.py
-```
-
-See [examples/README.md](examples/README.md) for the full setup and available options
+See [examples/](examples/) for self-contained, runnable pipelines that isolate each feature of bollhav.
 
 ## Installation
 ```bash
