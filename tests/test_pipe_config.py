@@ -57,14 +57,18 @@ def _make_patches(
         "bollhav.pipe.pipe_config.env_var_bool": lambda name, default=False: (
             bool_map.get(name, default)
         ),
-        "bollhav.pipe.pipe_config.env_var": lambda name, required=False, default=None, should_print_unset=True: (
+        "bollhav.pipe.pipe_config.env_var": lambda name,
+        required=False,
+        default=None,
+        should_print_unset=True: (
             {
                 "TAGS": tags,
                 "SCHEMA_SUFFIX": schema_suffix,
                 "UPSTREAM": upstream,
             }.get(name, default)
         ),
-        "bollhav.pipe.pipe_config.env_var_batch_expression": lambda name, should_print_unset=True: (
+        "bollhav.pipe.pipe_config.env_var_batch_expression": lambda name,
+        should_print_unset=True: (
             {
                 "BATCH_EXPRESSION_OVERRIDE": batch_expression_override,
             }.get(name)
