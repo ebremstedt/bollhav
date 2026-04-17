@@ -18,8 +18,8 @@ Prefix `not:` to exclude models:
 
 | Syntax | Meaning |
 |--------|---------|
-| `[all & not:debug]` | has `all` but NOT `debug` |
-| `[not:debug]` | does NOT have `debug` |
+| `[all & not:foo]` | has `all` but NOT `foo` |
+| `[not:foo]` | does NOT have `foo` |
 | `[foo & not:(bar\|baz)]` | has `foo` but NOT `bar` and NOT `baz` |
 | `not:[foo & bar]` | does NOT have both `foo` AND `bar` |
 
@@ -44,7 +44,7 @@ The prefixes can be combined:
 
 | Syntax | Meaning |
 |--------|---------|
-| `[r:sales & not:debug]` | match `sales`, exclude `debug`, reload matched |
+| `[r:sales & not:foo]` | match `sales`, exclude `foo`, reload matched |
 | `r:not:[foo]` | match everything without `foo`, reload all |
 
 ## Usage
@@ -65,6 +65,6 @@ Tag expressions exist because regex is a poor fit for model selection:
 
 - **Reload is a first-class concept.** The `r:` prefix ties reload intent directly to the selection. With regex you would need a second mechanism (a separate flag, a naming convention, a wrapper) to express "match these models *and* reload them."
 - **Multiple groups are trivial.** `[sales][finance]` reads as "sales or finance." The regex equivalent (`sales|finance`) looks simple in this case, but combining OR across groups with AND within groups gets unwieldy fast — `(?=.*foo)(?=.*bar)|baz` is not something you want in an environment variable.
-- **Negation is explicit.** `[all & not:debug]` says exactly what it means. Regex negation (`^(?!.*debug).*$`) is easy to get wrong and hard to read at a glance.
+- **Negation is explicit.** `[all & not:foo]` says exactly what it means. Regex negation (`^(?!.*foo).*$`) is easy to get wrong and hard to read at a glance.
 - **Fewer mistakes.** Regex has footguns everywhere — unescaped dots, greedy quantifiers, anchoring issues. Tag expressions have a small surface area: tags, `&`, `|`, `not:`, `r:`, and brackets. If it parses, it does what you expect.
 - **Environment-variable friendly.** Tag expressions are short, readable strings that work well as `TAGS=...` values. Complex regex patterns with special characters are awkward to pass through shell environments and easy to break with quoting issues.
