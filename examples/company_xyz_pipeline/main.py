@@ -1,14 +1,11 @@
 import logging
 import os
-import sys
 
-sys.path.insert(0, os.path.dirname(__file__))
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
 from bollhav.pipe import with_pipe_config, PipeConfig
 from bollhav.model import match_models
 from execute import execute
-
-MODELS_DIR = os.path.join(os.path.dirname(__file__), "models")
 
 
 def setup_logging(debug: bool) -> None:
@@ -21,23 +18,22 @@ def setup_logging(debug: bool) -> None:
 @with_pipe_config
 def main(pipe: PipeConfig) -> None:
     setup_logging(debug=pipe.debug)
-    matches = match_models(folder=MODELS_DIR, tags=pipe.tags)
+    matched_models = match_models(
+        folder="src/models", tags=pipe.tags, upstream_mode=pipe.upstream_mode
+    )
 
-    execute.set_name_width(max(len(m.target.full_name) for m in matches))
+    execute.set_name_width(max(len(m.target.full_name) for m in matched_models))
 
-    for model in matches:
-        model.runtime_override.apply_pipe(pipe)
-        model.target.schema.suffix = model.runtime_override.schema_suffix
-
+    for model in matched_models:
+        model.apply_pipe(pipe)
         intervals = model.infer_intervals()
 
         execute.set_total(len(intervals))
         for interval in intervals:
-            execute(
-                model=model,
-                since=interval.since,
-                until=interval.until,
+            since, until = (
+                (interval.since, interval.until) if interval else (None, None)
             )
+            execute(model=model, since=since, until=until)
 
     execute.finish()
 
