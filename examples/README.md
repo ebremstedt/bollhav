@@ -61,20 +61,3 @@ Just the views:
 ```bash
 TAGS="[views]" USE_SCHEMA_SUFFIX=false UPSTREAM=ignore_views LATEST_ENABLED=true python examples/company_xyz_pipeline/main.py
 ```
-
-### Write modes
-
-| Model                     | Write mode                 | Behaviour                                                       |
-|---------------------------|----------------------------|-----------------------------------------------------------------|
-| `products`                | `APPEND`                   | `warehouse_raw` — rows added every batch, nothing removed       |
-| `customers`               | `TRUNCATE_TABLE_INSERT`    | `warehouse_clean` — table wiped then reloaded each batch        |
-| `orders`                  | `RECREATE_TABLE_INSERT`    | `warehouse_clean` — table dropped, recreated, then loaded       |
-| `high_value_orders`       | `VIEW`                     | `warehouse_views` — CREATE OR ALTER VIEW from `source.query`    |
-| `active_customers`        | `VIEW`                     | `warehouse_views` — CREATE OR ALTER VIEW from `source.query`    |
-
-Other write modes not shown here (require additional model config):
-
-- `UPSERT_NO_DELETE` — requires columns with `unique=True`
-- `RECREATE_PARTITION` — requires `partitioned_by` and `unique=True` columns
-
-See [WRITEMODES.md](../bollhav/docs/WRITEMODES.md) for guidance on choosing a mode.
