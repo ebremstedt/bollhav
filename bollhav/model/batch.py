@@ -65,6 +65,41 @@ class Batch:
     "0 * * * *" means each chunk is one hour, "0 0 * * *" means one day.
     Can be overridden at runtime via the pipe's batch expression.
 
+    `window_expression` is a cron expression that defines the scope to catch up on
+    in `latest` mode — i.e. "one of what" counts as the latest complete unit.
+    Defaults to `batch_expression` when unset (so one chunk = one window, the
+    original behaviour). Only consulted in `latest` mode — for reload/backfill
+    since/until are explicit and the window is irrelevant. Can be overridden at
+    runtime via the pipe's window expression.
+
+        window_expression = the OUTER scope   ("one full DAY")
+        batch_expression  = the INNER chunks  ("in 15-min WRITES")
+
+        assume now = 2024-06-15 14:35 UTC in all three cases
+
+        window="@daily", batch="*/15 * * * *"
+          Jun 14 00:00                                    Jun 15 00:00
+          ┌───────────────────── yesterday ─────────────────────┐
+          │░│░│░│░│░│░│░│░│░│░│░│░│░│░│░│░│░│░│░│░│ ...  │░│░│░│
+          └─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴──────┴─┴─┴─┘
+           00:00 00:15 00:30 00:45 01:00 01:15      23:15 23:30 23:45
+           → 96 × 15-min chunks covering Jun 14 00:00 → Jun 15 00:00
+
+        window="@daily", batch="@hourly"
+          Jun 14 00:00                                    Jun 15 00:00
+          ┌───────────────────── yesterday ─────────────────────┐
+          │     │     │     │     │     │     │ ... │     │     │
+          └─────┴─────┴─────┴─────┴─────┴─────┴─────┴─────┴─────┘
+           00:00 01:00 02:00 03:00 04:00 05:00       22:00 23:00
+           → 24 × hourly chunks covering Jun 14 00:00 → Jun 15 00:00
+
+        window unset (== batch), batch="@hourly"
+          13:00                        14:00   [now 14:35]  15:00
+          ┌──── last complete hour ────┐
+          │░░░░░░░░░░░░░░░░░░░░░░░░░░░│
+          └───────────────────────────┘
+           → 1 × hourly chunk covering 13:00 → 14:00 (pre-window default)
+
     `tz` is the timezone used for interval resolution. Defaults to UTC.
     Can be overridden at runtime via `TIMEZONE_OVERRIDE`.
 
@@ -77,6 +112,7 @@ class Batch:
     """
 
     batch_expression: BatchExpression | BatchExpressionExtended = "@daily"
+    window_expression: BatchExpression | BatchExpressionExtended | None = None
     tz: tzinfo = timezone.utc
     lookback: int | None = None
     retries: int | None = None

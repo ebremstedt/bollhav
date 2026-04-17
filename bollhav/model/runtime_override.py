@@ -16,6 +16,7 @@ class RuntimeOverride:
     latest: bool = False
     schema_suffix: str = ""
     batch_expression: str | None = None
+    window_expression: str | None = None
     tz: tzinfo | None = None
     since: datetime | None = None
     until: datetime | None = None
@@ -25,6 +26,7 @@ class RuntimeOverride:
         self.latest = pipe.latest.enabled and not self.reload
         self.schema_suffix = pipe.schema_suffix
         self.batch_expression = pipe.batch_expression_override
+        self.window_expression = pipe.window_expression_override
         self.tz = pipe.tz_override
         self.since = pipe.backfill.since
         self.until = pipe.backfill.until

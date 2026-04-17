@@ -1,4 +1,4 @@
-[back to README](..README.md)
+[back to README](../../README.md)
 
 # Pipe
 
@@ -14,16 +14,29 @@ Standardizes code at the **pipe** level by preloading the variables below:
 | **TIMEZONE_OVERRIDE** | string | no | IANA timezone (e.g. `Europe/Stockholm`) that overrides all model timezones |
 | **LATEST_ENABLED** | bool | no | Enables latest mode, cannot be True along with **BACKFILL_ENABLED** |
 | **BACKFILL_ENABLED** | bool | no | Enables backfill mode, defaults to **True** when **LATEST_ENABLED** is not set. Cannot be True along with **LATEST_ENABLED** |
-| **BATCH_EXPRESSION_OVERRIDE** | BatchExpression | no | Overrides the model's batch expression (applies to all modes) |
+| **BATCH_EXPRESSION_OVERRIDE** | BatchExpression | no | Overrides the model's batch expression (chunk size, applies in all modes) |
+| **WINDOW_EXPRESSION_OVERRIDE** | BatchExpression | no | Overrides the model's window expression (latest-mode scope). Errors at startup if set without **LATEST_ENABLED** |
+| **UPSTREAM** | string | no | One of `enforce` (default), `ignore_views`, `ignore_completely`. Controls how upstream dependencies are enforced by `match_models` |
 
 
 ## Latest mode
 
-Resolves the most recent **complete** interval based on the batch expression and the current time.
+Resolves the most recent **complete** interval, then chunks it.
 
-For example, with an hourly expression (`0 * * * *`) and current time 14:35 UTC:
-- The 14:00-15:00 interval is still in progress, so it's skipped
-- The interval **13:00-14:00** is returned as the latest complete interval
+Two cron expressions are involved — the distinction matters in latest mode:
+
+- **`window_expression`** defines the *scope* — "one of what" counts as the latest complete unit. Falls back to `batch_expression` when unset.
+- **`batch_expression`** defines the *chunk size* — how the scope is split into `TZInterval`s.
+
+### Examples (assume now = 2024-06-15 14:35 UTC)
+
+| `window_expression` | `batch_expression` | Result |
+|---|---|---|
+| unset (falls back to batch) | `@hourly` | 1 chunk: **13:00 → 14:00** (one hour, one chunk) |
+| `@daily` | `@hourly` | 24 chunks covering **Jun 14 00:00 → Jun 15 00:00** |
+| `@daily` | `*/15 * * * *` | 96 fifteen-minute chunks covering **Jun 14 00:00 → Jun 15 00:00** |
+
+The 14:00-15:00 hour (and Jun 15 day) is in progress and never included — "complete" means the entire window has passed.
 
 
 ## Backfill mode (default)
@@ -55,6 +68,8 @@ This affects:
 | `use_schema_suffix` | `bool` | From `USE_SCHEMA_SUFFIX` |
 | `tz_override` | `tzinfo \| None` | From `TIMEZONE_OVERRIDE` |
 | `batch_expression_override` | `str \| None` | From `BATCH_EXPRESSION_OVERRIDE` |
+| `window_expression_override` | `str \| None` | From `WINDOW_EXPRESSION_OVERRIDE` — only valid when `latest.enabled` |
+| `upstream_mode` | `UpstreamMode` | From `UPSTREAM` (defaults to `ENFORCE`) |
 | `latest.enabled` | `bool` | From `LATEST_ENABLED` |
 | `backfill.enabled` | `bool` | From `BACKFILL_ENABLED` |
 | `backfill.since` | `datetime \| None` | From `BACKFILL_SINCE` |
