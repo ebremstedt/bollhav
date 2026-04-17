@@ -208,17 +208,27 @@ class Model:
             interval = self.latest_complete_interval(batchexpr, tz)
             since, until = interval.since, interval.until
         elif rt.reload:
+            if self.bounds.begin is None:
+                raise ValueError(
+                    f"reload requires bounds.begin to be set on model "
+                    f"{self.target.full_name!r}"
+                )
             since = self.bounds.begin
             until = self.bounds.end or self.latest_complete_interval(batchexpr).until
         else:
-            since = rt.since
+            since = rt.since or self.bounds.begin
+            if since is None:
+                raise ValueError(
+                    f"backfill requires a since value — set bounds.begin on model "
+                    f"{self.target.full_name!r} or pass --since at runtime"
+                )
             until = rt.until or self.latest_complete_interval(batchexpr).until
 
         cron_expression = _resolve_cron(batchexpr)
         if self.batching.lookback:
             since = self._apply_lookback(cron_expression, since)
 
-        return _chunk_interval(cron_expression, since, until)
+        return _chunk_interval(cron_expression, TZInterval(since, until))
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, Model):

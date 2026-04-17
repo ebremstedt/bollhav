@@ -10,6 +10,7 @@ from bollhav.model.batch import (
     _resolve_cron_interval,
     _chunk_interval,
 )
+from bollhav.model.intervals import TZInterval
 from bollhav.model.model import Model
 from bollhav.model.target import Target
 from bollhav.model.bounds import Bounds
@@ -105,7 +106,7 @@ class TestChunkInterval:
     def test_hourly_chunks_over_three_hours(self) -> None:
         since = datetime(2024, 6, 15, 10, 0, tzinfo=UTC)
         until = datetime(2024, 6, 15, 13, 0, tzinfo=UTC)
-        intervals = _chunk_interval("0 * * * *", since, until)
+        intervals = _chunk_interval("0 * * * *", TZInterval(since, until))
         assert len(intervals) == 3
         assert intervals[0].since == datetime(2024, 6, 15, 10, 0, tzinfo=UTC)
         assert intervals[0].until == datetime(2024, 6, 15, 11, 0, tzinfo=UTC)
@@ -117,7 +118,7 @@ class TestChunkInterval:
     def test_single_chunk(self) -> None:
         since = datetime(2024, 6, 15, 10, 0, tzinfo=UTC)
         until = datetime(2024, 6, 15, 11, 0, tzinfo=UTC)
-        intervals = _chunk_interval("0 * * * *", since, until)
+        intervals = _chunk_interval("0 * * * *", TZInterval(since, until))
         assert len(intervals) == 1
         assert intervals[0].since == since
         assert intervals[0].until == until
@@ -125,7 +126,7 @@ class TestChunkInterval:
     def test_partial_trailing_chunk(self) -> None:
         since = datetime(2024, 6, 15, 10, 0, tzinfo=UTC)
         until = datetime(2024, 6, 15, 11, 30, tzinfo=UTC)
-        intervals = _chunk_interval("0 * * * *", since, until)
+        intervals = _chunk_interval("0 * * * *", TZInterval(since, until))
         assert len(intervals) == 2
         assert intervals[0].until == datetime(2024, 6, 15, 11, 0, tzinfo=UTC)
         assert intervals[1].since == datetime(2024, 6, 15, 11, 0, tzinfo=UTC)
@@ -134,7 +135,7 @@ class TestChunkInterval:
     def test_daily_chunks(self) -> None:
         since = datetime(2024, 6, 15, 0, 0, tzinfo=UTC)
         until = datetime(2024, 6, 17, 0, 0, tzinfo=UTC)
-        intervals = _chunk_interval("0 0 * * *", since, until)
+        intervals = _chunk_interval("0 0 * * *", TZInterval(since, until))
         assert len(intervals) == 2
 
 
@@ -349,7 +350,7 @@ class TestInferIntervalsNoneInputs:
             batch_expression_override="0 * * * *",
             until=datetime(2024, 6, 15, 14, 0, tzinfo=UTC),
         )
-        with pytest.raises(TypeError):
+        with pytest.raises(ValueError, match="backfill requires a since value"):
             model.infer_intervals()
 
     @travel(datetime(2024, 6, 15, 14, 35, tzinfo=UTC))
@@ -357,7 +358,7 @@ class TestInferIntervalsNoneInputs:
         model = _model(
             batch_expression="@hourly", batch_expression_override="0 * * * *"
         )
-        with pytest.raises(TypeError):
+        with pytest.raises(ValueError, match="backfill requires a since value"):
             model.infer_intervals()
 
     @travel(datetime(2024, 6, 15, 14, 35, tzinfo=UTC))

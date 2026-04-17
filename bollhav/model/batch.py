@@ -41,19 +41,19 @@ def _resolve_cron_interval(
     return prev, curr
 
 
-def _chunk_interval(cron: str, since: datetime, until: datetime) -> list[TZInterval]:
-    it = croniter(cron, since)
-    intervals: list[TZInterval] = []
-    current = since
+def _chunk_interval(cron: str, incoming_interval: TZInterval) -> list[TZInterval]:
+    it = croniter(cron, incoming_interval.since)
+    outgoing_intervals: list[TZInterval] = []
+    current = incoming_interval.since
     while True:
         tick = it.get_next(datetime)
-        if tick >= until:
+        if tick >= incoming_interval.until:
             break
-        intervals.append(TZInterval(current, tick))
+        outgoing_intervals.append(TZInterval(current, tick))
         current = tick
-    if current < until:
-        intervals.append(TZInterval(current, until))
-    return intervals
+    if current < incoming_interval.until:
+        outgoing_intervals.append(TZInterval(current, incoming_interval.until))
+    return outgoing_intervals
 
 
 @dataclass
