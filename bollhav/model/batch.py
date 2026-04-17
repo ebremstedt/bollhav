@@ -1,6 +1,6 @@
 import logging
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone, tzinfo
+from datetime import datetime, timezone, tzinfo
 
 from icron import croniter
 from bollhav.model.intervals import TZInterval

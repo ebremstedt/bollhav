@@ -16,7 +16,7 @@ from bollhav.pipe.pipe_config import (  # noqa: E402
     load_pipe_config,
     with_pipe_config,
 )
-from bollhav.model.ordering import UpstreamMode
+from bollhav.model.ordering import UpstreamMode  # noqa: E402
 
 DT_SINCE = datetime(2024, 1, 1, tzinfo=timezone.utc)
 DT_UNTIL = datetime(2024, 1, 2, tzinfo=timezone.utc)

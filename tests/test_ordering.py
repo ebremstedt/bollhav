@@ -102,7 +102,7 @@ def test_self_referencing_raises():
 
 
 def test_view_ignores_upstream():
-    a = make_model("a")
+    make_model("a")
     v = make_model("v", upstream=["a"], write_mode=WriteMode.VIEW)
     result = topological_sort([v], upstream_mode=UpstreamMode.IGNORE_VIEWS)
     assert names(result) == ["v"]
