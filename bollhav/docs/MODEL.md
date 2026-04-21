@@ -124,7 +124,7 @@ When `LATEST_ENABLED=True`, `infer_intervals()` returns 96 `TZInterval`s coverin
 
 #### `infer_intervals() -> list[TZInterval] | list[None]`
 
-Resolves and chunks a time interval into `TZInterval`s. Mode, batch/window expressions, timezone, and time window are derived from the model's own settings and its `runtime_override` — so call `model.runtime_override.apply_pipe(pipe)` before invoking this. Returns `[None]` when `model.source.is_unfiltered` — signalling to callers that no interval filtering should be applied.
+Resolves and chunks a time interval into `TZInterval`s. Mode, batch/window expressions, timezone, and time window are derived from the model's own settings and its `runtime_override` — so call `model.runtime_override.apply_pipe(pipe)` before invoking this. Returns `[None]` when `model.batching is None` — signalling to callers that the model runs once with no interval filter.
 
 Three modes, evaluated in order: **latest** (if `model.runtime_override.latest`), **reload** (if `model.runtime_override.reload`), **backfill** (default). See the `infer_intervals` docstring for full details.
 

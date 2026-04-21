@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, tzinfo
+from datetime import datetime, timezone, tzinfo
 from typing import TYPE_CHECKING
 
 from icron import croniter
@@ -38,7 +38,7 @@ class Model:
         self.source = source
         self.target = target
         self.bounds = bounds or Bounds()
-        self.batching = batching or Batch()
+        self.batching = batching  # None signals "don't chunk, run once"
         self._validate_reloading()
         self.enabled = enabled
         self.debug = debug
@@ -62,9 +62,21 @@ class Model:
     )
 
     def effective_reload_mode(self) -> ChunkMode:
+        if self.batching is None:
+            # No batching = no chunking = no mode. Callers that branch on mode
+            # should have checked `model.batching is None` first.
+            raise ValueError(
+                f"Model {self.target.full_name!r} has no batching configured — "
+                f"effective_reload_mode() is not meaningful."
+            )
         return self.runtime_override.reload_mode or self.batching.mode
 
     def effective_reload_batch_size(self) -> int:
+        if self.batching is None:
+            raise ValueError(
+                f"Model {self.target.full_name!r} has no batching configured — "
+                f"effective_reload_batch_size() is not meaningful."
+            )
         return (
             self.runtime_override.reload_batch_size
             if self.runtime_override.reload_batch_size is not None
@@ -72,7 +84,7 @@ class Model:
         )
 
     def _validate_reloading(self) -> None:
-        if self.batching.mode is not ChunkMode.ROW:
+        if self.batching is None or self.batching.mode is not ChunkMode.ROW:
             return
         if self.target.write_mode not in self._ROW_RELOAD_COMPATIBLE_WRITE_MODES:
             allowed = ", ".join(
@@ -135,14 +147,22 @@ class Model:
                 f"    schema:      {self.source.schema}",
                 f"    dsn_env_var: {self.source.dsn_env_var}",
             ]
+        if self.batching is None:
+            lines += [
+                "",
+                "  batching:    (none — single run, read all)",
+            ]
+        else:
+            lines += [
+                "",
+                "  batching:",
+                f"    mode:        {self.batching.mode.value}",
+                f"    interval:    expression={self.batching.interval.expression}, "
+                f"lookback={self.batching.interval.lookback}",
+                f"    row:         batch_size={self.batching.row.batch_size}",
+                f"    retries:     {self.batching.retries}",
+            ]
         lines += [
-            "",
-            "  batching:",
-            f"    mode:        {self.batching.mode.value}",
-            f"    interval:    expression={self.batching.interval.expression}, "
-            f"lookback={self.batching.interval.lookback}",
-            f"    row:         batch_size={self.batching.row.batch_size}",
-            f"    retries:     {self.batching.retries}",
             "",
             "  bounds:",
             f"    begin:       {self.bounds.begin}",
@@ -181,11 +201,20 @@ class Model:
         so this returns 13:00-14:00.
 
         Uses the provided batch expression and timezone if set,
-        otherwise falls back to the model's own."""
+        otherwise falls back to the model's own. Raises if the model has
+        no batching and no override is supplied."""
+        if batch_expression_override is None and self.batching is None:
+            raise ValueError(
+                f"latest_complete_interval on model {self.target.full_name!r} "
+                f"needs either an override or a configured batching."
+            )
         cron_expression = _resolve_cron(
-            batch_expression_override or self.batching.interval.expression
+            batch_expression_override
+            or (self.batching.interval.expression if self.batching else "@daily")
         )
-        tz = tz_override or self.batching.interval.tz
+        tz = tz_override or (
+            self.batching.interval.tz if self.batching else timezone.utc
+        )
         now = datetime.now(tz=tz)
         # Get two ticks from now to measure the interval size, then seed
         # far enough back to guarantee at least two ticks before now.
@@ -212,8 +241,9 @@ class Model:
     def infer_intervals(self) -> list[TZInterval] | list[None]:
         """Resolve and chunk a time interval into TZIntervals.
 
-        Returns `[None]` when the source is marked `is_unfiltered` — signalling
-        to callers that no interval filtering should be applied to the read.
+        Returns `[None]` when the model has no `batching` configured — signalling
+        to callers that no interval filtering should be applied to the read
+        (the model runs once, unfiltered).
 
         All inputs come from the model's own settings and runtime_override.
         Call runtime_override.apply_pipe(pipe) before calling this method.
@@ -271,7 +301,7 @@ class Model:
            until = runtime_override.until, or latest complete interval end
                    (same fallback table as reload above)
         """
-        if self.source and self.source.is_unfiltered:
+        if self.batching is None:
             return [None]
 
         rt = self.runtime_override
