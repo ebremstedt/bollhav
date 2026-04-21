@@ -2,12 +2,16 @@ from datetime import datetime, timezone
 
 import pytest
 
+from bollhav.model.batch import Batch
 from bollhav.model.bounds import Bounds
 from bollhav.model.model import Model
 from bollhav.model.target import Target
 
 
 def make_model(**overrides) -> Model:
+    # Default to an explicit Batch() so infer_intervals tests exercise
+    # the time-chunking path (None would short-circuit to [None]).
+    overrides.setdefault("batching", Batch())
     return Model(
         target=overrides.pop("target", Target(name="orders")),
         source=overrides.pop("source", None),
@@ -24,7 +28,6 @@ def test_model_stores_fields():
 def test_model_exposes_sub_configs():
     from bollhav.model.schema import Schema
     from bollhav.model.target import Target
-    from bollhav.model.batch import Batch
     from bollhav.model.bounds import Bounds
 
     m = make_model()
@@ -33,6 +36,13 @@ def test_model_exposes_sub_configs():
     assert isinstance(m.batching, Batch)
     assert isinstance(m.bounds, Bounds)
     assert isinstance(m.tags, set)
+
+
+def test_batching_defaults_to_none_when_unspecified():
+    """No batching kwarg = no chunking. infer_intervals returns [None]."""
+    m = Model(target=Target(name="orders"))
+    assert m.batching is None
+    assert m.infer_intervals() == [None]
 
 
 def test_infer_intervals_reload_without_bounds_raises():

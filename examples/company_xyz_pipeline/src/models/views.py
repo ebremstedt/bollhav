@@ -13,7 +13,6 @@ high_value_orders = Model(
     source=Source(
         name="high_value_orders",
         query="SELECT * FROM warehouse_clean.orders WHERE total >= 20",
-        is_unfiltered=True,
     ),
     target=Target(
         name="high_value_orders",
@@ -32,7 +31,6 @@ active_customers = Model(
             "SELECT c.* FROM warehouse_clean.customer_master_data c "
             "JOIN warehouse_clean.orders o ON o.customer_id = c.id"
         ),
-        is_unfiltered=True,
     ),
     target=Target(
         name="active_customers",

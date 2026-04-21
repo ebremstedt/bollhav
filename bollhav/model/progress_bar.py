@@ -178,6 +178,10 @@ def progress_bar(func: Callable) -> Callable:
         if not hasattr(model, "effective_reload_mode"):
             return name, ""
 
+        # No batching = no mode label — model runs once, unfiltered.
+        if getattr(model, "batching", None) is None:
+            return name, ""
+
         m = model.effective_reload_mode().value.lower()
         if m == "row":
             size = model.effective_reload_batch_size()

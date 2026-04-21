@@ -105,11 +105,10 @@ def test_defaults():
     assert m.target.write_mode == WriteMode.APPEND
     assert m.enabled is True
     assert m.debug is False
-    assert m.batching.interval.expression == "@daily"
+    # With no batching kwarg passed, batching stays None ("don't chunk, run once").
+    assert m.batching is None
     assert m.target.sensitive is False
     assert m.target.unique_columns == []
-    assert m.batching.retries is None
-    assert m.batching.interval.lookback is None
 
 
 # --- Tags ---
