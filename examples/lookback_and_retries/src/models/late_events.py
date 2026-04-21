@@ -1,5 +1,15 @@
 from datetime import datetime, timezone
-from bollhav.model import Model, Source, Target, Schema, WriteMode, Tags, Bounds, Batch
+from bollhav.model import (
+    Model,
+    Source,
+    Target,
+    Schema,
+    WriteMode,
+    Tags,
+    Bounds,
+    Batch,
+    IntervalChunks,
+)
 
 
 # Hourly model with lookback and retries configured.
@@ -32,8 +42,6 @@ late_events = Model(
         end=datetime(2024, 1, 1, 6, tzinfo=timezone.utc),
     ),
     batching=Batch(
-        batch_expression="@hourly",
-        lookback=2,
-        retries=3,
+        interval=IntervalChunks(expression="@hourly", lookback=2), retries=3
     ),
 )

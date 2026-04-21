@@ -28,8 +28,8 @@ def main(pipe: PipeConfig) -> None:
         intervals = model.infer_intervals()
 
         print(f"\n{model.target.full_name}")
-        print(f"  batch_expression : {model.batching.batch_expression}")
-        print(f"  lookback         : {model.batching.lookback}")
+        print(f"  batch_expression : {model.batching.interval.expression}")
+        print(f"  lookback         : {model.batching.interval.lookback}")
         print(f"  retries          : {model.batching.retries}")
         print(f"  bounds           : {model.bounds.begin} → {model.bounds.end}")
         print(f"  chunks returned  : {len(intervals)}")

@@ -1,5 +1,15 @@
 from datetime import datetime, timezone
-from bollhav.model import Model, Source, Target, Schema, WriteMode, Tags, Bounds, Batch
+from bollhav.model import (
+    Model,
+    Source,
+    Target,
+    Schema,
+    WriteMode,
+    Tags,
+    Bounds,
+    Batch,
+    IntervalChunks,
+)
 
 
 # finance_ledger: NO explicit tags.
@@ -22,7 +32,7 @@ finance_ledger = Model(
         begin=datetime(2024, 1, 1, tzinfo=timezone.utc),
         end=datetime(2024, 1, 3, tzinfo=timezone.utc),
     ),
-    batching=Batch(batch_expression="@daily"),
+    batching=Batch(interval=IntervalChunks(expression="@daily")),
 )
 
 
@@ -45,5 +55,5 @@ finance_budgets = Model(
         begin=datetime(2024, 1, 1, tzinfo=timezone.utc),
         end=datetime(2024, 1, 3, tzinfo=timezone.utc),
     ),
-    batching=Batch(batch_expression="@daily"),
+    batching=Batch(interval=IntervalChunks(expression="@daily")),
 )

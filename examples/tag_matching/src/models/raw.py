@@ -1,5 +1,14 @@
 from datetime import datetime, timezone
-from bollhav.model import Model, Source, Target, Schema, WriteMode, Bounds, Batch
+from bollhav.model import (
+    Model,
+    Source,
+    Target,
+    Schema,
+    WriteMode,
+    Bounds,
+    Batch,
+    IntervalChunks,
+)
 
 
 # raw_events: NO explicit tags.
@@ -20,5 +29,5 @@ raw_events = Model(
         begin=datetime(2024, 1, 1, tzinfo=timezone.utc),
         end=datetime(2024, 1, 3, tzinfo=timezone.utc),
     ),
-    batching=Batch(batch_expression="@daily"),
+    batching=Batch(interval=IntervalChunks(expression="@daily")),
 )

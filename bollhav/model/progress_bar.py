@@ -19,7 +19,7 @@ class ProgressLevel(Enum):
     BATCH = "batch"
 
 
-def _get_progress_level() -> ProgressLevel:
+def get_progress_level() -> ProgressLevel:
     raw = os.environ.get("PROGRESS_BAR", "model").lower()
     try:
         return ProgressLevel(raw)
@@ -30,6 +30,9 @@ def _get_progress_level() -> ProgressLevel:
 @dataclass
 class _State:
     current_model: str = ""
+    current_mode: str = (
+        ""  # "interval" | "rows" | "" — set per-model from effective_reload_mode
+    )
     start: float = 0.0
     count: int = 0
     total: int = 0
@@ -84,7 +87,7 @@ def progress_bar(func: Callable) -> Callable:
         ✓ orders          4.5s 25/25 á 180ms
         ...
     """
-    level = _get_progress_level()
+    level = get_progress_level()
     s = _State()
 
     # ── stdout helpers ──────────────────────────────────────────────
@@ -155,22 +158,55 @@ def progress_bar(func: Callable) -> Callable:
 
     # ── model lifecycle ─────────────────────────────────────────────
 
-    def _resolve_model_name(args, kwargs) -> str:
+    def _resolve_model(args, kwargs) -> tuple[str, str]:
+        """Return (full_name, mode_label). mode_label is empty when the
+        model isn't a bollhav Model (or doesn't expose effective_reload_mode).
+
+        Examples of mode_label:
+            "10000 rows"      (ROW mode, effective batch size)
+            "hourly"          (INTERVAL with @hourly alias — @ stripped)
+            "*/15 * * * *"    (INTERVAL with a raw cron)"""
         bound = sig.bind(*args, **kwargs)
         bound.apply_defaults()
         model = bound.arguments.get("model")
-        if model and hasattr(model, "target") and hasattr(model.target, "full_name"):
-            return model.target.full_name
-        return func.__name__
+        if not (
+            model and hasattr(model, "target") and hasattr(model.target, "full_name")
+        ):
+            return func.__name__, ""
 
-    def _begin_model(name: str) -> None:
+        name = model.target.full_name
+        if not hasattr(model, "effective_reload_mode"):
+            return name, ""
+
+        m = model.effective_reload_mode().value.lower()
+        if m == "row":
+            size = model.effective_reload_batch_size()
+            return name, f"{size} rows"
+
+        # INTERVAL mode — show the effective interval expression.
+        # Precedence: tag override > pipe override > model's static config.
+        rt = model.runtime_override
+        expr = (
+            getattr(rt, "reload_interval_expression", None)
+            or getattr(rt, "batch_expression", None)
+            or model.batching.interval.expression
+        )
+        # Strip the leading "@" from cron aliases for cleaner display
+        # (`@hourly` -> `hourly`); raw crons pass through unchanged.
+        return name, expr.lstrip("@")
+
+    def _begin_model(name: str, mode: str) -> None:
         s.current_model = name
+        s.current_mode = mode
         s.start = time.time()
         s.count = 0
         s.finish_total = 0
         s.batch_times = []
         if level == ProgressLevel.BATCH:
             _update_batch_display(name)
+
+    def _mode_label() -> str:
+        return f" ({s.current_mode})" if s.current_mode else ""
 
     def _finish_current() -> None:
         if not s.current_model:
@@ -180,6 +216,7 @@ def progress_bar(func: Callable) -> Callable:
 
         if level == ProgressLevel.MINIMAL:
             s.current_model = ""
+            s.current_mode = ""
             return
 
         if level == ProgressLevel.BATCH:
@@ -187,23 +224,25 @@ def progress_bar(func: Callable) -> Callable:
 
         _clear_line()
 
-        name = s.current_model
-        w = max(s.name_width, len(name))
+        name_with_mode = f"{s.current_model}{_mode_label()}"
+        w = max(s.name_width, len(name_with_mode))
         elapsed = _format_duration(time.time() - s.start)
         bw = max(s.batch_width, len(_batch_count_str()))
 
         _write(
-            f"✓ {name:<{w}} {elapsed} {_batch_count_str():>{bw}}{_avg_batch_str()}",
+            f"▸ {name_with_mode:<{w}} {elapsed} {_batch_count_str():>{bw}}{_avg_batch_str()}",
             newline=True,
         )
         s.current_model = ""
+        s.current_mode = ""
 
     # ── batch-level spinner update ──────────────────────────────────
 
     def _update_batch_display(model_name: str) -> None:
         bar = _format_progress(current=s.count, total=s.total)
-        w = max(s.name_width, len(model_name))
-        msg = f"{model_name:<{w}} {bar}{_avg_batch_str()}{_eta_str()}"
+        name_with_mode = f"{model_name}{_mode_label()}"
+        w = max(s.name_width, len(name_with_mode))
+        msg = f"{name_with_mode:<{w}} {bar}{_avg_batch_str()}{_eta_str()}"
 
         if _spinner_thread[0] is None:
             _start_spinner(msg)
@@ -219,11 +258,11 @@ def progress_bar(func: Callable) -> Callable:
         if not s.overall_start:
             s.overall_start = time.time()
 
-        model_name = _resolve_model_name(args, kwargs)
+        model_name, model_mode = _resolve_model(args, kwargs)
 
         if model_name != s.current_model:
             _finish_current()
-            _begin_model(model_name)
+            _begin_model(model_name, model_mode)
 
         batch_start = time.time()
         result = func(*args, **kwargs)
@@ -251,7 +290,7 @@ def progress_bar(func: Callable) -> Callable:
         if s.finished:
             return
         _finish_current()
-        if level == ProgressLevel.MINIMAL and s.models_done > 0:
+        if s.models_done > 0:
             _clear_line()
             elapsed = time.time() - s.overall_start if s.overall_start else 0
             _write(

@@ -14,8 +14,8 @@ Standardizes code at the **pipe** level by preloading the variables below:
 | **TIMEZONE_OVERRIDE** | string | no | IANA timezone (e.g. `Europe/Stockholm`) that overrides all model timezones |
 | **LATEST_ENABLED** | bool | no | Enables latest mode, cannot be True along with **BACKFILL_ENABLED** |
 | **BACKFILL_ENABLED** | bool | no | Enables backfill mode, defaults to **True** when **LATEST_ENABLED** is not set. Cannot be True along with **LATEST_ENABLED** |
-| **BATCH_EXPRESSION_OVERRIDE** | BatchExpression | no | Overrides the model's batch expression (chunk size, applies in all modes) |
-| **WINDOW_EXPRESSION_OVERRIDE** | BatchExpression | no | Overrides the model's window expression (latest-mode scope). Errors at startup if set without **LATEST_ENABLED** |
+| **BATCH_EXPRESSION_OVERRIDE** | IntervalExpression | no | Overrides the model's batch expression (chunk size, applies in all modes) |
+| **WINDOW_EXPRESSION_OVERRIDE** | IntervalExpression | no | Overrides the model's window expression (latest-mode scope). Errors at startup if set without **LATEST_ENABLED** |
 | **UPSTREAM** | string | no | One of `enforce` (default), `ignore_views`, `ignore_completely`. Controls how upstream dependencies are enforced by `match_models` |
 
 

@@ -64,7 +64,7 @@ def _make_patches(
                 "UPSTREAM": upstream,
             }.get(name, default)
         ),
-        "bollhav.pipe.pipe_config.env_var_batch_expression": lambda name, should_print_unset=True: (
+        "bollhav.pipe.pipe_config.env_var_interval_expression": lambda name, should_print_unset=True: (
             {
                 "BATCH_EXPRESSION_OVERRIDE": batch_expression_override,
             }.get(name)
@@ -92,8 +92,8 @@ class TestLoadPipeConfig:
                 patches["bollhav.pipe.pipe_config.env_var"],
             ),
             patch(
-                "bollhav.pipe.pipe_config.env_var_batch_expression",
-                patches["bollhav.pipe.pipe_config.env_var_batch_expression"],
+                "bollhav.pipe.pipe_config.env_var_interval_expression",
+                patches["bollhav.pipe.pipe_config.env_var_interval_expression"],
             ),
             patch(
                 "bollhav.pipe.pipe_config.env_var_iso8601_datetime",
@@ -186,8 +186,8 @@ class TestWithPipeConfig:
                 patches["bollhav.pipe.pipe_config.env_var"],
             ),
             patch(
-                "bollhav.pipe.pipe_config.env_var_batch_expression",
-                patches["bollhav.pipe.pipe_config.env_var_batch_expression"],
+                "bollhav.pipe.pipe_config.env_var_interval_expression",
+                patches["bollhav.pipe.pipe_config.env_var_interval_expression"],
             ),
             patch(
                 "bollhav.pipe.pipe_config.env_var_iso8601_datetime",

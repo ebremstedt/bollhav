@@ -133,6 +133,10 @@ TAGS="[all]" USE_SCHEMA_SUFFIX=false python examples/tag_matching/main.py
 | `[mart]` | `CustomerJourney` only | pascal-split of the schema `DataMart` |
 | `[all & not:warehouse_raw]` | everything except `raw_events` | exclude by schema auto-tag |
 | `[r:sales]` | both sales models, marked for reload | `r:` prefix sets `runtime_override.reload=True` |
+| `[reload:sales]` | same as `[r:sales]` | `reload` is a full-word alias for `r` |
+| `[r_row_100:sales]` | sales models, reload in ROW mode, 100 rows/chunk | forces `ChunkMode.ROW` + `batch_size=100` at runtime (requires `WriteMode.APPEND` or `UPSERT_NO_DELETE`) |
+| `[r_interval_@daily:sales]` | sales models, reload in INTERVAL mode, daily chunks | forces `ReloadMode.INTERVAL` + `interval_expression="@daily"` at runtime |
+| `r_interval_@hourly:[sales\|finance]` | both domains, reload hourly | group-level — applies to every tag in the group |
 
 ## What the output looks like
 

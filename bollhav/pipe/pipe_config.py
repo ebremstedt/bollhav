@@ -2,14 +2,14 @@ from dataclasses import dataclass
 from datetime import datetime, tzinfo
 from roskarl import (
     env_var_bool,
-    env_var_batch_expression,
+    env_var_interval_expression,
     env_var,
     env_var_iso8601_datetime,
 )
 from functools import wraps
 from typing import Callable
 from bollhav.model.ordering import UpstreamMode
-from bollhav.model.progress_bar import _get_progress_level
+from bollhav.model.progress_bar import get_progress_level
 from bollhav.pipe.tz import _resolve_tz_override, _apply_tz
 
 
@@ -64,7 +64,7 @@ class PipeConfig:
             return dt.isoformat() if dt else "—"
 
         print("── pipe ────────────────────")
-        _row("progress", _get_progress_level().value)
+        _row("progress", get_progress_level().value)
         _row("tags", self.tags or "—")
         if self.latest.enabled:
             _row("mode", "latest")
@@ -120,10 +120,10 @@ def load_pipe_config() -> PipeConfig:
             since=_backfill_dt("BACKFILL_SINCE"),
             until=_backfill_dt("BACKFILL_UNTIL"),
         ),
-        batch_expression_override=env_var_batch_expression(
+        batch_expression_override=env_var_interval_expression(
             name="BATCH_EXPRESSION_OVERRIDE", should_print_unset=False
         ),
-        window_expression_override=env_var_batch_expression(
+        window_expression_override=env_var_interval_expression(
             name="WINDOW_EXPRESSION_OVERRIDE", should_print_unset=False
         ),
         tz_override=tz_override,

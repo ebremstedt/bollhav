@@ -1,5 +1,15 @@
 from datetime import datetime, timezone
-from bollhav.model import Model, Source, Target, Schema, WriteMode, Tags, Bounds, Batch
+from bollhav.model import (
+    Model,
+    Source,
+    Target,
+    Schema,
+    WriteMode,
+    Tags,
+    Bounds,
+    Batch,
+    IntervalChunks,
+)
 
 
 # Single hourly model. Bounds cover three days of history.
@@ -22,5 +32,5 @@ page_views = Model(
         begin=datetime(2024, 1, 1, tzinfo=timezone.utc),
         end=datetime(2024, 1, 4, tzinfo=timezone.utc),
     ),
-    batching=Batch(batch_expression="@hourly"),
+    batching=Batch(interval=IntervalChunks(expression="@hourly")),
 )

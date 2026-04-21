@@ -6,6 +6,7 @@ from time_machine import travel
 
 from bollhav.model.batch import (
     Batch,
+    IntervalChunks,
     _resolve_cron,
     _resolve_cron_interval,
     _chunk_interval,
@@ -20,7 +21,7 @@ UTC = timezone.utc
 
 
 def _model(
-    batch_expression="@hourly",
+    interval_expression="@hourly",
     tz=UTC,
     lookback=None,
     retries=None,
@@ -34,9 +35,11 @@ def _model(
     m = Model(
         target=Target(name="test"),
         batching=Batch(
-            batch_expression=batch_expression,
-            tz=tz,
-            lookback=lookback,
+            interval=IntervalChunks(
+                expression=interval_expression,
+                tz=tz,
+                lookback=lookback,
+            ),
             retries=retries,
         ),
         bounds=bounds,
@@ -56,20 +59,21 @@ class TestResolveCron:
     def test_daily_alias(self) -> None:
         assert _resolve_cron("@daily") == "0 0 * * *"
 
-    def test_midnight_alias(self) -> None:
-        assert _resolve_cron("@midnight") == "0 0 * * *"
-
     def test_weekly_alias(self) -> None:
         assert _resolve_cron("@weekly") == "0 0 * * 0"
 
     def test_monthly_alias(self) -> None:
         assert _resolve_cron("@monthly") == "0 0 1 * *"
 
-    def test_yearly_alias(self) -> None:
-        assert _resolve_cron("@yearly") == "0 0 1 1 *"
+    def test_minutely_alias(self) -> None:
+        assert _resolve_cron("@minutely") == "* * * * *"
 
-    def test_annually_alias(self) -> None:
-        assert _resolve_cron("@annually") == "0 0 1 1 *"
+    def test_short_form_aliases(self) -> None:
+        # roskarl provides short-form synonyms alongside the -ly forms
+        assert _resolve_cron("@hour") == _resolve_cron("@hourly")
+        assert _resolve_cron("@day") == _resolve_cron("@daily")
+        assert _resolve_cron("@week") == _resolve_cron("@weekly")
+        assert _resolve_cron("@month") == _resolve_cron("@monthly")
 
     def test_raw_expression_passed_through(self) -> None:
         assert _resolve_cron("0 6 * * *") == "0 6 * * *"
@@ -140,14 +144,14 @@ class TestChunkInterval:
 
 class TestApplyLookback:
     def test_lookback_shifts_since_backwards(self) -> None:
-        model = _model(batch_expression="@hourly", lookback=3)
+        model = _model(interval_expression="@hourly", lookback=3)
         result = model._apply_lookback(
             "0 * * * *", datetime(2024, 6, 15, 14, 0, tzinfo=UTC)
         )
         assert result == datetime(2024, 6, 15, 11, 0, tzinfo=UTC)
 
     def test_lookback_daily(self) -> None:
-        model = _model(batch_expression="@daily", lookback=2)
+        model = _model(interval_expression="@daily", lookback=2)
         result = model._apply_lookback(
             "0 0 * * *", datetime(2024, 6, 15, 0, 0, tzinfo=UTC)
         )
@@ -157,35 +161,35 @@ class TestApplyLookback:
 class TestLatestCompleteInterval:
     @travel(datetime(2024, 6, 15, 14, 35, tzinfo=UTC))
     def test_hourly(self) -> None:
-        model = _model(batch_expression="@hourly", tz=UTC)
+        model = _model(interval_expression="@hourly", tz=UTC)
         interval = model.latest_complete_interval()
         assert interval.since == datetime(2024, 6, 15, 13, 0, tzinfo=UTC)
         assert interval.until == datetime(2024, 6, 15, 14, 0, tzinfo=UTC)
 
     @travel(datetime(2024, 6, 15, 14, 35, tzinfo=UTC))
     def test_daily(self) -> None:
-        model = _model(batch_expression="@daily", tz=UTC)
+        model = _model(interval_expression="@daily", tz=UTC)
         interval = model.latest_complete_interval()
         assert interval.since == datetime(2024, 6, 14, 0, 0, tzinfo=UTC)
         assert interval.until == datetime(2024, 6, 15, 0, 0, tzinfo=UTC)
 
     @travel(datetime(2024, 6, 15, 14, 35, tzinfo=UTC))
     def test_uses_model_tz(self) -> None:
-        model = _model(batch_expression="@daily", tz=CET)
+        model = _model(interval_expression="@daily", tz=CET)
         interval = model.latest_complete_interval()
         assert interval.since == datetime(2024, 6, 14, 0, 0, tzinfo=CET)
         assert interval.until == datetime(2024, 6, 15, 0, 0, tzinfo=CET)
 
     @travel(datetime(2024, 6, 15, 14, 35, tzinfo=UTC))
     def test_tz_override(self) -> None:
-        model = _model(batch_expression="@hourly", tz=CET)
+        model = _model(interval_expression="@hourly", tz=CET)
         interval = model.latest_complete_interval(tz_override=UTC)
         assert interval.since == datetime(2024, 6, 15, 13, 0, tzinfo=UTC)
         assert interval.until == datetime(2024, 6, 15, 14, 0, tzinfo=UTC)
 
     @travel(datetime(2024, 6, 15, 14, 35, tzinfo=UTC))
     def test_batch_expression_override(self) -> None:
-        model = _model(batch_expression="@daily", tz=UTC)
+        model = _model(interval_expression="@daily", tz=UTC)
         interval = model.latest_complete_interval(batch_expression_override="0 * * * *")
         assert interval.since == datetime(2024, 6, 15, 13, 0, tzinfo=UTC)
         assert interval.until == datetime(2024, 6, 15, 14, 0, tzinfo=UTC)
@@ -195,7 +199,7 @@ class TestInferIntervalsTimezone:
     @travel(datetime(2024, 6, 15, 14, 35, tzinfo=UTC))
     def test_latest_uses_model_tz(self) -> None:
         model = _model(
-            batch_expression="@hourly",
+            interval_expression="@hourly",
             tz=CET,
             batch_expression_override="0 * * * *",
             latest=True,
@@ -208,7 +212,7 @@ class TestInferIntervalsTimezone:
     @travel(datetime(2024, 6, 15, 14, 35, tzinfo=UTC))
     def test_latest_uses_utc_by_default(self) -> None:
         model = _model(
-            batch_expression="@hourly",
+            interval_expression="@hourly",
             batch_expression_override="0 * * * *",
             latest=True,
         )
@@ -220,7 +224,7 @@ class TestInferIntervalsTimezone:
     @travel(datetime(2024, 6, 15, 14, 35, tzinfo=UTC))
     def test_tz_override_takes_precedence_over_model_tz(self) -> None:
         model = _model(
-            batch_expression="@hourly",
+            interval_expression="@hourly",
             tz=CET,
             batch_expression_override="0 * * * *",
             tz_override=UTC,
@@ -234,7 +238,7 @@ class TestInferIntervalsTimezone:
     @travel(datetime(2024, 6, 15, 14, 35, tzinfo=UTC))
     def test_tz_override_none_falls_back_to_model(self) -> None:
         model = _model(
-            batch_expression="@hourly",
+            interval_expression="@hourly",
             tz=CET,
             batch_expression_override="0 * * * *",
             tz_override=None,
@@ -250,7 +254,7 @@ class TestInferIntervalsLookback:
     @travel(datetime(2024, 6, 15, 14, 35, tzinfo=UTC))
     def test_latest_with_lookback(self) -> None:
         model = _model(
-            batch_expression="@hourly",
+            interval_expression="@hourly",
             lookback=3,
             batch_expression_override="0 * * * *",
             latest=True,
@@ -262,7 +266,7 @@ class TestInferIntervalsLookback:
 
     def test_backfill_with_lookback(self) -> None:
         model = _model(
-            batch_expression="@hourly",
+            interval_expression="@hourly",
             lookback=2,
             batch_expression_override="0 * * * *",
             since=datetime(2024, 6, 15, 12, 0, tzinfo=UTC),
@@ -275,7 +279,7 @@ class TestInferIntervalsLookback:
 
     def test_no_lookback(self) -> None:
         model = _model(
-            batch_expression="@hourly",
+            interval_expression="@hourly",
             batch_expression_override="0 * * * *",
             since=datetime(2024, 6, 15, 12, 0, tzinfo=UTC),
             until=datetime(2024, 6, 15, 14, 0, tzinfo=UTC),
@@ -289,7 +293,7 @@ class TestInferIntervalsNoneInputs:
     @travel(datetime(2024, 6, 15, 14, 35, tzinfo=UTC))
     def test_until_none_defaults_to_last_complete_hourly(self) -> None:
         model = _model(
-            batch_expression="@hourly",
+            interval_expression="@hourly",
             batch_expression_override="0 * * * *",
             since=datetime(2024, 6, 15, 12, 0, tzinfo=UTC),
         )
@@ -301,7 +305,7 @@ class TestInferIntervalsNoneInputs:
     @travel(datetime(2024, 6, 15, 14, 35, tzinfo=UTC))
     def test_until_none_defaults_to_last_complete_daily(self) -> None:
         model = _model(
-            batch_expression="@daily",
+            interval_expression="@daily",
             batch_expression_override="0 0 * * *",
             since=datetime(2024, 6, 14, 0, 0, tzinfo=UTC),
         )
@@ -313,7 +317,7 @@ class TestInferIntervalsNoneInputs:
     @travel(datetime(2024, 6, 15, 14, 35, tzinfo=UTC))
     def test_until_none_uses_model_tz_not_override(self) -> None:
         model = _model(
-            batch_expression="@daily",
+            interval_expression="@daily",
             tz=CET,
             batch_expression_override="0 0 * * *",
             tz_override=UTC,
@@ -325,7 +329,7 @@ class TestInferIntervalsNoneInputs:
     @travel(datetime(2024, 6, 15, 14, 35, tzinfo=UTC))
     def test_until_none_uses_provided_batch_expression_first(self) -> None:
         model = _model(
-            batch_expression="@daily",
+            interval_expression="@daily",
             tz=UTC,
             batch_expression_override="0 * * * *",
             since=datetime(2024, 6, 15, 12, 0, tzinfo=UTC),
@@ -336,7 +340,7 @@ class TestInferIntervalsNoneInputs:
     @travel(datetime(2024, 6, 15, 14, 35, tzinfo=UTC))
     def test_until_none_falls_back_to_model_batch_expression(self) -> None:
         model = _model(
-            batch_expression="@daily",
+            interval_expression="@daily",
             tz=UTC,
             since=datetime(2024, 6, 14, 0, 0, tzinfo=UTC),
         )
@@ -345,7 +349,7 @@ class TestInferIntervalsNoneInputs:
 
     def test_since_none_without_latest_raises(self) -> None:
         model = _model(
-            batch_expression="@hourly",
+            interval_expression="@hourly",
             batch_expression_override="0 * * * *",
             until=datetime(2024, 6, 15, 14, 0, tzinfo=UTC),
         )
@@ -355,7 +359,7 @@ class TestInferIntervalsNoneInputs:
     @travel(datetime(2024, 6, 15, 14, 35, tzinfo=UTC))
     def test_both_none_without_latest_raises(self) -> None:
         model = _model(
-            batch_expression="@hourly", batch_expression_override="0 * * * *"
+            interval_expression="@hourly", batch_expression_override="0 * * * *"
         )
         with pytest.raises(ValueError, match="backfill requires a since value"):
             model.infer_intervals()
@@ -363,7 +367,7 @@ class TestInferIntervalsNoneInputs:
     @travel(datetime(2024, 6, 15, 14, 35, tzinfo=UTC))
     def test_both_none_with_latest_resolves(self) -> None:
         model = _model(
-            batch_expression="@hourly",
+            interval_expression="@hourly",
             batch_expression_override="0 * * * *",
             latest=True,
         )
@@ -375,7 +379,7 @@ class TestInferIntervalsNoneInputs:
     @travel(datetime(2024, 6, 15, 14, 35, tzinfo=UTC))
     def test_defaults_to_model_batch_expression(self) -> None:
         model = _model(
-            batch_expression="@hourly",
+            interval_expression="@hourly",
             since=datetime(2024, 6, 15, 12, 0, tzinfo=UTC),
             until=datetime(2024, 6, 15, 14, 0, tzinfo=UTC),
         )

@@ -76,3 +76,62 @@ Two groups:
 
 This pattern lets a single scheduled invocation reload a targeted subset
 while everything else continues its normal incremental cadence.
+
+## Changing how reload chunks
+
+Plain `r:` uses whatever the model is configured with — by default that's
+`reload_mode=INTERVAL` on `Batch` plus the model's own `interval_expression`.
+Two extended prefixes override that at match time.
+
+### `r_interval_@<alias>:` — force a different cadence
+
+The customer dimension above is daily. Want to reprocess it in hourly
+chunks instead for a one-off run? Override the batch expression at the
+tag:
+
+```bash
+TAGS="[r_interval_@hourly:customers]" USE_SCHEMA_SUFFIX=false \
+  python examples/reload_flag/main.py
+```
+
+The `reload` alias also works — `[reload_interval_@hourly:customers]`
+does the same thing. Allowed aliases come from roskarl:
+`@minutely`/`@minute`, `@hourly`/`@hour`, `@daily`/`@day`,
+`@weekly`/`@week`, `@monthly`/`@month`.
+
+For a cadence that doesn't have a named alias, configure it statically
+on the model (`Batch(interval_expression="*/15 * * * *")`) and use plain
+`r:` to reload, or override globally with
+`BATCH_EXPRESSION_OVERRIDE="*/15 * * * *"` — arbitrary cron expressions
+are intentionally not accepted inside tags.
+
+### `r_row_<N>:` — reload by row count instead of time
+
+For append-only models where time-based chunking doesn't match how the
+data actually lands (e.g. you want to replay rows in 1000-row batches
+for throttling, back-pressure, or because the table has no useful time
+column), switch reload into ROW mode:
+
+```bash
+TAGS="[r_row_1000:my_append_table]" USE_SCHEMA_SUFFIX=false \
+  python examples/reload_flag/main.py
+```
+
+Constraints:
+- `WriteMode.APPEND` or `WriteMode.UPSERT_NO_DELETE` — truncate/recreate
+  write modes reject ROW because they assume they see the whole dataset
+  at once.
+- `batch_size` is capped at 10000.
+- `infer_intervals()` refuses to produce time chunks under ROW-mode
+  reload — callers branch on `model.effective_reload_mode()` and use
+  the row-batching execution path.
+
+### Both work at group level too
+
+```bash
+TAGS="r_interval_@daily:[sales|finance]" python examples/reload_flag/main.py
+TAGS="r_row_500:[append_models]"        python examples/reload_flag/main.py
+```
+
+Runtime wins over the model's static config — the same model can be
+reloaded INTERVAL on Monday and ROW on Tuesday without code changes.
