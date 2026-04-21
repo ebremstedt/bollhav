@@ -1,5 +1,15 @@
 from datetime import datetime, timezone
-from bollhav.model import Model, Source, Target, Schema, WriteMode, Tags, Bounds, Batch
+from bollhav.model import (
+    Model,
+    Source,
+    Target,
+    Schema,
+    WriteMode,
+    Tags,
+    Bounds,
+    Batch,
+    IntervalChunks,
+)
 
 inventory_transactions = Model(
     source=Source(name="inventory_transactions"),
@@ -14,7 +24,7 @@ inventory_transactions = Model(
         begin=datetime(2024, 1, 1, tzinfo=timezone.utc),
         end=datetime(2024, 1, 11, tzinfo=timezone.utc),
     ),
-    batching=Batch(batch_expression="@daily"),
+    batching=Batch(interval=IntervalChunks(expression="@daily")),
 )
 
 supplier_catalog = Model(
@@ -30,7 +40,7 @@ supplier_catalog = Model(
         begin=datetime(2024, 1, 1, tzinfo=timezone.utc),
         end=datetime(2024, 1, 3, tzinfo=timezone.utc),
     ),
-    batching=Batch(batch_expression="@daily"),
+    batching=Batch(interval=IntervalChunks(expression="@daily")),
 )
 
 shipment_events = Model(
@@ -46,7 +56,7 @@ shipment_events = Model(
         begin=datetime(2024, 1, 1, tzinfo=timezone.utc),
         end=datetime(2024, 1, 11, tzinfo=timezone.utc),
     ),
-    batching=Batch(batch_expression="@daily"),
+    batching=Batch(interval=IntervalChunks(expression="@daily")),
 )
 
 exchange_rates = Model(
@@ -62,7 +72,7 @@ exchange_rates = Model(
         begin=datetime(2024, 1, 1, tzinfo=timezone.utc),
         end=datetime(2024, 1, 21, tzinfo=timezone.utc),
     ),
-    batching=Batch(batch_expression="@daily"),
+    batching=Batch(interval=IntervalChunks(expression="@daily")),
 )
 
 audit_log = Model(
@@ -78,5 +88,5 @@ audit_log = Model(
         begin=datetime(2024, 1, 1, tzinfo=timezone.utc),
         end=datetime(2024, 1, 8, tzinfo=timezone.utc),
     ),
-    batching=Batch(batch_expression="@daily"),
+    batching=Batch(interval=IntervalChunks(expression="@daily")),
 )

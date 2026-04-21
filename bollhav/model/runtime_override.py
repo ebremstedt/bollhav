@@ -4,15 +4,24 @@ from dataclasses import dataclass
 from datetime import datetime, tzinfo
 from typing import TYPE_CHECKING
 
+from bollhav.model.batch import ChunkMode
+
 if TYPE_CHECKING:
     from bollhav.pipe.pipe_config import PipeConfig
 
 
 @dataclass
 class RuntimeOverride:
-    """Runtime state set from the pipe config — not part of the model definition."""
+    """Runtime state set from the pipe config — not part of the model definition.
+
+    `reload_mode` and `reload_batch_size` trump the model's own `reloading`
+    fields when set. `None` means "use whatever the model is configured with".
+    """
 
     reload: bool = False
+    reload_mode: ChunkMode | None = None
+    reload_batch_size: int | None = None
+    reload_interval_expression: str | None = None
     latest: bool = False
     schema_suffix: str = ""
     batch_expression: str | None = None

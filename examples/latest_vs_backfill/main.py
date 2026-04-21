@@ -28,7 +28,7 @@ def main(pipe: PipeConfig) -> None:
         intervals = model.infer_intervals()
 
         print(f"\n{model.target.full_name}")
-        print(f"  batch_expression : {model.batching.batch_expression}")
+        print(f"  batch_expression : {model.batching.interval.expression}")
         print(f"  bounds           : {model.bounds.begin} → {model.bounds.end}")
         print(f"  chunks returned  : {len(intervals)}")
         if intervals and intervals[0] is not None:

@@ -1,5 +1,15 @@
 from datetime import datetime, timezone
-from bollhav.model import Model, Source, Target, Schema, WriteMode, Tags, Bounds, Batch
+from bollhav.model import (
+    Model,
+    Source,
+    Target,
+    Schema,
+    WriteMode,
+    Tags,
+    Bounds,
+    Batch,
+    IntervalChunks,
+)
 
 # TRUNCATE_TABLE_INSERT — wipes the table then bulk inserts fresh data every run.
 customers = Model(
@@ -15,5 +25,5 @@ customers = Model(
         begin=datetime(2024, 1, 1, tzinfo=timezone.utc),
         end=datetime(2024, 1, 4, tzinfo=timezone.utc),
     ),
-    batching=Batch(batch_expression="@daily"),
+    batching=Batch(interval=IntervalChunks(expression="@daily")),
 )

@@ -1,4 +1,13 @@
-from bollhav.model import Model, Source, Target, Schema, WriteMode, Tags, Batch
+from bollhav.model import (
+    Model,
+    Source,
+    Target,
+    Schema,
+    WriteMode,
+    Tags,
+    Batch,
+    IntervalChunks,
+)
 
 
 # Scenario: a warehouse fact table of payment transactions.
@@ -32,7 +41,6 @@ fact_transactions = Model(
     ),
     tagging=Tags(tags={"finance", "large"}),
     batching=Batch(
-        batch_expression="*/15 * * * *",
-        window_expression="@daily",
+        interval=IntervalChunks(expression="*/15 * * * *", window_expression="@daily")
     ),
 )

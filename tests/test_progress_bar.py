@@ -77,12 +77,12 @@ def test_total_does_not_bleed_across_models():
     output = buf.getvalue()
 
     # step_a must finish with 5/5, NOT 5/3
-    lines = [line for line in output.splitlines() if "✓" in line and "step_a" in line]
+    lines = [line for line in output.splitlines() if "▸" in line and "step_a" in line]
     assert lines, "step_a finished line not found"
     assert "5/5" in lines[0], f"Expected 5/5 in step_a line, got: {lines[0]}"
 
     # step_b must finish with 3/3, NOT 3/<some other total>
-    lines_b = [line for line in output.splitlines() if "✓" in line and "step_b" in line]
+    lines_b = [line for line in output.splitlines() if "▸" in line and "step_b" in line]
     assert lines_b, "step_b finished line not found"
     assert "3/3" in lines_b[0], f"Expected 3/3 in step_b line, got: {lines_b[0]}"
 
@@ -150,7 +150,7 @@ def test_batch_level_shows_finish_lines(monkeypatch):
     execute(model=model_a)
 
     output = finish_captured(execute)
-    assert "✓" in output
+    assert "▸" in output
     assert "alpha" in output
     assert "2/2" in output
 
@@ -182,4 +182,4 @@ def test_minimal_level_shows_summary(monkeypatch):
     output = buf.getvalue()
 
     assert "2 models done" in output
-    assert "✓" in output
+    assert "✓" in output  # final all-done summary uses ✓ regardless of level

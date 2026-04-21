@@ -12,7 +12,7 @@ The solution uses both cron expressions on `Batch`:
 | Field | Value | Role |
 |---|---|---|
 | `window_expression` | `@daily` | **outer scope** — one full day is what we catch up on |
-| `batch_expression` | `*/15 * * * *` | **inner chunks** — split that day into 96 × 15-minute writes |
+| `interval_expression` | `*/15 * * * *` | **inner chunks** — split that day into 96 × 15-minute writes |
 
 One run. One day of data. Ninety-six small, independent, retryable chunks.
 
@@ -40,15 +40,15 @@ warehouse_finance.fact_transactions
     2026-04-16 23:45:00+00:00 → 2026-04-17 00:00:00+00:00
 ```
 
-## Why not just use `batch_expression="*/15 * * * *"` alone?
+## Why not just use `interval_expression="*/15 * * * *"` alone?
 
 Without `window_expression`, latest mode returns **one** chunk — the last
 completed 15-minute slice. You would need to schedule 96 separate invocations
 per day to cover a whole day. `window_expression="@daily"` is what tells
 bollhav: "the scope of one run is a full day — now chunk that scope
-according to `batch_expression`."
+according to `interval_expression`."
 
-## Why not just use `batch_expression="@daily"` alone?
+## Why not just use `interval_expression="@daily"` alone?
 
 Then latest mode returns one chunk covering a full day — a single
 24-hour INSERT. For a large fact table that's exactly what we are trying

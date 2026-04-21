@@ -8,11 +8,12 @@ from icron import croniter
 from bollhav.model.source import Source
 from bollhav.model.target import Target
 from bollhav.model.bounds import Bounds
-from bollhav.model.batch import Batch, _resolve_cron, _chunk_interval
+from bollhav.model.batch import Batch, ChunkMode, _resolve_cron, _chunk_interval
 from bollhav.model.intervals import TZInterval
 from bollhav.model.runtime_override import RuntimeOverride
 from bollhav.model.tags import Tags
-from roskarl import BatchExpression, BatchExpressionExtended
+from bollhav.model.write_modes import WriteMode
+from roskarl import IntervalExpression, IntervalExpressionExtended
 
 if TYPE_CHECKING:
     from bollhav.pipe.pipe_config import PipeConfig
@@ -38,6 +39,7 @@ class Model:
         self.target = target
         self.bounds = bounds or Bounds()
         self.batching = batching or Batch()
+        self._validate_reloading()
         self.enabled = enabled
         self.debug = debug
         self.description = description
@@ -54,6 +56,48 @@ class Model:
         )
         if self.debug:
             self.pretty()
+
+    _ROW_RELOAD_COMPATIBLE_WRITE_MODES = frozenset(
+        {WriteMode.APPEND, WriteMode.UPSERT_NO_DELETE}
+    )
+
+    def effective_reload_mode(self) -> ChunkMode:
+        return self.runtime_override.reload_mode or self.batching.mode
+
+    def effective_reload_batch_size(self) -> int:
+        return (
+            self.runtime_override.reload_batch_size
+            if self.runtime_override.reload_batch_size is not None
+            else self.batching.row.batch_size
+        )
+
+    def _validate_reloading(self) -> None:
+        if self.batching.mode is not ChunkMode.ROW:
+            return
+        if self.target.write_mode not in self._ROW_RELOAD_COMPATIBLE_WRITE_MODES:
+            allowed = ", ".join(
+                sorted(m.value for m in self._ROW_RELOAD_COMPATIBLE_WRITE_MODES)
+            )
+            raise ValueError(
+                f"Batch(reload_mode=ROW) is not compatible with "
+                f"WriteMode.{self.target.write_mode.value} on model "
+                f"{self.target.full_name!r} — allowed: {allowed}"
+            )
+
+    def _validate_runtime_reload(self) -> None:
+        """Re-check WriteMode compatibility when a runtime override forces ROW."""
+        if self.runtime_override.reload_mode is not ChunkMode.ROW:
+            return
+        if self.target.write_mode not in self._ROW_RELOAD_COMPATIBLE_WRITE_MODES:
+            allowed = ", ".join(
+                sorted(m.value for m in self._ROW_RELOAD_COMPATIBLE_WRITE_MODES)
+            )
+            raise ValueError(
+                f"Runtime override forces ChunkMode.ROW on model "
+                f"{self.target.full_name!r}, but "
+                f"WriteMode.{self.target.write_mode.value} is not compatible — "
+                f"allowed: {allowed}"
+            )
 
     def apply_pipe(self, pipe: PipeConfig) -> None:
         """Apply pipe-level config to this model — sets runtime_override state
@@ -94,8 +138,10 @@ class Model:
         lines += [
             "",
             "  batching:",
-            f"    expression:  {self.batching.batch_expression}",
-            f"    lookback:    {self.batching.lookback}",
+            f"    mode:        {self.batching.mode.value}",
+            f"    interval:    expression={self.batching.interval.expression}, "
+            f"lookback={self.batching.interval.lookback}",
+            f"    row:         batch_size={self.batching.row.batch_size}",
             f"    retries:     {self.batching.retries}",
             "",
             "  bounds:",
@@ -122,8 +168,8 @@ class Model:
 
     def latest_complete_interval(
         self,
-        batch_expression_override: BatchExpression
-        | BatchExpressionExtended
+        batch_expression_override: IntervalExpression
+        | IntervalExpressionExtended
         | None = None,
         tz_override: tzinfo | None = None,
     ) -> TZInterval:
@@ -137,9 +183,9 @@ class Model:
         Uses the provided batch expression and timezone if set,
         otherwise falls back to the model's own."""
         cron_expression = _resolve_cron(
-            batch_expression_override or self.batching.batch_expression
+            batch_expression_override or self.batching.interval.expression
         )
-        tz = tz_override or self.batching.tz
+        tz = tz_override or self.batching.interval.tz
         now = datetime.now(tz=tz)
         # Get two ticks from now to measure the interval size, then seed
         # far enough back to guarantee at least two ticks before now.
@@ -161,7 +207,7 @@ class Model:
         tick1 = it.get_next(datetime)
         tick2 = it.get_next(datetime)
         tick_size = tick2 - tick1
-        return since - (tick_size * self.batching.lookback)
+        return since - (tick_size * self.batching.interval.lookback)
 
     def infer_intervals(self) -> list[TZInterval] | list[None]:
         """Resolve and chunk a time interval into TZIntervals.
@@ -173,20 +219,20 @@ class Model:
         Call runtime_override.apply_pipe(pipe) before calling this method.
 
         Two cron expressions are resolved:
-            batch_expression   defines the chunk size — how the resolved interval
-                               is split into TZIntervals for processing. Used in
-                               all three modes, and as the fallback tick when
-                               resolving an open-ended `until` in reload/backfill.
-            window_expression  defines the scope for `latest` mode only — the
-                               outer interval to catch up on. Defaults to
-                               `batch_expression` when unset. Irrelevant for
-                               reload/backfill, which get bounds explicitly.
+            interval_expression  defines the chunk size — how the resolved interval
+                                 is split into TZIntervals for processing. Used in
+                                 all three modes, and as the fallback tick when
+                                 resolving an open-ended `until` in reload/backfill.
+            window_expression    defines the scope for `latest` mode only — the
+                                 outer interval to catch up on. Defaults to
+                                 `interval_expression` when unset. Irrelevant for
+                                 reload/backfill, which get bounds explicitly.
 
         Resolution order:
-            batch_expression:   runtime_override > model's own batch expression
-            window_expression:  runtime_override > model's own window expression
-                                > batch_expression (fallback; latest mode only)
-            timezone:           runtime_override > model's own timezone
+            interval_expression: runtime_override > model's own interval expression
+            window_expression:   runtime_override > model's own window expression
+                                 > interval_expression (fallback; latest mode only)
+            timezone:            runtime_override > model's own timezone
 
         Three modes, evaluated in this order:
 
@@ -229,16 +275,38 @@ class Model:
             return [None]
 
         rt = self.runtime_override
-        tz = rt.tz or self.batching.tz
-        batchexpr = rt.batch_expression or self.batching.batch_expression
+        if self.batching.mode is ChunkMode.ROW and not rt.reload:
+            raise ValueError(
+                f"Model {self.target.full_name!r} is configured with "
+                f"Batch(mode=ROW). ROW-mode models can only be reloaded — "
+                f"latest and backfill require mode=INTERVAL."
+            )
+        tz = rt.tz or self.batching.interval.tz
+        batchexpr = rt.batch_expression or self.batching.interval.expression
 
         if rt.latest:
             windowexpr = (
-                rt.window_expression or self.batching.window_expression or batchexpr
+                rt.window_expression
+                or self.batching.interval.window_expression
+                or batchexpr
             )
             interval = self.latest_complete_interval(windowexpr, tz)
             since, until = interval.since, interval.until
         elif rt.reload:
+            if rt.reload_interval_expression:
+                batchexpr = rt.reload_interval_expression
+            if self.effective_reload_mode() is ChunkMode.ROW:
+                raise ValueError(
+                    f"infer_intervals() cannot be called in reload mode on "
+                    f"model {self.target.full_name!r}: effective reload mode is "
+                    f"ROW (source: "
+                    f"{'runtime override' if rt.reload_mode is ChunkMode.ROW else 'model.reloading'}"
+                    f"), which chunks work by row count instead of time. "
+                    f"infer_intervals() only produces time intervals, so "
+                    f"time-based chunks would be meaningless here. Callers must "
+                    f"branch on `model.effective_reload_mode()` and use the "
+                    f"row-batching execution path for ROW-mode reloads."
+                )
             if self.bounds.begin is None:
                 raise ValueError(
                     f"reload requires bounds.begin to be set on model "
@@ -256,7 +324,7 @@ class Model:
             until = rt.until or self.latest_complete_interval(batchexpr).until
 
         cron_expression = _resolve_cron(batchexpr)
-        if self.batching.lookback:
+        if self.batching.interval.lookback:
             since = self._apply_lookback(cron_expression, since)
 
         return _chunk_interval(cron_expression, TZInterval(since, until))

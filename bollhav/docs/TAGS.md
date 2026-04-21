@@ -25,18 +25,42 @@ Prefix `not:` to exclude models:
 
 Tag-level `not:` (inside the brackets) negates that specific condition. Group-level `not:` (outside the brackets) negates the entire group — the group matches when the inner expression does NOT match.
 
-### Reload flag (`r:`)
+### Reload flag (`r:` or `reload:`)
 
-Prefix `r:` to mark matched models for reload:
+Prefix `r:` (or the full-word alias `reload:`) to mark matched models for reload:
 
 | Syntax | Meaning |
 |--------|---------|
 | `[r:foo]` | match `foo`, reload |
+| `[reload:foo]` | same as `[r:foo]` — `reload` is a full-word alias for `r` |
 | `[r:foo & bar]` | match `foo` AND `bar`, reload |
 | `[r:(foo\|bar)]` | match `foo` OR `bar`, reload |
 | `r:[foo & bar]` | match `foo` AND `bar`, reload for all |
 
-Group-level `r:` (outside the brackets) applies to all tags inside. Tag-level `r:` applies only to that tag.
+Group-level `r:` (outside the brackets) applies to all tags inside. Tag-level `r:` applies only to that tag. `reload` works as a drop-in replacement for `r` in every form — pick whichever reads better for you.
+
+### Controlling how reload chunks its work
+
+Plain `r:` reloads using whatever the model is statically configured with (the `reload_mode` / `reload_batch_size` fields on the model's `Batch`, defaulting to `INTERVAL` + the model's own `interval_expression`). Two extended prefixes let you override that *at match time* without touching the model code:
+
+| Prefix | Forces | Notes |
+|--------|--------|-------|
+| `r_row_<N>:` | ROW-mode reload, `batch_size=<N>` | `<N>` is the row count per chunk. Capped at 10000. Compatible with `WriteMode.APPEND` and `WriteMode.UPSERT_NO_DELETE`. |
+| `r_interval_<@alias>:` | INTERVAL-mode reload, `interval_expression=<alias>` | `<alias>` is one of `@minutely`/`@minute`, `@hourly`/`@hour`, `@daily`/`@day`, `@weekly`/`@week`, `@monthly`/`@month` (sourced from roskarl). |
+
+For a cadence that doesn't have a named alias, set it statically on the model (`Batch(interval_expression="*/15 * * * *")`) and reload with plain `r:`, or override globally with the `BATCH_EXPRESSION_OVERRIDE` env var — arbitrary cron expressions are intentionally not accepted inside tags.
+
+Both extended prefixes accept the `reload_` long form (`reload_row_100:`, `reload_interval_@daily:`), and both work at tag-level and group-level:
+
+| Syntax | Meaning |
+|--------|---------|
+| `[r_row_100:vPAS]` | reload `vPAS` in ROW mode, 100 rows/chunk |
+| `reload_row_500:[foo & bar]` | group-level — ROW mode, 500 rows/chunk for both |
+| `[r_interval_@daily:sales]` | reload `sales` in INTERVAL mode, one chunk per day |
+| `r_interval_@hourly:[facts]` | group-level — hourly chunks for every matched model |
+| `[r_row_100:foo][r_interval_@daily:bar]` | mix — `foo` in ROW/100, `bar` in INTERVAL/@daily |
+
+Runtime trumps the model's own `reloading`, so the same model can be run ROW one day and INTERVAL the next without code changes. Validation fires at parse/match time — an unknown cron alias or a row-batch over the cap raises immediately.
 
 ### Combining `r:` and `not:`
 
@@ -46,6 +70,7 @@ The prefixes can be combined:
 |--------|---------|
 | `[r:sales & not:foo]` | match `sales`, exclude `foo`, reload matched |
 | `r:not:[foo]` | match everything without `foo`, reload all |
+| `r_row_100:not:[views]` | reload everything except `views` in ROW mode |
 
 ## Usage
 

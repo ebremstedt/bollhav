@@ -34,7 +34,7 @@ model = Model(
     ),
     source=Source(name="raw.orders"),
     bounds=Bounds(begin=datetime(2024, 1, 1, tzinfo=timezone.utc)),
-    batching=Batch(batch_expression="0 * * * *"),
+    batching=Batch(interval_expression="0 * * * *"),
     debug=True,
 )
 ```
@@ -88,18 +88,18 @@ model = Model(
 
 | Parameter | Type | Default | Description |
 |---|---|---|---|
-| `batch_expression` | `BatchExpression` | `"@daily"` | Chunk size — how an interval is split into `TZInterval`s for processing |
-| `window_expression` | `BatchExpression \| None` | `None` | Scope for `latest` mode — "one of what" counts as the latest complete unit. When `None`, falls back to `batch_expression` (one chunk = one scope, pre-window behaviour). Ignored in reload/backfill, which use explicit since/until |
+| `interval_expression` | `IntervalExpression` | `"@daily"` | Chunk size — how an interval is split into `TZInterval`s for processing |
+| `window_expression` | `IntervalExpression \| None` | `None` | Scope for `latest` mode — "one of what" counts as the latest complete unit. When `None`, falls back to `interval_expression` (one chunk = one scope, pre-window behaviour). Ignored in reload/backfill, which use explicit since/until |
 | `tz` | `tzinfo` | `timezone.utc` | Timezone used for interval resolution |
 | `lookback` | `int` | `None` | Extends interval start backwards by N cron-ticks |
 | `retries` | `int` | `None` | Retry count on failure |
 
-#### `batch_expression` vs `window_expression`
+#### `interval_expression` vs `window_expression`
 
 Two cron expressions that do different jobs:
 
 - **`window_expression`** — the OUTER scope ("catch up on one full DAY")
-- **`batch_expression`** — the INNER chunks ("split that into 15-min WRITES")
+- **`interval_expression`** — the INNER chunks ("split that into 15-min WRITES")
 
 `window_expression` is consulted only in `latest` mode. For `reload`/`backfill` the since/until are explicit and the window is irrelevant.
 
@@ -113,7 +113,7 @@ window unset (== batch), batch="@hourly" → 1 × hourly chunk (13:00→14:00)
 
 ```python
 batching=Batch(
-    batch_expression="*/15 * * * *",   # chunk into 15-min pieces
+    interval_expression="*/15 * * * *",   # chunk into 15-min pieces
     window_expression="@daily",         # scope = one full day
 )
 ```
@@ -134,7 +134,7 @@ Returns the most recent fully elapsed interval. An in-progress interval is never
 
 | Parameter | Type | Default | Description |
 |---|---|---|---|
-| `batch_expression_override` | `BatchExpression \| None` | `None` | Overrides the model's batch expression |
+| `batch_expression_override` | `IntervalExpression \| None` | `None` | Overrides the model's batch expression |
 | `tz_override` | `tzinfo \| None` | `None` | Overrides the model's timezone |
 
 ### Computed attributes
