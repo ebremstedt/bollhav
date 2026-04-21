@@ -1,6 +1,6 @@
 # tag_matching
 
-Shows how the `TAGS` expression selects models. No data is read or written —
+Shows how the `TAGS` expression selects models. No data is read or written,
 this example just prints the matched models so you can see which
 expressions resolve to which subset.
 
