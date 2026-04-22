@@ -123,6 +123,30 @@ def truncate_write(
     cursor.commit()
 
 
+def append(
+    conn: pyodbc.Connection,
+    model: Model,
+    df: pl.DataFrame,
+    fast_executemany: bool = True,
+) -> None:
+    """Bulk insert rows into target without clearing existing data."""
+    schema = model.target.schema.resolved
+    table = model.target.name
+    all_col_names = [c.name for c in model.target.columns]
+
+    cursor = conn.cursor()
+    mssql_cols = [c for c in model.target.columns if isinstance(c, MssqlColumn)]
+    _bulk_insert(
+        cursor,
+        f"{_b(schema)}.{_b(table)}",
+        all_col_names,
+        df,
+        columns=mssql_cols,
+        fast=fast_executemany,
+    )
+    cursor.commit()
+
+
 def create_replace_view(conn: pyodbc.Connection, model: Model) -> None:
     """Create or alter a view using the query defined on model.source."""
     if model.source is None or model.source.query is None:
