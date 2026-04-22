@@ -69,6 +69,7 @@ def ensure_table(conn: pyodbc.Connection, model: Model) -> None:
     cursor = conn.cursor()
 
     if model.target.recreate_table:
+        logger.debug("Dropping table (recreate_table=True): %s.%s", schema, table)
         cursor.execute(
             f"IF OBJECT_ID(?, 'U') IS NOT NULL DROP TABLE {_b(schema)}.{_b(table)}",
             f"{schema}.{table}",
@@ -84,6 +85,7 @@ def ensure_table(conn: pyodbc.Connection, model: Model) -> None:
     )
 
     if model.target.truncate_table:
+        logger.debug("Truncating table (truncate_table=True): %s.%s", schema, table)
         cursor.execute(f"TRUNCATE TABLE {_b(schema)}.{_b(table)}")
 
     unique_cols = [c for c in mssql_cols if c.unique]
