@@ -1,4 +1,4 @@
-from bollhav.model.database import Database, DatabaseColumn
+from bollhav.model.database import Database, DatabaseColumn, DatabaseIndex
 from bollhav.model.intervals import TZInterval
 from bollhav.model.matching import match_models
 from bollhav.model.ordering import UpstreamMode
@@ -12,12 +12,13 @@ from bollhav.model.target import Target
 from bollhav.model.bounds import Bounds
 from bollhav.model.batch import Batch, ChunkMode, IntervalChunks, RowChunks
 from bollhav.model.tags import Tags
-from bollhav.model.progress_bar import progress_bar, ProgressLevel
+from bollhav.model.progress_bar import progress_bar, ProgressLevel, name_width_for
 
 __all__ = [
     "WriteMode",
     "Database",
     "DatabaseColumn",
+    "DatabaseIndex",
     "TZInterval",
     "match_models",
     "UpstreamMode",
@@ -35,4 +36,5 @@ __all__ = [
     "Tags",
     "progress_bar",
     "ProgressLevel",
+    "name_width_for",
 ]

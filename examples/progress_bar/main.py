@@ -17,18 +17,21 @@ import os
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
 from bollhav.pipe import with_pipe_config, PipeConfig
-from bollhav.model import match_models
+from bollhav.model import match_models, name_width_for
 from execute import execute
 
 
 @with_pipe_config
 def main(pipe: PipeConfig) -> None:
     matched = match_models(folder="src/models", tags=pipe.tags)
-    if matched:
-        execute.set_name_width(max(len(m.target.full_name) for m in matched) + 12)
 
     for model in matched:
         model.apply_pipe(pipe)
+
+    if matched:
+        execute.set_name_width(name_width_for(matched))
+
+    for model in matched:
         intervals = model.infer_intervals()
         execute.set_total(len(intervals))
         for interval in intervals:

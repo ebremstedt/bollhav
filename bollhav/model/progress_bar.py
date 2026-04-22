@@ -27,6 +27,31 @@ def get_progress_level() -> ProgressLevel:
         return ProgressLevel.MODEL
 
 
+def _model_display_label(model) -> str:
+    """Mirror of `_resolve_model`'s mode-label logic, exposed so callers can
+    pre-compute the width a row will take. Call *after* `apply_pipe` so the
+    returned name reflects the active schema suffix."""
+    name = model.target.full_name
+    if getattr(model, "batching", None) is None:
+        return name
+    mode = model.effective_reload_mode().value.lower()
+    if mode == "row":
+        return f"{name} ({model.effective_reload_batch_size()} rows)"
+    rt = model.runtime_override
+    expr = (
+        getattr(rt, "reload_interval_expression", None)
+        or getattr(rt, "batch_expression", None)
+        or model.batching.interval.expression
+    )
+    return f"{name} ({expr.lstrip('@')})"
+
+
+def name_width_for(models) -> int:
+    """Return the width the progress bar needs to align every row's mode
+    column. Pass this to `set_name_width` after `apply_pipe` has run."""
+    return max(len(_model_display_label(m)) for m in models)
+
+
 @dataclass
 class _State:
     current_model: str = ""

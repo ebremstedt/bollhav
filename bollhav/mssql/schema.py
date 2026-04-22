@@ -2,6 +2,7 @@ import logging
 import pyodbc
 from bollhav.model.model import Model
 from bollhav.mssql.columns import MssqlColumn
+from bollhav.mssql.indexes import MssqlIndex
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +31,19 @@ def _col_ddl(col: MssqlColumn) -> str:
     pk = " PRIMARY KEY" if col.primary_key else ""
     null = " NOT NULL" if not col.nullable else ""
     return f"    {_b(col.name)} {_col_type(col)}{pk}{null}"
+
+
+def _index_ddl(schema: str, table: str, idx: MssqlIndex) -> str:
+    unique = "UNIQUE " if idx.unique else ""
+    cols = ", ".join(_b(c) for c in idx.columns)
+    include = (
+        f" INCLUDE ({', '.join(_b(c) for c in idx.included)})" if idx.included else ""
+    )
+    where = f" WHERE {idx.filter}" if idx.filter else ""
+    return (
+        f"CREATE {unique}NONCLUSTERED INDEX {_b(idx.name)} "
+        f"ON {_b(schema)}.{_b(table)} ({cols}){include}{where}"
+    )
 
 
 def ensure_schema(conn: pyodbc.Connection, schema: str) -> None:
@@ -80,6 +94,33 @@ def ensure_table(conn: pyodbc.Connection, model: Model) -> None:
     cursor.commit()
 
 
+def ensure_indexes(conn: pyodbc.Connection, model: Model) -> None:
+    schema = model.target.schema.resolved
+    table = model.target.name
+    mssql_indexes = [i for i in model.target.indexes if isinstance(i, MssqlIndex)]
+    if not mssql_indexes:
+        return
+    logger.debug("Ensuring %d index(es) on: %s.%s", len(mssql_indexes), schema, table)
+
+    cursor = conn.cursor()
+    for idx in mssql_indexes:
+        cursor.execute(
+            f"IF NOT EXISTS ("
+            f"    SELECT 1 FROM sys.indexes"
+            f"    WHERE name = ? AND object_id = OBJECT_ID(?)"
+            f") {_index_ddl(schema, table, idx)}",
+            idx.name,
+            f"{schema}.{table}",
+        )
+    cursor.commit()
+
+
 def ensure_schema_and_table(conn: pyodbc.Connection, model: Model) -> None:
     ensure_schema(conn=conn, schema=model.target.schema.resolved)
     ensure_table(conn=conn, model=model)
+
+
+def ensure_schema_table_and_indexes(conn: pyodbc.Connection, model: Model) -> None:
+    ensure_schema(conn=conn, schema=model.target.schema.resolved)
+    ensure_table(conn=conn, model=model)
+    ensure_indexes(conn=conn, model=model)
