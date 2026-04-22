@@ -33,7 +33,8 @@ shipment_tracking_summary = Model(
     target=Target(
         name="shipment_tracking_summary",
         schema=Schema(name="warehouse_clean"),
-        write_mode=WriteMode.RECREATE_TABLE_INSERT,
+        write_mode=WriteMode.APPEND,
+        recreate_table=True,
     ),
     tagging=Tags(tags={"clean"}),
     upstream=["warehouse_raw.shipment_events"],
@@ -50,7 +51,8 @@ inventory_snapshot = Model(
     target=Target(
         name="inventory_snapshot",
         schema=Schema(name="warehouse_clean"),
-        write_mode=WriteMode.TRUNCATE_TABLE_INSERT,
+        write_mode=WriteMode.APPEND,
+        truncate_table=True,
     ),
     tagging=Tags(tags={"clean"}),
     upstream=["warehouse_raw.inventory_transactions"],

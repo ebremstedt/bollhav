@@ -21,6 +21,8 @@ class Target:
     dsn_env_var: str | None = None
     column_sorting: Callable | None = sort_columns
     extra: dict | None = None
+    recreate_table: bool = False
+    truncate_table: bool = False
 
     sensitive: bool = field(init=False, default=False)
     unique_columns: list = field(init=False, default_factory=list)
@@ -45,6 +47,17 @@ class Target:
             raise ValueError("ModelType.VIEW must use WriteMode.VIEW")
         if self.model_type == ModelType.TABLE and self.write_mode == WriteMode.VIEW:
             raise ValueError("ModelType.TABLE cannot use WriteMode.VIEW")
+        if self.recreate_table and self.truncate_table:
+            raise ValueError(
+                "recreate_table and truncate_table cannot both be True — "
+                "recreate already leaves the table empty"
+            )
+        if (
+            self.recreate_table or self.truncate_table
+        ) and self.write_mode == WriteMode.VIEW:
+            raise ValueError(
+                "recreate_table/truncate_table are not applicable to WriteMode.VIEW"
+            )
         if self.database is not None and len(self.columns) == 0:
             raise ValueError("columns must be set when database is provided")
         if len(self.columns) > 0 and self.database is None:

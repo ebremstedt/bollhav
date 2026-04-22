@@ -48,7 +48,8 @@ finance_budgets = Model(
     target=Target(
         name="finance_budgets",
         schema=Schema(name="warehouse_finance"),
-        write_mode=WriteMode.TRUNCATE_TABLE_INSERT,
+        write_mode=WriteMode.APPEND,
+        truncate_table=True,
     ),
     tagging=Tags(tags={"forecast"}),
     bounds=Bounds(

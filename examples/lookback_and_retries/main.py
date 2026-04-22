@@ -17,25 +17,29 @@ import os
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
 from bollhav.pipe import with_pipe_config, PipeConfig
-from bollhav.model import match_models
+from bollhav.model import apply_pipe_to_models
 from execute import execute
 
 
 @with_pipe_config
 def main(pipe: PipeConfig) -> None:
-    for model in match_models(folder="src/models", tags=pipe.tags):
-        model.apply_pipe(pipe)
+    models = apply_pipe_to_models(pipe)
+    for model in models:
         intervals = model.infer_intervals()
 
         print(f"\n{model.target.full_name}")
-        print(f"  batch_expression : {model.batching.interval.expression}")
-        print(f"  lookback         : {model.batching.interval.lookback}")
-        print(f"  retries          : {model.batching.retries}")
-        print(f"  bounds           : {model.bounds.begin} → {model.bounds.end}")
-        print(f"  chunks returned  : {len(intervals)}")
+        print(f"  interval_expression : {model.batching.interval.expression}")
+        print(f"  lookback            : {model.batching.interval.lookback}")
+        print(f"  retries             : {model.batching.retries}")
+        print(f"  bounds              : {model.bounds.begin} → {model.bounds.end}")
+        print(f"  chunks returned     : {len(intervals)}")
         if intervals and intervals[0] is not None:
-            print(f"  first chunk      : {intervals[0].since} → {intervals[0].until}")
-            print(f"  last chunk       : {intervals[-1].since} → {intervals[-1].until}")
+            print(
+                f"  first chunk         : {intervals[0].since} → {intervals[0].until}"
+            )
+            print(
+                f"  last chunk          : {intervals[-1].since} → {intervals[-1].until}"
+            )
         print()
 
         for iv in intervals:

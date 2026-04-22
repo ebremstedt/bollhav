@@ -37,7 +37,7 @@ def _model(
             database=Database.MSSQL,
             columns=cols,
             indexes=indexes or [],
-            write_mode=WriteMode.TRUNCATE_TABLE_INSERT,
+            write_mode=WriteMode.APPEND,
             column_sorting=None,
         ),
     )
@@ -169,7 +169,7 @@ class TestTargetIndexValidation:
                 database=Database.MSSQL,
                 columns=[MssqlColumn(name="a", nullable=False)],
                 indexes=[MssqlIndex(name="ix", columns=["missing"])],
-                write_mode=WriteMode.TRUNCATE_TABLE_INSERT,
+                write_mode=WriteMode.APPEND,
                 column_sorting=None,
             )
 
@@ -181,7 +181,7 @@ class TestTargetIndexValidation:
                 database=Database.MSSQL,
                 columns=[MssqlColumn(name="a", nullable=False)],
                 indexes=[MssqlIndex(name="ix", columns=["a"], included=["missing"])],
-                write_mode=WriteMode.TRUNCATE_TABLE_INSERT,
+                write_mode=WriteMode.APPEND,
                 column_sorting=None,
             )
 
@@ -195,7 +195,7 @@ class TestTargetIndexValidation:
                 MssqlColumn(name="b"),
             ],
             indexes=[MssqlIndex(name="ix", columns=["a"], included=["b"])],
-            write_mode=WriteMode.TRUNCATE_TABLE_INSERT,
+            write_mode=WriteMode.APPEND,
             column_sorting=None,
         )
         assert len(t.indexes) == 1

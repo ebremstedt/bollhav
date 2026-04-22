@@ -24,7 +24,7 @@ def main(pipe: PipeConfig) -> None:
     print(f"\nTAGS = {pipe.tags!r}")
     print(f"Matched {len(matched)} model(s):\n")
     for model in matched:
-        reload_marker = " (reload)" if model.runtime_override.reload else ""
+        reload_marker = " (reload)" if model.directives.reload else ""
         tags = ", ".join(sorted(model.tags))
         print(f"  - {model.target.full_name}{reload_marker}")
         print(f"      auto-tags: {tags}")

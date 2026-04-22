@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 
 
@@ -8,11 +8,16 @@ class Schema:
     suffix: str = ""
     suffix_appendix: str | None = "%y%W"
 
+    _base_name: str = field(init=False, default="", repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        self._base_name = self.name
+
     @property
     def resolved(self) -> str:
         if self.suffix:
-            s = self.name + "_" + self.suffix
+            s = self._base_name + "_" + self.suffix
             if self.suffix_appendix:
                 s = s + "_" + datetime.now().strftime(self.suffix_appendix) + "_"
             return s
-        return self.name
+        return self._base_name

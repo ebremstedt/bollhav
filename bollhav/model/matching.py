@@ -19,12 +19,12 @@ def _model_matches(
         return None
     for group in potential_tag_groups:
         if group_matches(model.tags, group):
-            model.runtime_override.reload = any(tag.reload for tag in group.tags)
-            model.runtime_override.reload_mode = next(
+            model.directives.reload = any(tag.reload for tag in group.tags)
+            model.directives.reload_mode = next(
                 (tag.reload_mode for tag in group.tags if tag.reload_mode is not None),
                 None,
             )
-            model.runtime_override.reload_batch_size = next(
+            model.directives.reload_batch_size = next(
                 (
                     tag.reload_batch_size
                     for tag in group.tags
@@ -32,7 +32,7 @@ def _model_matches(
                 ),
                 None,
             )
-            model.runtime_override.reload_interval_expression = next(
+            model.directives.reload_interval_expression = next(
                 (
                     tag.reload_interval_expression
                     for tag in group.tags
@@ -40,7 +40,6 @@ def _model_matches(
                 ),
                 None,
             )
-            model._validate_runtime_reload()
             return model
     return None
 
@@ -87,7 +86,7 @@ def match_models(
     Scan a folder recursively for Python modules, discover all Model instances,
     and return those whose tags match the given tag expression.
 
-    Runtime state (e.g. reload) is set on model.runtime_override during matching.
+    Runtime state (e.g. reload) is set on model.directives during matching.
 
     Usage:
         for model in match_models(folder="src/models", tags="[r:sales & finance]"):
@@ -112,7 +111,7 @@ def match_models(
     INTERVAL_EXPRESSION_SHORTCUTS: @minutely/@minute, @hourly/@hour,
     @daily/@day, @weekly/@week, @monthly/@month. For custom cron
     expressions, configure the model statically or use
-    BATCH_EXPRESSION_OVERRIDE — arbitrary cron strings are not accepted
+    INTERVAL_EXPRESSION_OVERRIDE — arbitrary cron strings are not accepted
     inside tags.
 
     Raises:
@@ -150,7 +149,7 @@ def match_models(
                         "Matched model %r from %s (reload=%s)",
                         full_name,
                         file,
-                        model.runtime_override.reload,
+                        model.directives.reload,
                     )
 
     if total_models == 0:

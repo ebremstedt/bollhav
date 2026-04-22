@@ -4,7 +4,7 @@ import polars as pl
 from typing import Generator
 from bollhav.model.model import Model
 from bollhav.model.write_modes import WriteMode
-from bollhav.mssql.modes import append, merge, truncate_write, create_replace_view
+from bollhav.mssql.modes import append, merge, create_replace_view
 from bollhav.mssql.schema import ensure_schema_table_and_indexes
 
 logger = logging.getLogger(__name__)
@@ -22,8 +22,6 @@ def write_dataframes(
             write_function = append
         case WriteMode.UPSERT_NO_DELETE:
             write_function = merge
-        case WriteMode.TRUNCATE_TABLE_INSERT:
-            write_function = truncate_write
         case _:
             raise ValueError(
                 f"Unhandled write mode for MSSQL: {model.target.write_mode}"

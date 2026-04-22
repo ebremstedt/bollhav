@@ -98,31 +98,6 @@ def merge(
     cursor.commit()
 
 
-def truncate_write(
-    conn: pyodbc.Connection,
-    model: Model,
-    df: pl.DataFrame,
-    fast_executemany: bool = True,
-) -> None:
-    """Truncate target table then bulk insert."""
-    schema = model.target.schema.resolved
-    table = model.target.name
-    all_col_names = [c.name for c in model.target.columns]
-
-    cursor = conn.cursor()
-    mssql_cols = [c for c in model.target.columns if isinstance(c, MssqlColumn)]
-    cursor.execute(f"TRUNCATE TABLE {_b(schema)}.{_b(table)}")
-    _bulk_insert(
-        cursor,
-        f"{_b(schema)}.{_b(table)}",
-        all_col_names,
-        df,
-        columns=mssql_cols,
-        fast=fast_executemany,
-    )
-    cursor.commit()
-
-
 def append(
     conn: pyodbc.Connection,
     model: Model,

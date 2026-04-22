@@ -82,7 +82,7 @@ visibility in logs.
 ## Notes
 
 - The `(interval)` label next to each model name is read from
-  `model.effective_reload_mode()` — see the [row_mode example](../row_mode/README.md)
+  `model.batching.mode` — see the [row_mode example](../row_mode/README.md)
   for the corresponding `(rows)` label on ROW-mode models.
 - See [PROGRESS_BAR.md](../../bollhav/docs/PROGRESS_BAR.md) for the
   full level reference.

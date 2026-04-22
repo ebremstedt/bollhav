@@ -41,7 +41,7 @@ def _make_patches(
     schema_suffix: str = "dev",
     use_schema_suffix: bool = True,
     debug: bool = False,
-    batch_expression_override: str | None = None,
+    interval_expression_override: str | None = None,
     backfill_since: datetime | None = None,
     backfill_until: datetime | None = None,
     upstream: str | None = None,
@@ -66,7 +66,7 @@ def _make_patches(
         ),
         "bollhav.pipe.pipe_config.env_var_interval_expression": lambda name, should_print_unset=True: (
             {
-                "BATCH_EXPRESSION_OVERRIDE": batch_expression_override,
+                "INTERVAL_EXPRESSION_OVERRIDE": interval_expression_override,
             }.get(name)
         ),
         "bollhav.pipe.pipe_config.env_var_iso8601_datetime": lambda name: {
@@ -119,13 +119,13 @@ class TestLoadPipeConfig:
         ):
             self._run(latest_enabled=True, backfill_enabled=True)
 
-    def test_batch_expression_override_stored(self) -> None:
-        cfg = self._run(batch_expression_override="0 0 * * *")
-        assert cfg.batch_expression_override == "0 0 * * *"
+    def test_interval_expression_override_stored(self) -> None:
+        cfg = self._run(interval_expression_override="0 0 * * *")
+        assert cfg.interval_expression_override == "0 0 * * *"
 
-    def test_batch_expression_override_defaults_to_none(self) -> None:
+    def test_interval_expression_override_defaults_to_none(self) -> None:
         cfg = self._run()
-        assert cfg.batch_expression_override is None
+        assert cfg.interval_expression_override is None
 
     def test_backfill_populates_fields(self) -> None:
         cfg = self._run(

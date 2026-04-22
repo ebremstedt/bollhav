@@ -4,7 +4,7 @@ import os
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
 from bollhav.pipe import with_pipe_config, PipeConfig
-from bollhav.model import match_models, name_width_for
+from bollhav.model import apply_pipe_to_models, name_width_for
 from execute import execute
 
 
@@ -18,16 +18,11 @@ def setup_logging(debug: bool) -> None:
 @with_pipe_config
 def main(pipe: PipeConfig) -> None:
     setup_logging(debug=pipe.debug)
-    matched_models = match_models(
-        folder="src/models", tags=pipe.tags, upstream_mode=pipe.upstream_mode
-    )
+    models = apply_pipe_to_models(pipe)
 
-    for model in matched_models:
-        model.apply_pipe(pipe)
+    execute.set_name_width(name_width_for(models))
 
-    execute.set_name_width(name_width_for(matched_models))
-
-    for model in matched_models:
+    for model in models:
         intervals = model.infer_intervals()
 
         execute.set_total(len(intervals))

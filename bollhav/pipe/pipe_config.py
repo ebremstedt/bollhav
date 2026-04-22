@@ -31,7 +31,7 @@ class PipeConfig:
     latest: LatestConfig
     backfill: BackfillConfig
     schema_suffix: str
-    batch_expression_override: str | None = None
+    interval_expression_override: str | None = None
     window_expression_override: str | None = None
     tz_override: tzinfo | None = None
     use_schema_suffix: bool = True
@@ -58,7 +58,7 @@ class PipeConfig:
             )
 
         def _row(key: str, val: str) -> None:
-            print(f"  {key:<16}{val}")
+            print(f"  {key:<18}{val}")
 
         def _date(dt: datetime | None) -> str:
             return dt.isoformat() if dt else "—"
@@ -82,7 +82,7 @@ class PipeConfig:
             _row("upstream", self.upstream_mode.value)
         if self.latest.enabled or self.backfill.enabled:
             _row("tz override", str(self.tz_override) if self.tz_override else "unset")
-            _row("batch override", self.batch_expression_override or "unset")
+            _row("interval override", self.interval_expression_override or "unset")
         if self.latest.enabled:
             _row("window override", self.window_expression_override or "unset")
         print("────────────────────────────")
@@ -120,8 +120,8 @@ def load_pipe_config() -> PipeConfig:
             since=_backfill_dt("BACKFILL_SINCE"),
             until=_backfill_dt("BACKFILL_UNTIL"),
         ),
-        batch_expression_override=env_var_interval_expression(
-            name="BATCH_EXPRESSION_OVERRIDE", should_print_unset=False
+        interval_expression_override=env_var_interval_expression(
+            name="INTERVAL_EXPRESSION_OVERRIDE", should_print_unset=False
         ),
         window_expression_override=env_var_interval_expression(
             name="WINDOW_EXPRESSION_OVERRIDE", should_print_unset=False

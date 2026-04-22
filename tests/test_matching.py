@@ -11,7 +11,7 @@ from bollhav.model.matching import _model_matches, match_models
 def make_model(*tags: str) -> MagicMock:
     model = MagicMock()
     model.tags = set(tags)
-    model.runtime_override = MagicMock(
+    model.directives = MagicMock(
         reload=False,
         reload_mode=None,
         reload_batch_size=None,
@@ -27,7 +27,7 @@ def test_model_matches_when_tag_matches():
     model = make_model("wee", "all")
     result = _model_matches(model, parse_expression("[wee]"))
     assert result is model
-    assert result.runtime_override.reload is False
+    assert result.directives.reload is False
 
 
 def test_model_does_not_match_when_tag_absent():
@@ -39,35 +39,35 @@ def test_model_matches_with_reload_tag_level():
     model = make_model("sales")
     result = _model_matches(model, parse_expression("[r:sales]"))
     assert result is model
-    assert result.runtime_override.reload is True
+    assert result.directives.reload is True
 
 
 def test_model_matches_with_reload_group_level():
     model = make_model("sales")
     result = _model_matches(model, parse_expression("r:[sales]"))
     assert result is model
-    assert result.runtime_override.reload is True
+    assert result.directives.reload is True
 
 
 def test_model_matches_with_reload_paren_level():
     model = make_model("finance")
     result = _model_matches(model, parse_expression("[r:(sales|finance)]"))
     assert result is model
-    assert result.runtime_override.reload is True
+    assert result.directives.reload is True
 
 
 def test_model_reload_true_if_any_matching_group_has_reload():
     model = make_model("sales")
     result = _model_matches(model, parse_expression("[r:sales][other]"))
     assert result is model
-    assert result.runtime_override.reload is True
+    assert result.directives.reload is True
 
 
 def test_model_no_reload_when_matched_group_has_no_reload():
     model = make_model("finance")
     result = _model_matches(model, parse_expression("[r:sales][finance]"))
     assert result is model
-    assert result.runtime_override.reload is False
+    assert result.directives.reload is False
 
 
 def test_disabled_model_does_not_match():
@@ -76,75 +76,56 @@ def test_disabled_model_does_not_match():
     assert _model_matches(model, parse_expression("[wee]")) is None
 
 
-# --- _model_matches propagates r_row_<N>: to runtime_override ---
+# --- _model_matches propagates r_row_<N>: to directives ---
 
 
 def test_model_matches_populates_row_mode_and_batch_size():
     model = make_model("vPAS")
     result = _model_matches(model, parse_expression("[r_row_100:vPAS]"))
     assert result is model
-    assert result.runtime_override.reload is True
-    assert result.runtime_override.reload_mode is ChunkMode.ROW
-    assert result.runtime_override.reload_batch_size == 100
+    assert result.directives.reload is True
+    assert result.directives.reload_mode is ChunkMode.ROW
+    assert result.directives.reload_batch_size == 100
 
 
 def test_model_matches_group_level_r_row_propagates():
     model = make_model("vPAS")
     result = _model_matches(model, parse_expression("r_row_500:[vPAS]"))
-    assert result.runtime_override.reload_mode is ChunkMode.ROW
-    assert result.runtime_override.reload_batch_size == 500
+    assert result.directives.reload_mode is ChunkMode.ROW
+    assert result.directives.reload_batch_size == 500
 
 
 def test_model_matches_plain_reload_leaves_row_fields_none():
     model = make_model("vPAS")
     result = _model_matches(model, parse_expression("[r:vPAS]"))
-    assert result.runtime_override.reload is True
-    assert result.runtime_override.reload_mode is None
-    assert result.runtime_override.reload_batch_size is None
+    assert result.directives.reload is True
+    assert result.directives.reload_mode is None
+    assert result.directives.reload_batch_size is None
 
 
 def test_model_matches_no_reload_leaves_row_fields_none():
     model = make_model("vPAS")
     result = _model_matches(model, parse_expression("[vPAS]"))
-    assert result.runtime_override.reload is False
-    assert result.runtime_override.reload_mode is None
-    assert result.runtime_override.reload_batch_size is None
+    assert result.directives.reload is False
+    assert result.directives.reload_mode is None
+    assert result.directives.reload_batch_size is None
 
 
-def test_model_matches_populates_interval_batch_expression():
+def test_model_matches_populates_interval_expression():
     model = make_model("foo")
     result = _model_matches(model, parse_expression("[r_interval_@daily:foo]"))
-    assert result.runtime_override.reload is True
-    assert result.runtime_override.reload_mode is ChunkMode.INTERVAL
-    assert result.runtime_override.reload_interval_expression == "@daily"
-    assert result.runtime_override.reload_batch_size is None
+    assert result.directives.reload is True
+    assert result.directives.reload_mode is ChunkMode.INTERVAL
+    assert result.directives.reload_interval_expression == "@daily"
+    assert result.directives.reload_batch_size is None
 
 
 def test_model_matches_reload_word_alias_equivalent_to_r():
     model = make_model("foo")
     result = _model_matches(model, parse_expression("[reload_row_100:foo]"))
-    assert result.runtime_override.reload is True
-    assert result.runtime_override.reload_mode is ChunkMode.ROW
-    assert result.runtime_override.reload_batch_size == 100
-
-
-def test_model_matches_runtime_row_incompatible_writemode_raises():
-    from bollhav.model.model import Model
-    from bollhav.model.schema import Schema
-    from bollhav.model.tags import Tags
-    from bollhav.model.target import Target
-    from bollhav.model.write_modes import WriteMode
-
-    m = Model(
-        target=Target(
-            name="vPAS",
-            schema=Schema(name="s"),
-            write_mode=WriteMode.TRUNCATE_TABLE_INSERT,
-        ),
-        tagging=Tags({"vPAS"}),
-    )
-    with pytest.raises(ValueError, match="Runtime override forces ChunkMode.ROW"):
-        _model_matches(m, parse_expression("[r_row_100:vPAS]"))
+    assert result.directives.reload is True
+    assert result.directives.reload_mode is ChunkMode.ROW
+    assert result.directives.reload_batch_size == 100
 
 
 def test_model_matches_runtime_row_upsert_no_delete_is_compatible():
@@ -176,8 +157,8 @@ def test_model_matches_runtime_row_upsert_no_delete_is_compatible():
     )
     result = _model_matches(m, parse_expression("[r_row_100:dim_user]"))
     assert result is m
-    assert result.runtime_override.reload_mode is ChunkMode.ROW
-    assert result.runtime_override.reload_batch_size == 100
+    assert result.directives.reload_mode is ChunkMode.ROW
+    assert result.directives.reload_batch_size == 100
 
 
 # --- match_models ---

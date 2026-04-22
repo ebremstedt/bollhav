@@ -5,7 +5,7 @@ import polars as pl
 from typing import cast, LiteralString
 from datetime import datetime, timedelta
 from bollhav.model.model import Model
-from bollhav.postgres.schema import ensure_schema, ensure_schema_and_table
+from bollhav.postgres.schema import ensure_schema
 
 logger = logging.getLogger(__name__)
 
@@ -52,53 +52,6 @@ def recreate_partition(
                 col=sql.Identifier(model.target.partitioned_by),
             ),
             [since, until],
-        )
-        col_names = sql.SQL(", ").join(sql.Identifier(c) for c in df.columns)
-        copy_query = sql.SQL("COPY {schema}.{table} ({cols}) FROM STDIN").format(
-            schema=sql.Identifier(model.target.schema.resolved),
-            table=sql.Identifier(model.target.name),
-            cols=col_names,
-        )
-        with conn.cursor().copy(copy_query) as copy:
-            for row in df.rows():
-                copy.write_row(row)
-
-
-def recreate_table_insert(
-    conn: psycopg.Connection,
-    model: Model,
-    df: pl.DataFrame,
-) -> None:
-    with conn.transaction():
-        conn.execute(
-            sql.SQL("DROP TABLE IF EXISTS {schema}.{table}").format(
-                schema=sql.Identifier(model.target.schema.resolved),
-                table=sql.Identifier(model.target.name),
-            )
-        )
-        ensure_schema_and_table(conn=conn, model=model)
-        col_names = sql.SQL(", ").join(sql.Identifier(c) for c in df.columns)
-        copy_query = sql.SQL("COPY {schema}.{table} ({cols}) FROM STDIN").format(
-            schema=sql.Identifier(model.target.schema.resolved),
-            table=sql.Identifier(model.target.name),
-            cols=col_names,
-        )
-        with conn.cursor().copy(copy_query) as copy:
-            for row in df.rows():
-                copy.write_row(row)
-
-
-def truncate_table_insert(
-    conn: psycopg.Connection,
-    model: Model,
-    df: pl.DataFrame,
-) -> None:
-    with conn.transaction():
-        conn.execute(
-            sql.SQL("TRUNCATE TABLE {schema}.{table}").format(
-                schema=sql.Identifier(model.target.schema.resolved),
-                table=sql.Identifier(model.target.name),
-            )
         )
         col_names = sql.SQL(", ").join(sql.Identifier(c) for c in df.columns)
         copy_query = sql.SQL("COPY {schema}.{table} ({cols}) FROM STDIN").format(

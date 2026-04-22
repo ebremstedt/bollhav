@@ -1,7 +1,7 @@
 """Entry point for the latest_window_vs_batch example.
 
 Shows the interval plan for a model that uses a `window_expression` (outer
-scope) together with a `batch_expression` (inner chunk size) — a common
+scope) together with an `interval_expression` (inner chunk size) — a common
 setup for large tables that need a daily catch-up but cannot load a whole
 day in a single write.
 
@@ -14,19 +14,19 @@ import os
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
 from bollhav.pipe import with_pipe_config, PipeConfig
-from bollhav.model import match_models
+from bollhav.model import apply_pipe_to_models
 
 
 @with_pipe_config
 def main(pipe: PipeConfig) -> None:
-    for model in match_models(folder="src/models", tags=pipe.tags):
-        model.apply_pipe(pipe)
+    models = apply_pipe_to_models(pipe)
+    for model in models:
         intervals = model.infer_intervals()
 
         print(f"\n{model.target.full_name}")
-        print(f"  window_expression : {model.batching.interval.window_expression}")
-        print(f"  batch_expression  : {model.batching.interval.expression}")
-        print(f"  chunks returned   : {len(intervals)}")
+        print(f"  window_expression   : {model.batching.interval.window_expression}")
+        print(f"  interval_expression : {model.batching.interval.expression}")
+        print(f"  chunks returned     : {len(intervals)}")
 
         if not intervals or intervals[0] is None:
             print()

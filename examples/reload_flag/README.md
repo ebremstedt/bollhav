@@ -50,9 +50,9 @@ warehouse_clean.customer_dimension
 ```
 
 Ten daily chunks covering the full declared bounds. Note `LATEST_ENABLED=true`
-is still set — reload wins. `runtime_override.apply_pipe` reads
-`self.latest = pipe.latest.enabled and not self.reload`, so reload
-suppresses latest automatically.
+is still set — reload wins. `apply_pipe_to_models` computes
+`directives.latest = pipe.latest.enabled and not directives.reload`, so
+reload suppresses latest automatically.
 
 ## Reload vs backfill
 
@@ -79,9 +79,10 @@ while everything else continues its normal incremental cadence.
 
 ## Changing how reload chunks
 
-Plain `r:` uses whatever the model is configured with — by default that's
-`reload_mode=INTERVAL` on `Batch` plus the model's own `interval_expression`.
-Two extended prefixes override that at match time.
+Plain `r:` uses whatever the model is statically configured with on `Batch`
+(`mode`, `row.batch_size`, `interval.expression`). Two extended prefixes
+override that at match time — `apply_pipe_to_models` bakes them into the
+returned model's `batching`.
 
 ### `r_interval_@<alias>:` — force a different cadence
 
@@ -102,7 +103,7 @@ does the same thing. Allowed aliases come from roskarl:
 For a cadence that doesn't have a named alias, configure it statically
 on the model (`Batch(interval_expression="*/15 * * * *")`) and use plain
 `r:` to reload, or override globally with
-`BATCH_EXPRESSION_OVERRIDE="*/15 * * * *"` — arbitrary cron expressions
+`INTERVAL_EXPRESSION_OVERRIDE="*/15 * * * *"` — arbitrary cron expressions
 are intentionally not accepted inside tags.
 
 ### `r_row_<N>:` — reload by row count instead of time
@@ -123,8 +124,8 @@ Constraints:
   at once.
 - `batch_size` is capped at 10000.
 - `infer_intervals()` refuses to produce time chunks under ROW-mode
-  reload — callers branch on `model.effective_reload_mode()` and use
-  the row-batching execution path.
+  reload — callers branch on `model.batching.mode` and use the
+  row-batching execution path.
 
 ### Both work at group level too
 
