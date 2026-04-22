@@ -6,7 +6,7 @@ from bollhav.model.batch import Batch, IntervalChunks, RowChunks
 from bollhav.model.directives import Directives
 from bollhav.model.matching import match_models
 from bollhav.model.model import Model
-from bollhav.model.schema import Schema
+from bollhav.model.target_schema import TargetSchema
 from bollhav.model.target import Target
 
 if TYPE_CHECKING:
@@ -67,7 +67,7 @@ def _apply_to_model(model: Model, pipe: PipeConfig) -> Model:
 def _target_with_pipe(target: Target, pipe: PipeConfig) -> Target:
     return Target(
         name=target.name,
-        schema=Schema(
+        schema=TargetSchema(
             name=target.schema.name,
             suffix=pipe.schema_suffix,
             suffix_appendix=target.schema.suffix_appendix,

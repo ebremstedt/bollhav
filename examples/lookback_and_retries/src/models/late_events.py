@@ -1,9 +1,9 @@
 from datetime import datetime, timezone
 from bollhav.model import (
     Model,
-    Source,
+    SourceTable,
     Target,
-    Schema,
+    TargetSchema,
     WriteMode,
     Tags,
     Bounds,
@@ -30,10 +30,10 @@ from bollhav.model import (
 #   but does not implement the retry loop itself. That's the user's job —
 #   execute() in this example reads the value and runs the loop.
 late_events = Model(
-    source=Source(name="late_events"),
+    source=SourceTable(name="late_events"),
     target=Target(
         name="late_events",
-        schema=Schema(name="warehouse_events"),
+        schema=TargetSchema(name="warehouse_events"),
         write_mode=WriteMode.APPEND,
     ),
     tagging=Tags(tags={"events"}),

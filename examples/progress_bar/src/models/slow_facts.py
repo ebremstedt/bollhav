@@ -4,8 +4,8 @@ from bollhav.model import (
     Batch,
     IntervalChunks,
     Model,
-    Schema,
-    Source,
+    TargetSchema,
+    SourceTable,
     Tags,
     Target,
     WriteMode,
@@ -15,10 +15,10 @@ from bollhav.model.bounds import Bounds
 
 # Hourly model with a full-day backfill window — 24 chunks.
 slow_facts = Model(
-    source=Source(name="slow_facts_source"),
+    source=SourceTable(name="slow_facts_source"),
     target=Target(
         name="slow_facts",
-        schema=Schema(name="warehouse_clean"),
+        schema=TargetSchema(name="warehouse_clean"),
         write_mode=WriteMode.APPEND,
     ),
     bounds=Bounds(

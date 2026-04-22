@@ -15,10 +15,10 @@ Every model's tag set is **assembled** from several sources. You rarely
 need to list every tag by hand — most come for free from the model's
 name and schema.
 
-For a model with `target=Target(name="sales_orders", schema=Schema(name="warehouse_sales"))`
+For a model with `target=Target(name="sales_orders", schema=TargetSchema(name="warehouse_sales"))`
 and `tagging=Tags(tags={"sales"})`, the assembled tag set is:
 
-| Source | Tag contributed | Controlled by |
+| SourceTable | Tag contributed | Controlled by |
 |---|---|---|
 | You passed it explicitly | `sales` | `Tags(tags={...})` |
 | The table name | `sales_orders` | `name_add_to_tags` (default `True`) |
@@ -63,7 +63,7 @@ and CDC pipelines), opt into the Pascal splitters:
 
 ```python
 Model(
-    target=Target(name="CustomerJourney", schema=Schema(name="DataMart")),
+    target=Target(name="CustomerJourney", schema=TargetSchema(name="DataMart")),
     tagging=Tags(unpascal_name_for_tags=True, unpascal_schema_for_tags=True),
 )
 # auto-tags include: customer, journey, data, mart

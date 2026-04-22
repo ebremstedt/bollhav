@@ -2,8 +2,8 @@ from bollhav.model import (
     Batch,
     IntervalChunks,
     Model,
-    Schema,
-    Source,
+    TargetSchema,
+    SourceTable,
     Tags,
     Target,
     WriteMode,
@@ -15,10 +15,10 @@ from bollhav.model import (
 # the ROW-mode event_stream model in this same example so the run output
 # shows both modes side by side.
 customer_summary = Model(
-    source=Source(name="customer_summary_source"),
+    source=SourceTable(name="customer_summary_source"),
     target=Target(
         name="customer_summary",
-        schema=Schema(name="warehouse_clean"),
+        schema=TargetSchema(name="warehouse_clean"),
         write_mode=WriteMode.APPEND,
     ),
     tagging=Tags(tags={"customers"}),

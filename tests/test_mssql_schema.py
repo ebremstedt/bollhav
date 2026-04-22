@@ -7,8 +7,8 @@ import pytest  # noqa: E402
 
 from bollhav.model.database import Database  # noqa: E402
 from bollhav.model.model import Model  # noqa: E402
-from bollhav.model.schema import Schema  # noqa: E402
-from bollhav.model.source import Source  # noqa: E402
+from bollhav.model.target_schema import TargetSchema  # noqa: E402
+from bollhav.model.source_table import SourceTable  # noqa: E402
 from bollhav.model.target import Target  # noqa: E402
 from bollhav.model.write_modes import WriteMode  # noqa: E402
 from bollhav.mssql.columns import MssqlColumn, MssqlType  # noqa: E402
@@ -30,10 +30,10 @@ def _model(
         MssqlColumn(name="val", data_type=MssqlType.NVARCHAR, length=50),
     ]
     return Model(
-        source=Source(name="src"),
+        source=SourceTable(name="src"),
         target=Target(
             name="t",
-            schema=Schema(name="s"),
+            schema=TargetSchema(name="s"),
             database=Database.MSSQL,
             columns=cols,
             indexes=indexes or [],
@@ -165,7 +165,7 @@ class TestTargetIndexValidation:
         with pytest.raises(ValueError, match="references unknown column"):
             Target(
                 name="t",
-                schema=Schema(name="s"),
+                schema=TargetSchema(name="s"),
                 database=Database.MSSQL,
                 columns=[MssqlColumn(name="a", nullable=False)],
                 indexes=[MssqlIndex(name="ix", columns=["missing"])],
@@ -177,7 +177,7 @@ class TestTargetIndexValidation:
         with pytest.raises(ValueError, match="references unknown column"):
             Target(
                 name="t",
-                schema=Schema(name="s"),
+                schema=TargetSchema(name="s"),
                 database=Database.MSSQL,
                 columns=[MssqlColumn(name="a", nullable=False)],
                 indexes=[MssqlIndex(name="ix", columns=["a"], included=["missing"])],
@@ -188,7 +188,7 @@ class TestTargetIndexValidation:
     def test_known_columns_ok(self) -> None:
         t = Target(
             name="t",
-            schema=Schema(name="s"),
+            schema=TargetSchema(name="s"),
             database=Database.MSSQL,
             columns=[
                 MssqlColumn(name="a", nullable=False),

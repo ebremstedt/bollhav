@@ -1,8 +1,8 @@
 from bollhav.model import (
     Model,
-    Source,
+    SourceTable,
     Target,
-    Schema,
+    TargetSchema,
     WriteMode,
     Tags,
     Batch,
@@ -33,10 +33,10 @@ from bollhav.model import (
 # cover the full window. The window expression is what lets *one* run
 # cover a whole day's worth of chunks.
 fact_transactions = Model(
-    source=Source(name="fact_transactions"),
+    source=SourceTable(name="fact_transactions"),
     target=Target(
         name="fact_transactions",
-        schema=Schema(name="warehouse_finance"),
+        schema=TargetSchema(name="warehouse_finance"),
         write_mode=WriteMode.APPEND,
     ),
     tagging=Tags(tags={"finance", "large"}),

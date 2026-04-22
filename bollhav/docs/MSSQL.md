@@ -118,7 +118,7 @@ Runs `CREATE OR ALTER VIEW`. Requires `model.source.query` to be set. No datafra
 from bollhav.model import WriteMode
 
 target = Target(..., write_mode=WriteMode.VIEW)
-source = Source(..., query="SELECT id, name FROM dbo.raw_table")
+source = SourceTable(..., query="SELECT id, name FROM dbo.raw_table")
 write(conn=conn, model=model)   # no df_gen
 ```
 

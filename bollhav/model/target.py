@@ -5,13 +5,13 @@ from bollhav.model.database import Database, DatabaseColumn, DatabaseIndex
 from bollhav.model.model_type import ModelType
 from bollhav.model.write_modes import WriteMode
 from bollhav.model.column_sorting import sort_columns
-from bollhav.model.schema import Schema
+from bollhav.model.target_schema import TargetSchema
 
 
 @dataclass
 class Target:
     name: str
-    schema: Schema = field(default_factory=Schema)
+    schema: TargetSchema = field(default_factory=TargetSchema)
     database: Database | None = None
     columns: list[DatabaseColumn] = field(default_factory=list)
     indexes: list[DatabaseIndex] = field(default_factory=list)

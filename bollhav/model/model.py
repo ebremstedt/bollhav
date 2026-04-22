@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone, tzinfo
+from typing import TYPE_CHECKING
 
 from icron import croniter
-from bollhav.model.source import Source
+from bollhav.model.source_file import SourceFile
+from bollhav.model.source_table import SourceTable
 from bollhav.model.target import Target
 from bollhav.model.bounds import Bounds
 from bollhav.model.batch import Batch, ChunkMode, _resolve_cron, _chunk_interval
@@ -12,6 +14,9 @@ from bollhav.model.intervals import TZInterval
 from bollhav.model.directives import Directives
 from bollhav.model.tags import Tags
 from roskarl import IntervalExpression, IntervalExpressionExtended
+
+if TYPE_CHECKING:
+    from bollhav.model.source import Source
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +38,7 @@ class Model:
         self.source = source
         self.target = target
         self.bounds = bounds or Bounds()
-        self.batching = batching  # None signals "don't chunk, run once"
+        self.batching = batching  # None signals to not chunk
         self.enabled = enabled
         self.debug = debug
         self.description = description
@@ -72,13 +77,22 @@ class Model:
             f"    partitioned: {self.target.partitioned_by}",
             f"    columns ({len(cols)}): {col_summary}",
         ]
-        if self.source:
+        if isinstance(self.source, SourceTable):
             lines += [
                 "",
-                "  source:",
+                "  source (table):",
                 f"    name:        {self.source.name}",
                 f"    schema:      {self.source.schema}",
                 f"    dsn_env_var: {self.source.dsn_env_var}",
+            ]
+        elif isinstance(self.source, SourceFile):
+            lines += [
+                "",
+                "  source (file):",
+                f"    name:        {self.source.name}",
+                f"    path:        {self.source.path}",
+                f"    encoding:    {self.source.encoding}",
+                f"    separator:   {self.source.separator}",
             ]
         if self.batching is None:
             lines += [

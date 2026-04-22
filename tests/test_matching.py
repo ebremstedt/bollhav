@@ -136,7 +136,7 @@ def test_model_matches_runtime_row_upsert_no_delete_is_compatible():
 
     from bollhav.model.database import Database
     from bollhav.model.model import Model
-    from bollhav.model.schema import Schema
+    from bollhav.model.target_schema import TargetSchema
     from bollhav.model.tags import Tags
     from bollhav.model.target import Target
     from bollhav.model.write_modes import WriteMode
@@ -148,7 +148,7 @@ def test_model_matches_runtime_row_upsert_no_delete_is_compatible():
     m = Model(
         target=Target(
             name="dim_user",
-            schema=Schema(name="s"),
+            schema=TargetSchema(name="s"),
             write_mode=WriteMode.UPSERT_NO_DELETE,
             database=Database.POSTGRES,
             columns=[id_col],

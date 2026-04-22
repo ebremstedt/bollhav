@@ -3,7 +3,7 @@ from datetime import datetime
 
 
 @dataclass
-class Schema:
+class TargetSchema:
     name: str = ""
     suffix: str = ""
     suffix_appendix: str | None = "%y%W"

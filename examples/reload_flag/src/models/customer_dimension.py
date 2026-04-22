@@ -1,9 +1,9 @@
 from datetime import datetime, timezone
 from bollhav.model import (
     Model,
-    Source,
+    SourceTable,
     Target,
-    Schema,
+    TargetSchema,
     WriteMode,
     Tags,
     Bounds,
@@ -27,10 +27,10 @@ from bollhav.model import (
 # rows and you want to reprocess the whole history for this model
 # specifically, without kicking off a global backfill.
 customer_dimension = Model(
-    source=Source(name="customers"),
+    source=SourceTable(name="customers"),
     target=Target(
         name="customer_dimension",
-        schema=Schema(name="warehouse_clean"),
+        schema=TargetSchema(name="warehouse_clean"),
         write_mode=WriteMode.APPEND,
         truncate_table=True,
     ),

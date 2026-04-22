@@ -1,9 +1,9 @@
 from datetime import datetime, timezone
 from bollhav.model import (
     Model,
-    Source,
+    SourceTable,
     Target,
-    Schema,
+    TargetSchema,
     WriteMode,
     Tags,
     Bounds,
@@ -13,10 +13,10 @@ from bollhav.model import (
 
 # APPEND — rows are added every run, nothing is ever removed or deduplicated.
 products = Model(
-    source=Source(name="products"),
+    source=SourceTable(name="products"),
     target=Target(
         name="products",
-        schema=Schema(name="warehouse_raw"),
+        schema=TargetSchema(name="warehouse_raw"),
         write_mode=WriteMode.APPEND,
     ),
     tagging=Tags(tags={"products"}),
