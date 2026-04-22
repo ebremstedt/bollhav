@@ -11,14 +11,15 @@ from bollhav.model import (
     IntervalChunks,
 )
 
-# RECREATE_TABLE_INSERT — drops and recreates the table then inserts.
+# recreate_table — drops and recreates the table before the load, then appends.
 # Depends on customers being loaded first.
 orders = Model(
     source=Source(name="orders"),
     target=Target(
         name="orders",
         schema=Schema(name="warehouse_clean"),
-        write_mode=WriteMode.RECREATE_TABLE_INSERT,
+        write_mode=WriteMode.APPEND,
+        recreate_table=True,
     ),
     tagging=Tags(tags={"orders"}),
     upstream=["warehouse_clean.customer_master_data"],

@@ -21,7 +21,7 @@ Example output (time-of-day depends on when you run it):
 
 ```
 warehouse_web.page_views
-  batch_expression : @hourly
+  interval_expression : @hourly
   bounds           : 2024-01-01 00:00:00+00:00 → 2024-01-04 00:00:00+00:00
   chunks returned  : 1
   first chunk      : 2026-04-17 12:00:00+00:00 → 2026-04-17 13:00:00+00:00
@@ -37,13 +37,13 @@ TAGS="[web]" USE_SCHEMA_SUFFIX=false BACKFILL_ENABLED=true \
 ```
 
 - Uses the explicit `BACKFILL_SINCE` / `BACKFILL_UNTIL` window.
-- Chunked by the model's `batch_expression` (`@hourly`) → **72 chunks** over the 3-day window.
+- Chunked by the model's `interval_expression` (`@hourly`) → **72 chunks** over the 3-day window.
 
 Example output:
 
 ```
 warehouse_web.page_views
-  batch_expression : @hourly
+  interval_expression : @hourly
   bounds           : 2024-01-01 00:00:00+00:00 → 2024-01-04 00:00:00+00:00
   chunks returned  : 72
   first chunk      : 2024-01-01 00:00:00+00:00 → 2024-01-01 01:00:00+00:00

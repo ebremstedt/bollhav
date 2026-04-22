@@ -11,13 +11,14 @@ from bollhav.model import (
     IntervalChunks,
 )
 
-# TRUNCATE_TABLE_INSERT — wipes the table then bulk inserts fresh data every run.
+# truncate_table — wipes the table before the load, then appends.
 customers = Model(
     source=Source(name="customers"),
     target=Target(
         name="customer_master_data",
         schema=Schema(name="warehouse_clean"),
-        write_mode=WriteMode.TRUNCATE_TABLE_INSERT,
+        write_mode=WriteMode.APPEND,
+        truncate_table=True,
     ),
     tagging=Tags(tags={"customers"}),
     batch_sleep=0.05,

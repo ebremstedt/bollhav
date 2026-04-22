@@ -47,7 +47,7 @@ def test_batching_defaults_to_none_when_unspecified():
 
 def test_infer_intervals_reload_without_bounds_raises():
     m = make_model()
-    m.runtime_override.reload = True
+    m.directives.reload = True
     with pytest.raises(ValueError, match="reload requires bounds.begin"):
         m.infer_intervals()
 

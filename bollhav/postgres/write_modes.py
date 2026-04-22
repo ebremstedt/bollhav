@@ -7,8 +7,6 @@ import polars as pl
 from bollhav.model.write_modes import WriteMode
 from bollhav.model.model import Model
 from bollhav.postgres.modes import (
-    recreate_table_insert,
-    truncate_table_insert,
     recreate_partition,
     upsert_no_delete,
     create_replace_view,
@@ -48,10 +46,6 @@ def write_dataframes(
     match model.target.write_mode:
         case WriteMode.APPEND:
             write_function = append
-        case WriteMode.RECREATE_TABLE_INSERT:
-            write_function = recreate_table_insert
-        case WriteMode.TRUNCATE_TABLE_INSERT:
-            write_function = truncate_table_insert
         case WriteMode.RECREATE_PARTITION:
             if since is None or until is None:
                 raise ValueError("Since and until must be set for RECREATE_PARTITION")
@@ -105,14 +99,12 @@ def write(
     """
     if model.target.write_mode in (
         WriteMode.APPEND,
-        WriteMode.RECREATE_TABLE_INSERT,
-        WriteMode.TRUNCATE_TABLE_INSERT,
         WriteMode.RECREATE_PARTITION,
         WriteMode.UPSERT_NO_DELETE,
     ):
         if not df_gen:
             raise ValueError(
-                "Modes APPEND, RECREATE_TABLE_INSERT, TRUNCATE_TABLE_INSERT, RECREATE_PARTITION, UPSERT_NO_DELETE need a dataframe"
+                "Modes APPEND, RECREATE_PARTITION, UPSERT_NO_DELETE need a dataframe"
             )
         write_dataframes(
             conn=conn,

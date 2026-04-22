@@ -7,7 +7,7 @@ from bollhav.mssql.schema import (
     ensure_schema_and_table,
     ensure_schema_table_and_indexes,
 )
-from bollhav.mssql.modes import append, merge, truncate_write, create_replace_view
+from bollhav.mssql.modes import append, merge, create_replace_view
 from bollhav.mssql.write_modes import write, write_dataframes
 
 __all__ = [
@@ -21,7 +21,6 @@ __all__ = [
     "ensure_schema_table_and_indexes",
     "append",
     "merge",
-    "truncate_write",
     "create_replace_view",
     "write",
     "write_dataframes",

@@ -29,13 +29,14 @@ See [MODES.md](MODES.md) for the general concepts. Below describes the Postgres-
 
 Uses `COPY ... FROM STDIN` inside a transaction. No deduplication or conflict handling.
 
-## RECREATE_TABLE_INSERT
+## Pre-load flags: `recreate_table` / `truncate_table`
 
-Runs `DROP TABLE IF EXISTS`, recreates the table via `ensure_schema_and_table`, then uses `COPY`. All in one transaction.
+Both live on `Target`. They run once in `ensure_table` **before** the chunked write loop starts:
 
-## TRUNCATE_TABLE_INSERT
+- `recreate_table=True` → `DROP TABLE IF EXISTS` then `CREATE TABLE` (schema reset).
+- `truncate_table=True` → `CREATE TABLE IF NOT EXISTS` then `TRUNCATE TABLE` (rows wiped, schema kept).
 
-Runs `TRUNCATE TABLE` then `COPY`. All in one transaction.
+Both default to `False`; setting both raises. Combine with any non-VIEW write mode — typically `APPEND` for a full reload, or `UPSERT_NO_DELETE` when you also want dedup after the wipe.
 
 ## RECREATE_PARTITION
 

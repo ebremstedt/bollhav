@@ -26,7 +26,7 @@ class PotentialTagGroup:
 #
 # Only the known cron aliases (@hourly, @daily, ...) are accepted inside
 # r_interval_ tags. For custom cron expressions, configure the model
-# statically or use the pipe-level BATCH_EXPRESSION_OVERRIDE env var.
+# statically or use the pipe-level INTERVAL_EXPRESSION_OVERRIDE env var.
 _RELOAD_PREFIX_RE = re.compile(r"(?:r|reload)(?:_row_(\d+)|_interval_(@\w+))?:")
 _RELOAD_PREFIX_TOKEN = r"(?:r|reload)(?:_row_\d+|_interval_@\w+)?:"
 
@@ -43,7 +43,7 @@ def _validate_cron_alias(alias: str) -> None:
 def _interpret_reload_match(
     m: re.Match,
 ) -> tuple[ChunkMode | None, int | None, str | None]:
-    """Pull (mode, batch_size, batch_expression) out of a regex match on
+    """Pull (mode, batch_size, interval_expression) out of a regex match on
     _RELOAD_PREFIX_RE. Validates numeric caps and cron aliases."""
     if m.group(1):
         size = int(m.group(1))

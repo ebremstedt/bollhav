@@ -28,7 +28,7 @@ pushes the start back to `02:00`, so we actually process **4 chunks**:
 
 ```
 warehouse_events.late_events
-  batch_expression : @hourly
+  interval_expression : @hourly
   lookback         : 2
   retries          : 3
   chunks returned  : 4
@@ -53,7 +53,7 @@ third try.
 `lookback` is expressed in **cron ticks**, not wall-clock hours. The
 tick size is derived from the batch expression:
 
-| `batch_expression` | `lookback=2` means |
+| `interval_expression` | `lookback=2` means |
 |---|---|
 | `@hourly` | 2 hours earlier |
 | `@daily` | 2 days earlier |
@@ -84,7 +84,7 @@ real use, pair `lookback` with an idempotent write mode:
 
 - `RECREATE_PARTITION` with a `partitioned_by` column
 - `UPSERT_NO_DELETE` with a `unique=True` key
-- `TRUNCATE_TABLE_INSERT` (for small reference tables)
+- `APPEND` + `truncate_table=True` (for small reference tables — wipes once before the load)
 
 See [bollhav/docs/WRITEMODES.md](../../bollhav/docs/WRITEMODES.md) for
 guidance on picking a write mode.

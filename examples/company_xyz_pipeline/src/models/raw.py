@@ -32,7 +32,8 @@ supplier_catalog = Model(
     target=Target(
         name="supplier_catalog",
         schema=Schema(name="warehouse_raw"),
-        write_mode=WriteMode.RECREATE_TABLE_INSERT,
+        write_mode=WriteMode.APPEND,
+        recreate_table=True,
     ),
     tagging=Tags(tags={"raw"}),
     batch_sleep=0.02,

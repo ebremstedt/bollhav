@@ -30,20 +30,15 @@ def get_progress_level() -> ProgressLevel:
 def _model_display_label(model) -> str:
     """Mirror of `_resolve_model`'s mode-label logic, exposed so callers can
     pre-compute the width a row will take. Call *after* `apply_pipe` so the
-    returned name reflects the active schema suffix."""
+    returned name reflects the active schema suffix and any tag-driven
+    reload overrides already baked into `batching`."""
     name = model.target.full_name
     if getattr(model, "batching", None) is None:
         return name
-    mode = model.effective_reload_mode().value.lower()
+    mode = model.batching.mode.value.lower()
     if mode == "row":
-        return f"{name} ({model.effective_reload_batch_size()} rows)"
-    rt = model.runtime_override
-    expr = (
-        getattr(rt, "reload_interval_expression", None)
-        or getattr(rt, "batch_expression", None)
-        or model.batching.interval.expression
-    )
-    return f"{name} ({expr.lstrip('@')})"
+        return f"{name} ({model.batching.row.batch_size} rows)"
+    return f"{name} ({model.batching.interval.expression.lstrip('@')})"
 
 
 def name_width_for(models) -> int:
@@ -56,7 +51,7 @@ def name_width_for(models) -> int:
 class _State:
     current_model: str = ""
     current_mode: str = (
-        ""  # "interval" | "rows" | "" — set per-model from effective_reload_mode
+        ""  # "interval" | "rows" | "" — set per-model from batching.mode
     )
     start: float = 0.0
     count: int = 0
@@ -185,10 +180,10 @@ def progress_bar(func: Callable) -> Callable:
 
     def _resolve_model(args, kwargs) -> tuple[str, str]:
         """Return (full_name, mode_label). mode_label is empty when the
-        model isn't a bollhav Model (or doesn't expose effective_reload_mode).
+        model isn't a bollhav Model (or has no batching configured).
 
         Examples of mode_label:
-            "10000 rows"      (ROW mode, effective batch size)
+            "10000 rows"      (ROW mode, batching.row.batch_size)
             "hourly"          (INTERVAL with @hourly alias — @ stripped)
             "*/15 * * * *"    (INTERVAL with a raw cron)"""
         bound = sig.bind(*args, **kwargs)
@@ -200,29 +195,19 @@ def progress_bar(func: Callable) -> Callable:
             return func.__name__, ""
 
         name = model.target.full_name
-        if not hasattr(model, "effective_reload_mode"):
-            return name, ""
 
         # No batching = no mode label — model runs once, unfiltered.
         if getattr(model, "batching", None) is None:
             return name, ""
 
-        m = model.effective_reload_mode().value.lower()
+        m = model.batching.mode.value.lower()
         if m == "row":
-            size = model.effective_reload_batch_size()
-            return name, f"{size} rows"
+            return name, f"{model.batching.row.batch_size} rows"
 
         # INTERVAL mode — show the effective interval expression.
-        # Precedence: tag override > pipe override > model's static config.
-        rt = model.runtime_override
-        expr = (
-            getattr(rt, "reload_interval_expression", None)
-            or getattr(rt, "batch_expression", None)
-            or model.batching.interval.expression
-        )
         # Strip the leading "@" from cron aliases for cleaner display
         # (`@hourly` -> `hourly`); raw crons pass through unchanged.
-        return name, expr.lstrip("@")
+        return name, model.batching.interval.expression.lstrip("@")
 
     def _begin_model(name: str, mode: str) -> None:
         s.current_model = name

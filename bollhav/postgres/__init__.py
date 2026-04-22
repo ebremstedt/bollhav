@@ -3,8 +3,6 @@ from bollhav.postgres.schema import ensure_schema, ensure_table, ensure_schema_a
 from bollhav.postgres.modes import (
     append,
     recreate_partition,
-    recreate_table_insert,
-    truncate_table_insert,
     upsert_no_delete,
     create_replace_view,
 )
@@ -18,8 +16,6 @@ __all__ = [
     "ensure_schema_and_table",
     "append",
     "recreate_partition",
-    "recreate_table_insert",
-    "truncate_table_insert",
     "upsert_no_delete",
     "create_replace_view",
     "write",

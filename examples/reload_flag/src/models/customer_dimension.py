@@ -21,7 +21,7 @@ from bollhav.model import (
 # Reload runs — triggered by matching this model with an `r:` tag prefix:
 #   - bounds.begin → bounds.end is used as the interval
 #   - ignores LATEST_ENABLED / BACKFILL_SINCE — they are overridden
-#   - chunks the full bounds window by batch_expression
+#   - chunks the full bounds window by interval_expression
 #
 # Use case for reload: an upstream schema change invalidated historical
 # rows and you want to reprocess the whole history for this model
@@ -31,7 +31,8 @@ customer_dimension = Model(
     target=Target(
         name="customer_dimension",
         schema=Schema(name="warehouse_clean"),
-        write_mode=WriteMode.TRUNCATE_TABLE_INSERT,
+        write_mode=WriteMode.APPEND,
+        truncate_table=True,
     ),
     tagging=Tags(tags={"customers"}),
     bounds=Bounds(

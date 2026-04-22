@@ -18,23 +18,20 @@ import os
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
 from bollhav.pipe import with_pipe_config, PipeConfig
-from bollhav.model import ChunkMode, match_models, name_width_for
+from bollhav.model import ChunkMode, apply_pipe_to_models, name_width_for
 from execute import execute
 from mock_read import read_all
 
 
 @with_pipe_config
 def main(pipe: PipeConfig) -> None:
-    matched = match_models(folder="src/models", tags=pipe.tags)
+    models = apply_pipe_to_models(pipe)
 
-    for model in matched:
-        model.apply_pipe(pipe)
+    if models:
+        execute.set_name_width(name_width_for(models))
 
-    if matched:
-        execute.set_name_width(name_width_for(matched))
-
-    for model in matched:
-        if model.effective_reload_mode() is ChunkMode.ROW:
+    for model in models:
+        if model.batching.mode is ChunkMode.ROW:
             _run_row_mode(model)
         else:
             _run_interval_mode(model)
@@ -43,13 +40,13 @@ def main(pipe: PipeConfig) -> None:
 
 
 def _run_row_mode(model) -> None:
-    if not model.runtime_override.reload:
+    if not model.directives.reload:
         raise ValueError(
             f"Model {model.target.full_name!r} is ROW-mode — it can only be "
             f'reloaded. Re-run with the `r:` tag prefix, e.g. TAGS="[r:events]"'
         )
     df = read_all(model)
-    size = model.effective_reload_batch_size()
+    size = model.batching.row.batch_size
     total = (len(df) + size - 1) // size
     execute.set_total(total)
     for i, start in enumerate(range(0, len(df), size), start=1):

@@ -14,8 +14,6 @@ from bollhav.postgres.schema import _col_ddl, ensure_schema, ensure_table  # noq
 from bollhav.postgres.modes import (  # noqa: E402
     append,
     recreate_partition,
-    recreate_table_insert,
-    truncate_table_insert,
     upsert_no_delete,
 )
 from bollhav.postgres.columns import PostgresColumn, PostgresType  # noqa: E402
@@ -54,6 +52,8 @@ def _model(
     columns: list[PostgresColumn] | None = None,
     partitioned_by: str | None = None,
     source_query: str | None = None,
+    recreate_table: bool = False,
+    truncate_table: bool = False,
 ) -> Model:
     cols = columns or [_col("id"), _col("val")]
     return Model(
@@ -68,6 +68,8 @@ def _model(
             if write_mode != WriteMode.VIEW
             else ModelType.VIEW,
             partitioned_by=partitioned_by,
+            recreate_table=recreate_table,
+            truncate_table=truncate_table,
         ),
     )
 
@@ -202,34 +204,22 @@ class TestOverwriteInsert:
             )
 
 
-class TestRecreateInsert:
-    def test_drops_and_recreates(self) -> None:
+class TestEnsureTableRecreate:
+    def test_drops_before_create_when_recreate_table(self) -> None:
         conn = _conn()
-        import polars as pl
-
-        df = pl.DataFrame({"id": [1], "val": ["a"]})
-        copy_mock = MagicMock()
-        copy_mock.__enter__ = MagicMock(return_value=copy_mock)
-        copy_mock.__exit__ = MagicMock(return_value=False)
-        cursor_mock = MagicMock()
-        cursor_mock.copy.return_value = copy_mock
-        conn.cursor.return_value.copy.return_value = copy_mock
-        recreate_table_insert(conn=conn, model=_model(), df=df)
-        assert conn.transaction.call_count == 2
+        ensure_table(conn=conn, model=_model(recreate_table=True))
+        statements = [str(call.args[0]) for call in conn.execute.call_args_list]
+        assert any("DROP TABLE" in s for s in statements), statements
+        assert any("CREATE TABLE" in s for s in statements), statements
 
 
-class TestTruncateInsert:
-    def test_truncates(self) -> None:
+class TestEnsureTableTruncate:
+    def test_truncates_after_create_when_truncate_table(self) -> None:
         conn = _conn()
-        import polars as pl
-
-        df = pl.DataFrame({"id": [1], "val": ["a"]})
-        copy_mock = MagicMock()
-        copy_mock.__enter__ = MagicMock(return_value=copy_mock)
-        copy_mock.__exit__ = MagicMock(return_value=False)
-        conn.cursor.return_value.copy.return_value = copy_mock
-        truncate_table_insert(conn=conn, model=_model(), df=df)
-        conn.transaction.assert_called_once()
+        ensure_table(conn=conn, model=_model(truncate_table=True))
+        statements = [str(call.args[0]) for call in conn.execute.call_args_list]
+        assert any("CREATE TABLE" in s for s in statements), statements
+        assert any("TRUNCATE TABLE" in s for s in statements), statements
 
 
 class TestUpdateInsert:

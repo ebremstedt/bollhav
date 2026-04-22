@@ -28,7 +28,7 @@ Example output:
 ```
 warehouse_finance.fact_transactions
   window_expression : @daily
-  batch_expression  : */15 * * * *
+  interval_expression  : */15 * * * *
   chunks returned   : 96
   first three chunks:
     2026-04-16 00:00:00+00:00 → 2026-04-16 00:15:00+00:00

@@ -41,14 +41,14 @@ Group-level `r:` (outside the brackets) applies to all tags inside. Tag-level `r
 
 ### Controlling how reload chunks its work
 
-Plain `r:` reloads using whatever the model is statically configured with (the `reload_mode` / `reload_batch_size` fields on the model's `Batch`, defaulting to `INTERVAL` + the model's own `interval_expression`). Two extended prefixes let you override that *at match time* without touching the model code:
+Plain `r:` reloads using whatever the model is statically configured with (the `mode` / `row.batch_size` / `interval.expression` fields on the model's `Batch`). Two extended prefixes let you override that *at match time* without touching the model code — `apply_pipe_to_models` bakes them into the returned model's `batching`:
 
 | Prefix | Forces | Notes |
 |--------|--------|-------|
 | `r_row_<N>:` | ROW-mode reload, `batch_size=<N>` | `<N>` is the row count per chunk. Capped at 10000. Compatible with `WriteMode.APPEND` and `WriteMode.UPSERT_NO_DELETE`. |
 | `r_interval_<@alias>:` | INTERVAL-mode reload, `interval_expression=<alias>` | `<alias>` is one of `@minutely`/`@minute`, `@hourly`/`@hour`, `@daily`/`@day`, `@weekly`/`@week`, `@monthly`/`@month` (sourced from roskarl). |
 
-For a cadence that doesn't have a named alias, set it statically on the model (`Batch(interval_expression="*/15 * * * *")`) and reload with plain `r:`, or override globally with the `BATCH_EXPRESSION_OVERRIDE` env var — arbitrary cron expressions are intentionally not accepted inside tags.
+For a cadence that doesn't have a named alias, set it statically on the model (`Batch(interval_expression="*/15 * * * *")`) and reload with plain `r:`, or override globally with the `INTERVAL_EXPRESSION_OVERRIDE` env var — arbitrary cron expressions are intentionally not accepted inside tags.
 
 Both extended prefixes accept the `reload_` long form (`reload_row_100:`, `reload_interval_@daily:`), and both work at tag-level and group-level:
 
@@ -60,7 +60,7 @@ Both extended prefixes accept the `reload_` long form (`reload_row_100:`, `reloa
 | `r_interval_@hourly:[facts]` | group-level — hourly chunks for every matched model |
 | `[r_row_100:foo][r_interval_@daily:bar]` | mix — `foo` in ROW/100, `bar` in INTERVAL/@daily |
 
-Runtime trumps the model's own `reloading`, so the same model can be run ROW one day and INTERVAL the next without code changes. Validation fires at parse/match time — an unknown cron alias or a row-batch over the cap raises immediately.
+Tag overrides trump the model's static `Batch`, so the same model can be run ROW one day and INTERVAL the next without code changes. Validation fires at parse/match time — an unknown cron alias or a row-batch over the cap raises immediately.
 
 ### Combining `r:` and `not:`
 
@@ -75,14 +75,14 @@ The prefixes can be combined:
 ## Usage
 
 ```python
-for model, reload in match_models(folder="src/models", tags="[r:sales & finance]"):
-    if reload:
+for model in apply_pipe_to_models(pipe, folder="src/models"):
+    if model.directives.reload:
         interval = (model.bounds.begin, model.bounds.end)
     else:
         interval = ...  # use your default incremental interval
 ```
 
-Each result is a `(model, reload)` tuple. `reload` is `True` if the matched expression included `r:`.
+`apply_pipe_to_models` runs matching internally, then bakes tag-driven reload overrides (mode, batch_size, interval_expression) straight into each returned model's `batching`. `model.directives.reload` tells you whether this run is a reload.
 
 ## Why not regex?
 

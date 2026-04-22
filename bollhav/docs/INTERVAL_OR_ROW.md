@@ -22,7 +22,7 @@ Works everywhere, pairs with latest/backfill/reload uniformly, everyone on the t
 - **Write mode**: `APPEND` or `UPSERT_NO_DELETE`. Truncate/recreate modes assume they see the whole dataset; partial row-batches don't fit.
 - **Reload only**: latest/backfill raise at `infer_intervals()`.
 - **`batch_size` ≤ 10000**: above that, per-chunk overhead isn't the bottleneck anymore.
-- **`infer_intervals()` not usable for ROW reloads**: callers branch on `model.effective_reload_mode()` and drive row chunks themselves.
+- **`infer_intervals()` not usable for ROW reloads**: callers branch on `model.batching.mode` and drive row chunks themselves.
 
 ## Runtime override via tag
 
@@ -32,7 +32,7 @@ Works everywhere, pairs with latest/backfill/reload uniformly, everyone on the t
 TAGS="[r_row_500:facts_2022]" python pipeline.py
 ```
 
-Model stays INTERVAL in static config, this invocation reloads in ROW with 500 rows/chunk. See [TAGS.md](TAGS.md) for the inverse (`r_interval_@...:`).
+Model stays INTERVAL in static config; `apply_pipe_to_models` bakes the tag override into `batching.mode`/`batching.row.batch_size` on the returned copy so the run uses ROW with 500 rows/chunk. See [TAGS.md](TAGS.md) for the inverse (`r_interval_@...:`).
 
 ## TL;DR
 

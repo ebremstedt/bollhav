@@ -31,9 +31,19 @@ def ensure_schema(conn: psycopg.Connection, schema: str) -> None:
 
 
 def ensure_table(conn: psycopg.Connection, model: Model) -> None:
+    schema_id = sql.Identifier(model.target.schema.resolved)
+    table_id = sql.Identifier(model.target.name)
     logger.debug(
         "Ensuring table: %s.%s", model.target.schema.resolved, model.target.name
     )
+
+    if model.target.recreate_table:
+        conn.execute(
+            sql.SQL("DROP TABLE IF EXISTS {schema}.{table}").format(
+                schema=schema_id, table=table_id
+            )
+        )
+
     col_defs = sql.SQL(",\n").join(
         sql.SQL(_col_ddl(col))
         for col in model.target.columns
@@ -41,11 +51,18 @@ def ensure_table(conn: psycopg.Connection, model: Model) -> None:
     )
     conn.execute(
         sql.SQL("CREATE TABLE IF NOT EXISTS {schema}.{table} (\n{col_defs}\n)").format(
-            schema=sql.Identifier(model.target.schema.resolved),
-            table=sql.Identifier(model.target.name),
+            schema=schema_id,
+            table=table_id,
             col_defs=col_defs,
         )
     )
+
+    if model.target.truncate_table:
+        conn.execute(
+            sql.SQL("TRUNCATE TABLE {schema}.{table}").format(
+                schema=schema_id, table=table_id
+            )
+        )
     if model.target.partitioned_by is not None:
         index_name = f"{model.target.name}_{model.target.partitioned_by}_idx"
         conn.execute(

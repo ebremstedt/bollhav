@@ -51,7 +51,8 @@ sales_forecasts = Model(
     target=Target(
         name="sales_forecasts",
         schema=Schema(name="warehouse_sales"),
-        write_mode=WriteMode.TRUNCATE_TABLE_INSERT,
+        write_mode=WriteMode.APPEND,
+        truncate_table=True,
     ),
     tagging=Tags(tags={"forecast"}),
     bounds=Bounds(

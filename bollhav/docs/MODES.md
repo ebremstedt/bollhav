@@ -26,53 +26,39 @@ flowchart LR
 - We want to save rows immediately (as to not break our pipeline, like in raw)
 - Duplicates are okay
 
-## RECREATE_TABLE_INSERT
+## Pre-load flags: `recreate_table` and `truncate_table`
 
-Drops and recreates the table before inserting. Stronger than TRUNCATE_TABLE_INSERT as it also resets the schema.
+Two booleans on `Target` that compose with any non-VIEW write mode. They run **once** in `ensure_table`, before the chunked write loop — so they're safe to combine with row-chunked or interval-chunked batching without clobbering earlier chunks.
 
-```mermaid
-flowchart LR
-    A[Incoming rows] e1@--> B[DROP TABLE target]
-    B e2@--> C[CREATE TABLE target]
-    C e3@--> D[INSERT all rows]
-    D e4@--> E[Target table]
+- `recreate_table=True` → `DROP TABLE IF EXISTS` then `CREATE TABLE`. Resets schema. Use when column definitions have changed.
+- `truncate_table=True` → `CREATE TABLE IF NOT EXISTS` then `TRUNCATE TABLE`. Wipes rows, keeps schema. Use when you want a full reload but the schema is stable.
 
-    e1@{ animation: fast }
-    e2@{ animation: fast }
-    e3@{ animation: fast }
-    e4@{ animation: fast }
-
-    style A fill:#4A90D9,stroke:#2C5F8A,color:#fff
-    style B fill:#C0392B,stroke:#922B21,color:#fff
-    style C fill:#E67E22,stroke:#A04000,color:#fff
-    style D fill:#5BA85A,stroke:#3A7A39,color:#fff
-    style E fill:#2C3E50,stroke:#1a252f,color:#fff
-```
-
-### When to use:
-- When the table schema may have changed and needs to be realigned with the model
-- When a full schema reset is preferred over a simple truncate
-
-
-## TRUNCATE_TABLE_INSERT
-
-Fully reloads the table on every run. Wipes everything first, then inserts.
+Both default to `False`. Setting both is an error. Neither is valid with `WriteMode.VIEW`.
 
 ```mermaid
 flowchart LR
-    A[Incoming rows] --> B[TRUNCATE target]
-    B --> C[INSERT all rows]
-    C --> D[Target table]
+    A[Incoming rows] --> B{recreate_table?}
+    B -- Yes --> C[DROP + CREATE TABLE]
+    B -- No --> D{truncate_table?}
+    D -- Yes --> E[CREATE IF NOT EXISTS + TRUNCATE]
+    D -- No --> F[CREATE IF NOT EXISTS]
+    C --> G[chunked write loop]
+    E --> G
+    F --> G
 
     style A fill:#4A90D9,stroke:#2C5F8A,color:#fff
-    style B fill:#C0392B,stroke:#922B21,color:#fff
-    style C fill:#5BA85A,stroke:#3A7A39,color:#fff
-    style D fill:#2C3E50,stroke:#1a252f,color:#fff
+    style B fill:#E67E22,stroke:#A04000,color:#fff
+    style C fill:#C0392B,stroke:#922B21,color:#fff
+    style D fill:#E67E22,stroke:#A04000,color:#fff
+    style E fill:#C0392B,stroke:#922B21,color:#fff
+    style F fill:#5BA85A,stroke:#3A7A39,color:#fff
+    style G fill:#2C3E50,stroke:#1a252f,color:#fff
 ```
 
-### When to use:
-- When the dataset is quite small, so reloading it completely is fine
-- When we want to make sure that deletes from source are included
+Typical combinations:
+- `APPEND` + `truncate_table=True` → idempotent full reload
+- `APPEND` + `recreate_table=True` → idempotent full reload with schema reset
+- `UPSERT_NO_DELETE` + `truncate_table=True` → wipe then upsert (useful when the incoming data has duplicates)
 
 ## UPSERT_NO_DELETE
 
@@ -183,9 +169,15 @@ flowchart LR
 
 | Mode | Inserts | Updates | Deletes | Notes |
 |---|---|---|---|---|
-| `APPEND` | ✅ | ❌ | ❌ | No deduplication |
-| `TRUNCATE_TABLE_INSERT` | ✅ | ❌ | ✅ | Full reload every run |
+| `APPEND` | ✅ | ❌ | ❌ | No deduplication. Pair with `truncate_table=True` or `recreate_table=True` for full reloads |
 | `UPSERT_NO_DELETE` | ✅ | ✅ | ❌ | Safe upsert |
 | `RECREATE_PARTITION` | ✅ | ✅ | ✅ | Deletes matches first |
 | `MERGE` | ✅ | ✅ | ✅ | Requires Postgres 15+ |
 | `VIEW` | ❌ | ❌ | ❌ | Updates view definition only |
+
+### Pre-load flags (on `Target`)
+
+| Flag | Effect before load |
+|---|---|
+| `recreate_table=True` | `DROP` + `CREATE TABLE` (schema reset) |
+| `truncate_table=True` | `CREATE IF NOT EXISTS` + `TRUNCATE TABLE` |

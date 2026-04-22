@@ -70,17 +70,30 @@ from bollhav.mssql import ensure_schema, ensure_table, ensure_schema_and_table
 
 See [MODES.md](MODES.md) for general concepts. Below describes the MSSQL-specific implementation.
 
-## TRUNCATE_TABLE_INSERT
+## APPEND
 
-Runs `TRUNCATE TABLE` then bulk inserts all rows using `cursor.fast_executemany`. Committed in one transaction.
+Bulk inserts all rows using `cursor.fast_executemany`. Committed in one transaction.
 
 ```python
 from bollhav.mssql import write
 from bollhav.model import WriteMode
 
-target = Target(..., write_mode=WriteMode.TRUNCATE_TABLE_INSERT)
+target = Target(..., write_mode=WriteMode.APPEND)
 write(conn=conn, model=model, df_gen=df_gen)
 ```
+
+## Pre-load flags: `recreate_table` / `truncate_table`
+
+Set on `Target`. Executed once inside `ensure_table` **before** the chunked write loop:
+
+- `recreate_table=True` → `DROP TABLE` (if exists) then `CREATE TABLE`. Resets schema.
+- `truncate_table=True` → `CREATE TABLE IF NOT EXISTS` then `TRUNCATE TABLE`. Keeps schema.
+
+```python
+target = Target(..., write_mode=WriteMode.APPEND, truncate_table=True)
+```
+
+Both `False` by default; both `True` raises. Not valid with `WriteMode.VIEW`.
 
 ## UPSERT_NO_DELETE
 
@@ -130,6 +143,6 @@ write(
 
 Like `write` but skips VIEW handling and always expects a dataframe generator.
 
-## `merge` / `truncate_write` / `create_replace_view`
+## `append` / `merge` / `create_replace_view`
 
 Low-level functions if you need direct control. Prefer `write` in pipelines.

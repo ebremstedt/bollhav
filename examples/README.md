@@ -6,16 +6,16 @@ time so you can see how that feature behaves on its own.
 
 | Folder | Demonstrates |
 |---|---|
-| [`company_xyz_pipeline/`](company_xyz_pipeline/) | End-to-end: pipe config, matching, apply_pipe, progress bar, all WriteModes |
+| [`company_xyz_pipeline/`](company_xyz_pipeline/) | End-to-end: pipe config, `apply_pipe_to_models`, progress bar, all WriteModes |
 | [`tag_matching/`](tag_matching/) | Tag expressions and how name/schema auto-contribute tags (snake_case + PascalCase) |
 | [`latest_vs_backfill/`](latest_vs_backfill/) | Same model, different modes — latest pulls the last complete chunk, backfill uses an explicit window |
-| [`latest_window_vs_batch/`](latest_window_vs_batch/) | `window_expression` + `batch_expression` together — big-warehouse scenario (daily scope, 15-minute writes) |
+| [`latest_window_vs_batch/`](latest_window_vs_batch/) | `window_expression` + `interval_expression` together — big-warehouse scenario (daily scope, 15-minute writes) |
 | [`reload_flag/`](reload_flag/) | `r:` tag prefix — reprocess a model's full declared bounds, overriding latest/backfill |
 | [`lookback_and_retries/`](lookback_and_retries/) | `Batch(lookback=N, retries=N)` — extending intervals for late data and wiring up a retry loop |
 
 ## `company_xyz_pipeline/`
 
-A self-contained pipeline that mocks both reading and writing, showing the full bollhav pattern — `@with_pipe_config`, `match_models`, `Model.apply_pipe`, `@progress_bar` — without any database connections.
+A self-contained pipeline that mocks both reading and writing, showing the full bollhav pattern — `@with_pipe_config`, `apply_pipe_to_models`, `@progress_bar` — without any database connections.
 
 ### Structure
 
@@ -26,8 +26,8 @@ company_xyz_pipeline/
       raw.py            # warehouse_raw — source tables
       clean.py          # warehouse_clean — cleaned / derived tables
       products.py       # WriteMode.APPEND
-      customers.py      # WriteMode.TRUNCATE_TABLE_INSERT
-      orders.py         # WriteMode.RECREATE_TABLE_INSERT
+      customers.py      # WriteMode.APPEND + truncate_table=True
+      orders.py         # WriteMode.APPEND + recreate_table=True
       views.py          # WriteMode.VIEW — CREATE OR ALTER VIEW
   main.py               # entry point — @with_pipe_config
   execute.py            # batch handler — @progress_bar

@@ -1,37 +1,18 @@
 [back to README](../../README.md)
 
-# Match models in your pie folder
+# Match models in your pipe folder
 
-## Using just an environment variable
-
-```sh
-export TAGS=[schema_xyz|schema_xyz]
-```
-
-```python
-from bollhav.model import match_models
-
-tags = env_var(name="TAGS", required=True)
-for model, reload in match_models(tags=tags, folder="src/models"):
-    if reload:
-        interval = (model.bounds.begin, model.bounds.end)
-    else:
-        interval = ...  # use your default incremental interval
-    execute(model, interval, ...)
-```
-
-## Using the decorator
-
-Load pipe level config with the decorator:
+`apply_pipe_to_models(pipe, folder)` discovers every `Model` under `folder`, filters by `pipe.tags`, topologically sorts them, and returns copies with pipe/tag overrides baked into `batching`, `target.schema`, and `directives`. The input models are not mutated.
 
 ```python
 from bollhav.pipe import PipeConfig, with_pipe_config
-from bollhav.model import match_models
+from bollhav.model import apply_pipe_to_models
 
 @with_pipe_config
-def main(pipe: PipeConfig):
-    for model in match_models(tags=pipe.tags, folder="src/models"):
-        intervals = model.infer_intervals(pipe)
-        for interval in intervals:
+def main(pipe: PipeConfig) -> None:
+    for model in apply_pipe_to_models(pipe, folder="src/models"):
+        for interval in model.infer_intervals():
             execute(model, interval, ...)
 ```
+
+If you only need raw matching (no pipe application — e.g. for diagnostics or tooling), use `match_models(folder, tags, upstream_mode)` directly.

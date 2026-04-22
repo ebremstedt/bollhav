@@ -1,4 +1,6 @@
+from bollhav.model.apply_pipe import apply_pipe_to_models
 from bollhav.model.database import Database, DatabaseColumn, DatabaseIndex
+from bollhav.model.directives import Directives
 from bollhav.model.intervals import TZInterval
 from bollhav.model.matching import match_models
 from bollhav.model.ordering import UpstreamMode
@@ -15,10 +17,12 @@ from bollhav.model.tags import Tags
 from bollhav.model.progress_bar import progress_bar, ProgressLevel, name_width_for
 
 __all__ = [
+    "apply_pipe_to_models",
     "WriteMode",
     "Database",
     "DatabaseColumn",
     "DatabaseIndex",
+    "Directives",
     "TZInterval",
     "match_models",
     "UpstreamMode",

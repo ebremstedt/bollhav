@@ -1,8 +1,9 @@
 """Per-chunk write handler. The @progress_bar decorator counts each call
-as one chunk and renders the line based on `model.effective_reload_mode()`
-— so a row-mode model shows "(rows)" next to its name, an interval model
-shows "(interval)". Tag overrides like `r_row_<N>:` flip the label too,
-because effective_reload_mode reads runtime overrides first."""
+as one chunk and renders the line based on `model.batching.mode` — so a
+row-mode model shows "(rows)" next to its name, an interval model shows
+"(interval)". Tag overrides like `r_row_<N>:` flip the label too, because
+`apply_pipe` bakes tag-driven reload overrides into `batching` before the
+progress bar reads it."""
 
 import polars as pl
 from bollhav.model import Model, progress_bar

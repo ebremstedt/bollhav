@@ -20,8 +20,8 @@ from bollhav.model import (
 #
 # The fix: use two cron expressions.
 #
-#   window_expression = "@daily"          → OUTER scope: one full day
-#   batch_expression  = "*/15 * * * *"    → INNER chunk: 15 minutes each
+#   window_expression   = "@daily"          → OUTER scope: one full day
+#   interval_expression = "*/15 * * * *"    → INNER chunk: 15 minutes each
 #
 # In latest mode, infer_intervals() resolves the outer window (yesterday,
 # 00:00 → 00:00) and then splits it into 96 fifteen-minute chunks. Each

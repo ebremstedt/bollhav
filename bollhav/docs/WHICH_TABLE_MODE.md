@@ -11,8 +11,8 @@ flowchart TD
     Q6{Deletes matter?}:::question
 
     RP([RECREATE_PARTITION]):::mode
-    RTI([⚠️ RECREATE_TABLE_INSERT<br>caution]):::caution
-    TTI([TRUNCATE_TABLE_INSERT]):::mode
+    APP_REC([APPEND<br>+ recreate_table=True]):::mode
+    APP_TRUNC([APPEND<br>+ truncate_table=True]):::mode
     UND([⚠️ UPSERT_NO_DELETE<br>caution]):::caution
     APP([APPEND]):::mode
 
@@ -21,8 +21,8 @@ flowchart TD
     Q2 e5b@-->|No| Q3
     Q3 e5@-->|Yes| Q4
     Q3 e6@-->|No| Q5
-    Q4 e7@-->|Yes| RTI
-    Q4 e8@-->|No| TTI
+    Q4 e7@-->|Yes| APP_REC
+    Q4 e8@-->|No| APP_TRUNC
     Q5 e9@-->|Yes| Q6
     Q5 e10@-->|No| APP
     Q6 e11@-->|No| UND
