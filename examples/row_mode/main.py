@@ -18,7 +18,7 @@ import os
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
 from bollhav.pipe import with_pipe_config, PipeConfig
-from bollhav.model import ChunkMode, match_models
+from bollhav.model import ChunkMode, match_models, name_width_for
 from execute import execute
 from mock_read import read_all
 
@@ -26,11 +26,14 @@ from mock_read import read_all
 @with_pipe_config
 def main(pipe: PipeConfig) -> None:
     matched = match_models(folder="src/models", tags=pipe.tags)
-    if matched:
-        execute.set_name_width(max(len(m.target.full_name) for m in matched) + 10)
 
     for model in matched:
         model.apply_pipe(pipe)
+
+    if matched:
+        execute.set_name_width(name_width_for(matched))
+
+    for model in matched:
         if model.effective_reload_mode() is ChunkMode.ROW:
             _run_row_mode(model)
         else:

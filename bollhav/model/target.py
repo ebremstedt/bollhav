@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field
 from typing import Callable
 
-from bollhav.model.database import Database, DatabaseColumn
+from bollhav.model.database import Database, DatabaseColumn, DatabaseIndex
 from bollhav.model.model_type import ModelType
 from bollhav.model.write_modes import WriteMode
 from bollhav.model.column_sorting import sort_columns
@@ -14,6 +14,7 @@ class Target:
     schema: Schema = field(default_factory=Schema)
     database: Database | None = None
     columns: list[DatabaseColumn] = field(default_factory=list)
+    indexes: list[DatabaseIndex] = field(default_factory=list)
     model_type: ModelType = ModelType.TABLE
     write_mode: WriteMode = WriteMode.APPEND
     partitioned_by: str | None = None
@@ -84,3 +85,15 @@ class Target:
             sorted_names = self.column_sorting(col_names)
             name_to_col = {c.name: c for c in self.columns}
             self.columns = [name_to_col[n] for n in sorted_names]
+
+        if self.indexes:
+            col_names = {c.name for c in self.columns}
+            for idx in self.indexes:
+                referenced = list(getattr(idx, "columns", [])) + list(
+                    getattr(idx, "included", [])
+                )
+                unknown = [c for c in referenced if c not in col_names]
+                if unknown:
+                    raise ValueError(
+                        f"Index {idx.name!r} references unknown column(s): {unknown}"
+                    )

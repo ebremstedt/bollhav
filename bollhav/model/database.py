@@ -15,3 +15,8 @@ class DatabaseColumn:
     order: int | None = None
     sensitive: bool = False
     description: str | None = None
+
+
+@dataclass
+class DatabaseIndex:
+    name: str

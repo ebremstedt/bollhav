@@ -5,7 +5,7 @@ from typing import Generator
 from bollhav.model.model import Model
 from bollhav.model.write_modes import WriteMode
 from bollhav.mssql.modes import merge, truncate_write, create_replace_view
-from bollhav.mssql.schema import ensure_schema_and_table
+from bollhav.mssql.schema import ensure_schema_table_and_indexes
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +28,7 @@ def write_dataframes(
             )
 
     if create_if_missing:
-        ensure_schema_and_table(conn=conn, model=model)
+        ensure_schema_table_and_indexes(conn=conn, model=model)
 
     for df in df_gen:
         if len(df) == 0:
