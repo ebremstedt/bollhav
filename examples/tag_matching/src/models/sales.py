@@ -1,9 +1,9 @@
 from datetime import datetime, timezone
 from bollhav.model import (
     Model,
-    Source,
+    SourceTable,
     Target,
-    Schema,
+    TargetSchema,
     WriteMode,
     Tags,
     Bounds,
@@ -23,10 +23,10 @@ from bollhav.model import (
 #   {all, orders, sales, sales_orders,
 #    warehouse, warehouse_sales, warehouse_sales.sales_orders}
 sales_orders = Model(
-    source=Source(name="sales_orders"),
+    source=SourceTable(name="sales_orders"),
     target=Target(
         name="sales_orders",
-        schema=Schema(name="warehouse_sales"),
+        schema=TargetSchema(name="warehouse_sales"),
         write_mode=WriteMode.APPEND,
     ),
     bounds=Bounds(
@@ -47,10 +47,10 @@ sales_orders = Model(
 # The rule of thumb: only list tags that cannot be derived from the
 # model's name or schema.
 sales_forecasts = Model(
-    source=Source(name="sales_forecasts"),
+    source=SourceTable(name="sales_forecasts"),
     target=Target(
         name="sales_forecasts",
-        schema=Schema(name="warehouse_sales"),
+        schema=TargetSchema(name="warehouse_sales"),
         write_mode=WriteMode.APPEND,
         truncate_table=True,
     ),

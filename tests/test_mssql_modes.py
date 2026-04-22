@@ -7,8 +7,8 @@ import polars as pl  # noqa: E402
 
 from bollhav.model.database import Database  # noqa: E402
 from bollhav.model.model import Model  # noqa: E402
-from bollhav.model.schema import Schema  # noqa: E402
-from bollhav.model.source import Source  # noqa: E402
+from bollhav.model.target_schema import TargetSchema  # noqa: E402
+from bollhav.model.source_table import SourceTable  # noqa: E402
 from bollhav.model.target import Target  # noqa: E402
 from bollhav.model.write_modes import WriteMode  # noqa: E402
 from bollhav.mssql.columns import MssqlColumn, MssqlType  # noqa: E402
@@ -22,10 +22,10 @@ def _model(
     truncate_table: bool = False,
 ) -> Model:
     return Model(
-        source=Source(name="src"),
+        source=SourceTable(name="src"),
         target=Target(
             name="t",
-            schema=Schema(name="s"),
+            schema=TargetSchema(name="s"),
             database=Database.MSSQL,
             columns=[
                 MssqlColumn(name="id", data_type=MssqlType.INT, nullable=False),

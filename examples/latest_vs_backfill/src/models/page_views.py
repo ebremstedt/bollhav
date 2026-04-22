@@ -1,9 +1,9 @@
 from datetime import datetime, timezone
 from bollhav.model import (
     Model,
-    Source,
+    SourceTable,
     Target,
-    Schema,
+    TargetSchema,
     WriteMode,
     Tags,
     Bounds,
@@ -21,10 +21,10 @@ from bollhav.model import (
 # set, you get every hour in that window: 72 chunks for a full 3-day
 # backfill, chunked by the batch expression.
 page_views = Model(
-    source=Source(name="page_views"),
+    source=SourceTable(name="page_views"),
     target=Target(
         name="page_views",
-        schema=Schema(name="warehouse_web"),
+        schema=TargetSchema(name="warehouse_web"),
         write_mode=WriteMode.APPEND,
     ),
     tagging=Tags(tags={"web"}),

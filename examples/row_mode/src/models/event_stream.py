@@ -3,8 +3,8 @@ from bollhav.model import (
     ChunkMode,
     Model,
     RowChunks,
-    Schema,
-    Source,
+    TargetSchema,
+    SourceTable,
     Tags,
     Target,
     WriteMode,
@@ -24,10 +24,10 @@ from bollhav.model.bounds import Bounds
 # the `r:` tag prefix below to put it into reload mode. WriteMode must be
 # APPEND (enforced at Model construction).
 event_stream = Model(
-    source=Source(name="event_stream_raw"),
+    source=SourceTable(name="event_stream_raw"),
     target=Target(
         name="event_stream",
-        schema=Schema(name="warehouse_raw"),
+        schema=TargetSchema(name="warehouse_raw"),
         write_mode=WriteMode.APPEND,
     ),
     bounds=Bounds(),

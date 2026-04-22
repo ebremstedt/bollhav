@@ -1,9 +1,9 @@
 from datetime import datetime, timezone
 from bollhav.model import (
     Model,
-    Source,
+    SourceTable,
     Target,
-    Schema,
+    TargetSchema,
     WriteMode,
     Tags,
     Bounds,
@@ -12,10 +12,10 @@ from bollhav.model import (
 )
 
 inventory_transactions = Model(
-    source=Source(name="inventory_transactions"),
+    source=SourceTable(name="inventory_transactions"),
     target=Target(
         name="inventory_transactions",
-        schema=Schema(name="warehouse_raw"),
+        schema=TargetSchema(name="warehouse_raw"),
         write_mode=WriteMode.APPEND,
     ),
     tagging=Tags(tags={"raw"}),
@@ -28,10 +28,10 @@ inventory_transactions = Model(
 )
 
 supplier_catalog = Model(
-    source=Source(name="supplier_catalog"),
+    source=SourceTable(name="supplier_catalog"),
     target=Target(
         name="supplier_catalog",
-        schema=Schema(name="warehouse_raw"),
+        schema=TargetSchema(name="warehouse_raw"),
         write_mode=WriteMode.APPEND,
         recreate_table=True,
     ),
@@ -45,10 +45,10 @@ supplier_catalog = Model(
 )
 
 shipment_events = Model(
-    source=Source(name="shipment_events"),
+    source=SourceTable(name="shipment_events"),
     target=Target(
         name="shipment_events",
-        schema=Schema(name="warehouse_raw"),
+        schema=TargetSchema(name="warehouse_raw"),
         write_mode=WriteMode.APPEND,
     ),
     tagging=Tags(tags={"raw"}),
@@ -61,10 +61,10 @@ shipment_events = Model(
 )
 
 exchange_rates = Model(
-    source=Source(name="exchange_rates"),
+    source=SourceTable(name="exchange_rates"),
     target=Target(
         name="exchange_rates",
-        schema=Schema(name="warehouse_raw"),
+        schema=TargetSchema(name="warehouse_raw"),
         write_mode=WriteMode.APPEND,
     ),
     tagging=Tags(tags={"raw"}),
@@ -77,10 +77,10 @@ exchange_rates = Model(
 )
 
 audit_log = Model(
-    source=Source(name="audit_log"),
+    source=SourceTable(name="audit_log"),
     target=Target(
         name="audit_log",
-        schema=Schema(name="warehouse_raw"),
+        schema=TargetSchema(name="warehouse_raw"),
         write_mode=WriteMode.APPEND,
     ),
     tagging=Tags(tags={"raw"}),

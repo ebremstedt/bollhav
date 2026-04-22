@@ -1,32 +1,32 @@
 from unittest.mock import patch
 from datetime import datetime
 
-from bollhav.model.schema import Schema
+from bollhav.model.target_schema import TargetSchema
 
 
 def test_resolved_no_suffix():
-    assert Schema(name="kodserver_raw").resolved == "kodserver_raw"
+    assert TargetSchema(name="kodserver_raw").resolved == "kodserver_raw"
 
 
 def test_resolved_with_suffix_no_appendix():
-    s = Schema(name="kodserver_raw", suffix="pr123", suffix_appendix=None)
+    s = TargetSchema(name="kodserver_raw", suffix="pr123", suffix_appendix=None)
     assert s.resolved == "kodserver_raw_pr123"
 
 
 def test_resolved_with_suffix_and_appendix_has_trailing_underscore():
     fixed_now = datetime(2026, 4, 1)
-    with patch("bollhav.model.schema.datetime") as mock_dt:
+    with patch("bollhav.model.target_schema.datetime") as mock_dt:
         mock_dt.now.return_value = fixed_now
-        s = Schema(name="kodserver_raw", suffix="pr123")
+        s = TargetSchema(name="kodserver_raw", suffix="pr123")
         result = s.resolved
     assert result == "kodserver_raw_pr123_2613_"
 
 
 def test_resolved_appendix_yyww_format():
     fixed_now = datetime(2026, 4, 1)
-    with patch("bollhav.model.schema.datetime") as mock_dt:
+    with patch("bollhav.model.target_schema.datetime") as mock_dt:
         mock_dt.now.return_value = fixed_now
-        s = Schema(name="s", suffix="x")
+        s = TargetSchema(name="s", suffix="x")
         result = s.resolved
     assert result.endswith("_")
     parts = result.rstrip("_").split("_")
@@ -39,14 +39,14 @@ def test_resolved_uses_base_name_after_name_overwritten():
     """If name is overwritten to the resolved form (as apply_pipe does),
     resolved keeps composing from the original base, not the mutated name —
     otherwise repeated applies would compound the suffix."""
-    s = Schema(name="warehouse", suffix="pr123", suffix_appendix=None)
+    s = TargetSchema(name="warehouse", suffix="pr123", suffix_appendix=None)
     assert s.resolved == "warehouse_pr123"
     s.name = s.resolved  # simulate apply_pipe's mutation
     assert s.resolved == "warehouse_pr123"  # still the same — idempotent
 
 
 def test_apply_pipe_style_mutation_is_idempotent():
-    s = Schema(name="warehouse", suffix="pr123", suffix_appendix=None)
+    s = TargetSchema(name="warehouse", suffix="pr123", suffix_appendix=None)
     s.name = s.resolved
     s.name = s.resolved
     s.name = s.resolved

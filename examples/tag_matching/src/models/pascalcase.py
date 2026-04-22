@@ -1,9 +1,9 @@
 from datetime import datetime, timezone
 from bollhav.model import (
     Model,
-    Source,
+    SourceTable,
     Target,
-    Schema,
+    TargetSchema,
     WriteMode,
     Tags,
     Bounds,
@@ -25,10 +25,10 @@ from bollhav.model import (
 # gets the auto-tags: "customer", "journey", "data", "mart" (plus the usual
 # full-name tags, "all", etc.).
 CustomerJourney = Model(
-    source=Source(name="CustomerJourney"),
+    source=SourceTable(name="CustomerJourney"),
     target=Target(
         name="CustomerJourney",
-        schema=Schema(name="DataMart"),
+        schema=TargetSchema(name="DataMart"),
         write_mode=WriteMode.APPEND,
     ),
     tagging=Tags(

@@ -3,7 +3,7 @@ from unittest.mock import MagicMock
 import pytest
 from bollhav.model.model_type import ModelType
 from bollhav.model.model import Model
-from bollhav.model.schema import Schema
+from bollhav.model.target_schema import TargetSchema
 from bollhav.model.target import Target
 from bollhav.model.bounds import Bounds
 from bollhav.model.tags import Tags
@@ -120,7 +120,9 @@ def test_name_added_to_tags_by_default():
 
 
 def test_schema_added_to_tags_by_default():
-    m = make_model(target=Target(name="test_table", schema=Schema(name="my_schema")))
+    m = make_model(
+        target=Target(name="test_table", schema=TargetSchema(name="my_schema"))
+    )
     assert "my_schema" in m.tags
 
 
@@ -136,7 +138,7 @@ def test_name_not_added_to_tags_when_disabled():
 
 def test_schema_not_added_to_tags_when_disabled():
     m = make_model(
-        target=Target(name="test_table", schema=Schema(name="my_schema")),
+        target=Target(name="test_table", schema=TargetSchema(name="my_schema")),
         tagging=Tags(schema_add_to_tags=False),
     )
     assert "my_schema" not in m.tags
@@ -155,7 +157,9 @@ def test_unsnake_name_splits_on_underscore():
 
 
 def test_unsnake_schema_splits_on_underscore():
-    m = make_model(target=Target(name="test_table", schema=Schema(name="my_schema")))
+    m = make_model(
+        target=Target(name="test_table", schema=TargetSchema(name="my_schema"))
+    )
     assert "my" in m.tags
     assert "schema" in m.tags
 
@@ -170,7 +174,7 @@ def test_unsnake_name_disabled():
 
 def test_unsnake_schema_disabled():
     m = make_model(
-        target=Target(name="test_table", schema=Schema(name="my_schema")),
+        target=Target(name="test_table", schema=TargetSchema(name="my_schema")),
         tagging=Tags(unsnake_schema_for_tags=False),
     )
     assert "my" not in m.tags
@@ -195,7 +199,7 @@ def test_unpascal_name_splits_pascal_case():
 
 def test_unpascal_schema_splits_pascal_case():
     m = make_model(
-        target=Target(name="test_table", schema=Schema(name="MySchema")),
+        target=Target(name="test_table", schema=TargetSchema(name="MySchema")),
         tagging=Tags(unpascal_schema_for_tags=True),
     )
     assert "my" in m.tags
@@ -204,14 +208,14 @@ def test_unpascal_schema_splits_pascal_case():
 
 def test_unpascal_schema_off_by_default():
     m = make_model(
-        target=Target(name="test_table", schema=Schema(name="MySchema")),
+        target=Target(name="test_table", schema=TargetSchema(name="MySchema")),
     )
     assert "my" not in m.tags
 
 
 def test_full_name_added_to_tags_by_default():
     m = make_model(
-        target=Target(name="poop", schema=Schema(name="cha_clean")),
+        target=Target(name="poop", schema=TargetSchema(name="cha_clean")),
     )
     assert "cha_clean.poop" in m.tags
 
@@ -223,7 +227,7 @@ def test_full_name_not_added_when_no_schema():
 
 def test_full_name_not_added_when_disabled():
     m = make_model(
-        target=Target(name="poop", schema=Schema(name="cha_clean")),
+        target=Target(name="poop", schema=TargetSchema(name="cha_clean")),
         tagging=Tags(full_name_add_to_tags=False),
     )
     assert "cha_clean.poop" not in m.tags

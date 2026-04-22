@@ -1,9 +1,9 @@
 from datetime import datetime, timezone
 from bollhav.model import (
     Model,
-    Source,
+    SourceTable,
     Target,
-    Schema,
+    TargetSchema,
     WriteMode,
     Tags,
     Bounds,
@@ -12,10 +12,10 @@ from bollhav.model import (
 )
 
 product_price_history = Model(
-    source=Source(name="products"),
+    source=SourceTable(name="products"),
     target=Target(
         name="product_price_history",
-        schema=Schema(name="warehouse_clean"),
+        schema=TargetSchema(name="warehouse_clean"),
         write_mode=WriteMode.APPEND,
     ),
     tagging=Tags(tags={"clean"}),
@@ -29,10 +29,10 @@ product_price_history = Model(
 )
 
 shipment_tracking_summary = Model(
-    source=Source(name="shipment_events"),
+    source=SourceTable(name="shipment_events"),
     target=Target(
         name="shipment_tracking_summary",
-        schema=Schema(name="warehouse_clean"),
+        schema=TargetSchema(name="warehouse_clean"),
         write_mode=WriteMode.APPEND,
         recreate_table=True,
     ),
@@ -47,10 +47,10 @@ shipment_tracking_summary = Model(
 )
 
 inventory_snapshot = Model(
-    source=Source(name="inventory_transactions"),
+    source=SourceTable(name="inventory_transactions"),
     target=Target(
         name="inventory_snapshot",
-        schema=Schema(name="warehouse_clean"),
+        schema=TargetSchema(name="warehouse_clean"),
         write_mode=WriteMode.APPEND,
         truncate_table=True,
     ),

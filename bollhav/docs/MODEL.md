@@ -11,10 +11,10 @@ A `Model` is a pure data object describing what data looks like and where it goe
 ```python
 from bollhav.model.model import Model
 from bollhav.model.target import Target
-from bollhav.model.source import Source
+from bollhav.model.source_table import SourceTable
 from bollhav.model.bounds import Bounds
 from bollhav.model.batch import Batch
-from bollhav.model.schema import Schema
+from bollhav.model.target_schema import TargetSchema
 from bollhav.model.write_modes import WriteMode
 from bollhav.postgres.columns import PostgresColumn, PostgresType
 from bollhav.model.database import Database
@@ -22,7 +22,7 @@ from bollhav.model.database import Database
 model = Model(
     target=Target(
         name="orders",
-        schema=Schema(name="public"),
+        schema=TargetSchema(name="public"),
         database=Database.POSTGRES,
         columns=[
             PostgresColumn(name="id", data_type=PostgresType.BIGINT, primary_key=True, nullable=False),
@@ -32,7 +32,7 @@ model = Model(
         write_mode=WriteMode.APPEND,
         partitioned_by="created_at",
     ),
-    source=Source(name="raw.orders"),
+    source=SourceTable(name="raw.orders"),
     bounds=Bounds(begin=datetime(2024, 1, 1, tzinfo=timezone.utc)),
     batching=Batch(interval_expression="0 * * * *"),
     debug=True,
@@ -44,7 +44,7 @@ model = Model(
 | Parameter | Type | Default | Description |
 |---|---|---|---|
 | `target` | `Target` | required | Defines where and how data is written |
-| `source` | `Source` | `None` | Defines where data is read from |
+| `source` | `SourceTable` | `None` | Defines where data is read from |
 | `bounds` | `Bounds` | `None` | Optional backfill begin/end bounds |
 | `batching` | `Batch` | `None` | Controls batch size and retries |
 | `tagging` | `Tags` | `None` | Controls tag auto-assembly |
@@ -59,7 +59,7 @@ model = Model(
 | Parameter | Type | Default | Description |
 |---|---|---|---|
 | `name` | `str` | required | Destination table name |
-| `schema` | `Schema` | `Schema()` | Destination schema |
+| `schema` | `TargetSchema` | `TargetSchema()` | Destination schema |
 | `database` | `Database` | `None` | Target database. Required if `columns` is set |
 | `columns` | `list[PostgresColumn]` | `[]` | Column definitions. Required if `database` is set |
 | `model_type` | `ModelType` | `TABLE` | `TABLE` or `VIEW` |
@@ -67,12 +67,12 @@ model = Model(
 | `partitioned_by` | `str` | `None` | Column to partition by. Must exist in `columns` |
 | `dsn_env_var` | `str` | `None` | DSN env var for the target connection |
 
-### Source parameters
+### SourceTable parameters
 
 | Parameter | Type | Default | Description |
 |---|---|---|---|
-| `name` | `str` | required | Source table or entity name |
-| `schema` | `str` | `None` | Source schema |
+| `name` | `str` | required | SourceTable table or entity name |
+| `schema` | `str` | `None` | SourceTable schema |
 | `dsn_env_var` | `str` | `None` | DSN env var for the source connection |
 | `query` | `str` | `None` | Optional query override |
 | `infer_schema_length` | `int` | `None` | Passed to polars as `infer_schema_length`. Max rows to scan for schema inference. `None` scans all rows (can be slow) |
@@ -251,7 +251,7 @@ For full-reload semantics, combine a write mode with `Target(recreate_table=True
 Tags are automatically assembled at init time. By default `name`, `schema`, and `"all"` are added.
 
 ```python
-model = Model(target=Target(name="orders", schema=Schema(name="public")))
+model = Model(target=Target(name="orders", schema=TargetSchema(name="public")))
 model.tags  # {"orders", "public", "all"}
 ```
 

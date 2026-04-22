@@ -1,9 +1,9 @@
 from datetime import datetime, timezone
 from bollhav.model import (
     Model,
-    Source,
+    SourceTable,
     Target,
-    Schema,
+    TargetSchema,
     WriteMode,
     Tags,
     Bounds,
@@ -22,10 +22,10 @@ from bollhav.model import (
 #   {all, finance, finance_ledger, ledger,
 #    warehouse, warehouse_finance, warehouse_finance.finance_ledger}
 finance_ledger = Model(
-    source=Source(name="finance_ledger"),
+    source=SourceTable(name="finance_ledger"),
     target=Target(
         name="finance_ledger",
-        schema=Schema(name="warehouse_finance"),
+        schema=TargetSchema(name="warehouse_finance"),
         write_mode=WriteMode.APPEND,
     ),
     bounds=Bounds(
@@ -44,10 +44,10 @@ finance_ledger = Model(
 # it by hand. Pairs with sales_forecasts so `[forecast]` matches both
 # budget planning domains at once.
 finance_budgets = Model(
-    source=Source(name="finance_budgets"),
+    source=SourceTable(name="finance_budgets"),
     target=Target(
         name="finance_budgets",
-        schema=Schema(name="warehouse_finance"),
+        schema=TargetSchema(name="warehouse_finance"),
         write_mode=WriteMode.APPEND,
         truncate_table=True,
     ),

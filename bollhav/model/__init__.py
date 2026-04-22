@@ -8,8 +8,10 @@ from bollhav.model.model import Model
 from bollhav.model.model_type import ModelType
 from bollhav.model.column_sorting import sort_columns
 from bollhav.model.write_modes import WriteMode
-from bollhav.model.schema import Schema
+from bollhav.model.target_schema import TargetSchema
 from bollhav.model.source import Source
+from bollhav.model.source_file import SourceFile
+from bollhav.model.source_table import SourceTable
 from bollhav.model.target import Target
 from bollhav.model.bounds import Bounds
 from bollhav.model.batch import Batch, ChunkMode, IntervalChunks, RowChunks
@@ -29,8 +31,10 @@ __all__ = [
     "Model",
     "ModelType",
     "sort_columns",
-    "Schema",
+    "TargetSchema",
     "Source",
+    "SourceFile",
+    "SourceTable",
     "Target",
     "Bounds",
     "Batch",

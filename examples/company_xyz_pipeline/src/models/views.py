@@ -1,8 +1,8 @@
 from bollhav.model import (
     Model,
-    Source,
+    SourceTable,
     Target,
-    Schema,
+    TargetSchema,
     WriteMode,
     ModelType,
     Tags,
@@ -10,13 +10,13 @@ from bollhav.model import (
 
 # VIEW — CREATE OR ALTER VIEW, no dataframe consumed, runs once per execution.
 high_value_orders = Model(
-    source=Source(
+    source=SourceTable(
         name="high_value_orders",
         query="SELECT * FROM warehouse_clean.orders WHERE total >= 20",
     ),
     target=Target(
         name="high_value_orders",
-        schema=Schema(name="warehouse_views"),
+        schema=TargetSchema(name="warehouse_views"),
         model_type=ModelType.VIEW,
         write_mode=WriteMode.VIEW,
     ),
@@ -25,7 +25,7 @@ high_value_orders = Model(
 )
 
 active_customers = Model(
-    source=Source(
+    source=SourceTable(
         name="active_customers",
         query=(
             "SELECT c.* FROM warehouse_clean.customer_master_data c "
@@ -34,7 +34,7 @@ active_customers = Model(
     ),
     target=Target(
         name="active_customers",
-        schema=Schema(name="warehouse_views"),
+        schema=TargetSchema(name="warehouse_views"),
         model_type=ModelType.VIEW,
         write_mode=WriteMode.VIEW,
     ),

@@ -5,7 +5,7 @@ from bollhav.model.apply_pipe import _apply_to_model
 from bollhav.model.batch import Batch, ChunkMode, IntervalChunks, RowChunks
 from bollhav.model.bounds import Bounds
 from bollhav.model.model import Model
-from bollhav.model.schema import Schema
+from bollhav.model.target_schema import TargetSchema
 from bollhav.model.target import Target
 from bollhav.pipe.pipe_config import PipeConfig, LatestConfig, BackfillConfig
 
@@ -41,7 +41,7 @@ def _model(**batch_kwargs) -> Model:
     iv.update(batch_kwargs)
     return Model(
         target=Target(
-            name="orders", schema=Schema(name="public", suffix_appendix=None)
+            name="orders", schema=TargetSchema(name="public", suffix_appendix=None)
         ),
         batching=Batch(interval=IntervalChunks(**iv)),
     )
@@ -120,7 +120,7 @@ class TestTagReloadBakedIntoBatching:
     def test_reload_mode_baked_into_batching(self) -> None:
         m = Model(
             target=Target(
-                name="events", schema=Schema(name="raw", suffix_appendix=None)
+                name="events", schema=TargetSchema(name="raw", suffix_appendix=None)
             ),
             batching=Batch(
                 mode=ChunkMode.INTERVAL,
@@ -163,6 +163,6 @@ class TestTagReloadBakedIntoBatching:
 
 class TestBatchingNone:
     def test_no_batching_skips_interval_baking(self) -> None:
-        m = Model(target=Target(name="t", schema=Schema(suffix_appendix=None)))
+        m = Model(target=Target(name="t", schema=TargetSchema(suffix_appendix=None)))
         out = _apply_to_model(m, _pipe(interval_expression_override="@daily"))
         assert out.batching is None

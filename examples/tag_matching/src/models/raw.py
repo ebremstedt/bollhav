@@ -1,9 +1,9 @@
 from datetime import datetime, timezone
 from bollhav.model import (
     Model,
-    Source,
+    SourceTable,
     Target,
-    Schema,
+    TargetSchema,
     WriteMode,
     Bounds,
     Batch,
@@ -19,10 +19,10 @@ from bollhav.model import (
 # writing `tagging=Tags(tags={"raw"})` on a model already named or
 # schema'd `*_raw_*` — delete it, it's doing nothing.
 raw_events = Model(
-    source=Source(name="raw_events"),
+    source=SourceTable(name="raw_events"),
     target=Target(
         name="raw_events",
-        schema=Schema(name="warehouse_raw"),
+        schema=TargetSchema(name="warehouse_raw"),
         write_mode=WriteMode.APPEND,
     ),
     bounds=Bounds(

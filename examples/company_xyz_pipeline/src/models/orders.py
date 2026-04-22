@@ -1,9 +1,9 @@
 from datetime import datetime, timezone
 from bollhav.model import (
     Model,
-    Source,
+    SourceTable,
     Target,
-    Schema,
+    TargetSchema,
     WriteMode,
     Tags,
     Bounds,
@@ -14,10 +14,10 @@ from bollhav.model import (
 # recreate_table — drops and recreates the table before the load, then appends.
 # Depends on customers being loaded first.
 orders = Model(
-    source=Source(name="orders"),
+    source=SourceTable(name="orders"),
     target=Target(
         name="orders",
-        schema=Schema(name="warehouse_clean"),
+        schema=TargetSchema(name="warehouse_clean"),
         write_mode=WriteMode.APPEND,
         recreate_table=True,
     ),

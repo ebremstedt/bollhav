@@ -81,7 +81,7 @@ Typical recipes:
 - Your data is naturally partitioned by time (e.g. event date, created_at)
 - You process data in batches (hourly, daily) and need to be able to re-run a specific window
 - The table is too large to reload fully each run
-- Source deletes within a window must be reflected
+- SourceTable deletes within a window must be reflected
 
 **Avoid when:**
 - Your data does not have a reliable partition column
@@ -108,11 +108,11 @@ Typical recipes:
 
 **Use when:**
 - Rows need to be updated in place as source data changes
-- Source deletes are irrelevant or handled elsewhere
+- SourceTable deletes are irrelevant or handled elsewhere
 - The table is too large to reload but individual rows need to stay current
 
 **Avoid when:**
-- Source deletes must be reflected (use RECREATE_PARTITION, or pair with `truncate_table=True`)
+- SourceTable deletes must be reflected (use RECREATE_PARTITION, or pair with `truncate_table=True`)
 - You have no reliable unique key — mode requires at least one column with `unique=True`
 - You need strict idempotency (stale rows from deleted source records accumulate silently)
 
@@ -151,7 +151,7 @@ Typical recipes:
 
 ## Summary
 
-| Mode | Idempotent | Source deletes | Partitioned | Backfill | Volume | Persisted |
+| Mode | Idempotent | SourceTable deletes | Partitioned | Backfill | Volume | Persisted |
 |---|---|---|---|---|---|---|
 | `APPEND` | ⚠️ operation yes, table state no | ❌ (pair with `truncate_table`) | ❌ | ✅ (duplicates if re-run) | Any | ✅ |
 | `RECREATE_PARTITION` | ✅ | ✅ (in window) | ✅ | ✅ | Any | ✅ |
