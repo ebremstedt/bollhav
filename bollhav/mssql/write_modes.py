@@ -4,7 +4,7 @@ import polars as pl
 from typing import Generator
 from bollhav.model.model import Model
 from bollhav.model.write_modes import WriteMode
-from bollhav.mssql.modes import merge, truncate_write, create_replace_view
+from bollhav.mssql.modes import append, merge, truncate_write, create_replace_view
 from bollhav.mssql.schema import ensure_schema_table_and_indexes
 
 logger = logging.getLogger(__name__)
@@ -18,6 +18,8 @@ def write_dataframes(
     fast_executemany: bool = True,
 ) -> None:
     match model.target.write_mode:
+        case WriteMode.APPEND:
+            write_function = append
         case WriteMode.UPSERT_NO_DELETE:
             write_function = merge
         case WriteMode.TRUNCATE_TABLE_INSERT:
