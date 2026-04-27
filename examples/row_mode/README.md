@@ -64,7 +64,7 @@ Output:
 
 `▸` marks each model as a completed sub-step; `✓` is the final
 all-done. The `(rows)` / `(interval)` label is read from
-`model.batching.mode` — since `apply_pipe_to_models` bakes tag-driven
+`model.batching.mode` — since `apply_runtime_overrides` bakes tag-driven
 reload overrides into `batching` before the progress bar reads it, the
 label automatically reflects `r_row_<N>:` / `r_interval_<@alias>:`
 overrides.

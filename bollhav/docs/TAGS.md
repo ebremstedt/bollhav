@@ -41,7 +41,7 @@ Group-level `r:` (outside the brackets) applies to all tags inside. Tag-level `r
 
 ### Controlling how reload chunks its work
 
-Plain `r:` reloads using whatever the model is statically configured with (the `mode` / `row.batch_size` / `interval.expression` fields on the model's `Batch`). Two extended prefixes let you override that *at match time* without touching the model code — `apply_pipe_to_models` bakes them into the returned model's `batching`:
+Plain `r:` reloads using whatever the model is statically configured with (the `mode` / `row.batch_size` / `interval.expression` fields on the model's `Batch`). Two extended prefixes let you override that *at match time* without touching the model code — `apply_runtime_overrides` bakes them into the returned model's `batching`:
 
 | Prefix | Forces | Notes |
 |--------|--------|-------|
@@ -75,14 +75,14 @@ The prefixes can be combined:
 ## Usage
 
 ```python
-for model in apply_pipe_to_models(pipe, folder="src/models"):
+for model in apply_runtime_overrides(folder="src/models", tags="[r:sales & finance]"):
     if model.directives.reload:
         interval = (model.bounds.begin, model.bounds.end)
     else:
         interval = ...  # use your default incremental interval
 ```
 
-`apply_pipe_to_models` runs matching internally, then bakes tag-driven reload overrides (mode, batch_size, interval_expression) straight into each returned model's `batching`. `model.directives.reload` tells you whether this run is a reload.
+`apply_runtime_overrides` runs matching internally, then bakes tag-driven reload overrides (mode, batch_size, interval_expression) straight into each returned model's `batching`. `model.directives.reload` tells you whether this run is a reload.
 
 ## Why not regex?
 

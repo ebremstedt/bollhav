@@ -1,7 +1,7 @@
 # latest_vs_backfill
 
 Shows how the **same model** produces different interval plans depending on
-whether the pipe runs in **latest** mode or **backfill** mode.
+whether the run is in **latest** mode or **backfill** mode.
 
 One hourly model is defined in [src/models/page_views.py](src/models/page_views.py),
 with `bounds` spanning 2024-01-01 → 2024-01-04.
@@ -57,4 +57,4 @@ warehouse_web.page_views
 | `LATEST_ENABLED=true` | scheduled incremental runs — "pick up whatever's complete and move on" |
 | `BACKFILL_ENABLED=true` + since/until | bootstrapping a new model, reprocessing history, one-off remediation |
 
-You can't set both at once — the pipe raises `ValueError` at startup if you try.
+You can't set both at once — `@load_models` raises `ValueError` at startup if you try.

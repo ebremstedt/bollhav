@@ -6,7 +6,7 @@ time so you can see how that feature behaves on its own.
 
 | Folder | Demonstrates |
 |---|---|
-| [`company_xyz_pipeline/`](company_xyz_pipeline/) | End-to-end: pipe config, `apply_pipe_to_models`, progress bar, all WriteModes |
+| [`company_xyz_pipeline/`](company_xyz_pipeline/) | End-to-end: `@load_models`, progress bar, all WriteModes |
 | [`tag_matching/`](tag_matching/) | Tag expressions and how name/schema auto-contribute tags (snake_case + PascalCase) |
 | [`latest_vs_backfill/`](latest_vs_backfill/) | Same model, different modes — latest pulls the last complete chunk, backfill uses an explicit window |
 | [`latest_window_vs_batch/`](latest_window_vs_batch/) | `window_expression` + `interval_expression` together — big-warehouse scenario (daily scope, 15-minute writes) |
@@ -15,7 +15,7 @@ time so you can see how that feature behaves on its own.
 
 ## `company_xyz_pipeline/`
 
-A self-contained pipeline that mocks both reading and writing, showing the full bollhav pattern — `@with_pipe_config`, `apply_pipe_to_models`, `@progress_bar` — without any database connections.
+A self-contained pipeline that mocks both reading and writing, showing the full bollhav pattern — `@load_models`, `@progress_bar` — without any database connections.
 
 ### Structure
 
@@ -29,7 +29,7 @@ company_xyz_pipeline/
       customers.py      # WriteMode.APPEND + truncate_table=True
       orders.py         # WriteMode.APPEND + recreate_table=True
       views.py          # WriteMode.VIEW — CREATE OR ALTER VIEW
-  main.py               # entry point — @with_pipe_config
+  main.py               # entry point — @load_models
   execute.py            # batch handler — @progress_bar
   mock_read.py          # returns fake polars DataFrames
   mock_write.py         # prints instead of writing to a database

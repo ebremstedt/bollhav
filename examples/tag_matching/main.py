@@ -13,17 +13,13 @@ import os
 
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
-from bollhav.pipe import with_pipe_config, PipeConfig
-from bollhav.model import match_models
+from bollhav.model import Model, load_models
 
 
-@with_pipe_config
-def main(pipe: PipeConfig) -> None:
-    matched = match_models(folder="src/models", tags=pipe.tags)
-
-    print(f"\nTAGS = {pipe.tags!r}")
-    print(f"Matched {len(matched)} model(s):\n")
-    for model in matched:
+@load_models
+def main(models: list[Model], debug: bool) -> None:
+    print(f"\nMatched {len(models)} model(s):\n")
+    for model in models:
         reload_marker = " (reload)" if model.directives.reload else ""
         tags = ", ".join(sorted(model.tags))
         print(f"  - {model.target.full_name}{reload_marker}")

@@ -1,18 +1,19 @@
 [back to README](../../README.md)
 
-# Match models in your pipe folder
+# Matching models
 
-`apply_pipe_to_models(pipe, folder)` discovers every `Model` under `folder`, filters by `pipe.tags`, topologically sorts them, and returns copies with pipe/tag overrides baked into `batching`, `target.schema`, and `directives`. The input models are not mutated.
+The standard entry point is `@load_models`. It reads runtime overrides from env vars (see [RUNTIME_OVERRIDES.md](RUNTIME_OVERRIDES.md)), discovers models under `folder`, filters by `TAGS`, topologically sorts them, and bakes the overrides into `batching` / `target.schema` / `directives`. The discovered source models are not mutated.
 
 ```python
-from bollhav.pipe import PipeConfig, with_pipe_config
-from bollhav.model import apply_pipe_to_models
+from bollhav.model import Model, load_models
 
-@with_pipe_config
-def main(pipe: PipeConfig) -> None:
-    for model in apply_pipe_to_models(pipe, folder="src/models"):
+@load_models
+def main(models: list[Model], debug: bool) -> None:
+    for model in models:
         for interval in model.infer_intervals():
             execute(model, interval, ...)
 ```
 
-If you only need raw matching (no pipe application — e.g. for diagnostics or tooling), use `match_models(folder, tags, upstream_mode)` directly.
+For programmatic use (or tests) call `apply_runtime_overrides(...)` directly with explicit kwargs — same effect, no env reading.
+
+If you only need raw matching (no override baking — e.g. for diagnostics or tooling), use `match_models(folder, tags, upstream_mode)` directly.

@@ -1,12 +1,12 @@
 """Entry point for the latest_vs_backfill example.
 
 This example does not read or write data. Its purpose is to show how the
-pipe's mode (latest vs backfill) changes which intervals get resolved for
+runtime mode (latest vs backfill) changes which intervals get resolved for
 the same model.
 
 For each matched model we:
-  1. Apply the pipe config — returns a new Model with pipe overrides baked
-     into batching/bounds/target.schema and directives set from the pipe.
+  1. `@load_models` reads env vars and bakes runtime overrides into each
+     model's batching/bounds/target.schema and directives.
   2. Call infer_intervals() — this is where the mode matters.
   3. Print the first/last chunk and total count.
 
@@ -18,13 +18,11 @@ import os
 
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
-from bollhav.pipe import with_pipe_config, PipeConfig
-from bollhav.model import apply_pipe_to_models
+from bollhav.model import Model, load_models
 
 
-@with_pipe_config
-def main(pipe: PipeConfig) -> None:
-    models = apply_pipe_to_models(pipe)
+@load_models
+def main(models: list[Model], debug: bool) -> None:
     for model in models:
         intervals = model.infer_intervals()
 
