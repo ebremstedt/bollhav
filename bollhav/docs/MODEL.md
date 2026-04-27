@@ -124,7 +124,7 @@ When `LATEST_ENABLED=True`, `infer_intervals()` returns 96 `TZInterval`s coverin
 
 #### `infer_intervals() -> list[TZInterval] | list[None]`
 
-Resolves and chunks a time interval into `TZInterval`s. Reads `batching` (for expression, tz, lookback, mode) and `directives` (for `latest`, `reload`, `since`, `until`) directly — both are populated by `apply_pipe_to_models` before you call this. Returns `[None]` when `model.batching is None`, signalling that the model runs once with no interval filter.
+Resolves and chunks a time interval into `TZInterval`s. Reads `batching` (for expression, tz, lookback, mode) and `directives` (for `latest`, `reload`, `since`, `until`) directly — both are populated by `apply_runtime_overrides` before you call this. Returns `[None]` when `model.batching is None`, signalling that the model runs once with no interval filter.
 
 Three modes, evaluated in order: **latest** (if `model.directives.latest`), **reload** (if `model.directives.reload`), **backfill** (default). See the `infer_intervals` docstring for full details.
 
@@ -148,7 +148,7 @@ Returns the most recent fully elapsed interval. An in-progress interval is never
 
 ## Upstream dependencies
 
-Models can declare dependencies on other models using the `upstream` parameter. When `apply_pipe_to_models` (or `match_models` directly) returns results, they are topologically sorted so that upstream models always appear before their dependents.
+Models can declare dependencies on other models using the `upstream` parameter. When `apply_runtime_overrides` (or `match_models` directly) returns results, they are topologically sorted so that upstream models always appear before their dependents.
 
 ```python
 raw_orders = Model(
@@ -167,7 +167,7 @@ Circular dependencies are also detected and raise a `ValueError`.
 
 ### Upstream mode
 
-The `upstream_mode` parameter controls how upstream dependencies are enforced. It can be set via the `UPSTREAM` environment variable (read into `PipeConfig`) or passed directly to `match_models`.
+The `upstream_mode` parameter controls how upstream dependencies are enforced. It can be set via the `UPSTREAM` environment variable (read by `@load_models`) or passed directly to `match_models` / `apply_runtime_overrides`.
 
 | Mode | Value | Description |
 |---|---|---|
@@ -183,8 +183,7 @@ export UPSTREAM=ignore_views
 from bollhav.model import match_models, UpstreamMode
 
 match_models(folder="src/models", tags="[all]", upstream_mode=UpstreamMode.IGNORE_VIEWS)
-# or, more commonly, let apply_pipe_to_models read UPSTREAM from env:
-# apply_pipe_to_models(pipe, folder="src/models")
+# or, more commonly, just `@load_models` and let it read UPSTREAM from env.
 ```
 
 Given these models:

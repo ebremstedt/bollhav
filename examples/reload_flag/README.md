@@ -50,9 +50,9 @@ warehouse_clean.customer_dimension
 ```
 
 Ten daily chunks covering the full declared bounds. Note `LATEST_ENABLED=true`
-is still set — reload wins. `apply_pipe_to_models` computes
-`directives.latest = pipe.latest.enabled and not directives.reload`, so
-reload suppresses latest automatically.
+is still set — reload wins. `apply_runtime_overrides` computes
+`directives.latest = latest and not directives.reload`, so reload
+suppresses latest automatically.
 
 ## Reload vs backfill
 
@@ -81,7 +81,7 @@ while everything else continues its normal incremental cadence.
 
 Plain `r:` uses whatever the model is statically configured with on `Batch`
 (`mode`, `row.batch_size`, `interval.expression`). Two extended prefixes
-override that at match time — `apply_pipe_to_models` bakes them into the
+override that at match time — `apply_runtime_overrides` bakes them into the
 returned model's `batching`.
 
 ### `r_interval_@<alias>:` — force a different cadence

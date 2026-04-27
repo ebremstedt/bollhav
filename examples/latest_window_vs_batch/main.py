@@ -13,13 +13,11 @@ import os
 
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
-from bollhav.pipe import with_pipe_config, PipeConfig
-from bollhav.model import apply_pipe_to_models
+from bollhav.model import Model, load_models
 
 
-@with_pipe_config
-def main(pipe: PipeConfig) -> None:
-    models = apply_pipe_to_models(pipe)
+@load_models
+def main(models: list[Model], debug: bool) -> None:
     for model in models:
         intervals = model.infer_intervals()
 

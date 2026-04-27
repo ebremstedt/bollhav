@@ -16,15 +16,12 @@ import os
 
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
-from bollhav.pipe import with_pipe_config, PipeConfig
-from bollhav.model import apply_pipe_to_models, name_width_for
+from bollhav.model import Model, load_models, name_width_for
 from execute import execute
 
 
-@with_pipe_config
-def main(pipe: PipeConfig) -> None:
-    models = apply_pipe_to_models(pipe)
-
+@load_models
+def main(models: list[Model], debug: bool) -> None:
     if models:
         execute.set_name_width(name_width_for(models))
 

@@ -1,6 +1,6 @@
 # bollhav
 
-Model definition framework that standardizes code at pipe and model level using these [abstractions](bollhav/docs/ABSTRACTIONS.md)
+Model definition framework that standardizes data-pipeline code using these [abstractions](bollhav/docs/ABSTRACTIONS.md)
 
 This library
 - is permissive by design
@@ -9,9 +9,9 @@ This library
 Concepts
 - [Model](bollhav/docs/MODEL.md)
   - [Upstream](bollhav/docs/MODEL.md#upstream-dependencies)
-- [Pipe](bollhav/docs/PIPE.md)
+- [Runtime overrides](bollhav/docs/RUNTIME_OVERRIDES.md) — env vars that override model settings at run time, plus the `@load_models` decorator
 - [Tags](bollhav/docs/TAGS.md)
-    - [examples](bollhav/docs/MATCHING.md)
+    - [matching](bollhav/docs/MATCHING.md)
 - [Modes](bollhav/docs/MODES.md)
 - [Progress Bar](bollhav/docs/PROGRESS_BAR.md)
 

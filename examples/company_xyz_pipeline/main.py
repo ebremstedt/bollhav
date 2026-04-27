@@ -2,9 +2,7 @@ import logging
 import os
 
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
-
-from bollhav.pipe import with_pipe_config, PipeConfig
-from bollhav.model import apply_pipe_to_models, name_width_for
+from bollhav.model import Model, load_models
 from execute import execute
 
 
@@ -15,12 +13,9 @@ def setup_logging(debug: bool) -> None:
     )
 
 
-@with_pipe_config
-def main(pipe: PipeConfig) -> None:
-    setup_logging(debug=pipe.debug)
-    models = apply_pipe_to_models(pipe)
-
-    execute.set_name_width(name_width_for(models))
+@load_models
+def main(models: list[Model], debug: bool) -> None:
+    setup_logging(debug=debug)
 
     for model in models:
         intervals = model.infer_intervals()
@@ -31,8 +26,6 @@ def main(pipe: PipeConfig) -> None:
                 (interval.since, interval.until) if interval else (None, None)
             )
             execute(model=model, since=since, until=until)
-
-    execute.finish()
 
 
 if __name__ == "__main__":

@@ -32,7 +32,7 @@ Works everywhere, pairs with latest/backfill/reload uniformly, everyone on the t
 TAGS="[r_row_500:facts_2022]" python pipeline.py
 ```
 
-Model stays INTERVAL in static config; `apply_pipe_to_models` bakes the tag override into `batching.mode`/`batching.row.batch_size` on the returned copy so the run uses ROW with 500 rows/chunk. See [TAGS.md](TAGS.md) for the inverse (`r_interval_@...:`).
+Model stays INTERVAL in static config; `apply_runtime_overrides` bakes the tag override into `batching.mode`/`batching.row.batch_size` on the returned copy so the run uses ROW with 500 rows/chunk. See [TAGS.md](TAGS.md) for the inverse (`r_interval_@...:`).
 
 ## TL;DR
 

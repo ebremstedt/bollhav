@@ -4,9 +4,9 @@ Shows how the `r:` prefix on a tag expression flips a matched model into
 reload mode. Reload uses the model's `bounds.begin` / `bounds.end` as the
 interval, overriding both latest and backfill.
 
-The match_models call sets `model.directives.reload = True` when the tag
-expression matched with `r:`. apply_pipe() then honours that flag —
-latest is forced off and the bounds are the source of truth.
+`@load_models` runs `match_models` and bakes runtime overrides in. When the
+tag expression matches with `r:`, the resulting `model.directives.reload`
+is True; latest is forced off and the bounds are the source of truth.
 
 Run it with different TAGS values (and optionally LATEST_ENABLED) to see
 how reload behaves.
@@ -16,13 +16,11 @@ import os
 
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
-from bollhav.pipe import with_pipe_config, PipeConfig
-from bollhav.model import apply_pipe_to_models
+from bollhav.model import Model, load_models
 
 
-@with_pipe_config
-def main(pipe: PipeConfig) -> None:
-    models = apply_pipe_to_models(pipe)
+@load_models
+def main(models: list[Model], debug: bool) -> None:
     for model in models:
         reload = model.directives.reload
         intervals = model.infer_intervals()

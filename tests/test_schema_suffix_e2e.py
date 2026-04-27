@@ -1,7 +1,7 @@
 """End-to-end tests for SCHEMA_SUFFIX flowing through the progress bar.
 
 Runs the company_xyz_pipeline example's models through the same call
-sequence main.py uses (apply_pipe -> set_name_width -> execute) and
+sequence main.py uses (apply_runtime_overrides -> set_name_width -> execute) and
 asserts what the progress bar actually prints.
 """
 
@@ -15,13 +15,8 @@ from pathlib import Path
 
 import pytest
 
-from bollhav.model import Model, apply_pipe_to_models, name_width_for, progress_bar
+from bollhav.model import Model, apply_runtime_overrides, name_width_for, progress_bar
 from bollhav.model.ordering import UpstreamMode
-from bollhav.pipe.pipe_config import (
-    PipeConfig,
-    LatestConfig,
-    BackfillConfig,
-)
 
 
 EXAMPLE_ROOT = Path(__file__).parent.parent / "examples" / "company_xyz_pipeline"
@@ -30,21 +25,6 @@ EXAMPLE_ROOT = Path(__file__).parent.parent / "examples" / "company_xyz_pipeline
 @progress_bar
 def _run(model: Model, since: datetime, until: datetime) -> None:
     pass
-
-
-def _pipe(schema_suffix: str = "pr123") -> PipeConfig:
-    return PipeConfig(
-        tags="[customers]",
-        latest=LatestConfig(enabled=False),
-        backfill=BackfillConfig(
-            enabled=True,
-            since=datetime(2024, 1, 1, tzinfo=timezone.utc),
-            until=datetime(2024, 1, 3, tzinfo=timezone.utc),
-        ),
-        schema_suffix=schema_suffix,
-        use_schema_suffix=True,
-        upstream_mode=UpstreamMode.IGNORE_COMPLETELY,
-    )
 
 
 @pytest.fixture
@@ -59,12 +39,18 @@ def example_cwd():
         sys.path.remove(str(EXAMPLE_ROOT))
 
 
-def _drive_pipeline(pipe: PipeConfig) -> str:
-    """Mirror main.py: apply_pipe_to_models pulls and bakes models, then
-    we measure name width and execute against them."""
+def _drive_pipeline(*, schema_suffix: str = "pr123") -> str:
+    """Mirror main.py: apply_runtime_overrides pulls and bakes models, then we
+    measure name width and execute against them."""
     buf = io.StringIO()
     with redirect_stdout(buf):
-        models = apply_pipe_to_models(pipe)
+        models = apply_runtime_overrides(
+            tags="[customers]",
+            schema_suffix=schema_suffix,
+            upstream_mode=UpstreamMode.IGNORE_COMPLETELY,
+            backfill_since=datetime(2024, 1, 1, tzinfo=timezone.utc),
+            backfill_until=datetime(2024, 1, 3, tzinfo=timezone.utc),
+        )
 
         _run.set_name_width(name_width_for(models))
 
@@ -83,7 +69,7 @@ def _drive_pipeline(pipe: PipeConfig) -> str:
 
 def test_progress_bar_shows_suffixed_schema(example_cwd):
     """The progress bar must display the full suffixed schema name."""
-    output = _drive_pipeline(_pipe(schema_suffix="pr123"))
+    output = _drive_pipeline(schema_suffix="pr123")
 
     assert "warehouse_clean_pr123" in output, (
         f"Suffixed schema missing from progress bar output:\n{output}"
@@ -96,7 +82,7 @@ def test_progress_bar_shows_suffixed_schema(example_cwd):
 def test_progress_bar_does_not_show_unsuffixed_schema(example_cwd):
     """When a suffix is set, the bare unsuffixed schema must NOT appear —
     otherwise a test run looks like it hit production tables."""
-    output = _drive_pipeline(_pipe(schema_suffix="pr123"))
+    output = _drive_pipeline(schema_suffix="pr123")
 
     for line in output.splitlines():
         if "▸" not in line:
@@ -115,7 +101,7 @@ def test_progress_bar_rows_align_with_suffix(example_cwd):
     """Every row's elapsed-time column must start at the same position —
     otherwise the suffix has pushed names past the configured name_width
     and each row is picking its own column break."""
-    output = _drive_pipeline(_pipe(schema_suffix="pr123"))
+    output = _drive_pipeline(schema_suffix="pr123")
 
     rows = [line for line in output.splitlines() if line.lstrip().startswith("▸")]
     assert len(rows) >= 2, f"Need 2+ rows to detect misalignment, got:\n{output}"
