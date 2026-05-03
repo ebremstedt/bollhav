@@ -15,7 +15,7 @@ flowchart TD
     UC1 --> UC1Start(["Target(truncate_table=True)"]):::target
     UC1Start --> UC1Q{Need row<br/>uniqueness?}:::question
     UC1Q -->|Yes, by partition| UC1YP(["WriteMode.RECREATE_PARTITION"]):::writemode
-    UC1YP --> UC1YPPB(["Set Target(partitioned_by='column')"]):::uniqueness
+    UC1YP --> UC1YPPB(["Set partition_on=True on a column"]):::uniqueness
     UC1YP --> UC1YPC(["Mark the unique column(s)<br/>with unique=True to create constraint"]):::uniqueness
     UC1YP --> UC1YPR(["Deduplicate rows at read or transform time"]):::deduplication
     UC1Q -->|Yes, by unique key| UC1YU(["WriteMode.UPSERT_NO_DELETE"]):::writemode
@@ -30,7 +30,7 @@ flowchart TD
     UC2HN -->|Yes, by unique key| UC2HNY(["WriteMode.UPSERT_NO_DELETE"]):::writemode
     UC2HNY --> UC2HNYK(["Mark the upsert key column(s) with unique=True"]):::uniqueness
     UC2HN -->|Yes, by partition| UC2HNP(["WriteMode.RECREATE_PARTITION"]):::writemode
-    UC2HNP --> UC2HNPPB(["Set Target(partitioned_by='column')"]):::uniqueness
+    UC2HNP --> UC2HNPPB(["Set partition_on=True on a column"]):::uniqueness
     UC2HNP --> UC2HNPC(["Mark the unique column(s)<br/>with unique=True to create constraint"]):::uniqueness
     UC2HNP --> UC2HNPR(["Deduplicate rows at read or transform time"]):::deduplication
 

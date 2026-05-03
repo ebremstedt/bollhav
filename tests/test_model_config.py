@@ -13,11 +13,17 @@ from bollhav.model.write_modes import WriteMode
 UTC = timezone.utc
 
 
-def make_column(name: str, unique: bool = False, sensitive: bool = False) -> MagicMock:
+def make_column(
+    name: str,
+    unique: bool = False,
+    sensitive: bool = False,
+    partition_on: bool = False,
+) -> MagicMock:
     col = MagicMock()
     col.name = name
     col.unique = unique
     col.sensitive = sensitive
+    col.partition_on = partition_on
     return col
 
 
@@ -58,13 +64,17 @@ def test_columns_without_database_raises():
         Target(name="test_table", columns=[make_column("id")])
 
 
-def test_partitioned_by_unknown_column_raises():
-    with pytest.raises(ValueError, match="unknown column"):
+def test_multiple_partition_columns_raises():
+    with pytest.raises(
+        ValueError, match="At most one column can have partition_on=True"
+    ):
         Target(
             name="test_table",
             database=make_db(),
-            columns=[make_column("id"), make_column("ts")],
-            partitioned_by="missing",
+            columns=[
+                make_column("id", partition_on=True),
+                make_column("ts", partition_on=True),
+            ],
         )
 
 
@@ -303,20 +313,20 @@ def test_column_sorting_none_skips_sort():
 # --- Partitioned by ---
 
 
-def test_partitioned_by_sets_index_true():
+def test_partition_on_sets_partitioned_by_and_index():
     t = Target(
         name="test_table",
         database=make_db(),
-        columns=[make_column("id"), make_column("ts")],
-        partitioned_by="ts",
+        columns=[make_column("id"), make_column("ts", partition_on=True)],
         column_sorting=None,
     )
     assert t.partitioned_by == "ts"
     assert t.partitioned_by_index is True
 
 
-def test_partitioned_by_none_sets_index_false():
+def test_no_partition_column_sets_index_false():
     t = Target(name="test_table")
+    assert t.partitioned_by is None
     assert t.partitioned_by_index is False
 
 

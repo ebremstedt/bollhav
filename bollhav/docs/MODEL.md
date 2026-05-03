@@ -26,11 +26,10 @@ model = Model(
         database=Database.POSTGRES,
         columns=[
             PostgresColumn(name="id", data_type=PostgresType.BIGINT, primary_key=True, nullable=False),
-            PostgresColumn(name="created_at", data_type=PostgresType.TIMESTAMPTZ, nullable=False),
+            PostgresColumn(name="created_at", data_type=PostgresType.TIMESTAMPTZ, nullable=False, partition_on=True),
             PostgresColumn(name="email", data_type=PostgresType.TEXT, nullable=True, sensitive=True),
         ],
         write_mode=WriteMode.APPEND,
-        partitioned_by="created_at",
     ),
     source=SourceTable(name="raw.orders"),
     bounds=Bounds(begin=datetime(2024, 1, 1, tzinfo=timezone.utc)),
@@ -64,8 +63,9 @@ model = Model(
 | `columns` | `list[PostgresColumn]` | `[]` | Column definitions. Required if `database` is set |
 | `model_type` | `ModelType` | `TABLE` | `TABLE` or `VIEW` |
 | `write_mode` | `WriteMode` | `APPEND` | How to write data |
-| `partitioned_by` | `str` | `None` | Column to partition by. Must exist in `columns` |
 | `dsn_env_var` | `str` | `None` | DSN env var for the target connection |
+
+`Target.partitioned_by` is a derived `@property` — set `partition_on=True` on the column you want to partition by; only one column may carry it.
 
 ### SourceTable parameters
 
