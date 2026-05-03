@@ -112,7 +112,6 @@ def _target_with_suffix(target: Target, schema_suffix: str) -> Target:
         indexes=list(target.indexes),
         model_type=target.model_type,
         write_mode=target.write_mode,
-        partitioned_by=target.partitioned_by,
         dsn_env_var=target.dsn_env_var,
         column_sorting=target.column_sorting,
         extra=target.extra,

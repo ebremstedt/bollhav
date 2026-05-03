@@ -34,6 +34,7 @@ def _col(
     precision: int | None = None,
     scale: int | None = None,
     length: int | None = None,
+    partition_on: bool = False,
 ) -> PostgresColumn:
     return PostgresColumn(
         name=name,
@@ -44,13 +45,13 @@ def _col(
         precision=precision,
         scale=scale,
         length=length,
+        partition_on=partition_on,
     )
 
 
 def _model(
     write_mode: WriteMode = WriteMode.APPEND,
     columns: list[PostgresColumn] | None = None,
-    partitioned_by: str | None = None,
     source_query: str | None = None,
     recreate_table: bool = False,
     truncate_table: bool = False,
@@ -67,7 +68,6 @@ def _model(
             model_type=ModelType.TABLE
             if write_mode != WriteMode.VIEW
             else ModelType.VIEW,
-            partitioned_by=partitioned_by,
             recreate_table=recreate_table,
             truncate_table=truncate_table,
         ),
@@ -131,7 +131,7 @@ class TestEnsureTable:
 
     def test_creates_index_when_partitioned(self) -> None:
         conn = _conn()
-        model = _model(columns=[_col("id"), _col("ts")], partitioned_by="ts")
+        model = _model(columns=[_col("id"), _col("ts", partition_on=True)])
         ensure_table(conn=conn, model=model)
         assert conn.execute.call_count == 2
 
@@ -170,7 +170,7 @@ class TestOverwriteInsert:
         from bollhav.model.target_schema import TargetSchema
         from bollhav.model.target import Target
 
-        with pytest.raises(ValueError, match="partitioned_by"):
+        with pytest.raises(ValueError, match="partition_on"):
             Target(
                 name="t",
                 schema=TargetSchema(name="s"),

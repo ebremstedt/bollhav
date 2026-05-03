@@ -17,7 +17,6 @@ class Target:
     indexes: list[DatabaseIndex] = field(default_factory=list)
     model_type: ModelType = ModelType.TABLE
     write_mode: WriteMode = WriteMode.APPEND
-    partitioned_by: str | None = None
     dsn_env_var: str | None = None
     column_sorting: Callable | None = sort_columns
     extra: dict | None = None
@@ -42,6 +41,15 @@ class Target:
     def is_table(self) -> bool:
         return self.model_type == ModelType.TABLE
 
+    @property
+    def partitioned_by(self) -> str | None:
+        """Name of the column marked `partition_on=True`, or `None`
+        if no column is marked. Derived from `columns`."""
+        for c in self.columns:
+            if getattr(c, "partition_on", False):
+                return c.name
+        return None
+
     def __post_init__(self) -> None:
         if self.model_type == ModelType.VIEW and self.write_mode != WriteMode.VIEW:
             raise ValueError("ModelType.VIEW must use WriteMode.VIEW")
@@ -62,12 +70,13 @@ class Target:
             raise ValueError("columns must be set when database is provided")
         if len(self.columns) > 0 and self.database is None:
             raise ValueError("database must be set when columns is provided")
-        if self.partitioned_by and self.columns:
-            col_names = {c.name for c in self.columns}
-            if self.partitioned_by not in col_names:
-                raise ValueError(
-                    f"Partitioned_by references unknown column: {self.partitioned_by!r}"
-                )
+
+        partition_cols = [c for c in self.columns if getattr(c, "partition_on", False)]
+        if len(partition_cols) > 1:
+            names = ", ".join(repr(c.name) for c in partition_cols)
+            raise ValueError(
+                f"At most one column can have partition_on=True, got: {names}"
+            )
 
         self.sensitive = (
             any(getattr(c, "sensitive", False) for c in self.columns)
@@ -90,7 +99,7 @@ class Target:
             and self.partitioned_by is None
         ):
             raise ValueError(
-                "WriteMode.RECREATE_PARTITION requires partitioned_by to be set"
+                "WriteMode.RECREATE_PARTITION requires one column with partition_on=True"
             )
 
         if self.columns and self.column_sorting:

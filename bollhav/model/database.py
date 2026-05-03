@@ -15,6 +15,7 @@ class DatabaseColumn:
     order: int | None = None
     sensitive: bool = False
     description: str | None = None
+    partition_on: bool = False
 
 
 @dataclass
