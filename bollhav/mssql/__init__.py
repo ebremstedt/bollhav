@@ -3,6 +3,7 @@ from bollhav.mssql.indexes import MssqlIndex
 from bollhav.mssql.schema import (
     ensure_schema,
     ensure_table,
+    ensure_primary_key,
     ensure_indexes,
     ensure_schema_and_table,
     ensure_schema_table_and_indexes,
@@ -16,6 +17,7 @@ __all__ = [
     "MssqlType",
     "ensure_schema",
     "ensure_table",
+    "ensure_primary_key",
     "ensure_indexes",
     "ensure_schema_and_table",
     "ensure_schema_table_and_indexes",

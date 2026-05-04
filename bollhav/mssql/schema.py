@@ -28,9 +28,10 @@ def _col_type(col: MssqlColumn) -> str:
 
 
 def _col_ddl(col: MssqlColumn) -> str:
-    pk = " PRIMARY KEY" if col.primary_key else ""
+    # PRIMARY KEY is added separately by ensure_primary_key so existing tables
+    # also get the constraint and the constraint name is deterministic.
     null = " NOT NULL" if not col.nullable else ""
-    return f"    {_b(col.name)} {_col_type(col)}{pk}{null}"
+    return f"    {_b(col.name)} {_col_type(col)}{null}"
 
 
 def _index_ddl(schema: str, table: str, idx: MssqlIndex) -> str:
@@ -88,7 +89,10 @@ def ensure_table(conn: pyodbc.Connection, model: Model) -> None:
         logger.debug("Truncating table (truncate_table=True): %s.%s", schema, table)
         cursor.execute(f"TRUNCATE TABLE {_b(schema)}.{_b(table)}")
 
-    unique_cols = [c for c in mssql_cols if c.unique]
+    # Skip UQ for columns already covered by the PK — PRIMARY KEY enforces
+    # uniqueness, so a parallel UQ on the same columns is redundant.
+    pk_col_set = {c.name for c in mssql_cols if c.primary_key}
+    unique_cols = [c for c in mssql_cols if c.unique and c.name not in pk_col_set]
     if unique_cols:
         constraint_name = f"{table}_uq"
         cols = ", ".join(_b(c.name) for c in unique_cols)
@@ -103,6 +107,40 @@ def ensure_table(conn: pyodbc.Connection, model: Model) -> None:
             table,
         )
 
+    cursor.commit()
+
+
+def ensure_primary_key(conn: pyodbc.Connection, model: Model) -> None:
+    """Add a CLUSTERED PRIMARY KEY named `<table>_pk` if any columns are flagged
+    `primary_key=True` and the table doesn't already have a PK.
+
+    Idempotent and safe on existing tables — re-running is a no-op once the PK
+    is in place. Pairs with `_col_ddl` (which no longer emits inline PRIMARY
+    KEY) so new and existing tables both get a deterministically named, clustered
+    PK from this single code path.
+    """
+    schema = model.target.schema.resolved
+    table = model.target.name
+    mssql_cols = [c for c in model.target.columns if isinstance(c, MssqlColumn)]
+    pk_cols = [c for c in mssql_cols if c.primary_key]
+    if not pk_cols:
+        return
+
+    constraint_name = f"{table}_pk"
+    cols = ", ".join(_b(c.name) for c in pk_cols)
+    obj = f"{_b(schema)}.{_b(table)}"
+    logger.debug("Ensuring primary key on: %s.%s (%s)", schema, table, cols)
+
+    cursor = conn.cursor()
+    cursor.execute(
+        f"IF NOT EXISTS ("
+        f"    SELECT 1 FROM sys.key_constraints"
+        f"    WHERE parent_object_id = OBJECT_ID(?)"
+        f"      AND type = 'PK'"
+        f") ALTER TABLE {obj}"
+        f"    ADD CONSTRAINT {_b(constraint_name)} PRIMARY KEY CLUSTERED ({cols})",
+        f"{schema}.{table}",
+    )
     cursor.commit()
 
 
@@ -130,9 +168,11 @@ def ensure_indexes(conn: pyodbc.Connection, model: Model) -> None:
 def ensure_schema_and_table(conn: pyodbc.Connection, model: Model) -> None:
     ensure_schema(conn=conn, schema=model.target.schema.resolved)
     ensure_table(conn=conn, model=model)
+    ensure_primary_key(conn=conn, model=model)
 
 
 def ensure_schema_table_and_indexes(conn: pyodbc.Connection, model: Model) -> None:
     ensure_schema(conn=conn, schema=model.target.schema.resolved)
     ensure_table(conn=conn, model=model)
+    ensure_primary_key(conn=conn, model=model)
     ensure_indexes(conn=conn, model=model)

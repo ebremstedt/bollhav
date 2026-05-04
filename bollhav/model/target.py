@@ -25,6 +25,7 @@ class Target:
 
     sensitive: bool = field(init=False, default=False)
     unique_columns: list = field(init=False, default_factory=list)
+    primary_key_columns: list = field(init=False, default_factory=list)
     partitioned_by_index: bool = field(init=False, default=False)
 
     @property
@@ -49,6 +50,13 @@ class Target:
             if getattr(c, "partition_on", False):
                 return c.name
         return None
+
+    @property
+    def merge_key_columns(self) -> list:
+        """Columns to use as the upsert/merge join key. Prefers `primary_key=True`
+        columns (a PK is the canonical row identity); falls back to `unique=True`
+        columns for models that haven't been migrated to use `primary_key=True`."""
+        return self.primary_key_columns or self.unique_columns
 
     def __post_init__(self) -> None:
         if self.model_type == ModelType.VIEW and self.write_mode != WriteMode.VIEW:
@@ -88,11 +96,17 @@ class Target:
             if self.columns
             else []
         )
+        self.primary_key_columns = (
+            [c for c in self.columns if getattr(c, "primary_key", False)]
+            if self.columns
+            else []
+        )
         self.partitioned_by_index = self.partitioned_by is not None
 
-        if self.write_mode == WriteMode.UPSERT_NO_DELETE and not self.unique_columns:
+        if self.write_mode == WriteMode.UPSERT_NO_DELETE and not self.merge_key_columns:
             raise ValueError(
-                "WriteMode.UPSERT_NO_DELETE requires at least one column with unique=True"
+                "WriteMode.UPSERT_NO_DELETE requires at least one column with "
+                "primary_key=True or unique=True"
             )
         if (
             self.write_mode == WriteMode.RECREATE_PARTITION

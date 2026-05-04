@@ -18,12 +18,14 @@ def make_column(
     unique: bool = False,
     sensitive: bool = False,
     partition_on: bool = False,
+    primary_key: bool = False,
 ) -> MagicMock:
     col = MagicMock()
     col.name = name
     col.unique = unique
     col.sensitive = sensitive
     col.partition_on = partition_on
+    col.primary_key = primary_key
     return col
 
 
@@ -78,16 +80,48 @@ def test_multiple_partition_columns_raises():
         )
 
 
-def test_upsert_no_delete_without_unique_columns_raises():
-    with pytest.raises(
-        ValueError, match="requires at least one column with unique=True"
-    ):
+def test_upsert_no_delete_without_unique_or_pk_raises():
+    with pytest.raises(ValueError, match="primary_key=True or unique=True"):
         Target(
             name="test_table",
             database=make_db(),
             columns=[make_column("id"), make_column("ts")],
             write_mode=WriteMode.UPSERT_NO_DELETE,
         )
+
+
+def test_upsert_no_delete_with_primary_key_only_is_ok():
+    t = Target(
+        name="test_table",
+        database=make_db(),
+        columns=[make_column("id", primary_key=True), make_column("ts")],
+        write_mode=WriteMode.UPSERT_NO_DELETE,
+    )
+    assert [c.name for c in t.primary_key_columns] == ["id"]
+    assert [c.name for c in t.merge_key_columns] == ["id"]
+
+
+def test_merge_key_columns_prefers_primary_key_over_unique():
+    t = Target(
+        name="test_table",
+        database=make_db(),
+        columns=[
+            make_column("id", primary_key=True),
+            make_column("alt", unique=True),
+        ],
+        write_mode=WriteMode.UPSERT_NO_DELETE,
+    )
+    assert [c.name for c in t.merge_key_columns] == ["id"]
+
+
+def test_merge_key_columns_falls_back_to_unique():
+    t = Target(
+        name="test_table",
+        database=make_db(),
+        columns=[make_column("id", unique=True), make_column("v")],
+        write_mode=WriteMode.UPSERT_NO_DELETE,
+    )
+    assert [c.name for c in t.merge_key_columns] == ["id"]
 
 
 # --- Bounds ---
