@@ -57,14 +57,17 @@ MssqlColumn(
 # Schema helpers
 
 ```python
-from bollhav.mssql import ensure_schema, ensure_table, ensure_schema_and_table
+from bollhav.mssql import ensure_schema, ensure_table, ensure_primary_key, ensure_schema_and_table
 ```
 
 | Function                  | Description                                                        |
 |---------------------------|--------------------------------------------------------------------|
 | `ensure_schema`           | Creates the schema if it does not exist                            |
-| `ensure_table`            | Creates the table if it does not exist; adds UNIQUE constraint if any columns have `unique=True` |
-| `ensure_schema_and_table` | Calls both; the usual entry point                                  |
+| `ensure_table`            | Creates the table if it does not exist; adds `<table>_uq` UNIQUE for any `unique=True` columns *not* already covered by the PK |
+| `ensure_primary_key`      | Adds `<table>_pk` PRIMARY KEY CLUSTERED if any columns have `primary_key=True` and the table has no PK yet — works on existing tables, idempotent |
+| `ensure_schema_and_table` | Calls all three; the usual entry point                             |
+
+`primary_key=True` is added via a separate `ALTER TABLE … ADD CONSTRAINT` (rather than inline in `CREATE TABLE`) so the constraint name is deterministic (`<table>_pk`), composite PKs are supported, and existing tables get the constraint without a recreate. When a column is flagged both `primary_key=True` and `unique=True`, the redundant UNIQUE is skipped — the PK already enforces uniqueness.
 
 # Write Modes
 

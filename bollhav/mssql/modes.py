@@ -64,7 +64,7 @@ def merge(
 
     mssql_cols = [c for c in model.target.columns if isinstance(c, MssqlColumn)]
     all_col_names = [c.name for c in mssql_cols]
-    unique_col_names = [c.name for c in model.target.unique_columns]
+    unique_col_names = [c.name for c in model.target.merge_key_columns]
     non_unique_col_names = [c for c in all_col_names if c not in unique_col_names]
 
     col_defs = ", ".join(f"{_b(c.name)} {_col_type(c)}" for c in mssql_cols)

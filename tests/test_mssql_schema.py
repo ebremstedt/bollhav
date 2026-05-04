@@ -16,6 +16,7 @@ from bollhav.mssql.indexes import MssqlIndex  # noqa: E402
 from bollhav.mssql.schema import (  # noqa: E402
     _index_ddl,
     ensure_indexes,
+    ensure_primary_key,
     ensure_schema_table_and_indexes,
     ensure_table,
 )
@@ -158,6 +159,105 @@ class TestEnsureSchemaTableAndIndexes:
         assert "CREATE SCHEMA" in joined
         assert "CREATE TABLE" in joined
         assert "CREATE NONCLUSTERED INDEX" in joined
+
+
+class TestEnsurePrimaryKey:
+    def test_no_pk_columns_is_noop(self) -> None:
+        conn = _conn()
+        ensure_primary_key(conn=conn, model=_model())
+        conn.cursor.assert_not_called()
+
+    def test_pk_emits_clustered_alter(self) -> None:
+        conn = _conn()
+        model = _model(
+            columns=[
+                MssqlColumn(
+                    name="id", data_type=MssqlType.INT, nullable=False, primary_key=True
+                ),
+                MssqlColumn(name="val", data_type=MssqlType.NVARCHAR, length=50),
+            ]
+        )
+        ensure_primary_key(conn=conn, model=model)
+        sql = conn.cursor.return_value.execute.call_args_list[0].args[0]
+        assert "PRIMARY KEY CLUSTERED ([id])" in sql
+        assert "[t_pk]" in sql
+        assert "IF NOT EXISTS" in sql
+
+    def test_composite_pk(self) -> None:
+        conn = _conn()
+        model = _model(
+            columns=[
+                MssqlColumn(
+                    name="a", data_type=MssqlType.INT, nullable=False, primary_key=True
+                ),
+                MssqlColumn(
+                    name="b", data_type=MssqlType.INT, nullable=False, primary_key=True
+                ),
+            ]
+        )
+        ensure_primary_key(conn=conn, model=model)
+        sql = conn.cursor.return_value.execute.call_args_list[0].args[0]
+        assert "PRIMARY KEY CLUSTERED ([a], [b])" in sql
+
+
+class TestEnsureTablePkAndUniqueRedundancy:
+    def test_create_table_does_not_emit_inline_pk(self) -> None:
+        conn = _conn()
+        model = _model(
+            columns=[
+                MssqlColumn(
+                    name="id", data_type=MssqlType.INT, nullable=False, primary_key=True
+                ),
+                MssqlColumn(name="val", data_type=MssqlType.NVARCHAR, length=50),
+            ]
+        )
+        ensure_table(conn=conn, model=model)
+        joined = "\n".join(
+            c.args[0] for c in conn.cursor.return_value.execute.call_args_list
+        )
+        # PK is created via ensure_primary_key (separate ALTER), not in CREATE TABLE.
+        assert "CREATE TABLE" in joined
+        assert "PRIMARY KEY" not in joined
+
+    def test_unique_skipped_when_same_column_is_primary_key(self) -> None:
+        conn = _conn()
+        model = _model(
+            columns=[
+                MssqlColumn(
+                    name="id",
+                    data_type=MssqlType.INT,
+                    nullable=False,
+                    primary_key=True,
+                    unique=True,
+                ),
+                MssqlColumn(name="val", data_type=MssqlType.NVARCHAR, length=50),
+            ]
+        )
+        ensure_table(conn=conn, model=model)
+        joined = "\n".join(
+            c.args[0] for c in conn.cursor.return_value.execute.call_args_list
+        )
+        # No redundant UQ constraint when the only unique col is also the PK.
+        assert "CONSTRAINT [t_uq] UNIQUE" not in joined
+
+    def test_unique_kept_for_columns_that_are_not_primary_key(self) -> None:
+        conn = _conn()
+        model = _model(
+            columns=[
+                MssqlColumn(
+                    name="id", data_type=MssqlType.INT, nullable=False, primary_key=True
+                ),
+                MssqlColumn(
+                    name="alt", data_type=MssqlType.NVARCHAR, length=50, unique=True
+                ),
+            ]
+        )
+        ensure_table(conn=conn, model=model)
+        joined = "\n".join(
+            c.args[0] for c in conn.cursor.return_value.execute.call_args_list
+        )
+        # `alt` is unique-only, so the UQ constraint stays — but only on `alt`.
+        assert "CONSTRAINT [t_uq] UNIQUE ([alt])" in joined
 
 
 class TestTargetIndexValidation:
