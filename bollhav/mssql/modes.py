@@ -27,28 +27,85 @@ def _bulk_insert(
     )
 
 
-_VARCHAR_TYPES = {MssqlType.NVARCHAR, MssqlType.VARCHAR}
-_DATETIME_TYPES = {MssqlType.DATETIME, MssqlType.DATETIME2, MssqlType.DATETIMEOFFSET}
-_DATE_TYPES = {MssqlType.DATE}
-_BINARY_TYPES = {MssqlType.VARBINARY_MAX}
+def _input_size_for(col: MssqlColumn):
+    """Return the pyodbc.setinputsizes tuple for one column.
+
+    The point of being exhaustive here: any column position left as a bare `0`
+    becomes "I don't know, driver autodetect" — and for at least
+    variable-length string types, that lets pyodbc fall through to ODBC's
+    Data-At-Execution streaming path (SQLParamData/SQLPutData), which is
+    fragile for large batches and prone to mid-stream connection resets.
+    Giving every column an explicit (sql_type, length, scale) tuple removes
+    that uncertainty across the board.
+    """
+    t = col.data_type
+
+    # Variable-length string types
+    if t == MssqlType.NVARCHAR:
+        # MAX (length=None) has to use streaming — value can be up to 2GB.
+        return (pyodbc.SQL_WVARCHAR, col.length or 0, 0)
+    if t == MssqlType.VARCHAR:
+        return (pyodbc.SQL_VARCHAR, col.length or 0, 0)
+    if t == MssqlType.CHAR:
+        return (pyodbc.SQL_CHAR, col.length or 1, 0)
+
+    # Date / time types — scale = fractional-second digits, drives both buffer
+    # sizing and truncation behavior on the driver side.
+    if t == MssqlType.DATE:
+        return (pyodbc.SQL_TYPE_DATE, 10, 0)
+    if t == MssqlType.TIME:
+        scale = col.scale if col.scale is not None else 7
+        return (pyodbc.SQL_TYPE_TIME, 8 + (scale + 1 if scale else 0), scale)
+    if t == MssqlType.DATETIME:
+        # DATETIME has fixed 3-digit fractional seconds; scale not user-settable.
+        return (pyodbc.SQL_TYPE_TIMESTAMP, 23, 3)
+    if t in (MssqlType.DATETIME2, MssqlType.DATETIMEOFFSET):
+        scale = col.scale if col.scale is not None else 7
+        return (
+            pyodbc.SQL_TYPE_TIMESTAMP,
+            19 + (scale + 1 if scale else 0),
+            scale,
+        )
+
+    # Integer types
+    if t == MssqlType.BIGINT:
+        return (pyodbc.SQL_BIGINT, 19, 0)
+    if t == MssqlType.INT:
+        return (pyodbc.SQL_INTEGER, 10, 0)
+    if t == MssqlType.SMALLINT:
+        return (pyodbc.SQL_SMALLINT, 5, 0)
+    if t == MssqlType.TINYINT:
+        return (pyodbc.SQL_TINYINT, 3, 0)
+    if t == MssqlType.BIT:
+        return (pyodbc.SQL_BIT, 1, 0)
+
+    # Floating point
+    if t == MssqlType.FLOAT:
+        return (pyodbc.SQL_DOUBLE, 53, 0)
+    if t == MssqlType.REAL:
+        return (pyodbc.SQL_REAL, 24, 0)
+
+    # Decimal / numeric
+    if t == MssqlType.DECIMAL:
+        return (pyodbc.SQL_DECIMAL, col.precision or 18, col.scale or 0)
+    if t == MssqlType.NUMERIC:
+        return (pyodbc.SQL_NUMERIC, col.precision or 18, col.scale or 0)
+
+    # GUID
+    if t == MssqlType.UNIQUEIDENTIFIER:
+        return (pyodbc.SQL_GUID, 36, 0)
+
+    # Variable-length binary (MAX)
+    if t == MssqlType.VARBINARY_MAX:
+        return (pyodbc.SQL_VARBINARY, 0, 0)
+
+    # If we get here, MssqlType has gained a value this function doesn't
+    # cover yet — fail loudly rather than silently fall back to autodetect.
+    raise ValueError(f"_input_size_for: unhandled MssqlType {t!r}")
 
 
 def _set_input_sizes(cursor: pyodbc.Cursor, columns: list[MssqlColumn]) -> None:
-    """Pre-allocate buffer sizes to avoid truncation and type mismatches
-    when fast_executemany infers types from the first row."""
-    sizes = []
-    for col in columns:
-        if col.data_type in _VARCHAR_TYPES and col.length is None:
-            sizes.append((pyodbc.SQL_WVARCHAR, 0, 0))
-        elif col.data_type in _DATETIME_TYPES:
-            sizes.append((pyodbc.SQL_TYPE_TIMESTAMP, 27, 7))
-        elif col.data_type in _DATE_TYPES:
-            sizes.append((pyodbc.SQL_TYPE_DATE, 10, 0))
-        elif col.data_type in _BINARY_TYPES:
-            sizes.append((pyodbc.SQL_VARBINARY, 0, 0))
-        else:
-            sizes.append(0)
-    cursor.setinputsizes(sizes)
+    cursor.setinputsizes([_input_size_for(c) for c in columns])
 
 
 def merge(
