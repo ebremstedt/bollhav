@@ -37,6 +37,7 @@ For programmatic use (or tests) call `apply_runtime_overrides(...)` directly wit
 | **BACKFILL_UNTIL** | ISO 8601 datetime | no | End of backfill window. Defaults to the latest complete interval end |
 | **INTERVAL_EXPRESSION_OVERRIDE** | IntervalExpression | no | Overrides every model's `interval_expression` (chunk size, applies in all modes) |
 | **WINDOW_EXPRESSION_OVERRIDE** | IntervalExpression | no | Overrides every model's `window_expression` (latest-mode scope). Errors at startup if set without **LATEST_ENABLED** |
+| **LOOKBACK_OVERRIDE** | non-negative int | no | Overrides every model's `lookback`. Shifts each interval's `since` backwards by N cron-ticks of the (post-override) interval expression. Applies in latest, backfill, and reload modes |
 | **UPSTREAM** | string | no | One of `enforce` (default), `ignore_views`, `ignore_completely`. Controls upstream-dependency enforcement |
 
 ## Latest mode
@@ -57,6 +58,23 @@ Two cron expressions matter here:
 | `@daily` | `*/15 * * * *` | 96 fifteen-minute chunks covering **Jun 14 00:00 → Jun 15 00:00** |
 
 The 14:00-15:00 hour (and Jun 15 day) is in progress and never included — "complete" means the entire window has passed.
+
+## Lookback
+
+`lookback` shifts each resolved interval's `since` **backwards by N cron-ticks of the (post-override) interval expression**. Units are *ticks of the interval expression*, not calendar days/hours — this is the most common footgun.
+
+### Examples
+
+| `interval_expression` | `lookback` | Effect on `since` |
+|---|---|---|
+| `@daily` (`0 0 * * *`) | `5` | back 5 days |
+| `@hourly` (`0 * * * *`) | `5` | back 5 hours |
+| `*/15 * * * *` | `5` | back 75 minutes (5 × 15 min) |
+| `*/15 * * * *` | `480` | back 5 days (480 × 15 min) |
+
+The cron expression used for the tick size is the one in effect at run time — i.e. after **INTERVAL_EXPRESSION_OVERRIDE** is applied. So if you set both `INTERVAL_EXPRESSION_OVERRIDE=*/15 * * * *` and `LOOKBACK_OVERRIDE=5`, you get 75 minutes back, not 5 days.
+
+Applies uniformly in latest, backfill, and reload modes.
 
 ## Backfill mode (default)
 
@@ -83,6 +101,7 @@ models = apply_runtime_overrides(
     # backfill_since=..., backfill_until=...,
     # interval_expression_override="@hourly",
     # window_expression_override="@daily",
+    # lookback_override=5,
     # tz_override=ZoneInfo("Europe/Stockholm"),
     # upstream_mode=UpstreamMode.IGNORE_VIEWS,
 )
