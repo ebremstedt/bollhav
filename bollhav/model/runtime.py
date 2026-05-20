@@ -22,6 +22,7 @@ def apply_runtime_overrides(
     backfill_until: datetime | None = None,
     interval_expression_override: str | None = None,
     window_expression_override: str | None = None,
+    lookback_override: int | None = None,
     tz_override: tzinfo | None = None,
 ) -> list[Model]:
     """Match models against the tag expression and return new Model objects
@@ -34,6 +35,8 @@ def apply_runtime_overrides(
           `interval_expression_override` (pipe) when set.
         * `batching.interval.window_expression` overridden by
           `window_expression_override` when set.
+        * `batching.interval.lookback` overridden by `lookback_override` when
+          set.
         * `batching.interval.tz` overridden by `tz_override` when set.
         * `batching.mode` overridden by `directives.reload_mode` when set.
         * `batching.row.batch_size` overridden by
@@ -52,6 +55,7 @@ def apply_runtime_overrides(
             backfill_until=backfill_until,
             interval_expression_override=interval_expression_override,
             window_expression_override=window_expression_override,
+            lookback_override=lookback_override,
             tz_override=tz_override,
         )
         for m in matched
@@ -67,6 +71,7 @@ def _apply_to_model(
     backfill_until: datetime | None,
     interval_expression_override: str | None,
     window_expression_override: str | None,
+    lookback_override: int | None,
     tz_override: tzinfo | None,
 ) -> Model:
     new_model = Model(
@@ -78,6 +83,7 @@ def _apply_to_model(
             model.directives,
             interval_expression_override=interval_expression_override,
             window_expression_override=window_expression_override,
+            lookback_override=lookback_override,
             tz_override=tz_override,
         ),
         enabled=model.enabled,
@@ -126,6 +132,7 @@ def _batching_with_overrides(
     *,
     interval_expression_override: str | None,
     window_expression_override: str | None,
+    lookback_override: int | None,
     tz_override: tzinfo | None,
 ) -> Batch | None:
     if batching is None:
@@ -140,6 +147,11 @@ def _batching_with_overrides(
     window_expression = (
         window_expression_override or batching.interval.window_expression
     )
+    lookback = (
+        lookback_override
+        if lookback_override is not None
+        else batching.interval.lookback
+    )
     tz = tz_override or batching.interval.tz
     mode = d.reload_mode or batching.mode
     batch_size = (
@@ -153,7 +165,7 @@ def _batching_with_overrides(
             expression=expression,
             window_expression=window_expression,
             tz=tz,
-            lookback=batching.interval.lookback,
+            lookback=lookback,
         ),
         row=RowChunks(batch_size=batch_size),
         retries=batching.retries,

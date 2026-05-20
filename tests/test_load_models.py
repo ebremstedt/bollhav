@@ -33,6 +33,7 @@ def _patches(
     backfill_until: datetime | None = None,
     interval_expression_override: str | None = None,
     window_expression_override: str | None = None,
+    lookback_override: int | None = None,
     tz_override: str | None = None,
     upstream: str | None = None,
     debug: bool = False,
@@ -57,6 +58,8 @@ def _patches(
         "WINDOW_EXPRESSION_OVERRIDE": window_expression_override,
     }
 
+    ints = {"LOOKBACK_OVERRIDE": lookback_override}
+
     iso = {"BACKFILL_SINCE": backfill_since, "BACKFILL_UNTIL": backfill_until}
 
     return [
@@ -75,6 +78,10 @@ def _patches(
         patch(
             "bollhav.model.load_models.env_var_interval_expression",
             lambda name, should_print_unset=True: intervals.get(name),
+        ),
+        patch(
+            "bollhav.model.load_models.env_var_int",
+            lambda name, should_print_unset=True: ints.get(name),
         ),
         patch(
             "bollhav.model.load_models.env_var_iso8601_datetime",
@@ -99,6 +106,7 @@ def _run_decorator(**env):
         patches[1],
         patches[2],
         patches[3],
+        patches[4],
         patch(
             "bollhav.model.load_models.apply_runtime_overrides", side_effect=_fake_apm
         ),
@@ -148,6 +156,14 @@ class TestEnvReading:
         apm, _ = _run_decorator(upstream="ignore_views")
         assert apm["upstream_mode"] is UpstreamMode.IGNORE_VIEWS
 
+    def test_lookback_override_passes_through(self) -> None:
+        apm, _ = _run_decorator(lookback_override=5)
+        assert apm["lookback_override"] == 5
+
+    def test_lookback_override_unset(self) -> None:
+        apm, _ = _run_decorator()
+        assert apm["lookback_override"] is None
+
 
 class TestValidation:
     def test_latest_and_backfill_both_true_raises(self) -> None:
@@ -168,6 +184,10 @@ class TestValidation:
             match="WINDOW_EXPRESSION_OVERRIDE only applies when LATEST_ENABLED",
         ):
             _run_decorator(window_expression_override="@daily")
+
+    def test_negative_lookback_override_raises(self) -> None:
+        with pytest.raises(ValueError, match="LOOKBACK_OVERRIDE must be non-negative"):
+            _run_decorator(lookback_override=-1)
 
     def test_invalid_upstream_raises(self) -> None:
         with pytest.raises(ValueError, match="UPSTREAM must be one of"):

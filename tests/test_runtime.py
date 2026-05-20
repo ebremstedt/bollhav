@@ -22,6 +22,7 @@ def _apply(
     backfill_until: datetime | None = None,
     interval_expression_override: str | None = None,
     window_expression_override: str | None = None,
+    lookback_override: int | None = None,
     tz_override=None,
 ) -> Model:
     return _apply_to_model(
@@ -32,6 +33,7 @@ def _apply(
         backfill_until=backfill_until,
         interval_expression_override=interval_expression_override,
         window_expression_override=window_expression_override,
+        lookback_override=lookback_override,
         tz_override=tz_override,
     )
 
@@ -81,14 +83,25 @@ class TestPipeOverrides:
         m = _apply(_model(), latest=True, window_expression_override="@daily")
         assert m.batching.interval.window_expression == "@daily"
 
+    def test_lookback_override(self) -> None:
+        m = _apply(_model(lookback=2), lookback_override=5)
+        assert m.batching.interval.lookback == 5
+
+    def test_lookback_override_zero_clears(self) -> None:
+        # 0 is a valid explicit value: "no lookback", and must win over a
+        # model-set non-None lookback.
+        m = _apply(_model(lookback=3), lookback_override=0)
+        assert m.batching.interval.lookback == 0
+
     def test_tz_override(self) -> None:
         m = _apply(_model(tz=UTC), tz_override=CET)
         assert m.batching.interval.tz == CET
 
     def test_overrides_skipped_when_unset(self) -> None:
-        m = _apply(_model(expression="@daily", tz=CET))
+        m = _apply(_model(expression="@daily", tz=CET, lookback=2))
         assert m.batching.interval.expression == "@daily"
         assert m.batching.interval.tz == CET
+        assert m.batching.interval.lookback == 2
 
 
 class TestDirectives:

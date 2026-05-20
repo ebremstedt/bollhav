@@ -9,6 +9,7 @@ from zoneinfo import ZoneInfo
 from roskarl import (
     env_var,
     env_var_bool,
+    env_var_int,
     env_var_interval_expression,
     env_var_iso8601_datetime,
 )
@@ -32,6 +33,7 @@ class _RuntimeConfig:
     backfill_until: datetime | None
     interval_expression_override: str | None
     window_expression_override: str | None
+    lookback_override: int | None
     tz_override: tzinfo | None
     debug: bool
 
@@ -69,6 +71,7 @@ def load_models(
         BACKFILL_UNTIL                ISO 8601 datetime
         INTERVAL_EXPRESSION_OVERRIDE  cron / @alias
         WINDOW_EXPRESSION_OVERRIDE    cron / @alias (latest mode only)
+        LOOKBACK_OVERRIDE             non-negative int (cron-ticks)
         UPSTREAM                      enforce | ignore_views | ignore_completely
     """
 
@@ -87,6 +90,7 @@ def load_models(
                 backfill_until=cfg.backfill_until,
                 interval_expression_override=cfg.interval_expression_override,
                 window_expression_override=cfg.window_expression_override,
+                lookback_override=cfg.lookback_override,
                 tz_override=cfg.tz_override,
             )
             func(models=models, debug=cfg.debug)
@@ -128,6 +132,12 @@ def _read_env() -> _RuntimeConfig:
             "in backfill mode since/until are set explicitly and no window is inferred"
         )
 
+    lookback_override = env_var_int(name="LOOKBACK_OVERRIDE", should_print_unset=False)
+    if lookback_override is not None and lookback_override < 0:
+        raise ValueError(
+            f"LOOKBACK_OVERRIDE must be non-negative, got {lookback_override}"
+        )
+
     return _RuntimeConfig(
         tags=env_var(name="TAGS", required=True),
         schema_suffix=schema_suffix,
@@ -140,6 +150,7 @@ def _read_env() -> _RuntimeConfig:
             name="INTERVAL_EXPRESSION_OVERRIDE", should_print_unset=False
         ),
         window_expression_override=window_expression_override,
+        lookback_override=lookback_override,
         tz_override=tz_override,
         debug=env_var_bool(name="DEBUG", default=False),
     )
@@ -198,6 +209,12 @@ def _print_summary(cfg: _RuntimeConfig) -> None:
     if cfg.latest or cfg.backfill_enabled:
         _row("tz override", str(cfg.tz_override) if cfg.tz_override else "unset")
         _row("interval override", cfg.interval_expression_override or "unset")
+        _row(
+            "lookback override",
+            str(cfg.lookback_override)
+            if cfg.lookback_override is not None
+            else "unset",
+        )
     if cfg.latest:
         _row("window override", cfg.window_expression_override or "unset")
     print("────────────────────────────")

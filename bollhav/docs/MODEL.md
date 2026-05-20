@@ -91,7 +91,7 @@ model = Model(
 | `interval_expression` | `IntervalExpression` | `"@daily"` | Chunk size — how an interval is split into `TZInterval`s for processing |
 | `window_expression` | `IntervalExpression \| None` | `None` | Scope for `latest` mode — "one of what" counts as the latest complete unit. When `None`, falls back to `interval_expression` (one chunk = one scope, pre-window behaviour). Ignored in reload/backfill, which use explicit since/until |
 | `tz` | `tzinfo` | `timezone.utc` | Timezone used for interval resolution |
-| `lookback` | `int` | `None` | Extends interval start backwards by N cron-ticks |
+| `lookback` | `int` | `None` | Extends interval start backwards by N cron-ticks **of the interval_expression**. Units are ticks, not calendar days/hours — e.g. with `interval_expression="*/15 * * * *"`, `lookback=5` is 75 minutes, not 5 days. See [RUNTIME_OVERRIDES.md](RUNTIME_OVERRIDES.md#lookback) |
 | `retries` | `int` | `None` | Retry count on failure |
 
 #### `interval_expression` vs `window_expression`
