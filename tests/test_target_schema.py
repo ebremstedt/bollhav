@@ -1,29 +1,24 @@
 from unittest.mock import patch
-from datetime import datetime
-
+from datetime import datetime, timezone
 from bollhav.model.target_schema import TargetSchema
-
 
 def test_resolved_no_suffix():
     assert TargetSchema(name="kodserver_raw").resolved == "kodserver_raw"
-
 
 def test_resolved_with_suffix_no_appendix():
     s = TargetSchema(name="kodserver_raw", suffix="pr123", suffix_appendix=None)
     assert s.resolved == "kodserver_raw_pr123"
 
-
 def test_resolved_with_suffix_and_appendix_has_trailing_underscore():
-    fixed_now = datetime(2026, 4, 1)
+    fixed_now = datetime(2026, 4, 1, tzinfo=timezone.utc)
     with patch("bollhav.model.target_schema.datetime") as mock_dt:
         mock_dt.now.return_value = fixed_now
         s = TargetSchema(name="kodserver_raw", suffix="pr123")
         result = s.resolved
-    assert result == "kodserver_raw_pr123_2613_"
-
+    assert result == "kodserver_raw_pr123_2614_"
 
 def test_resolved_appendix_yyww_format():
-    fixed_now = datetime(2026, 4, 1)
+    fixed_now = datetime(2026, 4, 1, tzinfo=timezone.utc)
     with patch("bollhav.model.target_schema.datetime") as mock_dt:
         mock_dt.now.return_value = fixed_now
         s = TargetSchema(name="s", suffix="x")
@@ -34,16 +29,11 @@ def test_resolved_appendix_yyww_format():
     assert len(yyww) == 4
     assert yyww.isdigit()
 
-
 def test_resolved_uses_base_name_after_name_overwritten():
-    """If name is overwritten to the resolved form (as apply_pipe does),
-    resolved keeps composing from the original base, not the mutated name —
-    otherwise repeated applies would compound the suffix."""
     s = TargetSchema(name="warehouse", suffix="pr123", suffix_appendix=None)
     assert s.resolved == "warehouse_pr123"
-    s.name = s.resolved  # simulate apply_pipe's mutation
-    assert s.resolved == "warehouse_pr123"  # still the same — idempotent
-
+    s.name = s.resolved
+    assert s.resolved == "warehouse_pr123"
 
 def test_apply_pipe_style_mutation_is_idempotent():
     s = TargetSchema(name="warehouse", suffix="pr123", suffix_appendix=None)
