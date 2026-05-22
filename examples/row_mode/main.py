@@ -15,8 +15,6 @@ The `r:` tag prefix is required: ROW-mode models can only be reloaded.
 
 import os
 
-os.chdir(os.path.dirname(os.path.abspath(__file__)))
-
 from bollhav.model import ChunkMode, Model, load_models, name_width_for
 from execute import execute
 from mock_read import read_all
@@ -64,4 +62,5 @@ def _run_interval_mode(model) -> None:
 
 
 if __name__ == "__main__":
+    os.chdir(os.path.dirname(os.path.abspath(__file__)))
     main()
