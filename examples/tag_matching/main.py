@@ -11,8 +11,6 @@ in this folder for a table of expressions to try.
 
 import os
 
-os.chdir(os.path.dirname(os.path.abspath(__file__)))
-
 from bollhav.model import Model, load_models
 
 
@@ -28,4 +26,5 @@ def main(models: list[Model], debug: bool) -> None:
 
 
 if __name__ == "__main__":
+    os.chdir(os.path.dirname(os.path.abspath(__file__)))
     main()

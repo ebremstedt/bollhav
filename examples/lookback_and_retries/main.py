@@ -14,8 +14,6 @@ eventually succeeds on attempt 3. Watch the console output.
 
 import os
 
-os.chdir(os.path.dirname(os.path.abspath(__file__)))
-
 from bollhav.model import Model, load_models
 from execute import execute
 
@@ -49,4 +47,5 @@ def main(models: list[Model], debug: bool) -> None:
 
 
 if __name__ == "__main__":
+    os.chdir(os.path.dirname(os.path.abspath(__file__)))
     main()
