@@ -1,6 +1,7 @@
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
+
 @dataclass
 class TargetSchema:
     name: str = ""
@@ -16,6 +17,11 @@ class TargetSchema:
         if self.suffix:
             s = self._base_name + "_" + self.suffix
             if self.suffix_appendix:
-                s = s + "_" + datetime.now(tz=timezone.utc).strftime(self.suffix_appendix) + "_"
+                s = (
+                    s
+                    + "_"
+                    + datetime.now(tz=timezone.utc).strftime(self.suffix_appendix)
+                    + "_"
+                )
             return s
         return self._base_name
