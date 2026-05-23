@@ -14,6 +14,7 @@ Concepts
     - [matching](docs/content/MATCHING.md)
 - [Modes](docs/content/MODES.md)
 - [Progress Bar](docs/content/PROGRESS_BAR.md)
+- [State](docs/content/STATE.md)
 
 Implementations:
 - [Postgres](docs/content/POSTGRES.md)

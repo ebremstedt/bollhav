@@ -37,12 +37,15 @@ def _patches(
     tz_override: str | None = None,
     upstream: str | None = None,
     dry_run: bool = False,
+    state_mode: str | None = None,
+    discover: bool = False,
     debug: bool = False,
 ):
     bools: dict = {
         "LATEST_ENABLED": latest_enabled,
         "DRY_RUN": dry_run,
         "DRY_RUN_EXTRA": False,
+        "DISCOVER": discover,
         "DEBUG": debug,
         "USE_SCHEMA_SUFFIX": use_schema_suffix,
     }
@@ -53,6 +56,7 @@ def _patches(
         "TAGS": tags,
         "SCHEMA_SUFFIX": schema_suffix,
         "UPSTREAM": upstream,
+        "STATE_MODE": state_mode,
         "TIMEZONE_OVERRIDE": tz_override,
     }
 
@@ -114,6 +118,10 @@ def _run_decorator(**env):
             "bollhav.model.load_models.apply_runtime_overrides", side_effect=_fake_apm
         ),
         patch("bollhav.model.load_models._print_summary", lambda cfg: None),
+        patch(
+            "bollhav.model.load_models._compute_intervals_and_prefill_state",
+            lambda models, cfg: None,
+        ),
     ):
 
         @load_models
@@ -184,6 +192,51 @@ class TestEnvReading:
         assert cfg.dry_run is True
 
 
+class TestStateEnvReading:
+    """STATE_MODE and DISCOVER don't flow through apply_runtime_overrides,
+    so we read them via the internal _read_env. Patches still apply
+    because env_var/env_var_bool are intercepted at module level."""
+
+    def _read(self, **env):
+        from bollhav.model.load_models import _read_env
+
+        patches = _patches(**env)
+        with patches[0], patches[1], patches[2], patches[3], patches[4]:
+            return _read_env()
+
+    def test_default_state_mode_is_respect(self) -> None:
+        from bollhav.model.state import StateMode
+
+        cfg = self._read()
+        assert cfg.state_mode is StateMode.RESPECT
+
+    def test_state_mode_disrespect(self) -> None:
+        from bollhav.model.state import StateMode
+
+        cfg = self._read(state_mode="disrespect")
+        assert cfg.state_mode is StateMode.DISRESPECT
+
+    def test_discover_default_false(self) -> None:
+        cfg = self._read()
+        assert cfg.discover is False
+
+    def test_discover_true(self) -> None:
+        cfg = self._read(discover=True)
+        assert cfg.discover is True
+
+
+class TestStateValidation:
+    def test_invalid_state_mode_raises(self) -> None:
+        with pytest.raises(ValueError, match="STATE_MODE must be one of"):
+            _run_decorator(state_mode="bogus")
+
+    def test_discover_and_latest_both_true_raises(self) -> None:
+        with pytest.raises(
+            ValueError, match="DISCOVER and LATEST_ENABLED cannot both be true"
+        ):
+            _run_decorator(discover=True, latest_enabled=True, backfill_enabled=False)
+
+
 class TestValidation:
     def test_latest_and_backfill_both_true_raises(self) -> None:
         with pytest.raises(
@@ -238,6 +291,10 @@ class TestDecoratorForms:
                 side_effect=_fake_apm,
             ),
             patch("bollhav.model.load_models._print_summary", lambda cfg: None),
+            patch(
+                "bollhav.model.load_models._compute_intervals_and_prefill_state",
+                lambda models, cfg: None,
+            ),
         ):
 
             @load_models(folder="custom/path")

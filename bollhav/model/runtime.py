@@ -90,6 +90,7 @@ def _apply_to_model(
             lookback_override=lookback_override,
             tz_override=tz_override,
         ),
+        state=model.state,
         enabled=model.enabled,
         debug=False,  # avoid re-printing pretty() on the copy
         description=model.description,

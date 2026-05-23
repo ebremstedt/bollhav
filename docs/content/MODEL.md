@@ -75,6 +75,12 @@ Type: `Tags` · Default: `None`
 
 Controls tag auto-assembly. See [Tagging](TAGGING.md) for the config object; see [Tags](TAGS.md) for the expression syntax used to select models at runtime.
 
+### state
+
+Type: `State` · Default: `None`
+
+Opt-in state tracking. See [State](STATE.md).
+
 ### enabled
 
 Type: `bool` · Default: `True`

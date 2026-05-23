@@ -14,10 +14,13 @@ from roskarl import (
     env_var_iso8601_datetime,
 )
 
+from uuid import uuid4
+
 from bollhav.model.runtime import apply_runtime_overrides
 from bollhav.model.model import Model
 from bollhav.model.ordering import UpstreamMode
 from bollhav.model.progress_bar import get_progress_level
+from bollhav.model.state import StateMode
 
 
 @dataclass
@@ -37,6 +40,8 @@ class _RuntimeConfig:
     tz_override: tzinfo | None
     dry_run: bool
     dry_run_extra: bool
+    state_mode: StateMode
+    discover: bool
     debug: bool
     table_suffix: str = ""
 
@@ -86,6 +91,11 @@ def load_models(
                                       prints the exhaustive per-model block
                                       (schema, bounds, tags, source, upstream,
                                       …). Implies DRY_RUN=true
+        STATE_MODE                    respect (default) | disrespect
+        DISCOVER                      bool; when true, intervals come from the
+                                      state table (pending rows) instead of from
+                                      bounds/backfill — only state-enabled
+                                      models do any work
     """
 
     def decorator(func: Callable[..., None]) -> Callable[[], None]:
@@ -112,6 +122,7 @@ def load_models(
 
                 print_summary(models, cfg)
                 return
+            _compute_intervals_and_prefill_state(models, cfg)
             func(models=models, debug=cfg.debug)
 
         return wrapper
@@ -127,6 +138,10 @@ def _read_env() -> _RuntimeConfig:
     backfill_enabled = env_var_bool(name="BACKFILL_ENABLED", default=not latest)
     if latest and backfill_enabled:
         raise ValueError("LATEST_ENABLED and BACKFILL_ENABLED cannot both be true")
+
+    discover = env_var_bool(name="DISCOVER", default=False)
+    if discover and latest:
+        raise ValueError("DISCOVER and LATEST_ENABLED cannot both be true")
 
     tz_override = _resolve_tz_override()
 
@@ -180,6 +195,8 @@ def _read_env() -> _RuntimeConfig:
         tz_override=tz_override,
         dry_run=_resolve_dry_run(),
         dry_run_extra=env_var_bool(name="DRY_RUN_EXTRA", default=False),
+        state_mode=_resolve_state_mode(),
+        discover=discover,
         debug=env_var_bool(name="DEBUG", default=False),
     )
 
@@ -190,6 +207,18 @@ def _resolve_dry_run() -> bool:
     return env_var_bool(name="DRY_RUN", default=False) or env_var_bool(
         name="DRY_RUN_EXTRA", default=False
     )
+
+
+def _resolve_state_mode() -> StateMode:
+    raw = env_var(name="STATE_MODE", should_print_unset=False)
+    if raw is None:
+        return StateMode.RESPECT
+    valid = {m.value: m for m in StateMode}
+    if raw not in valid:
+        raise ValueError(
+            f"STATE_MODE must be one of {list(valid.keys())}, got {raw!r}"
+        )
+    return valid[raw]
 
 
 def _resolve_tz_override() -> tzinfo | None:
@@ -216,6 +245,70 @@ def _resolve_upstream_mode() -> UpstreamMode:
     if raw not in valid:
         raise ValueError(f"UPSTREAM must be one of {list(valid.keys())}, got {raw!r}")
     return valid[raw]
+
+
+def _compute_intervals_and_prefill_state(
+    models: list[Model], cfg: _RuntimeConfig
+) -> None:
+    """Compute each model's intervals once (cached on the model so the
+    user's loop doesn't recompute) and, for state-enabled models, ensure
+    the state tables exist and pre-fill pending rows.
+
+    Carries `cfg.state_mode` through to the backend so a fresh
+    invocation can pick `respect` (preserve applied) or `disrespect`
+    (reset everything to pending).
+
+    Under DISCOVER, the normal flow flips: state-enabled models get
+    their intervals straight from the state table (no bounds/backfill
+    computation, no fresh pre-fill). STATE_MODE still applies on top:
+
+        DISCOVER + RESPECT    — read pending rows as-is, run them
+        DISCOVER + DISRESPECT — reset every row to pending first, then
+                                run the entire state table
+
+    Non-state-enabled models get empty intervals — they show up in the
+    user's loop but do no work."""
+    from bollhav.postgres import state as pg_state
+
+    directive_mode = _directive_mode_label(cfg)
+    for model in models:
+        if cfg.discover:
+            if model.state is None:
+                model.intervals = []
+                continue
+            run_id = uuid4()
+            model._state_run_id = run_id
+            pg_state.ensure_tables(model)
+            if cfg.state_mode is StateMode.DISRESPECT:
+                pg_state.reset_all_to_pending(model, run_id=run_id)
+            model.intervals = pg_state.read_pending(model)
+            continue
+
+        model.intervals = model.infer_intervals()
+        if model.state is None:
+            continue
+        # Stamp this invocation's run_id once per state-enabled model so
+        # both pre-fill rows and later applied/error writes share it.
+        run_id = uuid4()
+        model._state_run_id = run_id
+
+        pg_state.ensure_tables(model)
+        intervals = [iv for iv in model.intervals if iv is not None]
+        pg_state.prefill(
+            model,
+            run_id=run_id,
+            intervals=intervals,
+            directive_mode=directive_mode,
+            state_mode=cfg.state_mode,
+        )
+
+
+def _directive_mode_label(cfg: _RuntimeConfig) -> str:
+    if cfg.latest:
+        return "latest"
+    if cfg.backfill_enabled:
+        return "backfill"
+    return "reload"
 
 
 def _print_summary(cfg: _RuntimeConfig) -> None:
@@ -248,6 +341,8 @@ def _print_summary(cfg: _RuntimeConfig) -> None:
         _row("table suffix", cfg.table_suffix)
     if cfg.upstream_mode != UpstreamMode.ENFORCE:
         _row("upstream", cfg.upstream_mode.value)
+    if cfg.discover or cfg.state_mode is not StateMode.RESPECT:
+        _row("state", "discover" if cfg.discover else cfg.state_mode.value)
     if cfg.tz_override is not None:
         _row("tz override", str(cfg.tz_override))
     if cfg.interval_expression_override:

@@ -43,6 +43,8 @@ For programmatic use (or tests) call `apply_runtime_overrides(...)` directly wit
 | **UPSTREAM** | string | no | One of `enforce` (default), `ignore_views`, `ignore_completely`. Controls upstream-dependency enforcement |
 | **DRY_RUN** | bool | no | When `True`, `@load_models` prints a concise summary of matched models and exits without invoking the wrapped function |
 | **DRY_RUN_EXTRA** | bool | no | When `True`, same short-circuit but prints an exhaustive per-model block (schema, bounds, tags, source, upstream, …). Implies `DRY_RUN=true` |
+| **STATE_MODE** | string | no | One of `respect` (default), `disrespect`. Controls how `@load_models` pre-fill treats existing state rows. See [STATE.md](STATE.md) |
+| **DISCOVER** | bool | no | When `True`, intervals come from each state-enabled model's state table (`status='pending'` rows) instead of being computed from bounds/backfill. Combine with **STATE_MODE** to either complete what's pending (`respect`) or rerun the whole state table (`disrespect`). See [STATE.md](STATE.md) |
 
 ## Latest mode
 
@@ -106,6 +108,31 @@ Models with `batching=None` show `batching: none (single unfiltered run)` instea
     intervals : 10
 ──────────────────────────────────────────────────────────
 ```
+
+## State
+
+`STATE_MODE` and `DISCOVER` only matter for models that have opted in to state tracking via `state=State(...)`. For models without state tracking, both env vars are no-ops. Full details in [STATE.md](STATE.md).
+
+### Without DISCOVER (the normal flow)
+
+Intervals are computed from bounds/backfill as usual. `STATE_MODE` controls the pre-fill step:
+
+| `STATE_MODE` | Pre-fill behavior | Gate behavior |
+|---|---|---|
+| `respect` (default) | Insert pending rows for new intervals only — applied rows are preserved | `@state_tracker` skips intervals where `status='applied'` |
+| `disrespect` | Reset every interval in the computed window back to `pending`, clear `applied_at` | Same gate; but nothing is applied after a reset, so the whole window runs |
+
+### With DISCOVER
+
+`DISCOVER=true` flips the source of intervals: instead of bounds/backfill, each state-enabled model's intervals come straight from its state table. Requires a previous run to have populated the state table.
+
+| `DISCOVER` | `STATE_MODE` | What happens |
+|---|---|---|
+| `false` (default) | `respect` / `disrespect` | Normal flow — see table above |
+| `true` | `respect` | Read pending rows from each state table, run them. Applied rows are left untouched |
+| `true` | `disrespect` | Reset every row in each state table back to pending (clearing applied), then read & run them all |
+
+`BACKFILL_SINCE` / `BACKFILL_UNTIL` are not consulted under `DISCOVER=true`. Non-state-enabled models receive an empty interval list (they appear in the user's loop but do no work).
 
 ## Timezone
 

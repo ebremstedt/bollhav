@@ -11,6 +11,7 @@ from bollhav.model.bounds import Bounds
 from bollhav.model.batch import Batch, ChunkMode, _resolve_cron, _chunk_interval
 from bollhav.model.intervals import TZInterval
 from bollhav.model.directives import Directives
+from bollhav.model.state import State
 from bollhav.model.tags import Tags
 from roskarl import IntervalExpression, IntervalExpressionExtended
 
@@ -25,6 +26,7 @@ class Model:
         bounds: Bounds | None = None,
         batching: Batch | None = None,
         tagging: Tags | None = None,
+        state: State | None = None,
         enabled: bool = True,
         debug: bool = False,
         description: str | None = None,
@@ -35,6 +37,7 @@ class Model:
         self.target = target
         self.bounds = bounds or Bounds()
         self.batching = batching  # None signals to not chunk
+        self.state = state
         self.enabled = enabled
         self.debug = debug
         self.description = description
@@ -43,6 +46,16 @@ class Model:
         self.tags: set[str] = (tagging or Tags()).assemble(
             self.target.name, self.target.schema.name, self.target.catalog
         )
+        # Populated by @load_models after directives are baked in. Users
+        # iterate this directly; calls to infer_intervals() return it when
+        # set, otherwise fall through to live computation (handy in tests).
+        self.intervals: list | None = None
+
+        if state is not None and batching is None:
+            raise ValueError(
+                f"state tracking on model {target.name!r} requires batching "
+                f"to be configured — interval-only feature in v1"
+            )
 
         self.extra = kwargs
 
@@ -248,7 +261,13 @@ class Model:
            since = directives.since
            until = directives.until, or latest complete interval end
                    (same fallback table as reload above)
+
+        Returns `self.intervals` when @load_models has already computed
+        them — repeat calls in the user's loop don't re-do the work.
         """
+        if self.intervals is not None:
+            return self.intervals
+
         if self.batching is None:
             return [None]
 
