@@ -133,12 +133,10 @@ class TestDecoratorGating:
         def execute(model, since, until):
             calls.append((since, until))
 
-        with patch(
-            "bollhav.postgres.state.is_applied", return_value=True
-        ) as is_applied, patch(
-            "bollhav.postgres.state.mark_applied"
-        ) as mark_applied, patch(
-            "bollhav.postgres.state.record_error"
+        with (
+            patch("bollhav.postgres.state.is_applied", return_value=True) as is_applied,
+            patch("bollhav.postgres.state.mark_applied") as mark_applied,
+            patch("bollhav.postgres.state.record_error"),
         ):
             execute(model=_state_enabled_model(), since=SINCE, until=UNTIL)
 
@@ -153,11 +151,11 @@ class TestDecoratorGating:
         def execute(model, since, until):
             calls.append((since, until))
 
-        with patch("bollhav.postgres.state.is_applied", return_value=False), patch(
-            "bollhav.postgres.state.mark_applied"
-        ) as mark_applied, patch(
-            "bollhav.postgres.state.record_error"
-        ) as record_error:
+        with (
+            patch("bollhav.postgres.state.is_applied", return_value=False),
+            patch("bollhav.postgres.state.mark_applied") as mark_applied,
+            patch("bollhav.postgres.state.record_error") as record_error,
+        ):
             execute(model=_state_enabled_model(), since=SINCE, until=UNTIL)
 
         assert calls == [(SINCE, UNTIL)]
@@ -171,11 +169,11 @@ class TestDecoratorErrorHandling:
         def execute(model, since, until):
             raise RuntimeError("boom")
 
-        with patch("bollhav.postgres.state.is_applied", return_value=False), patch(
-            "bollhav.postgres.state.mark_applied"
-        ) as mark_applied, patch(
-            "bollhav.postgres.state.record_error"
-        ) as record_error:
+        with (
+            patch("bollhav.postgres.state.is_applied", return_value=False),
+            patch("bollhav.postgres.state.mark_applied") as mark_applied,
+            patch("bollhav.postgres.state.record_error") as record_error,
+        ):
             with pytest.raises(RuntimeError, match="boom"):
                 execute(model=_state_enabled_model(), since=SINCE, until=UNTIL)
 
@@ -191,11 +189,11 @@ class TestDecoratorErrorHandling:
         def execute(model, since, until):
             raise RuntimeError("boom")
 
-        with patch("bollhav.postgres.state.is_applied", return_value=False), patch(
-            "bollhav.postgres.state.mark_applied"
-        ), patch(
-            "bollhav.postgres.state.record_error"
-        ) as record_error:
+        with (
+            patch("bollhav.postgres.state.is_applied", return_value=False),
+            patch("bollhav.postgres.state.mark_applied"),
+            patch("bollhav.postgres.state.record_error") as record_error,
+        ):
             with pytest.raises(RuntimeError):
                 execute(
                     model=_state_enabled_model(log_errors=False),
@@ -210,7 +208,13 @@ class TestDiscoverFlow:
     """_compute_intervals_and_prefill_state branches on cfg.discover.
     These tests verify both branches without touching a real DB."""
 
-    def _cfg(self, *, discover: bool, state_mode: StateMode = StateMode.RESPECT):
+    def _cfg(
+        self,
+        *,
+        discover: bool,
+        state_mode: StateMode = StateMode.RESPECT,
+        nuke_state: bool = False,
+    ):
         from bollhav.model.load_models import _RuntimeConfig
         from bollhav.model.ordering import UpstreamMode
 
@@ -228,6 +232,7 @@ class TestDiscoverFlow:
             tz_override=None,
             state_mode=state_mode,
             discover=discover,
+            nuke_state=nuke_state,
             debug=False,
         )
 
@@ -247,13 +252,13 @@ class TestDiscoverFlow:
         pending = [TZInterval(SINCE, UNTIL)]
         model = _state_enabled_model()
 
-        with patch(
-            "bollhav.postgres.state.ensure_tables"
-        ) as ensure_tables, patch(
-            "bollhav.postgres.state.read_pending", return_value=pending
-        ) as read_pending, patch(
-            "bollhav.postgres.state.reset_all_to_pending"
-        ) as reset:
+        with (
+            patch("bollhav.postgres.state.ensure_tables") as ensure_tables,
+            patch(
+                "bollhav.postgres.state.read_pending", return_value=pending
+            ) as read_pending,
+            patch("bollhav.postgres.state.reset_all_to_pending") as reset,
+        ):
             _compute_intervals_and_prefill_state(
                 [model], self._cfg(discover=True, state_mode=StateMode.RESPECT)
             )
@@ -270,11 +275,11 @@ class TestDiscoverFlow:
         pending = [TZInterval(SINCE, UNTIL)]
         model = _state_enabled_model()
 
-        with patch("bollhav.postgres.state.ensure_tables"), patch(
-            "bollhav.postgres.state.read_pending", return_value=pending
-        ), patch(
-            "bollhav.postgres.state.reset_all_to_pending"
-        ) as reset:
+        with (
+            patch("bollhav.postgres.state.ensure_tables"),
+            patch("bollhav.postgres.state.read_pending", return_value=pending),
+            patch("bollhav.postgres.state.reset_all_to_pending") as reset,
+        ):
             _compute_intervals_and_prefill_state(
                 [model], self._cfg(discover=True, state_mode=StateMode.DISRESPECT)
             )
@@ -287,16 +292,103 @@ class TestDiscoverFlow:
 
         model = _state_enabled_model()
 
-        with patch("bollhav.postgres.state.ensure_tables"), patch(
-            "bollhav.postgres.state.read_pending", return_value=[]
-        ), patch(
-            "bollhav.postgres.state.prefill"
-        ) as prefill:
-            _compute_intervals_and_prefill_state(
-                [model], self._cfg(discover=True)
-            )
+        with (
+            patch("bollhav.postgres.state.ensure_tables"),
+            patch("bollhav.postgres.state.read_pending", return_value=[]),
+            patch("bollhav.postgres.state.prefill") as prefill,
+        ):
+            _compute_intervals_and_prefill_state([model], self._cfg(discover=True))
 
         prefill.assert_not_called()
+
+
+class TestNukeState:
+    """NUKE_STATE drops the state and errors tables before pre-fill,
+    in both the normal and DISCOVER branches."""
+
+    def _cfg(self, **overrides):
+        from bollhav.model.load_models import _RuntimeConfig
+        from bollhav.model.ordering import UpstreamMode
+
+        defaults = dict(
+            tags="x",
+            schema_suffix="",
+            upstream_mode=UpstreamMode.ENFORCE,
+            latest=False,
+            backfill_enabled=True,
+            backfill_since=None,
+            backfill_until=None,
+            interval_expression_override=None,
+            window_expression_override=None,
+            lookback_override=None,
+            tz_override=None,
+            state_mode=StateMode.RESPECT,
+            discover=False,
+            nuke_state=False,
+            debug=False,
+        )
+        defaults.update(overrides)
+        return _RuntimeConfig(**defaults)
+
+    def test_nuke_drops_then_ensures_in_normal_flow(self) -> None:
+        from bollhav.model.load_models import _compute_intervals_and_prefill_state
+
+        model = _state_enabled_model()
+        model.infer_intervals = MagicMock(return_value=[])
+
+        with (
+            patch("bollhav.postgres.state.drop_state_tables") as drop,
+            patch("bollhav.postgres.state.ensure_tables") as ensure,
+            patch("bollhav.postgres.state.prefill"),
+        ):
+            _compute_intervals_and_prefill_state([model], self._cfg(nuke_state=True))
+
+        drop.assert_called_once_with(model)
+        ensure.assert_called_once_with(model)
+
+    def test_nuke_drops_then_ensures_under_discover(self) -> None:
+        from bollhav.model.load_models import _compute_intervals_and_prefill_state
+
+        model = _state_enabled_model()
+
+        with (
+            patch("bollhav.postgres.state.drop_state_tables") as drop,
+            patch("bollhav.postgres.state.ensure_tables") as ensure,
+            patch("bollhav.postgres.state.read_pending", return_value=[]),
+        ):
+            _compute_intervals_and_prefill_state(
+                [model], self._cfg(nuke_state=True, discover=True)
+            )
+
+        drop.assert_called_once_with(model)
+        ensure.assert_called_once_with(model)
+
+    def test_no_nuke_does_not_drop(self) -> None:
+        from bollhav.model.load_models import _compute_intervals_and_prefill_state
+
+        model = _state_enabled_model()
+        model.infer_intervals = MagicMock(return_value=[])
+
+        with (
+            patch("bollhav.postgres.state.drop_state_tables") as drop,
+            patch("bollhav.postgres.state.ensure_tables"),
+            patch("bollhav.postgres.state.prefill"),
+        ):
+            _compute_intervals_and_prefill_state([model], self._cfg())
+
+        drop.assert_not_called()
+
+    def test_nuke_skipped_for_non_state_models(self) -> None:
+        from bollhav.model.load_models import _compute_intervals_and_prefill_state
+
+        model = MagicMock()
+        model.state = None
+        model.infer_intervals = MagicMock(return_value=[])
+
+        with patch("bollhav.postgres.state.drop_state_tables") as drop:
+            _compute_intervals_and_prefill_state([model], self._cfg(nuke_state=True))
+
+        drop.assert_not_called()
 
 
 class TestDecoratorNoneIntervals:

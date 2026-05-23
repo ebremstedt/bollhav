@@ -37,6 +37,7 @@ State tracking adds **two** bollhav-defined env vars on top of the standard runt
 |---|---|---|---|---|
 | **STATE_MODE** | string | no | `respect` | `respect` skips applied rows on re-run; `disrespect` resets every row back to pending |
 | **DISCOVER** | bool | no | `false` | When `true`, intervals come from each state-enabled model's state table instead of from bounds/backfill. Requires state to already exist from a previous run |
+| **NUKE_STATE** | bool | no | `false` | When `true`, `@load_models` drops each state-enabled model's state and errors tables before pre-fill. Narrowly scoped — only the two bollhav-owned tables per model, not the schema. Use in dev/CI to reset cleanly without `psql` |
 
 Plus **one user-named DSN env var** — its name is whatever you choose, but it must be set in the environment when you run the pipeline:
 

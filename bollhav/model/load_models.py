@@ -42,6 +42,7 @@ class _RuntimeConfig:
     dry_run_extra: bool
     state_mode: StateMode
     discover: bool
+    nuke_state: bool
     debug: bool
     table_suffix: str = ""
 
@@ -96,6 +97,10 @@ def load_models(
                                       state table (pending rows) instead of from
                                       bounds/backfill — only state-enabled
                                       models do any work
+        NUKE_STATE                    bool; when true, drop each state-enabled
+                                      model's state and errors tables before
+                                      pre-fill — handy in dev/CI to reset between
+                                      runs without psql
     """
 
     def decorator(func: Callable[..., None]) -> Callable[[], None]:
@@ -142,6 +147,8 @@ def _read_env() -> _RuntimeConfig:
     discover = env_var_bool(name="DISCOVER", default=False)
     if discover and latest:
         raise ValueError("DISCOVER and LATEST_ENABLED cannot both be true")
+
+    nuke_state = env_var_bool(name="NUKE_STATE", default=False)
 
     tz_override = _resolve_tz_override()
 
@@ -197,6 +204,7 @@ def _read_env() -> _RuntimeConfig:
         dry_run_extra=env_var_bool(name="DRY_RUN_EXTRA", default=False),
         state_mode=_resolve_state_mode(),
         discover=discover,
+        nuke_state=nuke_state,
         debug=env_var_bool(name="DEBUG", default=False),
     )
 
@@ -215,9 +223,7 @@ def _resolve_state_mode() -> StateMode:
         return StateMode.RESPECT
     valid = {m.value: m for m in StateMode}
     if raw not in valid:
-        raise ValueError(
-            f"STATE_MODE must be one of {list(valid.keys())}, got {raw!r}"
-        )
+        raise ValueError(f"STATE_MODE must be one of {list(valid.keys())}, got {raw!r}")
     return valid[raw]
 
 
@@ -267,7 +273,10 @@ def _compute_intervals_and_prefill_state(
                                 run the entire state table
 
     Non-state-enabled models get empty intervals — they show up in the
-    user's loop but do no work."""
+    user's loop but do no work.
+
+    When NUKE_STATE=true, each state-enabled model's state and errors
+    tables are dropped before anything else runs — handy in dev/CI."""
     from bollhav.postgres import state as pg_state
 
     directive_mode = _directive_mode_label(cfg)
@@ -278,6 +287,8 @@ def _compute_intervals_and_prefill_state(
                 continue
             run_id = uuid4()
             model._state_run_id = run_id
+            if cfg.nuke_state:
+                pg_state.drop_state_tables(model)
             pg_state.ensure_tables(model)
             if cfg.state_mode is StateMode.DISRESPECT:
                 pg_state.reset_all_to_pending(model, run_id=run_id)
@@ -292,6 +303,8 @@ def _compute_intervals_and_prefill_state(
         run_id = uuid4()
         model._state_run_id = run_id
 
+        if cfg.nuke_state:
+            pg_state.drop_state_tables(model)
         pg_state.ensure_tables(model)
         intervals = [iv for iv in model.intervals if iv is not None]
         pg_state.prefill(

@@ -72,6 +72,6 @@ psql "$TARGET_DSN" -c "SELECT since::date, error_type, error_message FROM z_ware
 | `BACKFILL_ENABLED=true`, `BACKFILL_SINCE`, `BACKFILL_UNTIL` | Normal backfill window. `BACKFILL_UNTIL` is required here — `bounds.end` on the model is not consulted in backfill mode |
 | `STATE_MODE` | `respect` (default) preserves applied; `disrespect` resets to pending |
 | `DISCOVER` | When `true`, intervals come from the state table, not from bounds/backfill |
+| `NUKE_STATE=true` | Drop each state-enabled model's state and errors tables before pre-fill — resets state without `psql`. Handled by `@load_models` |
 | `FAIL_ON_DAY` | (Example-only) Raise on the Nth day to simulate a partial run |
-| `NUKE_STATE=true` | (Example-only) Drop the `z_warehouse_clean` schema before the pipeline runs — resets state without `psql` |
 | `DEBUG=true` | (Optional) Enables debug logging so you see every `state: …` line as rows mutate |

@@ -39,6 +39,7 @@ def _patches(
     dry_run: bool = False,
     state_mode: str | None = None,
     discover: bool = False,
+    nuke_state: bool = False,
     debug: bool = False,
 ):
     bools: dict = {
@@ -46,6 +47,7 @@ def _patches(
         "DRY_RUN": dry_run,
         "DRY_RUN_EXTRA": False,
         "DISCOVER": discover,
+        "NUKE_STATE": nuke_state,
         "DEBUG": debug,
         "USE_SCHEMA_SUFFIX": use_schema_suffix,
     }
@@ -223,6 +225,14 @@ class TestStateEnvReading:
     def test_discover_true(self) -> None:
         cfg = self._read(discover=True)
         assert cfg.discover is True
+
+    def test_nuke_state_default_false(self) -> None:
+        cfg = self._read()
+        assert cfg.nuke_state is False
+
+    def test_nuke_state_true(self) -> None:
+        cfg = self._read(nuke_state=True)
+        assert cfg.nuke_state is True
 
 
 class TestStateValidation:

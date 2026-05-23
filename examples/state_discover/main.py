@@ -6,15 +6,11 @@ the DISCOVER + STATE_MODE matrix.
 Example-only env vars:
   FAIL_ON_DAY=N    raise on the Nth interval (1-indexed) to simulate a
                    partial pipeline
-  NUKE_STATE=true  drop the state schema before running, so the next
-                   invocation starts from a clean slate (no psql needed)
 """
 
 import logging
 import os
 import sys
-
-import psycopg
 
 from bollhav.model import Model, load_models, state_tracker
 
@@ -31,19 +27,6 @@ def _fail_on_day() -> int | None:
     if raw is None or raw == "":
         return None
     return int(raw)
-
-
-def _nuke_state() -> None:
-    """Drop the state schema so the next invocation starts from a
-    clean slate. Called from __main__ when NUKE_STATE=true."""
-    dsn = os.environ["TARGET_DSN"]
-    with psycopg.connect(dsn, autocommit=True) as conn:
-        conn.execute("DROP SCHEMA IF EXISTS z_warehouse_clean CASCADE")
-    print("state nuked: z_warehouse_clean")
-
-
-def _nuke_requested() -> bool:
-    return os.environ.get("NUKE_STATE", "").lower() in ("1", "true", "yes")
 
 
 @state_tracker
@@ -70,8 +53,6 @@ def main(models: list[Model], debug: bool) -> None:
 
 if __name__ == "__main__":
     os.chdir(os.path.dirname(os.path.abspath(__file__)))
-    if _nuke_requested():
-        _nuke_state()
     try:
         main()
     except RuntimeError as exc:

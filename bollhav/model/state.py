@@ -149,12 +149,12 @@ def _is_applied(model: "Model", *, since, until) -> bool:
 
 
 def _mark_applied(model: "Model", *, run_id: UUID, since, until) -> None:
-    _backend(model).mark_applied(
-        model=model, run_id=run_id, since=since, until=until
-    )
+    _backend(model).mark_applied(model=model, run_id=run_id, since=since, until=until)
 
 
-def _record_error(model: "Model", *, run_id: UUID, since, until, exc: Exception) -> None:
+def _record_error(
+    model: "Model", *, run_id: UUID, since, until, exc: Exception
+) -> None:
     _backend(model).record_error(
         model=model,
         run_id=run_id,

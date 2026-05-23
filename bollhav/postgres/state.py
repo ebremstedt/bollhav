@@ -121,6 +121,38 @@ CREATE INDEX IF NOT EXISTS {index} ON {schema}.{table} (created_at DESC)
 """
 
 
+def drop_state_tables(model: "Model") -> None:
+    """Drop this model's state and errors tables. Used by NUKE_STATE
+    to reset state between runs. Narrowly scoped on purpose — drops
+    only the two tables this model owns, not the schema, so a state
+    DB shared with other bollhav projects stays intact."""
+    schema = _state_schema(model)
+    state_table = _state_table(model)
+    errors_table = _errors_table(model)
+    logger.debug(
+        "state: nuking tables for %s — %s.%s, %s.%s",
+        model.target.full_name,
+        schema,
+        state_table,
+        schema,
+        errors_table,
+    )
+    with _connect(model) as conn:
+        with conn.transaction():
+            conn.execute(
+                sql.SQL("DROP TABLE IF EXISTS {schema}.{table}").format(
+                    schema=sql.Identifier(schema),
+                    table=sql.Identifier(state_table),
+                )
+            )
+            conn.execute(
+                sql.SQL("DROP TABLE IF EXISTS {schema}.{table}").format(
+                    schema=sql.Identifier(schema),
+                    table=sql.Identifier(errors_table),
+                )
+            )
+
+
 def ensure_tables(model: "Model") -> None:
     """Create the state schema + per-model state and errors tables if
     they don't already exist. Idempotent."""
@@ -264,8 +296,7 @@ def reset_all_to_pending(model: "Model", *, run_id: UUID) -> None:
     schema = _state_schema(model)
     table = _state_table(model)
     update = sql.SQL(
-        "UPDATE {schema}.{table} "
-        "SET status = 'pending', applied_at = NULL, run_id = %s"
+        "UPDATE {schema}.{table} SET status = 'pending', applied_at = NULL, run_id = %s"
     ).format(schema=sql.Identifier(schema), table=sql.Identifier(table))
 
     with _connect(model) as conn:
@@ -379,6 +410,7 @@ def record_error(
 
 
 __all__ = [
+    "drop_state_tables",
     "ensure_tables",
     "prefill",
     "reset_all_to_pending",

@@ -45,6 +45,7 @@ For programmatic use (or tests) call `apply_runtime_overrides(...)` directly wit
 | **DRY_RUN_EXTRA** | bool | no | When `True`, same short-circuit but prints an exhaustive per-model block (schema, bounds, tags, source, upstream, …). Implies `DRY_RUN=true` |
 | **STATE_MODE** | string | no | One of `respect` (default), `disrespect`. Controls how `@load_models` pre-fill treats existing state rows. See [STATE.md](STATE.md) |
 | **DISCOVER** | bool | no | When `True`, intervals come from each state-enabled model's state table (`status='pending'` rows) instead of being computed from bounds/backfill. Combine with **STATE_MODE** to either complete what's pending (`respect`) or rerun the whole state table (`disrespect`). See [STATE.md](STATE.md) |
+| **NUKE_STATE** | bool | no | When `True`, drop each state-enabled model's `<name>_state` and `<name>_errors` tables before pre-fill — resets state cleanly between dev/CI runs without `psql`. See [STATE.md](STATE.md) |
 
 ## Latest mode
 
