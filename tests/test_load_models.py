@@ -36,10 +36,13 @@ def _patches(
     lookback_override: int | None = None,
     tz_override: str | None = None,
     upstream: str | None = None,
+    dry_run: bool = False,
     debug: bool = False,
 ):
     bools: dict = {
         "LATEST_ENABLED": latest_enabled,
+        "DRY_RUN": dry_run,
+        "DRY_RUN_EXTRA": False,
         "DEBUG": debug,
         "USE_SCHEMA_SUFFIX": use_schema_suffix,
     }
@@ -163,6 +166,22 @@ class TestEnvReading:
     def test_lookback_override_unset(self) -> None:
         apm, _ = _run_decorator()
         assert apm["lookback_override"] is None
+
+    def test_dry_run_default_false(self) -> None:
+        from bollhav.model.load_models import _read_env
+
+        patches = _patches()
+        with patches[0], patches[1], patches[2], patches[3], patches[4]:
+            cfg = _read_env()
+        assert cfg.dry_run is False
+
+    def test_dry_run_true(self) -> None:
+        from bollhav.model.load_models import _read_env
+
+        patches = _patches(dry_run=True)
+        with patches[0], patches[1], patches[2], patches[3], patches[4]:
+            cfg = _read_env()
+        assert cfg.dry_run is True
 
 
 class TestValidation:
