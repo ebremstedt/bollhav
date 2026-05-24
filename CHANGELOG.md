@@ -4,7 +4,7 @@
 
 ### Added
 
-- `DRY_RUN` env var on `@load_models` — when `true`, prints a concise summary of every matched model (cron and interval count, grouped by schema, table names alphabetized within each schema) and exits without invoking the wrapped `main()`. Models are listed in alphabetical order across the whole summary. Strictly read-only — no DB or filesystem side effects.
+- `DRY_RUN` env var on `@load_models` — when `true` prints a concise summary of every matched model (cron and interval count, grouped by schema, table names alphabetized within each schema) and exits without invoking the wrapped `main()`. Models are listed in alphabetical order across the whole summary. Strictly read-only — no DB or filesystem side effects.
 - `DRY_RUN_EXTRA` env var — same short-circuit as `DRY_RUN`, but renders an exhaustive per-model block (schema, write mode, cron/window/intervals, bounds, tags, upstream, source, description). Setting just `DRY_RUN_EXTRA=true` implies `DRY_RUN=true`.
 - Both dry-run modes render a per-group **tag explanation table** above the model list. Each group of the `TAGS` expression is shown alongside its plain-English translation (e.g. `r_interval_@daily:[clean & not:views]` → `(clean and not views) (reload, daily)`).
 - `explain(expression)` and `explain_groups(expression)` functions in `bollhav.model.tagexpr` — render a tag expression in plain English, either as a single string or as per-group `(raw, english)` pairs. Importable for use outside the dry-run printer.
