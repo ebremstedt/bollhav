@@ -39,6 +39,8 @@ For programmatic use (or tests) call `apply_runtime_overrides(...)` directly wit
 | **WINDOW_EXPRESSION_OVERRIDE** | IntervalExpression | no | Overrides every model's `window_expression` (latest-mode scope). Errors at startup if set without **LATEST_ENABLED** |
 | **LOOKBACK_OVERRIDE** | non-negative int | no | Overrides every model's `lookback`. Shifts each interval's `since` backwards by N cron-ticks of the (post-override) interval expression. Applies in latest, backfill, and reload modes |
 | **UPSTREAM** | string | no | One of `enforce` (default), `ignore_views`, `ignore_completely`. Controls upstream-dependency enforcement |
+| **DRY_RUN** | bool | no | When `True`, `@load_models` prints a concise summary of matched models and exits without invoking the wrapped function |
+| **DRY_RUN_EXTRA** | bool | no | When `True`, same short-circuit but prints an exhaustive per-model block (schema, bounds, tags, source, upstream, …). Implies `DRY_RUN=true` |
 
 ## Latest mode
 
@@ -79,6 +81,29 @@ Applies uniformly in latest, backfill, and reload modes.
 ## Backfill mode (default)
 
 Uses an explicit time window, chunked by the interval expression. If `BACKFILL_UNTIL` is unset, it defaults to the end of the latest complete interval.
+
+## Dry run
+
+`DRY_RUN=true` short-circuits `@load_models` after matching and resolving intervals. The wrapped `main()` is not invoked.
+
+For each matched model, the summary shows:
+
+- `cron` — the effective `interval_expression` (post-overrides)
+- `window` — first-since → last-until of the resolved intervals
+- `intervals` — how many will run
+
+Models with `batching=None` show `batching: none (single unfiltered run)` instead.
+
+```
+── dry run ──────────────────────────────────────────────
+ 1 model matched, mode = backfill
+
+▸ public.orders
+    cron      : @daily
+    window    : 2024-01-01T00:00:00+00:00 → 2024-01-11T00:00:00+00:00
+    intervals : 10
+──────────────────────────────────────────────────────────
+```
 
 ## Timezone
 
