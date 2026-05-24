@@ -110,7 +110,7 @@ def _print_model_extra(model: Model) -> None:
 
     if model.batching is not None:
         if model.batching.mode is ChunkMode.ROW:
-            print(f"    mode         : row")
+            print("    mode         : row")
             print(f"    batch size   : {model.batching.row.batch_size}")
         else:
             intervals = model.infer_intervals()
