@@ -35,6 +35,8 @@ class _RuntimeConfig:
     window_expression_override: str | None
     lookback_override: int | None
     tz_override: tzinfo | None
+    dry_run: bool
+    dry_run_extra: bool
     debug: bool
 
 
@@ -73,6 +75,14 @@ def load_models(
         WINDOW_EXPRESSION_OVERRIDE    cron / @alias (latest mode only)
         LOOKBACK_OVERRIDE             non-negative int (cron-ticks)
         UPSTREAM                      enforce | ignore_views | ignore_completely
+        DRY_RUN                       bool; when true, print a concise summary
+                                      of matched models (cron, interval count)
+                                      and exit without invoking the wrapped
+                                      function
+        DRY_RUN_EXTRA                 bool; same short-circuit as DRY_RUN but
+                                      prints the exhaustive per-model block
+                                      (schema, bounds, tags, source, upstream,
+                                      …). Implies DRY_RUN=true
     """
 
     def decorator(func: Callable[..., None]) -> Callable[[], None]:
@@ -93,6 +103,11 @@ def load_models(
                 lookback_override=cfg.lookback_override,
                 tz_override=cfg.tz_override,
             )
+            if cfg.dry_run:
+                from bollhav.model.dry_run import print_summary
+
+                print_summary(models, cfg)
+                return
             func(models=models, debug=cfg.debug)
 
         return wrapper
@@ -152,7 +167,17 @@ def _read_env() -> _RuntimeConfig:
         window_expression_override=window_expression_override,
         lookback_override=lookback_override,
         tz_override=tz_override,
+        dry_run=_resolve_dry_run(),
+        dry_run_extra=env_var_bool(name="DRY_RUN_EXTRA", default=False),
         debug=env_var_bool(name="DEBUG", default=False),
+    )
+
+
+def _resolve_dry_run() -> bool:
+    """DRY_RUN_EXTRA implies DRY_RUN — setting just the verbose flag
+    should still short-circuit the wrapper."""
+    return env_var_bool(name="DRY_RUN", default=False) or env_var_bool(
+        name="DRY_RUN_EXTRA", default=False
     )
 
 
@@ -189,8 +214,9 @@ def _print_summary(cfg: _RuntimeConfig) -> None:
     def _date(dt: datetime | None) -> str:
         return dt.isoformat() if dt else "—"
 
-    print("── runtime ─────────────────")
-    _row("progress", get_progress_level().value)
+    width = 28
+    title = f"── runtime ── ( {get_progress_level().value} ) "
+    print(title + "─" * max(0, width - len(title)))
     _row("tags", cfg.tags or "—")
     if cfg.latest:
         _row("mode", "latest")
@@ -201,22 +227,22 @@ def _print_summary(cfg: _RuntimeConfig) -> None:
         )
     else:
         _row("mode", "off")
-    _row("debug", "on" if cfg.debug else "off")
+    if cfg.debug:
+        _row("debug", "on")
+    if cfg.dry_run:
+        _row("dry run", "extra" if cfg.dry_run_extra else "concise")
     if cfg.schema_suffix:
         _row("suffix", cfg.schema_suffix)
     if cfg.upstream_mode != UpstreamMode.ENFORCE:
         _row("upstream", cfg.upstream_mode.value)
-    if cfg.latest or cfg.backfill_enabled:
-        _row("tz override", str(cfg.tz_override) if cfg.tz_override else "unset")
-        _row("interval override", cfg.interval_expression_override or "unset")
-        _row(
-            "lookback override",
-            str(cfg.lookback_override)
-            if cfg.lookback_override is not None
-            else "unset",
-        )
-    if cfg.latest:
-        _row("window override", cfg.window_expression_override or "unset")
+    if cfg.tz_override is not None:
+        _row("tz override", str(cfg.tz_override))
+    if cfg.interval_expression_override:
+        _row("interval override", cfg.interval_expression_override)
+    if cfg.lookback_override is not None:
+        _row("lookback override", str(cfg.lookback_override))
+    if cfg.latest and cfg.window_expression_override:
+        _row("window override", cfg.window_expression_override)
     print("────────────────────────────")
 
 
