@@ -163,3 +163,106 @@ def group_matches(model_tags: set[str], group: PotentialTagGroup) -> bool:
 
 def tags_match(model_tags: set[str], parsed: list[PotentialTagGroup]) -> bool:
     return any(group_matches(model_tags, group) for group in parsed)
+
+
+def explain_groups(expression: str) -> list[tuple[str, str]]:
+    """Return per-group (raw, plain-English) pairs in expression order.
+
+    Useful for rendering a side-by-side breakdown:
+
+        [r:sales & finance][not:legacy]
+        →  [(r:sales & finance, sales and finance (reload)),
+            (not:[legacy], not legacy)]
+    """
+    raw_groups = re.findall(
+        rf"((?:{_RELOAD_PREFIX_TOKEN}|not:)*)?\[([^\]]+)\]", expression
+    )
+    parsed = parse_expression(expression)
+    out: list[tuple[str, str]] = []
+    for (prefix, content), group in zip(raw_groups, parsed):
+        raw = f"{prefix}[{content}]"
+        out.append((raw, _explain_group(group, parens_when_compound=False)))
+    return out
+
+
+def explain(expression: str) -> str:
+    """Render a tag expression in plain English.
+
+    Examples:
+        [clean]|[orders]|[customers]   → clean or orders or customers
+        [foo & bar]                    → foo and bar
+        [(foo|bar) & baz]              → (foo or bar) and baz
+        [not:foo]                      → not foo
+        not:[foo & bar]                → not (foo and bar)
+        [r:foo]                        → foo (reload)
+        r:[foo & bar]                  → foo and bar (reload)
+        [r_row_100:vPAS]               → vPAS (reload, row mode, 100 rows/chunk)
+        [r_interval_@daily:sales]      → sales (reload, daily)
+    """
+    groups = parse_expression(expression)
+    return " or ".join(_explain_group(g, len(groups) > 1) for g in groups)
+
+
+def _explain_group(group: PotentialTagGroup, parens_when_compound: bool) -> str:
+    # Lift the reload suffix to the group when every tag carries the
+    # same reload settings — avoids "foo (reload) and bar (reload)".
+    keys = {
+        (t.reload, t.reload_mode, t.reload_batch_size, t.reload_interval_expression)
+        for t in group.tags
+    }
+    uniform_reload = len(keys) == 1 and next(iter(keys))[0]
+
+    single = len(group.tags) == 1
+    tags_text = " and ".join(
+        _explain_tag(t, omit_reload=uniform_reload, single_tag_in_group=single)
+        for t in group.tags
+    )
+
+    needs_parens = len(group.tags) > 1 and (
+        parens_when_compound or group.negate or uniform_reload
+    )
+    if needs_parens:
+        tags_text = f"({tags_text})"
+
+    if group.negate:
+        tags_text = f"not {tags_text}"
+    if uniform_reload:
+        tags_text = f"{tags_text} ({_explain_reload(group.tags[0])})"
+
+    return tags_text
+
+
+def _explain_tag(
+    tag: PotentialTagMatch,
+    *,
+    omit_reload: bool,
+    single_tag_in_group: bool,
+) -> str:
+    cands = " or ".join(tag.candidates)
+    # Parens around multi-candidate tags are needed when they coexist
+    # with AND-joined siblings (else "foo or bar and baz" is ambiguous)
+    # OR when negation wraps them ("not (foo or bar)" vs the wrong
+    # "not foo or bar"). Otherwise they're noise.
+    if len(tag.candidates) > 1 and (not single_tag_in_group or tag.negate):
+        cands = f"({cands})"
+    text = f"not {cands}" if tag.negate else cands
+    if tag.reload and not omit_reload:
+        text = f"{text} ({_explain_reload(tag)})"
+    return text
+
+
+def _explain_reload(tag: PotentialTagMatch) -> str:
+    parts = ["reload"]
+    # The interval expression already implies INTERVAL mode and the row
+    # batch size implies ROW mode — naming the mode in those cases is
+    # redundant ("reload, interval mode, daily"). Only show the mode
+    # when there's no more specific hint.
+    if tag.reload_mode is not None and not (
+        tag.reload_batch_size is not None or tag.reload_interval_expression is not None
+    ):
+        parts.append(f"{tag.reload_mode.value.lower()} mode")
+    if tag.reload_batch_size is not None:
+        parts.append(f"row mode, {tag.reload_batch_size} rows/chunk")
+    if tag.reload_interval_expression is not None:
+        parts.append(tag.reload_interval_expression.lstrip("@"))
+    return ", ".join(parts)

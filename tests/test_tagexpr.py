@@ -3,6 +3,8 @@ from bollhav.model.batch import ChunkMode
 from bollhav.model.tagexpr import (
     PotentialTagMatch,
     PotentialTagGroup,
+    explain,
+    explain_groups,
     parse_expression,
     tags_match,
 )
@@ -499,3 +501,88 @@ class TestIntervalPrefix:
         assert parsed[1].tags[0].reload_mode is ChunkMode.INTERVAL
         assert parsed[1].tags[0].reload_interval_expression == "@daily"
         assert parsed[1].tags[0].reload_batch_size is None
+
+
+# --- explain / explain_groups ---
+
+
+class TestExplain:
+    def test_single_tag(self):
+        assert explain("[clean]") == "clean"
+
+    def test_multiple_groups_or(self):
+        assert explain("[clean]|[orders]|[customers]") == "clean or orders or customers"
+
+    def test_and(self):
+        assert explain("[foo & bar]") == "foo and bar"
+
+    def test_or_inside_group(self):
+        assert explain("[foo|bar]") == "foo or bar"
+
+    def test_or_inside_with_and(self):
+        assert explain("[(foo|bar) & baz]") == "(foo or bar) and baz"
+
+    def test_negate_tag(self):
+        assert explain("[not:foo]") == "not foo"
+
+    def test_negate_group(self):
+        assert explain("not:[foo & bar]") == "not (foo and bar)"
+
+    def test_reload_tag(self):
+        assert explain("[r:foo]") == "foo (reload)"
+
+    def test_reload_group_uniform(self):
+        # r:[foo & bar] applies reload to both — should be lifted to group level
+        assert explain("r:[foo & bar]") == "(foo and bar) (reload)"
+
+    def test_reload_row(self):
+        assert explain("[r_row_100:vPAS]") == "vPAS (reload, row mode, 100 rows/chunk)"
+
+    def test_reload_interval(self):
+        assert explain("[r_interval_@daily:sales]") == "sales (reload, daily)"
+
+    def test_two_groups_compound(self):
+        assert explain("[a & b][c]") == "(a and b) or c"
+
+    def test_negated_or_candidates_keeps_parens(self):
+        # "not foo or bar" is ambiguous — the parens have to stay so it
+        # reads as "not (foo or bar)" not "(not foo) or bar".
+        assert explain("[not:(foo|bar)]") == "not (foo or bar)"
+
+    def test_mixed_reload_in_group_not_lifted(self):
+        # When only one tag in an AND-group reloads, the suffix stays on
+        # that tag — lifting would falsely imply both reload.
+        assert explain("[r:foo & bar]") == "foo (reload) and bar"
+
+    def test_multi_candidate_with_tag_reload(self):
+        # Single-tag-in-group + multi-candidates + reload → no parens
+        # needed on the candidates, but the reload suffix should hang
+        # off the whole tag.
+        assert explain("[r:(foo|bar)]") == "foo or bar (reload)"
+
+    def test_multiple_groups_mixed_reload(self):
+        # Each group is rendered independently; one reloads, one doesn't.
+        assert explain("[r:foo][bar]") == "foo (reload) or bar"
+
+    def test_group_level_reload_with_group_negate(self):
+        assert explain("r:not:[foo]") == "not foo (reload)"
+
+    def test_invalid_expression_raises(self):
+        import pytest as _pytest
+
+        with _pytest.raises(ValueError, match="Must use \\[group\\] syntax"):
+            explain("foo")
+
+
+class TestExplainGroups:
+    def test_pairs_per_group(self):
+        pairs = explain_groups("[clean]|[orders]")
+        assert pairs == [("[clean]", "clean"), ("[orders]", "orders")]
+
+    def test_pair_preserves_raw_prefix(self):
+        pairs = explain_groups("r:[foo & bar]")
+        assert pairs == [("r:[foo & bar]", "(foo and bar) (reload)")]
+
+    def test_pair_negate_group(self):
+        pairs = explain_groups("not:[foo]")
+        assert pairs == [("not:[foo]", "not foo")]
