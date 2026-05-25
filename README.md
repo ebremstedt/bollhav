@@ -1,27 +1,27 @@
 # bollhav
 
-Model definition framework that standardizes data-pipeline code using these [abstractions](bollhav/docs/ABSTRACTIONS.md)
+Model definition framework that standardizes data-pipeline code.
 
 This library
 - is permissive by design
 - is designed with ✨developer experience✨ in mind
 
 Concepts
-- [Model](bollhav/docs/MODEL.md)
-  - [Upstream](bollhav/docs/MODEL.md#upstream-dependencies)
-- [Runtime overrides](bollhav/docs/RUNTIME_OVERRIDES.md) — env vars that override model settings at run time, plus the `@load_models` decorator
-- [Tags](bollhav/docs/TAGS.md)
-    - [matching](bollhav/docs/MATCHING.md)
-- [Modes](bollhav/docs/MODES.md)
-- [Progress Bar](bollhav/docs/PROGRESS_BAR.md)
+- [Model](docs/content/MODEL.md)
+  - [Upstream](docs/content/MODEL.md#upstream-dependencies)
+- [Runtime overrides](docs/content/RUNTIME_OVERRIDES.md) — env vars that override model settings at run time, plus the `@load_models` decorator
+- [Tags](docs/content/TAGS.md)
+    - [matching](docs/content/MATCHING.md)
+- [Modes](docs/content/MODES.md)
+- [Progress Bar](docs/content/PROGRESS_BAR.md)
 
 Implementations:
-- [Postgres](bollhav/docs/POSTGRES.md)
-- [MSSQL](bollhav/docs/MSSQL.md)
+- [Postgres](docs/content/POSTGRES.md)
+- [MSSQL](docs/content/MSSQL.md)
 
 # Demo
 
-![demo](bollhav/docs/batch_recording.gif)
+![demo](docs/content/batch_recording.gif)
 
 ## Explore the features
 

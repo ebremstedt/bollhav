@@ -3,7 +3,7 @@
 A self-contained pipeline that mixes a **`Batch(mode=ChunkMode.ROW)`**
 model and a normal `Batch(mode=ChunkMode.INTERVAL)` model in one run, so
 you can see both chunking strategies dispatched side-by-side. See
-[INTERVAL_OR_ROW.md](../../bollhav/docs/INTERVAL_OR_ROW.md) for when ROW
+[CHUNKING.md](../../docs/content/CHUNKING.md) for when ROW
 is the right call.
 
 ## Models in this example

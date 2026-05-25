@@ -63,5 +63,5 @@ window unset,   batch="*/15 * * * *"   → 1 run, 1 chunk, last 15 minutes only
 window unset,   batch="@daily"         → 1 run, 1 chunk, yesterday in one INSERT (heavy)
 ```
 
-See [bollhav/docs/PIPE.md](../../bollhav/docs/PIPE.md#latest-mode) for the
+See [docs/PIPE.md](../../docs/content/PIPE.md#latest-mode) for the
 full rules.

@@ -1,0 +1,86 @@
+site_name: bollhav
+site_description: Model definition framework that standardizes data-pipeline code
+site_url: https://bollhav.bremstedtanalytics.se/
+repo_url: https://github.com/ebremstedt/bollhav
+repo_name: ebremstedt/bollhav
+edit_uri: edit/main/docs/content/
+
+docs_dir: content
+site_dir: site
+
+theme:
+  name: material
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.top
+    - navigation.indexes
+    - content.code.copy
+    - content.action.edit
+    - toc.follow
+    - search.suggest
+    - search.highlight
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+
+nav:
+  - Home: index.md
+  - Model:
+      - Overview: MODEL.md
+      - Target: TARGET.md
+      - TargetSchema: TARGETSCHEMA.md
+      - SourceTable: SOURCETABLE.md
+      - SourceFile: SOURCEFILE.md
+      - Bounds: BOUNDS.md
+      - Batch: BATCH.md
+      - Tagging: TAGGING.md
+  - Env: ENV.md
+  - Decorators: DECORATORS.md
+  - Concepts:
+      - Modes: MODES.md
+      - State: STATE.md
+      - Chunking: CHUNKING.md
+  - Runtime:
+      - Runtime overrides: RUNTIME_OVERRIDES.md
+      - Progress bar: PROGRESS_BAR.md
+  - Tags:
+      - Tags: TAGS.md
+      - Advanced tag prefixes: ADVANCED_TAGS.md
+      - Matching: MATCHING.md
+  - Write modes: WRITEMODES.md
+  - Implementations:
+      - Postgres: POSTGRES.md
+      - MSSQL: MSSQL.md
+  - About: ABOUT.md

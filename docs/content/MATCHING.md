@@ -1,4 +1,4 @@
-[back to README](../../README.md)
+[← home](index.md)
 
 # Matching models
 

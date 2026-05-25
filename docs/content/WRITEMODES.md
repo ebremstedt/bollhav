@@ -1,14 +1,8 @@
-[back to README](../../README.md)
+[← home](index.md)
 
 # Choosing a Write Mode
 
 A practical guide to picking the right write mode.
-## Decision trees
-
-- [Which table mode?](WHICH_TABLE_MODE.md)
-- [View or table?](VIEW_OR_TABLE.md)
-
----
 
 ## Pre-load table flags
 
