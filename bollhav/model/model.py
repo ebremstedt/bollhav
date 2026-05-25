@@ -45,7 +45,7 @@ class Model:
         self.upstream: list[str] = upstream or []
         self.directives = Directives()
         self.tags: set[str] = (tagging or Tags()).assemble(
-            self.target.name, self.target.schema.name
+            self.target.name, self.target.schema.name, self.target.catalog
         )
 
         self.extra = kwargs
@@ -72,6 +72,11 @@ class Model:
             "  target:",
             f"    name:        {self.target.name}",
             f"    schema:      {self.target.schema.resolved}",
+            *(
+                [f"    catalog:     {self.target.catalog}"]
+                if self.target.catalog
+                else []
+            ),
             f"    write_mode:  {self.target.write_mode.value}",
             f"    model_type:  {self.target.model_type.value}",
             f"    partitioned: {self.target.partitioned_by}",

@@ -113,6 +113,7 @@ def _target_with_suffix(target: Target, schema_suffix: str) -> Target:
             suffix=schema_suffix,
             suffix_appendix=target.schema.suffix_appendix,
         ),
+        catalog=target.catalog,
         database=target.database,
         columns=list(target.columns),
         indexes=list(target.indexes),

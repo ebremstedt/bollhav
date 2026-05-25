@@ -277,6 +277,113 @@ def test_full_name_not_added_when_disabled():
     assert "cha_clean.poop" not in m.tags
 
 
+# --- Tags: catalog ---
+
+
+def test_catalog_added_to_tags_when_set():
+    m = make_model(
+        target=Target(
+            name="poop", schema=TargetSchema(name="cha_clean"), catalog="prod_dwh"
+        )
+    )
+    assert "prod_dwh" in m.tags
+
+
+def test_catalog_not_added_when_none():
+    m = make_model(target=Target(name="poop", schema=TargetSchema(name="cha_clean")))
+    # None should not contaminate the tag set
+    assert None not in m.tags
+    assert "" not in m.tags
+
+
+def test_catalog_not_added_when_disabled():
+    m = make_model(
+        target=Target(
+            name="poop", schema=TargetSchema(name="cha_clean"), catalog="prod_dwh"
+        ),
+        tagging=Tags(catalog_add_to_tags=False),
+    )
+    assert "prod_dwh" not in m.tags
+
+
+def test_fully_qualified_name_added_when_catalog_and_schema():
+    m = make_model(
+        target=Target(
+            name="poop", schema=TargetSchema(name="cha_clean"), catalog="prod_dwh"
+        )
+    )
+    assert "prod_dwh.cha_clean.poop" in m.tags
+
+
+def test_fully_qualified_name_not_added_without_catalog():
+    m = make_model(target=Target(name="poop", schema=TargetSchema(name="cha_clean")))
+    # No `None.cha_clean.poop` or `.cha_clean.poop` leaks in
+    assert not any("None" in t for t in m.tags)
+
+
+def test_fully_qualified_name_disabled():
+    m = make_model(
+        target=Target(
+            name="poop", schema=TargetSchema(name="cha_clean"), catalog="prod_dwh"
+        ),
+        tagging=Tags(fully_qualified_name_add_to_tags=False),
+    )
+    assert "prod_dwh.cha_clean.poop" not in m.tags
+    # Catalog-as-single-tag still present (separate flag)
+    assert "prod_dwh" in m.tags
+
+
+def test_unsnake_catalog_splits_on_underscore():
+    m = make_model(
+        target=Target(
+            name="poop", schema=TargetSchema(name="cha_clean"), catalog="prod_dwh"
+        )
+    )
+    assert "prod" in m.tags
+    assert "dwh" in m.tags
+
+
+def test_unsnake_catalog_disabled():
+    m = make_model(
+        target=Target(
+            name="poop", schema=TargetSchema(name="cha_clean"), catalog="prod_dwh"
+        ),
+        tagging=Tags(unsnake_catalog_for_tags=False),
+    )
+    assert "prod" not in m.tags
+
+
+def test_unpascal_catalog_off_by_default():
+    m = make_model(
+        target=Target(name="poop", schema=TargetSchema(name="cha"), catalog="ProdDwh")
+    )
+    # unpascal off → "prod" not added; raw "ProdDwh" still is
+    assert "prod" not in m.tags
+    assert "ProdDwh" in m.tags
+
+
+def test_unpascal_catalog_splits_pascal_case():
+    m = make_model(
+        target=Target(name="poop", schema=TargetSchema(name="cha"), catalog="ProdDwh"),
+        tagging=Tags(unpascal_catalog_for_tags=True),
+    )
+    assert "prod" in m.tags
+    assert "dwh" in m.tags
+
+
+# --- Target.full_name with catalog ---
+
+
+def test_full_name_includes_catalog_when_set():
+    t = Target(name="poop", schema=TargetSchema(name="cha_clean"), catalog="prod_dwh")
+    assert t.full_name == "prod_dwh.cha_clean.poop"
+
+
+def test_full_name_skips_catalog_when_unset():
+    t = Target(name="poop", schema=TargetSchema(name="cha_clean"))
+    assert t.full_name == "cha_clean.poop"
+
+
 # --- Target columns ---
 
 
