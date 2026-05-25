@@ -4,7 +4,7 @@ requires-python = ">=3.11.0"
 
 [[package]]
 name = "bollhav"
-version = "2.0.117"
+version = "2.0.133"
 source = { virtual = "." }
 dependencies = [
     { name = "polars" },

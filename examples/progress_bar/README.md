@@ -84,5 +84,5 @@ visibility in logs.
 - The `(interval)` label next to each model name is read from
   `model.batching.mode` — see the [row_mode example](../row_mode/README.md)
   for the corresponding `(rows)` label on ROW-mode models.
-- See [PROGRESS_BAR.md](../../bollhav/docs/PROGRESS_BAR.md) for the
+- See [PROGRESS_BAR.md](../../docs/content/PROGRESS_BAR.md) for the
   full level reference.

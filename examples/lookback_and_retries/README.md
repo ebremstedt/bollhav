@@ -86,5 +86,5 @@ real use, pair `lookback` with an idempotent write mode:
 - `UPSERT_NO_DELETE` with a `unique=True` key
 - `APPEND` + `truncate_table=True` (for small reference tables — wipes once before the load)
 
-See [bollhav/docs/WRITEMODES.md](../../bollhav/docs/WRITEMODES.md) for
+See [docs/WRITEMODES.md](../../docs/content/WRITEMODES.md) for
 guidance on picking a write mode.

@@ -150,6 +150,6 @@ Matched 1 model(s):
       auto-tags: all, budgets, finance, finance_budgets, forecast, warehouse, warehouse_finance, warehouse_finance.finance_budgets
 ```
 
-See [bollhav/docs/TAGS.md](../../bollhav/docs/TAGS.md) for the full tag
+See [docs/TAGS.md](../../docs/content/TAGS.md) for the full tag
 expression grammar and [bollhav/model/tags.py](../../bollhav/model/tags.py)
 for the `Tags` dataclass fields.
