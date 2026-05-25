@@ -12,6 +12,7 @@ from bollhav.model.target_schema import TargetSchema
 class Target:
     name: str
     schema: TargetSchema = field(default_factory=TargetSchema)
+    catalog: str | None = None
     database: Database | None = None
     columns: list[DatabaseColumn] = field(default_factory=list)
     indexes: list[DatabaseIndex] = field(default_factory=list)
@@ -30,9 +31,13 @@ class Target:
 
     @property
     def full_name(self) -> str:
-        return (
+        """`catalog.schema.name` when catalog is set, else `schema.name`
+        (or just `name` when schema is unset — same as before catalog
+        existed)."""
+        base = (
             f"{self.schema.resolved}.{self.name}" if self.schema.resolved else self.name
         )
+        return f"{self.catalog}.{base}" if self.catalog else base
 
     @property
     def is_view(self) -> bool:

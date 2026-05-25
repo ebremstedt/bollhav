@@ -1,5 +1,11 @@
 # Changelog
 
+## [2.0.133] - 2026-05-25
+
+### Added
+
+- `Target.catalog` field (default `None`) — three-part namespacing for warehouses that use `catalog.schema.table` addressing (Snowflake, BigQuery, Trino, etc.). When set, the catalog name is added to the model's tags, and `catalog.schema.name` joins the existing `schema.name` and `name` auto-tags. `Tags` gained four new flags (`catalog_add_to_tags`, `fully_qualified_name_add_to_tags`, `unsnake_catalog_for_tags`, `unpascal_catalog_for_tags`) to control catalog-derived tag behavior — all default to a sensible truthy/falsy matching their schema/name counterparts. `Target.full_name` now returns `catalog.schema.name` when catalog is set, falling back to `schema.name` or just `name`. `apply_runtime_overrides` carries `catalog` through when rebuilding targets with a schema suffix (catalog itself is not suffixed).
+
 ## [2.0.132] - 2026-05-24
 
 ### Added

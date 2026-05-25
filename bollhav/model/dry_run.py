@@ -105,6 +105,8 @@ def _concise_tail(model: Model) -> str | None:
 
 def _print_model_extra(model: Model) -> None:
     print(f"▸ {model.target.full_name}")
+    if model.target.catalog:
+        print(f"    catalog      : {model.target.catalog}")
     print(f"    schema       : {model.target.schema.resolved}")
     print(f"    write mode   : {model.target.write_mode.value}")
 
