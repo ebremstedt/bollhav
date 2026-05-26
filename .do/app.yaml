@@ -1,12 +1,26 @@
-name: bollhav-docs
-region: fra
+name: seahorse-app
+region: ams
+alerts:
+  - rule: DEPLOYMENT_FAILED
+  - rule: DOMAIN_FAILED
+features:
+  - buildpack-stack=ubuntu-22
+ingress:
+  rules:
+    - component:
+        name: bollhav-docs
+      match:
+        authority:
+          exact: ""
+        path:
+          prefix: /
 static_sites:
-  - name: docs
+  - name: bollhav-docs
+    environment_slug: python
     source_dir: docs
+    build_command: pip install -r requirements.txt && mkdocs build
+    output_dir: site
     github:
       repo: ebremstedt/bollhav
       branch: main
       deploy_on_push: true
-    build_command: pip install -r requirements.txt && mkdocs build
-    output_dir: site
-    environment_slug: python
