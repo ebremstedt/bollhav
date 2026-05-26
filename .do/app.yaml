@@ -1,0 +1,12 @@
+name: bollhav-docs
+region: fra
+static_sites:
+  - name: docs
+    source_dir: docs
+    github:
+      repo: ebremstedt/bollhav
+      branch: main
+      deploy_on_push: true
+    build_command: pip install -r requirements.txt && mkdocs build
+    output_dir: site
+    environment_slug: python
