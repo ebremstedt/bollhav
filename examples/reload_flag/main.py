@@ -21,7 +21,7 @@ from bollhav.model import Model, load_models
 def main(models: list[Model], debug: bool) -> None:
     for model in models:
         reload = model.directives.reload
-        intervals = model.infer_intervals()
+        intervals = model.intervals
 
         print(f"\n{model.target.full_name}")
         print(f"  reload flag     : {reload}")

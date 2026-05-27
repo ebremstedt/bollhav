@@ -81,4 +81,4 @@ batching=Batch(
 )
 ```
 
-When `LATEST_ENABLED=True`, `infer_intervals()` returns 96 `TZInterval`s covering yesterday 00:00 → today 00:00.
+When `LATEST_ENABLED=True`, `model.intervals` returns 96 `TZInterval`s covering yesterday 00:00 → today 00:00.

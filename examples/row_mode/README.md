@@ -134,6 +134,6 @@ ValueError: Model 'warehouse_raw.event_stream' is ROW-mode — it can
 only be reloaded. Re-run with the `r:` tag prefix, e.g. TAGS="[r:events]"
 ```
 
-(bollhav itself raises a similar error if you call `infer_intervals()`
+(bollhav itself raises a similar error if you read `model.intervals`
 on a ROW model outside reload — the example bypasses that path and
 enforces the same contract directly in its dispatch.)

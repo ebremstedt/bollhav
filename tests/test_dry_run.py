@@ -10,6 +10,18 @@ SINCE = datetime(2024, 1, 1, tzinfo=timezone.utc)
 UNTIL = datetime(2024, 1, 2, tzinfo=timezone.utc)
 
 
+class _IntervalsTripwire:
+    """Sentinel for `model.intervals`. Iterating or measuring it fires —
+    used to assert the dry-run code skips the intervals branch for ROW
+    mode, since reading it on a real Model would raise ValueError."""
+
+    def __iter__(self):
+        raise AssertionError("intervals should not be accessed for ROW mode")
+
+    def __len__(self):
+        raise AssertionError("intervals should not be accessed for ROW mode")
+
+
 def _cfg(**overrides):
     from bollhav.model.load_models import _RuntimeConfig
     from bollhav.model.ordering import UpstreamMode
@@ -62,7 +74,9 @@ def _mk_model(
         model.batching.mode = ChunkMode.INTERVAL
         model.batching.interval.expression = "@daily"
         model.batching.interval.lookback = None
-        model.infer_intervals = MagicMock(return_value=[TZInterval(SINCE, UNTIL)])
+        # `intervals` is a @property on Model; MagicMock instances accept
+        # arbitrary attribute assignment so we just set the value directly.
+        model.intervals = [TZInterval(SINCE, UNTIL)]
     else:
         model.batching = None
     return model
@@ -111,10 +125,9 @@ class TestConcise:
         m = _mk_model()
         m.batching.mode = ChunkMode.ROW
         m.batching.row.batch_size = 1000
-        # Make sure infer_intervals is NOT called for row mode — it raises.
-        m.infer_intervals = MagicMock(
-            side_effect=AssertionError("should not be called")
-        )
+        # Make sure `intervals` is NOT read for row mode — it raises on a
+        # real Model. Tripwire fires if dry_run iterates/measures it.
+        m.intervals = _IntervalsTripwire()
 
         print_summary([m], _cfg())
         out = capsys.readouterr().out
@@ -129,9 +142,7 @@ class TestConcise:
         row = _mk_model(full_name="public.b", name="b", schema="public")
         row.batching.mode = ChunkMode.ROW
         row.batching.row.batch_size = 500
-        row.infer_intervals = MagicMock(
-            side_effect=AssertionError("must not be called for ROW")
-        )
+        row.intervals = _IntervalsTripwire()
         view = _mk_model(
             full_name="public.c", name="c", schema="public", with_batching=False
         )

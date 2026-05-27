@@ -190,8 +190,16 @@ class Model:
         tick_size = tick2 - tick1
         return since - (tick_size * self.batching.interval.lookback)
 
-    def infer_intervals(self) -> list[TZInterval] | list[None]:
+    @property
+    def intervals(self) -> list[TZInterval] | list[None]:
         """Resolve and chunk a time interval into TZIntervals.
+
+        Computed on every access — never cached. The result depends on
+        `datetime.now()` (via `latest_complete_interval`), so a cache
+        would freeze the first answer for the model's lifetime and
+        return stale windows once the wall clock crossed a cron tick.
+        If you read it more than once in the same code path, snapshot
+        it: `intervals = model.intervals`.
 
         Returns `[None]` when the model has no `batching` configured — signalling
         to callers that no interval filtering should be applied to the read
@@ -265,10 +273,10 @@ class Model:
         elif d.reload:
             if self.batching.mode is ChunkMode.ROW:
                 raise ValueError(
-                    f"infer_intervals() cannot be called in reload mode on "
+                    f"model.intervals cannot be read in reload mode on "
                     f"model {self.target.full_name!r}: batching.mode is ROW, "
                     f"which chunks work by row count instead of time. "
-                    f"infer_intervals() only produces time intervals, so "
+                    f"model.intervals only produces time intervals, so "
                     f"time-based chunks would be meaningless here. Callers "
                     f"must branch on `model.batching.mode` and use the "
                     f"row-batching execution path for ROW-mode reloads."

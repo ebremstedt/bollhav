@@ -1,5 +1,11 @@
 # Changelog
 
+## [2.0.134] - 2026-05-27
+
+### Changed
+
+- `Model.infer_intervals()` → `Model.intervals` (`@property`). Iterating `for interval in model.intervals:` reads cleanly as a derived field instead of a method call. Recomputes on every access — no caching — because the result depends on `datetime.now()` via `latest_complete_interval` and a cached value would freeze the first answer across cron-tick boundaries. Snapshot it (`intervals = model.intervals`) before iterating if you also need `len()`. Behavior is otherwise identical: same return shape (`list[TZInterval] | [None]`), same `ValueError` paths for ROW mode and missing `bounds.begin`. Breaking — call sites lose the parens.
+
 ## [2.0.133] - 2026-05-25
 
 ### Added
@@ -18,8 +24,7 @@
 ### Changed
 
 - The `── runtime ──` summary now embeds the progress level in the title (e.g. `── runtime ── ( batch ) ────`) instead of taking up a row. Override rows (`tz override`, `interval override`, `lookback override`, `window override`) are hidden when unset, and `debug` is hidden when off — only meaningful values appear.
-- `Model.intervals` is populated by `@load_models` after `apply_runtime_overrides` runs, so the user's loop can iterate `model.intervals` directly instead of calling `model.infer_intervals()` in their `main()`. The method still works — it returns the cached value when set — so existing pipelines keep running unchanged.
-- ROW-mode models render their batch size in dry-run output (`<name>   <N> rows/chunk`) instead of trying to call `infer_intervals()` on them, which raises by design.
+- ROW-mode models render their batch size in dry-run output (`<name>   <N> rows/chunk`) instead of trying to read `model.intervals` on them, which raises by design.
 
 ### Documentation
 
