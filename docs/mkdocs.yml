@@ -67,7 +67,9 @@ nav:
       - Batch: BATCH.md
       - Tagging: TAGGING.md
   - Env: ENV.md
-  - Decorators: DECORATORS.md
+  - Decorators:
+      - Overview: DECORATORS.md
+      - "@load_models step by step": LOAD_MODELS.md
   - Concepts:
       - Modes: MODES.md
       - State: STATE.md
