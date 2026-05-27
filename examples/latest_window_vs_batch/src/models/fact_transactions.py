@@ -23,7 +23,7 @@ from bollhav.model import (
 #   window_expression   = "@daily"          → OUTER scope: one full day
 #   interval_expression = "*/15 * * * *"    → INNER chunk: 15 minutes each
 #
-# In latest mode, infer_intervals() resolves the outer window (yesterday,
+# In latest mode, model.intervals resolves the outer window (yesterday,
 # 00:00 → 00:00) and then splits it into 96 fifteen-minute chunks. Each
 # chunk is a small, fast, retryable write. If one chunk fails, only that
 # 15-minute slice needs to be reprocessed — not the entire day.

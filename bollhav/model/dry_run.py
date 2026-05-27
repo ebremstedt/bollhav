@@ -96,7 +96,7 @@ def _concise_tail(model: Model) -> str | None:
         return None
     if model.batching.mode is ChunkMode.ROW:
         return f"{model.batching.row.batch_size} rows/chunk"
-    count = _format_interval_count(model.infer_intervals())
+    count = _format_interval_count(model.intervals)
     return f"{count} × {model.batching.interval.expression}"
 
 
@@ -115,7 +115,7 @@ def _print_model_extra(model: Model) -> None:
             print("    mode         : row")
             print(f"    batch size   : {model.batching.row.batch_size}")
         else:
-            intervals = model.infer_intervals()
+            intervals = model.intervals
             print(f"    cron         : {model.batching.interval.expression}")
             print(f"    window       : {_format_window(intervals)}")
             print(f"    intervals    : {_format_interval_count(intervals)}")

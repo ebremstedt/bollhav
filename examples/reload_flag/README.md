@@ -123,7 +123,7 @@ Constraints:
   write modes reject ROW because they assume they see the whole dataset
   at once.
 - `batch_size` is capped at 10000.
-- `infer_intervals()` refuses to produce time chunks under ROW-mode
+- `model.intervals` refuses to produce time chunks under ROW-mode
   reload — callers branch on `model.batching.mode` and use the
   row-batching execution path.
 

@@ -4,7 +4,7 @@ Demonstrates a model configured with `Batch(mode=ChunkMode.ROW)` — work
 is chunked by row count instead of time interval. The dispatcher below
 branches on `model.batching.mode` and uses the row-batching code path
 for ROW-mode models. INTERVAL models fall through to the standard
-infer_intervals() path.
+model.intervals path.
 
 Run from the repo root:
 
@@ -54,7 +54,7 @@ def _run_row_mode(model) -> None:
 
 
 def _run_interval_mode(model) -> None:
-    intervals = model.infer_intervals()
+    intervals = model.intervals
     execute.set_total(len(intervals))
     df = read_all(model)
     for i, _ in enumerate(intervals, start=1):

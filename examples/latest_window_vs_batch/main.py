@@ -17,7 +17,7 @@ from bollhav.model import Model, load_models
 @load_models
 def main(models: list[Model], debug: bool) -> None:
     for model in models:
-        intervals = model.infer_intervals()
+        intervals = model.intervals
 
         print(f"\n{model.target.full_name}")
         print(f"  window_expression   : {model.batching.interval.window_expression}")

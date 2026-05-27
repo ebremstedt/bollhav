@@ -24,7 +24,7 @@ def main(models: list[Model], debug: bool) -> None:
         execute.set_name_width(name_width_for(models))
 
     for model in models:
-        intervals = model.infer_intervals()
+        intervals = model.intervals
         execute.set_total(len(intervals))
         for interval in intervals:
             execute(model=model, since=interval.since, until=interval.until)

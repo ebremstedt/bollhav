@@ -17,7 +17,7 @@ def main(models: list[Model], debug: bool) -> None:
     setup_logging(debug=debug)
 
     for model in models:
-        intervals = model.infer_intervals()
+        intervals = model.intervals
 
         execute.set_total(len(intervals))
         for interval in intervals:

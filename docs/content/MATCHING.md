@@ -10,7 +10,7 @@ from bollhav.model import Model, load_models
 @load_models
 def main(models: list[Model], debug: bool) -> None:
     for model in models:
-        for interval in model.infer_intervals():
+        for interval in model.intervals:
             execute(model, interval, ...)
 ```
 

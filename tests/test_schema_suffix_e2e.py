@@ -55,7 +55,7 @@ def _drive_pipeline(*, schema_suffix: str = "pr123") -> str:
         _run.set_name_width(name_width_for(models))
 
         for model in models:
-            intervals = model.infer_intervals()
+            intervals = model.intervals
             _run.set_total(len(intervals))
             for interval in intervals:
                 since, until = (
