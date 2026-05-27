@@ -34,6 +34,10 @@ When you call `main()`, the decorator runs the following steps **before** your f
 7. **If `DRY_RUN` (or `DRY_RUN_EXTRA`):** print the matched-model summary and **return without calling your `main()`**.
 8. **Otherwise: call your function** as `main(models=<resolved list>, debug=<DEBUG>)`.
 
+## Calculating intervals
+
+`@load_models` doesn't pre-compute time chunks — it just bakes in the directives. `model.intervals` calculates them lazily on access: it resolves `[since, until)` from the directives + `batching.interval`, then splits it into `TZInterval` chunks. See [Chunking](CHUNKING.md) and [Modes](MODES.md).
+
 ## Mental model
 
 > Env vars in → matched-and-overridden model list out → your code runs.
