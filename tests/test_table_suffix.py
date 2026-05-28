@@ -1,7 +1,7 @@
 """Tests for TABLE_SUFFIX — the per-table-name analog of SCHEMA_SUFFIX.
 
 Covers:
-- `Target.resolved_name` with/without suffix and optional date appendix.
+- `Target.name_resolved` with/without suffix and optional date appendix.
 - `Target.full_name` composition with the table suffix in play.
 - `apply_runtime_overrides(table_suffix=...)` baking the suffix into a
   copied target without mutating the source.
@@ -22,27 +22,27 @@ from bollhav.model.target import Target  # noqa: E402
 from bollhav.model.target_schema import TargetSchema  # noqa: E402
 
 
-# ── Target.resolved_name ─────────────────────────────────────────────
+# ── Target.name_resolved ─────────────────────────────────────────────
 
 
-def test_resolved_name_no_suffix():
-    assert Target(name="customers").resolved_name == "customers"
+def test_name_resolved_no_suffix():
+    assert Target(name="customers").name_resolved == "customers"
 
 
-def test_resolved_name_with_suffix_no_appendix():
+def test_name_resolved_with_suffix_no_appendix():
     t = Target(name="customers", suffix="v2", suffix_appendix=None)
-    assert t.resolved_name == "customers_v2"
+    assert t.name_resolved == "customers_v2"
 
 
-def test_resolved_name_with_suffix_and_appendix():
+def test_name_resolved_with_suffix_and_appendix():
     fixed_now = datetime(2026, 4, 1, tzinfo=timezone.utc)
     with patch("bollhav.model.target.datetime") as mock_dt:
         mock_dt.now.return_value = fixed_now
         t = Target(name="customers", suffix="v2", suffix_appendix="%y%V")
-        assert t.resolved_name == "customers_v2_2614"
+        assert t.name_resolved == "customers_v2_2614"
 
 
-def test_resolved_name_default_appendix_is_none():
+def test_name_resolved_default_appendix_is_none():
     """Unlike TargetSchema (which defaults the date suffix on), Target
     defaults it off — table hotswaps usually want a clean predictable
     name, not a time-varying one."""
@@ -100,10 +100,10 @@ def test_apply_runtime_overrides_bakes_table_suffix(tmp_path, monkeypatch):
     new = _target_with_suffix(src, schema_suffix="", table_suffix="v2")
 
     assert new.suffix == "v2"
-    assert new.resolved_name == "customers_v2"
+    assert new.name_resolved == "customers_v2"
     # source target must not be mutated
     assert src.suffix == ""
-    assert src.resolved_name == "customers"
+    assert src.name_resolved == "customers"
 
 
 def test_apply_runtime_overrides_empty_table_suffix_preserves_source():
@@ -115,7 +115,7 @@ def test_apply_runtime_overrides_empty_table_suffix_preserves_source():
     new = _target_with_suffix(src, schema_suffix="", table_suffix="")
 
     assert new.suffix == "legacy"
-    assert new.resolved_name == "customers_legacy"
+    assert new.name_resolved == "customers_legacy"
 
 
 def test_apply_runtime_overrides_combines_schema_and_table_suffix():
@@ -130,7 +130,7 @@ def test_apply_runtime_overrides_combines_schema_and_table_suffix():
     assert new.schema.suffix == "pr123"
     # resolved schema includes the schema date appendix by default, so use
     # the relevant pieces independently rather than asserting the full name.
-    assert new.resolved_name == "customers_v2"
+    assert new.name_resolved == "customers_v2"
 
 
 # ── load_models env wiring ───────────────────────────────────────────

@@ -61,7 +61,7 @@ def ensure_schema(conn: pyodbc.Connection, schema: str) -> None:
 
 def ensure_table(conn: pyodbc.Connection, model: Model) -> None:
     schema = model.target.schema.resolved
-    table = model.target.resolved_name
+    table = model.target.name_resolved
     logger.debug("Ensuring table: %s.%s", schema, table)
 
     mssql_cols = [c for c in model.target.columns if isinstance(c, MssqlColumn)]
@@ -120,7 +120,7 @@ def ensure_primary_key(conn: pyodbc.Connection, model: Model) -> None:
     PK from this single code path.
     """
     schema = model.target.schema.resolved
-    table = model.target.resolved_name
+    table = model.target.name_resolved
     mssql_cols = [c for c in model.target.columns if isinstance(c, MssqlColumn)]
     pk_cols = [c for c in mssql_cols if c.primary_key]
     if not pk_cols:
@@ -146,7 +146,7 @@ def ensure_primary_key(conn: pyodbc.Connection, model: Model) -> None:
 
 def ensure_indexes(conn: pyodbc.Connection, model: Model) -> None:
     schema = model.target.schema.resolved
-    table = model.target.resolved_name
+    table = model.target.name_resolved
     mssql_indexes = [i for i in model.target.indexes if isinstance(i, MssqlIndex)]
     if not mssql_indexes:
         return

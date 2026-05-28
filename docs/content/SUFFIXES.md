@@ -12,7 +12,7 @@ They compose: you can use both at once.
 | Knob | Default | What it changes | Typical use |
 |---|---|---|---|
 | **`SCHEMA_SUFFIX`** | required (set at runtime) | `target.schema.resolved` | Separating dev / PR / CI runs from prod |
-| **`TABLE_SUFFIX`** | empty (off) | `target.resolved_name` | Blue/green hotswap inside a single schema |
+| **`TABLE_SUFFIX`** | empty (off) | `target.name_resolved` | Blue/green hotswap inside a single schema |
 
 ## How it works
 
@@ -23,7 +23,7 @@ TARGETSCHEMA(name=warehouse, suffix=pr123, suffix_appendix=%y%V)
                                         └─ resolved → "warehouse_pr123_2614_"
 
 TARGET(name=customers,        suffix=v2,   suffix_appendix=None)
-                                        └─ resolved_name → "customers_v2"
+                                        └─ name_resolved → "customers_v2"
 
 TARGET.full_name → "warehouse_pr123_2614_.customers_v2"
 ```
@@ -32,10 +32,10 @@ The schema-suffix appendix defaults to `%y%V` (ISO year+week) — so every PR ru
 
 All downstream identifiers follow:
 
-- Postgres index name (`<table>_<col>_idx`) uses `resolved_name` — never collides between `customers_v2_payload_idx` and `customers_payload_idx`.
-- Postgres unique-constraint name (`<table>_uq`) uses `resolved_name`.
-- MSSQL `<table>_pk` and `<table>_uq` constraint names use `resolved_name`.
-- DDL targets (`CREATE TABLE`, `TRUNCATE`, `DROP`) use `resolved_name`.
+- Postgres index name (`<table>_<col>_idx`) uses `name_resolved` — never collides between `customers_v2_payload_idx` and `customers_payload_idx`.
+- Postgres unique-constraint name (`<table>_uq`) uses `name_resolved`.
+- MSSQL `<table>_pk` and `<table>_uq` constraint names use `name_resolved`.
+- DDL targets (`CREATE TABLE`, `TRUNCATE`, `DROP`) use `name_resolved`.
 
 Tag matching does **not** see the suffix — it stays bound to the base `name` so the same `TAGS=[customers]` expression works regardless of whether a suffix is set.
 
