@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone, tzinfo
-from typing import TYPE_CHECKING
 
 from icron import croniter
 from bollhav.model.source_file import SourceFile
@@ -15,9 +14,6 @@ from bollhav.model.directives import Directives
 from bollhav.model.tags import Tags
 from roskarl import IntervalExpression, IntervalExpressionExtended
 
-if TYPE_CHECKING:
-    from bollhav.model.source import Source
-
 logger = logging.getLogger(__name__)
 
 
@@ -25,7 +21,7 @@ class Model:
     def __init__(
         self,
         target: Target,
-        source: Source | None = None,
+        source: SourceFile | SourceTable | None = None,
         bounds: Bounds | None = None,
         batching: Batch | None = None,
         tagging: Tags | None = None,

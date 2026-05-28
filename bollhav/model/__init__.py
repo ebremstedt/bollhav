@@ -10,7 +10,6 @@ from bollhav.model.model_type import ModelType
 from bollhav.model.column_sorting import sort_columns
 from bollhav.model.write_modes import WriteMode
 from bollhav.model.target_schema import TargetSchema
-from bollhav.model.source import Source
 from bollhav.model.source_file import SourceFile
 from bollhav.model.source_table import SourceTable
 from bollhav.model.target import Target
@@ -34,7 +33,6 @@ __all__ = [
     "ModelType",
     "sort_columns",
     "TargetSchema",
-    "Source",
     "SourceFile",
     "SourceTable",
     "Target",
