@@ -32,9 +32,11 @@ def ensure_schema(conn: psycopg.Connection, schema: str) -> None:
 
 def ensure_table(conn: psycopg.Connection, model: Model) -> None:
     schema_id = sql.Identifier(model.target.schema.resolved)
-    table_id = sql.Identifier(model.target.name)
+    table_id = sql.Identifier(model.target.name_resolved)
     logger.debug(
-        "Ensuring table: %s.%s", model.target.schema.resolved, model.target.name
+        "Ensuring table: %s.%s",
+        model.target.schema.resolved,
+        model.target.name_resolved,
     )
 
     if model.target.recreate_table:
@@ -64,14 +66,14 @@ def ensure_table(conn: psycopg.Connection, model: Model) -> None:
             )
         )
     if model.target.partitioned_by is not None:
-        index_name = f"{model.target.name}_{model.target.partitioned_by}_idx"
+        index_name = f"{model.target.name_resolved}_{model.target.partitioned_by}_idx"
         conn.execute(
             sql.SQL(
                 "CREATE INDEX IF NOT EXISTS {index} ON {schema}.{table} ({col})"
             ).format(
                 index=sql.Identifier(index_name),
                 schema=sql.Identifier(model.target.schema.resolved),
-                table=sql.Identifier(model.target.name),
+                table=sql.Identifier(model.target.name_resolved),
                 col=sql.Identifier(model.target.partitioned_by),
             )
         )
@@ -82,7 +84,7 @@ def ensure_table(conn: psycopg.Connection, model: Model) -> None:
         if isinstance(col, PostgresColumn) and col.unique
     ]
     if unique_columns:
-        constraint_name = f"{model.target.name}_uq"
+        constraint_name = f"{model.target.name_resolved}_uq"
         unique_col_ids = sql.SQL(", ").join(
             sql.Identifier(col.name) for col in unique_columns
         )
@@ -95,7 +97,7 @@ def ensure_table(conn: psycopg.Connection, model: Model) -> None:
                 END $$
             """).format(
                 schema=sql.Identifier(model.target.schema.resolved),
-                table=sql.Identifier(model.target.name),
+                table=sql.Identifier(model.target.name_resolved),
                 constraint=sql.Identifier(constraint_name),
                 cols=unique_col_ids,
             )

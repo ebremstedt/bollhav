@@ -29,6 +29,8 @@ For programmatic use (or tests) call `apply_runtime_overrides(...)` directly wit
 | **TAGS** | string | yes | Tag expression to filter models |
 | **SCHEMA_SUFFIX** | string | yes | Suffix appended to schema name in non-production |
 | **USE_SCHEMA_SUFFIX** | bool | no | Enables schema suffix, defaults to **True** |
+| **TABLE_SUFFIX** | string | yes (when `USE_TABLE_SUFFIX=true`) | Suffix appended to every matched model's table name — for blue/green hotswap inside a single schema. See [Schema vs table suffix](SUFFIXES.md) |
+| **USE_TABLE_SUFFIX** | bool | no | Enables table suffix, defaults to **False** |
 | **DEBUG** | bool | no | Enables timestamped debug prints |
 | **TIMEZONE_OVERRIDE** | string | no | IANA timezone (e.g. `Europe/Stockholm`) that overrides every model's timezone |
 | **LATEST_ENABLED** | bool | no | Enables latest mode. Cannot be `True` along with **BACKFILL_ENABLED** |
