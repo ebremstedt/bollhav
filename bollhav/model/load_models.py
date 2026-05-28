@@ -38,6 +38,7 @@ class _RuntimeConfig:
     dry_run: bool
     dry_run_extra: bool
     debug: bool
+    table_suffix: str = ""
 
 
 def load_models(
@@ -65,6 +66,8 @@ def load_models(
         TAGS                          (required)
         SCHEMA_SUFFIX                 (required when USE_SCHEMA_SUFFIX=true)
         USE_SCHEMA_SUFFIX             default true
+        TABLE_SUFFIX                  (required when USE_TABLE_SUFFIX=true)
+        USE_TABLE_SUFFIX              default false
         DEBUG                         default false
         TIMEZONE_OVERRIDE             IANA timezone name
         LATEST_ENABLED                default false
@@ -94,6 +97,7 @@ def load_models(
                 folder=folder,
                 tags=cfg.tags,
                 schema_suffix=cfg.schema_suffix,
+                table_suffix=cfg.table_suffix,
                 upstream_mode=cfg.upstream_mode,
                 latest=cfg.latest,
                 backfill_since=cfg.backfill_since,
@@ -138,6 +142,12 @@ def _read_env() -> _RuntimeConfig:
         raise ValueError("USE_SCHEMA_SUFFIX=True requires non-empty SCHEMA_SUFFIX")
     schema_suffix = raw_suffix if use_schema_suffix else ""
 
+    use_table_suffix = env_var_bool(name="USE_TABLE_SUFFIX", default=False)
+    raw_table_suffix = env_var(name="TABLE_SUFFIX", default="")
+    if use_table_suffix and raw_table_suffix == "":
+        raise ValueError("USE_TABLE_SUFFIX=True requires non-empty TABLE_SUFFIX")
+    table_suffix = raw_table_suffix if use_table_suffix else ""
+
     window_expression_override = env_var_interval_expression(
         name="WINDOW_EXPRESSION_OVERRIDE", should_print_unset=False
     )
@@ -156,6 +166,7 @@ def _read_env() -> _RuntimeConfig:
     return _RuntimeConfig(
         tags=env_var(name="TAGS", required=True),
         schema_suffix=schema_suffix,
+        table_suffix=table_suffix,
         upstream_mode=_resolve_upstream_mode(),
         latest=latest,
         backfill_enabled=backfill_enabled,
@@ -232,7 +243,9 @@ def _print_summary(cfg: _RuntimeConfig) -> None:
     if cfg.dry_run:
         _row("dry run", "extra" if cfg.dry_run_extra else "concise")
     if cfg.schema_suffix:
-        _row("suffix", cfg.schema_suffix)
+        _row("schema suffix", cfg.schema_suffix)
+    if cfg.table_suffix:
+        _row("table suffix", cfg.table_suffix)
     if cfg.upstream_mode != UpstreamMode.ENFORCE:
         _row("upstream", cfg.upstream_mode.value)
     if cfg.tz_override is not None:
