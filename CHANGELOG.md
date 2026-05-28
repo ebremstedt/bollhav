@@ -1,5 +1,17 @@
 # Changelog
 
+## [2.0.136] - 2026-05-28
+
+### Added
+
+- `Target.suffix` and `Target.suffix_appendix` fields, plus a `name_resolved` `@property` that returns the base `name` with the suffix (and optional `strftime` appendix) applied. Mirrors what `TargetSchema.resolved` already does for the schema — same three-field triple, same resolution rule — but lives flat on `Target` because there's not enough table-specific structure to justify a separate `TargetTable` wrapper. `suffix_appendix` defaults to `None` (unlike `TargetSchema`'s `"%y%V"` default) because the typical use case — blue/green table hotswap — wants a stable predictable name (`customers_v2`), not a time-varying one. Opt in by setting an appendix when you want throwaway sandbox names.
+- `TABLE_SUFFIX` and `USE_TABLE_SUFFIX` env vars on `@load_models`, parallel to `SCHEMA_SUFFIX` / `USE_SCHEMA_SUFFIX`. `USE_TABLE_SUFFIX` defaults to `false` (off) — most pipelines don't want a per-table rename. When `true`, `TABLE_SUFFIX` must be set; the value is baked into every matched model's `target.suffix`. `apply_runtime_overrides` gained a matching `table_suffix=""` kwarg for programmatic use. The two suffixes compose cleanly: `SCHEMA_SUFFIX=pr123 TABLE_SUFFIX=v2` lands tables at `warehouse_pr123_2614_.customers_v2`.
+- New docs page [Schema vs table suffix](docs/content/SUFFIXES.md) — when to use which, the limitations of each (Postgres' 63-char truncation tightens, cross-table SQL doesn't follow renames, etc.), and how the two compose. `TABLE_SUFFIX` / `USE_TABLE_SUFFIX` added to the env-vars table in [RUNTIME_OVERRIDES.md](docs/content/RUNTIME_OVERRIDES.md) and to [ENV.md](docs/content/ENV.md). [TARGET.md](docs/content/TARGET.md) gained sections for the new `suffix`, `suffix_appendix`, and `name_resolved` fields.
+
+### Changed
+
+- All DDL bollhav emits — Postgres `CREATE TABLE` / `TRUNCATE` / index name / unique-constraint name, and MSSQL `CREATE TABLE` / PK / UQ / index — now uses `target.name_resolved` instead of `target.name`. Existing models with no `suffix` set are unaffected because `name_resolved == name` in that case. `Target.full_name` now composes as `catalog.schema.resolved.name_resolved` so the fully-qualified identifier always reflects the resolved form. `Model.pretty()` and the dry-run summary render `name_resolved` for the same reason — what you see in the printout is what'll hit the database.
+
 ## [2.0.135] - 2026-05-28
 
 ### Changed

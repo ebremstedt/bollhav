@@ -29,6 +29,7 @@ When you call `main()`, the decorator runs the following steps **before** your f
 5. **Match by tags.** Filters the discovered models against the `TAGS` expression and topologically sorts them with the chosen `UPSTREAM` policy. See [Matching](MATCHING.md) and [Tags](TAGS.md).
 6. **Bake in the overrides.** Each matched model is **copied** (the source models are not mutated) with:
     - `target.schema.suffix` set to `SCHEMA_SUFFIX`
+    - `target.suffix` set to `TABLE_SUFFIX` (when `USE_TABLE_SUFFIX=true`) — see [Schema vs table suffix](SUFFIXES.md)
     - `batching.interval` updated by `INTERVAL_EXPRESSION_OVERRIDE` / `WINDOW_EXPRESSION_OVERRIDE` / `LOOKBACK_OVERRIDE` / `TIMEZONE_OVERRIDE`
     - `directives.latest` / `directives.since` / `directives.until` set from the chosen mode
 7. **If `DRY_RUN` (or `DRY_RUN_EXTRA`):** print the matched-model summary and **return without calling your `main()`**.

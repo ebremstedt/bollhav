@@ -10,6 +10,22 @@ Type: `str` · Default: required
 
 Destination table name.
 
+## suffix
+
+Type: `str` · Default: `""`
+
+Appended to `name` at runtime (e.g. `customers` → `customers_v2`). Off by default; set via `TABLE_SUFFIX` env var or programmatically. Used for blue/green hotswap inside a single schema — see [Schema vs table suffix](SUFFIXES.md).
+
+## suffix_appendix
+
+Type: `str | None` · Default: `None`
+
+Optional `strftime` format string appended after `suffix` (e.g. `"%y%V"` → `customers_v2_2614`). Defaults to `None` because hotswap usually wants a stable predictable name; turn it on for throwaway sandbox tables.
+
+## Computed: `name_resolved`
+
+A derived `@property` returning the resolved table name: `name` with `suffix` (and optional `suffix_appendix`) applied. Equals `name` when `suffix` is empty. All DDL bollhav emits (`CREATE TABLE`, index/constraint names) uses `name_resolved` so a suffixed run never collides with the base table.
+
 ## schema
 
 Type: `TargetSchema` · Default: `TargetSchema()`
@@ -20,7 +36,7 @@ Destination schema. See [TargetSchema](TARGETSCHEMA.md) for the sub-fields.
 
 Type: `str` · Default: `None`
 
-Destination catalog. Set for three-part addressing (`catalog.schema.table`) on warehouses like Snowflake, BigQuery, and Trino. When set, `Target.full_name` returns `catalog.schema.name` and the catalog is added to the model's tags.
+Destination catalog. Set for three-part addressing (`catalog.schema.table`) on warehouses like Snowflake, BigQuery, and Trino. When set, `Target.full_name` returns `catalog.schema_resolved.name_resolved` and the catalog is added to the model's tags.
 
 ## database
 

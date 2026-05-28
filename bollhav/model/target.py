@@ -33,7 +33,7 @@ class Target:
     partitioned_by_index: bool = field(init=False, default=False)
 
     @property
-    def resolved_name(self) -> str:
+    def name_resolved(self) -> str:
         """Base table name with `suffix` (and optional date `suffix_appendix`)
         appended. Empty `suffix` returns the bare name unchanged."""
         if not self.suffix:
@@ -45,13 +45,13 @@ class Target:
 
     @property
     def full_name(self) -> str:
-        """`catalog.schema.resolved_name` when catalog is set, else
-        `schema.resolved_name` (or just `resolved_name` when schema is unset —
+        """`catalog.schema.name_resolved` when catalog is set, else
+        `schema.name_resolved` (or just `name_resolved` when schema is unset —
         same as before catalog existed)."""
         base = (
-            f"{self.schema.resolved}.{self.resolved_name}"
+            f"{self.schema.resolved}.{self.name_resolved}"
             if self.schema.resolved
-            else self.resolved_name
+            else self.name_resolved
         )
         return f"{self.catalog}.{base}" if self.catalog else base
 

@@ -59,7 +59,7 @@ def _mk_model(
     model = MagicMock()
     model.target.full_name = full_name
     model.target.name = name
-    model.target.resolved_name = name
+    model.target.name_resolved = name
     model.target.schema.resolved = schema
     model.target.write_mode.value = "APPEND"
     model.bounds.begin = None
