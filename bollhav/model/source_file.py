@@ -1,11 +1,10 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-
-from bollhav.model.source import Source
 
 
 @dataclass
-class SourceFile(Source):
+class SourceFile:
+    name: str
     path: Path
     encoding: str | None = None
     separator: str | None = None
@@ -14,3 +13,4 @@ class SourceFile(Source):
     archive_folder: Path | None = None
     dateformat: str | None = None
     file_ending: str | None = None
+    extra: dict = field(default_factory=dict)
