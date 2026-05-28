@@ -16,6 +16,7 @@ def apply_runtime_overrides(
     *,
     tags: str,
     schema_suffix: str = "",
+    table_suffix: str = "",
     upstream_mode: UpstreamMode = UpstreamMode.ENFORCE,
     latest: bool = False,
     backfill_since: datetime | None = None,
@@ -30,6 +31,7 @@ def apply_runtime_overrides(
 
     Each returned model has:
         * `target.schema.suffix` set to `schema_suffix`.
+        * `target.suffix` set to `table_suffix`.
         * `batching.interval.expression` overridden by
           `directives.reload_interval_expression` (tag) or
           `interval_expression_override` (pipe) when set.
@@ -50,6 +52,7 @@ def apply_runtime_overrides(
         _apply_to_model(
             m,
             schema_suffix=schema_suffix,
+            table_suffix=table_suffix,
             latest=latest,
             backfill_since=backfill_since,
             backfill_until=backfill_until,
@@ -73,9 +76,10 @@ def _apply_to_model(
     window_expression_override: str | None,
     lookback_override: int | None,
     tz_override: tzinfo | None,
+    table_suffix: str = "",
 ) -> Model:
     new_model = Model(
-        target=_target_with_suffix(model.target, schema_suffix),
+        target=_target_with_suffix(model.target, schema_suffix, table_suffix),
         source=model.source,
         bounds=model.bounds,
         batching=_batching_with_overrides(
@@ -105,9 +109,13 @@ def _apply_to_model(
     return new_model
 
 
-def _target_with_suffix(target: Target, schema_suffix: str) -> Target:
+def _target_with_suffix(
+    target: Target, schema_suffix: str, table_suffix: str = ""
+) -> Target:
     return Target(
         name=target.name,
+        suffix=table_suffix or target.suffix,
+        suffix_appendix=target.suffix_appendix,
         schema=TargetSchema(
             name=target.schema.name,
             suffix=schema_suffix,

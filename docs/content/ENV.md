@@ -58,6 +58,14 @@ Bool, default `true`. When `true`, each model's `TargetSchema` honors its `suffi
 
 String, optional. Overrides every model's `TargetSchema.suffix` for this run — typically used in dev (`SCHEMA_SUFFIX=$USER`) to isolate writes per developer.
 
+## USE_TABLE_SUFFIX
+
+Bool, default `false`. When `true`, each matched model's `Target.suffix` is set to `TABLE_SUFFIX`. Off by default because most pipelines don't need it. See [Schema vs table suffix](SUFFIXES.md) for when you would.
+
+## TABLE_SUFFIX
+
+String, required when `USE_TABLE_SUFFIX=true`. Appended to every matched model's `Target.name` for this run (`customers` → `customers_v2`). Use for blue/green hotswap inside a single schema. See [Schema vs table suffix](SUFFIXES.md).
+
 ## DEBUG
 
 Bool, default `false`. Pretty-prints every matched model after `apply_runtime_overrides` runs — the fully-resolved version after env vars and tag overrides have been baked in.

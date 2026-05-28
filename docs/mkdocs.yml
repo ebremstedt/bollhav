@@ -76,6 +76,7 @@ nav:
       - Chunking: CHUNKING.md
   - Runtime:
       - Runtime overrides: RUNTIME_OVERRIDES.md
+      - Schema vs table suffix: SUFFIXES.md
       - Progress bar: PROGRESS_BAR.md
   - Tags:
       - Tags: TAGS.md

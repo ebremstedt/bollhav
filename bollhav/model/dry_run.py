@@ -76,14 +76,14 @@ def _print_models_concise(models: list[Model]) -> None:
     schemas = sorted(by_schema)
     for i, schema in enumerate(schemas):
         group = by_schema[schema]
-        name_width = max(len(m.target.name) for m in group)
+        name_width = max(len(m.target.name_resolved) for m in group)
         print(f"{schema}:")
         for model in group:
             tail = _concise_tail(model)
             if tail is None:
-                print(f"  {model.target.name}")
+                print(f"  {model.target.name_resolved}")
             else:
-                name = model.target.name.ljust(name_width)
+                name = model.target.name_resolved.ljust(name_width)
                 print(f"  {name}   {tail}")
         if i < len(schemas) - 1:
             print()
