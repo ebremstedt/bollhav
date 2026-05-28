@@ -66,7 +66,7 @@ class Model:
             f"  upstream:      {', '.join(self.upstream) if self.upstream else '(none)'}",
             "",
             "  target:",
-            f"    name:        {self.target.name}",
+            f"    name:        {self.target.resolved_name}",
             f"    schema:      {self.target.schema.resolved}",
             *(
                 [f"    catalog:     {self.target.catalog}"]

@@ -1,4 +1,5 @@
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Callable
 
 from bollhav.model.database import Database, DatabaseColumn, DatabaseIndex
@@ -11,6 +12,8 @@ from bollhav.model.target_schema import TargetSchema
 @dataclass
 class Target:
     name: str
+    suffix: str = ""
+    suffix_appendix: str | None = None
     schema: TargetSchema = field(default_factory=TargetSchema)
     catalog: str | None = None
     database: Database | None = None
@@ -30,12 +33,25 @@ class Target:
     partitioned_by_index: bool = field(init=False, default=False)
 
     @property
+    def resolved_name(self) -> str:
+        """Base table name with `suffix` (and optional date `suffix_appendix`)
+        appended. Empty `suffix` returns the bare name unchanged."""
+        if not self.suffix:
+            return self.name
+        s = f"{self.name}_{self.suffix}"
+        if self.suffix_appendix:
+            s += "_" + datetime.now(tz=timezone.utc).strftime(self.suffix_appendix)
+        return s
+
+    @property
     def full_name(self) -> str:
-        """`catalog.schema.name` when catalog is set, else `schema.name`
-        (or just `name` when schema is unset — same as before catalog
-        existed)."""
+        """`catalog.schema.resolved_name` when catalog is set, else
+        `schema.resolved_name` (or just `resolved_name` when schema is unset —
+        same as before catalog existed)."""
         base = (
-            f"{self.schema.resolved}.{self.name}" if self.schema.resolved else self.name
+            f"{self.schema.resolved}.{self.resolved_name}"
+            if self.schema.resolved
+            else self.resolved_name
         )
         return f"{self.catalog}.{base}" if self.catalog else base
 
