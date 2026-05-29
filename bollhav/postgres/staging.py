@@ -331,7 +331,7 @@ def stage(
 ) -> Iterator[Stage]:
     """Stream sub-batches into staging, then atomically flush to target.
 
-    Usage inside an `@state_tracker`-wrapped execute:
+    Usage inside an `@state`-wrapped execute:
 
         with stage(conn, model, since=since, until=until) as s:
             for chunk in source:
@@ -340,7 +340,7 @@ def stage(
     The model is expected to have `_state_run_id` already stashed (the
     user's pipeline setup mints one per invocation). On a clean exit
     the flush sets `model._state_applied_via_staging = (since, until)`
-    so `@state_tracker` skips its own (redundant) mark_applied.
+    so `@state` skips its own (redundant) mark_applied.
 
     On exception inside the with-block the staging table is left in
     place for `gc_orphan_staging_tables()` to clean up next run. The

@@ -11,6 +11,41 @@ from bollhav.model.target_schema import TargetSchema
 
 
 @dataclass
+class Mutations:
+    """━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    ⚠  MUTATED AT RUNTIME — NOT CONFIG
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    Lives on `Target.mutations`. Every read- or write-site spells out
+    its mutability in the access path: `target.mutations.recreated`
+    cannot be confused with a config field — and the plural reads as
+    "things that have already been mutated on this target."
+
+    Per-pipeline-run tracker for one-shot setup operations on a
+    Target. Every field below starts `False`. The first time the
+    corresponding DDL statement runs in `ensure_schema_and_table`
+    during a pipeline invocation, the flag flips to `True` so
+    subsequent intervals in the same loop skip the redundant work.
+
+    `apply_runtime_overrides` builds a fresh `Target` (and therefore
+    a fresh `Mutations`) for every `@load_models` invocation, so
+    these flags reset naturally between pipeline runs.
+
+    Single-worker only: two pipelines on the same model with
+    `recreate_table=True` each see their own fresh `Mutations` and
+    would both DROP, potentially clobbering each other. The flag
+    isn't a cross-process lock — see `model_lock` if you need that.
+    """
+
+    schema_created: bool = False
+    table_created: bool = False
+    recreated: bool = False  # `recreate_table` DROP done?
+    truncated: bool = False  # `truncate_table` TRUNCATE done?
+    indexes_created: bool = False
+    uniques_added: bool = False
+
+
+@dataclass
 class Target:
     name: str
     suffix: str = ""
@@ -25,6 +60,10 @@ class Target:
     dsn_env_var: str | None = None
     column_sorting: Callable | None = sort_columns
     extra: dict | None = None
+    # ⚠ Destructive one-shot ops. Run ONCE on the first
+    # `ensure_schema_and_table` call of a pipeline run (gated by
+    # `mutations` below). NOT SAFE for parallel runs of the same
+    # model — see `Mutations` docstring.
     recreate_table: bool = False
     truncate_table: bool = False
     staging: Staging | None = None
@@ -33,6 +72,10 @@ class Target:
     unique_columns: list = field(init=False, default_factory=list)
     primary_key_columns: list = field(init=False, default_factory=list)
     partitioned_by_index: bool = field(init=False, default=False)
+    # ⚠ MUTATED AT RUNTIME — see Mutations docstring above. Fields
+    # default to all-False (nothing's been done yet). Do not pre-set
+    # these in your `Target(...)` call; they're filled in for you.
+    mutations: Mutations = field(init=False, default_factory=Mutations)
 
     @property
     def name_resolved(self) -> str:
@@ -73,6 +116,26 @@ class Target:
             if getattr(c, "partition_on", False):
                 return c.name
         return None
+
+    @property
+    def setup_complete(self) -> bool:
+        """True iff every *applicable* one-shot setup op has been
+        done. A flag staying False is fine when its directive isn't
+        set: e.g. `mutations.recreated` only flips when
+        `recreate_table=True`, so on a non-recreate target the flag
+        stays False forever and we treat that as "nothing to do."
+
+        Lets `ensure_schema_and_table` short-circuit the empty
+        BEGIN/COMMIT roundtrip on intervals after the first."""
+        m = self.mutations
+        return (
+            m.schema_created
+            and m.table_created
+            and (m.recreated or not self.recreate_table)
+            and (m.truncated or not self.truncate_table)
+            and (m.indexes_created or self.partitioned_by is None)
+            and (m.uniques_added or not self.unique_columns)
+        )
 
     @property
     def merge_key_columns(self) -> list:

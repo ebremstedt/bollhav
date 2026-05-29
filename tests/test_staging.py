@@ -4,7 +4,7 @@ Postgres connection is mocked. Covers:
   * `stage()` happy path (DDL → COPY → flush tx)
   * exception path (no flush, marker not set)
   * preconditions (write mode, state, batching, run_id)
-  * @state_tracker bypass after a flush
+  * @state bypass after a flush
   * orphan staging-table GC
 
 Real-DB exercise lives in the runnable example."""

@@ -1,6 +1,6 @@
 """Per-interval execute function.
 
-`@state_tracker` wraps this: gates on the state row (skip if applied),
+`@state` wraps this: gates on the state row (skip if applied),
 runs, then either lets the staged flush flip the state row inside its
 own tx, or — for non-staged models — issues `mark_applied` after a
 successful run.
@@ -18,12 +18,12 @@ from datetime import datetime
 
 import psycopg
 
-from bollhav.model import Model, state_tracker
+from bollhav.model import Model, state
 from bollhav.postgres import write
 from mock_read import read
 
 
-@state_tracker
+@state
 def execute(model: Model, since: datetime, until: datetime) -> None:
     # Optional artificial delay — gives the dashboard time to show the
     # `running` spinner before the row flips to `applied`. Default: no

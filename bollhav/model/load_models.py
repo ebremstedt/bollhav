@@ -112,7 +112,7 @@ def load_models(
                                       where the state tables don't exist or
                                       you don't want to touch them. Skips the
                                       bootstrap, banner, and any state-table
-                                      writes; @state_tracker becomes a
+                                      writes; @state becomes a
                                       passthrough; write() uses the direct
                                       path even on staging-enabled models.
     """
@@ -139,7 +139,7 @@ def load_models(
             # model — useful for ad-hoc/dev runs. Nulling `state` and
             # `target.staging` makes the rest of the wrapper cascade
             # naturally: bootstrap is a no-op, banner skips,
-            # @state_tracker becomes passthrough, write() routes direct.
+            # @state becomes passthrough, write() routes direct.
             if cfg.state_disabled:
                 for m in models:
                     m.state = None
