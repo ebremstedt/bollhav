@@ -1,5 +1,17 @@
 # Changelog
 
+## [2.0.137] - 2026-05-29
+
+### Added
+
+- `Target.mutations` — per-pipeline-run tracker for one-shot setup DDL. Six flags (`schema_created`, `table_created`, `recreated`, `truncated`, `indexes_created`, `uniques_added`) flip the first time the corresponding statement fires in `ensure_schema_and_table`; subsequent intervals skip the work. `Target.setup_complete` property gates the whole function — on a 365-interval backfill, one setup transaction instead of 365. Each flag is "did that DDL fire?", and `setup_complete` reconciles them against the directive (e.g. `m.recreated OR not target.recreate_table`). Field is `init=False` so the verbose access path `target.mutations.X` always reads as runtime state, never config. See [Mutating targets](docs/content/MUTATIONS.md).
+- Views and library-only tables as upstreams in `z_bollhav.model_library`. View-models auto-register on every bootstrap; static / no-state tables opt in via `Model(library=True)`. The library gained a `model_type` column and made `state_schema` / `state_table` nullable; `is_satisfied` returns `True` on mere library presence when state pointers are NULL (zero SQL), otherwise runs the existing applied-row check. `lookup` now returns a `LibraryEntry` `NamedTuple`. Block reasons name the upstream's `model_type`. Documented in [STATE.md](docs/content/STATE.md#upstreams-views-and-library-only-tables).
+- New example [examples/state_with_view](examples/state_with_view/) — `warehouse.orders` (table, state + staging) → `warehouse.v_high_value_orders` (VIEW) → `warehouse.high_value_sums` (table, state + staging). Demonstrates view auto-registration and the downstream's satisfaction-by-presence path end-to-end.
+
+### Changed
+
+- `ensure_library` migrates older `z_bollhav.model_library` tables with **additive, idempotent** ALTERs (sentinel-gated via `information_schema`) instead of `DROP TABLE`. The library is shared across multiple pipelines run by potentially-different bollhav images at the same time, so dropping would brick concurrent old-image writers — `ADD COLUMN model_type TEXT NOT NULL DEFAULT 'TABLE'` and `ALTER COLUMN state_schema/state_table DROP NOT NULL` let both versions coexist. Same constraint going forward: never drop, never tighten `NOT NULL`.
+
 ## [2.0.136] - 2026-05-28
 
 ### Added

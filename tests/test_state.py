@@ -101,7 +101,12 @@ class TestModelStateField:
                 state=State(),
             )
 
-    def test_staging_without_state_raises(self) -> None:
+    def test_staging_without_state_is_allowed(self) -> None:
+        """Staging without state is a supported combo: memory-bounded
+        chunked writes + atomic per-interval finalization, without
+        the state-row durability layer. Re-runs re-process every
+        interval (no `applied` gate). The orphan-staging GC handles
+        crashed prior runs."""
         from bollhav.model import (
             Batch,
             IntervalChunks,
@@ -111,15 +116,16 @@ class TestModelStateField:
             TargetSchema,
         )
 
-        with pytest.raises(ValueError, match="target.staging on model"):
-            Model(
-                target=Target(
-                    name="orders",
-                    schema=TargetSchema(name="public"),
-                    staging=Staging(),
-                ),
-                batching=Batch(interval=IntervalChunks(expression="@hourly")),
-            )
+        m = Model(
+            target=Target(
+                name="orders",
+                schema=TargetSchema(name="public"),
+                staging=Staging(),
+            ),
+            batching=Batch(interval=IntervalChunks(expression="@hourly")),
+        )
+        assert m.state is None
+        assert m.target.staging is not None
 
     def test_staging_with_state_ok(self) -> None:
         from bollhav.model import (
@@ -1235,6 +1241,8 @@ class TestLoadModelsStateBootstrap:
         from bollhav.model.staging import Staging
 
         model = MagicMock()
+        model.target.is_view = False
+        model.library = False
         model.target.staging = Staging()
         model.target.full_name = "public.orders"
         model.upstream = upstream if upstream is not None else []
@@ -1246,6 +1254,8 @@ class TestLoadModelsStateBootstrap:
 
     def _plain_model(self):
         model = MagicMock()
+        model.target.is_view = False
+        model.library = False
         model.target.staging = None
         model.target.full_name = "public.other"
         return model

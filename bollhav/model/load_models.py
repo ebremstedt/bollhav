@@ -290,29 +290,83 @@ def _bootstrap_state_for_staged_models(
     State DB unreachable → warn and set `model.intervals = []`. Other
     models keep going."""
     from bollhav.postgres import library as pg_library
+    from bollhav.postgres import staging as pg_staging
     from bollhav.postgres import state as pg_state
 
     matched_names = {m.target.full_name for m in models}
 
     for model in models:
+        # Library-only registration path. Triggered for:
+        #   * Views — always (claimable upstream; no state needed).
+        #   * Tables with `library=True` but no `state` / no staging —
+        #     opt-in for static / no-state tables that should still be
+        #     discoverable as upstreams.
+        # No state table is created; the library row alone makes the
+        # model claimable. Every downstream interval that references
+        # one of these is satisfied by mere presence in the library.
+        is_register_only = model.target.is_view or (
+            model.library and model.target.staging is None
+        )
+        if is_register_only:
+            try:
+                with pg_state._connect(model) as conn:
+                    pg_library.ensure_library(conn)
+                    pg_library.register(conn, model)
+            except ConnectionError as exc:
+                logger.warning(
+                    "library: registration failed for %s — %s",
+                    model.target.full_name,
+                    exc,
+                )
+            continue
+
         if model.target.staging is None:
             continue
 
-        contract = list(model.intervals)  # step 1
+        # Every staging model — with or without state — needs:
+        #   * a run_id stashed for per-interval staging table naming
+        #   * orphan staging tables from earlier crashed runs GC'd
         run_id = uuid4()
         model._state_run_id = run_id
+        try:
+            pg_staging.gc_orphan_staging_tables(model)
+        except ConnectionError as exc:
+            logger.warning(
+                "staging: orphan GC failed for %s — %s",
+                model.target.full_name,
+                exc,
+            )
+
+        if model.state is None:
+            # Staging without state — register in library if opted in
+            # (so downstreams can claim this table) and we're done.
+            # No state-table ensure, no prefill, no interval filtering;
+            # the user's loop runs every contract interval every time.
+            if model.library:
+                try:
+                    with pg_state._connect(model) as conn:
+                        pg_library.ensure_library(conn)
+                        pg_library.register(conn, model)
+                except ConnectionError as exc:
+                    logger.warning(
+                        "library: registration failed for %s — %s",
+                        model.target.full_name,
+                        exc,
+                    )
+            continue
+
+        contract = list(model.intervals)
 
         try:
-            pg_state.ensure_tables(model)  # step 2
+            pg_state.ensure_tables(model)
 
             with pg_state._connect(model) as conn:
-                pg_library.ensure_library(conn)  # step 3
+                pg_library.ensure_library(conn)
                 pg_library.register(conn, model)
 
-                # step 4 — per-interval status at bootstrap time.
-                # The decorator additionally re-checks at runtime,
-                # so blocked rows here are a snapshot that may flip
-                # back to processable as upstreams catch up.
+                # The decorator additionally re-checks at runtime, so
+                # blocked rows here are a snapshot that may flip back
+                # to processable as upstreams catch up.
                 upstreams_to_check = [
                     u for u in model.upstream if u not in matched_names
                 ]
@@ -325,7 +379,7 @@ def _bootstrap_state_for_staged_models(
                     )
                     prefill_rows.append((interval, status, reason))
 
-                pg_state.prefill(  # step 5
+                pg_state.prefill(
                     model,
                     run_id=run_id,
                     intervals=prefill_rows,
@@ -333,10 +387,10 @@ def _bootstrap_state_for_staged_models(
                     conn=conn,
                 )
 
-            # step 6 — user's loop iterates EVERY non-applied row
-            # (pending, blocked, running, error). The decorator
-            # re-evaluates each one at runtime so blocked rows
-            # naturally unblock as their upstream catches up.
+            # User's loop iterates EVERY non-applied row (pending,
+            # blocked, running, error). The decorator re-evaluates
+            # each one at runtime so blocked rows naturally unblock
+            # as their upstream catches up.
             model.intervals = pg_state.read_actionable(model)
         except ConnectionError as exc:
             logger.warning(
@@ -439,11 +493,9 @@ def _resolve_interval_status(
                     f"upstream {upstream_name!r} not registered",
                 ),
             )
-        _, up_state_schema, up_state_table = entry
         if not pg_library.is_satisfied(
             conn,
-            upstream_state_schema=up_state_schema,
-            upstream_state_table=up_state_table,
+            entry=entry,
             since=interval.since,
             until=interval.until,
         ):
@@ -452,8 +504,9 @@ def _resolve_interval_status(
                 format_block_reason(
                     BlockCode.UPSTREAM_NOT_SATISFIED,
                     (
-                        f"upstream {upstream_name!r} has no applied row covering "
-                        f"{interval.since.isoformat()} → {interval.until.isoformat()}"
+                        f"upstream {upstream_name!r} ({entry.model_type}) has no "
+                        f"applied row covering {interval.since.isoformat()} → "
+                        f"{interval.until.isoformat()}"
                     ),
                 ),
             )

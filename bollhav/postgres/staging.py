@@ -75,10 +75,6 @@ def _staging_table(model: "Model", run_id: UUID) -> str:
 
 
 def _assert_supported(model: "Model") -> None:
-    if model.state is None:
-        raise ValueError(
-            f"stage() requires model.state to be set on {model.target.full_name!r}"
-        )
     if model.batching is None:
         raise ValueError(
             f"stage() requires model.batching to be set on {model.target.full_name!r}"
@@ -88,7 +84,7 @@ def _assert_supported(model: "Model") -> None:
             f"stage() currently supports WriteMode.APPEND only; "
             f"{model.target.full_name!r} uses {model.target.write_mode.value!r}"
         )
-    if model.state.dsn_env_var is not None:
+    if model.state is not None and model.state.dsn_env_var is not None:
         raise NotImplementedError(
             f"stage() currently requires state to share a DB with the target "
             f"(leave State() without dsn_env_var) — the atomic flush moves "
@@ -101,18 +97,53 @@ def _assert_supported(model: "Model") -> None:
 # ── DDL ─────────────────────────────────────────────────────────────
 
 
+def ensure_staging_schema(conn: psycopg.Connection, model: "Model") -> None:
+    """Idempotently create the staging schema (`z_<target_schema>` by
+    default — co-located with state). Gated by
+    `target.mutations.staging_schema_created` so the `CREATE SCHEMA
+    IF NOT EXISTS` only fires on the first interval of a pipeline run.
+
+    Necessary on the staging-without-state path because nothing else
+    creates the schema: state-tracked staging gets it for free as a
+    side-effect of `pg_state.ensure_tables`."""
+    if model.target.mutations.staging_schema_created:
+        return
+    schema = _staging_schema(model)
+    conn.execute(
+        sql.SQL("CREATE SCHEMA IF NOT EXISTS {schema}").format(
+            schema=sql.Identifier(schema),
+        )
+    )
+    model.target.mutations.staging_schema_created = True
+
+
 def ensure_staging_table(
     conn: psycopg.Connection, model: "Model", run_id: UUID
 ) -> None:
-    """Create the per-interval staging table mirroring target columns.
+    """Create the staging table mirroring target columns.
 
     No indexes, no constraints — staging is write-once via COPY then
     drained by a single INSERT...SELECT. UNLOGGED by default: writes
     skip WAL (~2-3x faster COPY), and a crash truncates staging —
     fine, since the interval reruns from the top. Flip `Staging.logged`
-    to opt into LOGGED for compliance/replication environments."""
+    to opt into LOGGED for compliance/replication environments.
+
+    The staging schema is ensured up-front via `ensure_staging_schema`,
+    which is a one-shot gated by `mutations.staging_schema_created`.
+
+    In `StagingMode.REUSED` (the default) the CREATE itself is also
+    one-shot — gated by `mutations.staging_table_created` — so a
+    365-interval backfill issues a single `CREATE TABLE` instead of
+    365. In `StagingMode.PER_INTERVAL` the CREATE fires every interval,
+    since the previous interval's flush dropped the table."""
+    from bollhav.model.staging import StagingMode
     from bollhav.postgres.columns import PostgresColumn
     from bollhav.postgres.schema import _col_ddl
+
+    ensure_staging_schema(conn, model)
+    mode = _staging_mode(model)
+    if mode is StagingMode.REUSED and model.target.mutations.staging_table_created:
+        return
 
     schema = _staging_schema(model)
     table = _staging_table(model, run_id)
@@ -133,6 +164,33 @@ def ensure_staging_table(
             schema=sql.Identifier(schema),
             table=sql.Identifier(table),
             col_defs=col_defs,
+        )
+    )
+    if mode is StagingMode.REUSED:
+        model.target.mutations.staging_table_created = True
+
+
+def _staging_mode(model: "Model"):
+    """Resolve the configured `StagingMode` for the model. Defaults
+    to `StagingMode.REUSED` when staging is set without an explicit
+    mode (matches the `Staging` dataclass default)."""
+    from bollhav.model.staging import StagingMode
+
+    if model.target.staging is None or model.target.staging.mode is None:
+        return StagingMode.REUSED
+    return model.target.staging.mode
+
+
+def truncate_staging_table(
+    conn: psycopg.Connection, model: "Model", run_id: UUID
+) -> None:
+    """Clear the reused staging table before the next interval's
+    COPY. Only called in `StagingMode.REUSED`. Cheap on UNLOGGED
+    tables — essentially a relfilenode swap."""
+    conn.execute(
+        sql.SQL("TRUNCATE TABLE {schema}.{table}").format(
+            schema=sql.Identifier(_staging_schema(model)),
+            table=sql.Identifier(_staging_table(model, run_id)),
         )
     )
 
@@ -184,23 +242,35 @@ def flush_to_target(
     until: datetime,
 ) -> None:
     """Atomic flush: INSERT INTO target SELECT * FROM staging,
-    DROP staging, UPDATE state row to applied — all in one transaction.
+    DROP staging, and — when state is enabled — UPDATE the state row
+    to applied. All in one transaction.
 
-    On success: data is in target ↔ state row says applied.
+    On success: data is in target. If state is set, the state row
+    also says applied (both flipped under the same commit).
     On failure: postgres rolls back; staging table remains (GC'd next
-    run) and state row stays pending. No partial write visible in target."""
+    run) and state row stays pending. No partial write visible in
+    target.
+
+    Without state (`model.state is None`) the flush still gives you
+    memory-bounded chunked writes and atomic-per-interval finalization
+    — INSERT and DROP commit together — just nothing to flip. Re-runs
+    re-process the interval because there's no `applied` gate."""
     staging_schema_id = sql.Identifier(_staging_schema(model))
     staging_table_id = sql.Identifier(_staging_table(model, run_id))
     target_schema_id = sql.Identifier(model.target.schema.resolved)
     target_table_id = sql.Identifier(model.target.name_resolved)
-    state_schema_id = sql.Identifier(pg_state._state_schema(model))
-    state_table_id = sql.Identifier(pg_state._state_table(model))
 
     col_names = sql.SQL(", ").join(
         sql.Identifier(col.name) for col in model.target.columns
     )
 
+    from bollhav.model.staging import StagingMode
+
     keep = model.target.staging is not None and model.target.staging.keep_after_flush
+    mode = _staging_mode(model)
+    # REUSED keeps the table for the next interval (its TRUNCATE clears
+    # it). PER_INTERVAL drops unless the operator opted into keep.
+    drop_after_flush = mode is StagingMode.PER_INTERVAL and not keep
 
     with conn.transaction():
         conn.execute(
@@ -215,24 +285,25 @@ def flush_to_target(
                 cols=col_names,
             )
         )
-        if not keep:
+        if drop_after_flush:
             conn.execute(
                 sql.SQL("DROP TABLE {schema}.{table}").format(
                     schema=staging_schema_id,
                     table=staging_table_id,
                 )
             )
-        conn.execute(
-            sql.SQL(
-                "UPDATE {schema}.{table} "
-                "SET status = 'applied', applied_at = now(), run_id = %s "
-                "WHERE since = %s AND until = %s"
-            ).format(
-                schema=state_schema_id,
-                table=state_table_id,
-            ),
-            [str(run_id), since, until],
-        )
+        if model.state is not None:
+            conn.execute(
+                sql.SQL(
+                    "UPDATE {schema}.{table} "
+                    "SET status = 'applied', applied_at = now(), run_id = %s "
+                    "WHERE since = %s AND until = %s"
+                ).format(
+                    schema=sql.Identifier(pg_state._state_schema(model)),
+                    table=sql.Identifier(pg_state._state_table(model)),
+                ),
+                [str(run_id), since, until],
+            )
     logger.debug(
         "stage: flushed %s..%s for %s",
         since,
@@ -355,7 +426,21 @@ def stage(
             f"{model.target.full_name!r}."
         )
 
+    from bollhav.model.staging import StagingMode
+
+    # REUSED mode: track whether this interval is the first one for
+    # this pipeline run before `ensure_staging_table` flips the flag.
+    # If the table already existed (mutations.staging_table_created
+    # was True), we need a TRUNCATE to clear the prior interval's
+    # rows. PER_INTERVAL mode never needs TRUNCATE — every interval
+    # gets a freshly-CREATEd empty table.
+    mode = _staging_mode(model)
+    needs_truncate = (
+        mode is StagingMode.REUSED and model.target.mutations.staging_table_created
+    )
     ensure_staging_table(conn, model, run_id)
+    if needs_truncate:
+        truncate_staging_table(conn, model, run_id)
     s = Stage(conn, model, run_id=run_id, since=since, until=until)
     try:
         yield s

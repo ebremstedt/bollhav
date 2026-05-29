@@ -27,6 +27,8 @@ def _model(*, staged=False, with_state=False, write_mode=None, staging_cfg=None)
     from bollhav.model.write_modes import WriteMode
     from bollhav.postgres.columns import PostgresColumn, PostgresType
 
+    from bollhav.model.target import Mutations
+
     model = MagicMock()
     model.state = State() if (staged or with_state) else None
     model.batching = MagicMock()
@@ -40,6 +42,7 @@ def _model(*, staged=False, with_state=False, write_mode=None, staging_cfg=None)
         PostgresColumn(name="id", data_type=PostgresType.BIGINT),
         PostgresColumn(name="amount", data_type=PostgresType.NUMERIC),
     ]
+    model.target.mutations = Mutations()
     model._state_run_id = RUN_ID
     model._state_applied_via_staging = None
     return model
@@ -153,9 +156,10 @@ class TestStagedPathEndToEnd:
         assert any("CREATE UNLOGGED TABLE" in q for q in executed)
         # Two COPY contexts on the cursor (one per chunk).
         assert conn.cursor.return_value.copy.call_count == 2
-        # Final flush: insert-select, drop staging, update state row.
+        # Default `StagingMode.REUSED` flush: INSERT + UPDATE only —
+        # the staging table stays for the next interval.
         assert any("INSERT INTO" in q and "SELECT" in q for q in executed)
-        assert any("DROP TABLE" in q and "staging" in q for q in executed)
+        assert not any("DROP TABLE" in q and "staging" in q for q in executed)
         assert any("status = 'applied'" in q for q in executed)
 
     def test_marker_set_after_successful_flush(self) -> None:

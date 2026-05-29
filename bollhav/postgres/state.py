@@ -643,21 +643,15 @@ def is_upstream_satisfied_live(
                     f"upstream {upstream_name!r} not registered",
                 ),
             )
-        _, up_state_schema, up_state_table = entry
-        if not pg_library.is_satisfied(
-            conn,
-            upstream_state_schema=up_state_schema,
-            upstream_state_table=up_state_table,
-            since=since,
-            until=until,
-        ):
+        if not pg_library.is_satisfied(conn, entry=entry, since=since, until=until):
             return (
                 False,
                 format_block_reason(
                     BlockCode.UPSTREAM_NOT_SATISFIED,
                     (
-                        f"upstream {upstream_name!r} has no applied row covering "
-                        f"{since.isoformat()} → {until.isoformat()}"
+                        f"upstream {upstream_name!r} ({entry.model_type}) has no "
+                        f"applied row covering {since.isoformat()} → "
+                        f"{until.isoformat()}"
                     ),
                 ),
             )
