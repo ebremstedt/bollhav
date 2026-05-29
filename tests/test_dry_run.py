@@ -42,6 +42,8 @@ def _cfg(**overrides):
         dry_run=True,
         dry_run_extra=False,
         state_mode=StateMode.RESPECT,
+        state_disabled=False,
+        peek=False,
         debug=False,
     )
     defaults.update(overrides)

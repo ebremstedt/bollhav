@@ -1,0 +1,840 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>bollhav</title>
+<style>
+  :root {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 14px;
+    line-height: 1.4;
+    --bg: #0e1116;
+    --bg-2: #161b22;
+    --bg-3: #1c2128;
+    --fg: #c9d1d9;
+    --fg-dim: #768390;
+    --fg-dimmer: #4d5764;
+    --border: #30363d;
+    --pending: #3a4150;
+    --running: #2f81f7;
+    --applied: #2da44e;
+    --blocked: #d29922;
+    --error: #f85149;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--fg); }
+
+  header {
+    display: flex; align-items: center; gap: 14px;
+    padding: 10px 18px; border-bottom: 1px solid var(--border);
+    background: var(--bg-2); position: sticky; top: 0; z-index: 10;
+  }
+  .brand { font-weight: 700; letter-spacing: 0.04em; }
+  #filter {
+    flex: 0 0 240px;
+    font: inherit; color: inherit;
+    background: var(--bg-3);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 5px 10px;
+    outline: none;
+  }
+  #filter:focus { border-color: var(--running); }
+  #filter::placeholder { color: var(--fg-dimmer); }
+
+  nav { display: flex; gap: 2px; }
+  nav button {
+    font: inherit; color: var(--fg-dim);
+    background: transparent;
+    border: 1px solid transparent;
+    border-bottom-color: transparent;
+    padding: 4px 12px;
+    border-radius: 4px 4px 0 0;
+    cursor: pointer;
+    position: relative;
+    top: 1px;
+  }
+  nav button:hover { color: var(--fg); }
+  nav button.active {
+    color: var(--fg);
+    background: var(--bg);
+    border-color: var(--border);
+    border-bottom-color: var(--bg);
+  }
+  .status { margin-left: auto; font-size: 12px; }
+  .dim { color: var(--fg-dim); }
+  .err { color: var(--error); }
+  main { max-width: 1400px; margin: 0 auto; }
+
+  .legend {
+    padding: 10px 18px; border-bottom: 1px solid var(--border);
+    font-size: 12px; color: var(--fg-dim);
+    display: flex; align-items: center; gap: 14px;
+  }
+  .legend span[title] { cursor: help; }
+  .lg {
+    display: inline-block; width: 11px; height: 11px;
+    border-radius: 2px; margin-right: 3px; vertical-align: middle;
+  }
+  .lg.pending { background: var(--pending); }
+  .lg.running { background: var(--running); }
+  .lg.applied { background: var(--applied); }
+  .lg.blocked { background: var(--blocked); }
+  .lg.error { background: var(--error); }
+
+  /* Slim single-line row */
+  .row {
+    display: flex; align-items: center; gap: 10px;
+    padding: 6px 18px;
+    border-bottom: 1px solid var(--border);
+    min-height: 30px;
+  }
+  .row .meta {
+    flex: 0 0 240px;
+    display: inline-flex; align-items: center; gap: 6px;
+    cursor: help;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .row .name {
+    font-weight: 600;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .row .info {
+    display: inline-flex;
+    align-items: center; justify-content: center;
+    width: 14px; height: 14px;
+    border-radius: 50%;
+    border: 1px solid var(--fg-dimmer);
+    color: var(--fg-dimmer);
+    font-size: 10px;
+    font-weight: 700;
+    font-style: italic;
+    line-height: 1;
+    flex-shrink: 0;
+    user-select: none;
+  }
+  .row .meta:hover .info {
+    color: var(--fg-dim);
+    border-color: var(--fg-dim);
+  }
+  /* One horizontal scroll container wraps the timeline header and
+     all model rows. The meta column on each row is sticky so the
+     name stays visible while you scroll the cells. */
+  #rows-scroll {
+    /* `auto` so the scrollbar only appears when there are enough
+       cells to actually scroll. When it does appear, the styling
+       below makes it impossible to miss. */
+    overflow-x: auto;
+    overflow-y: visible;
+    scrollbar-color: var(--running) var(--bg-3);
+    scrollbar-width: auto;
+  }
+  #rows-scroll::-webkit-scrollbar {
+    height: 18px;
+  }
+  #rows-scroll::-webkit-scrollbar-track {
+    background: var(--bg-3);
+    border-top: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+  }
+  #rows-scroll::-webkit-scrollbar-thumb {
+    background: var(--running);
+    border: 3px solid var(--bg-3);
+    border-radius: 10px;
+    min-width: 60px;
+  }
+  #rows-scroll::-webkit-scrollbar-thumb:hover {
+    background: #5aa6ff;
+  }
+  #rows-scroll::-webkit-scrollbar-thumb:active {
+    background: #1d6ed6;
+  }
+
+  #timeline-header {
+    display: flex; align-items: flex-end;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-2);
+    position: sticky;
+    top: 0;
+    z-index: 5;
+    min-height: 36px;
+  }
+  #timeline-header .meta {
+    flex: 0 0 240px;
+    padding: 10px 18px 6px;
+    position: sticky;
+    left: 0;
+    background: var(--bg-2);
+    z-index: 6;
+    font-size: 11px;
+    color: var(--fg-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    font-weight: 700;
+  }
+  #timeline-header .ticks {
+    position: relative;
+    height: 30px;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+  #timeline-header .tick {
+    position: absolute;
+    bottom: 0;
+    font-size: 11px;
+    color: var(--fg);
+    font-weight: 600;
+    white-space: nowrap;
+    transform: translateX(-50%);
+    user-select: none;
+    line-height: 1;
+    padding-bottom: 6px;
+  }
+  /* the little vertical mark beneath each tick. For most ticks the
+     parent is centered on its cell so 50% is the cell center; for
+     the first tick (anchored left) we want the mark at the LEFT
+     edge of the badge so it sits over the cell — that case sets
+     `--anchor-left: 1` and we use left: 0 instead. */
+  #timeline-header .tick::after {
+    content: "";
+    position: absolute;
+    bottom: 0;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 2px;
+    height: 6px;
+    background: var(--fg-dim);
+    border-radius: 1px;
+  }
+  #timeline-header .tick[style*="translateX(0)"]::after {
+    left: 0;
+    transform: translateX(0);
+  }
+  /* year: same shape as month, just bigger + bolder + brighter
+     tick mark so it stands apart without looking like a different
+     kind of label. */
+  #timeline-header .tick.year {
+    font-size: 13px;
+    font-weight: 800;
+    color: var(--fg);
+    letter-spacing: 0.04em;
+  }
+  #timeline-header .tick.year::after {
+    height: 8px;
+    width: 2px;
+    background: var(--fg);
+  }
+
+  /* Per-row meta is sticky so the model name stays put as cells scroll. */
+  .row .meta {
+    position: sticky;
+    left: 0;
+    z-index: 2;
+    background: var(--bg);
+    padding-right: 8px;
+    /* slight shadow so cells scrolling under can be distinguished */
+    box-shadow: 4px 0 6px -4px rgba(0, 0, 0, 0.4);
+  }
+  /* Cells are absolutely positioned within the row so each interval
+     can take up its true proportional width on the timeline — daily
+     intervals are narrow, monthly intervals span much wider. */
+  .row .cells {
+    flex: 0 0 auto;
+    position: relative;
+    height: 14px;
+    padding-right: 18px;
+  }
+  .row .cells .empty {
+    color: var(--fg-dimmer); font-size: 11px;
+    position: absolute; left: 0; top: 0;
+  }
+  .cell {
+    position: absolute;
+    top: 0;
+    height: 14px;
+    border-radius: 2px;
+    cursor: default;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .cell.pending { background: var(--pending); }
+  .cell.running { background: var(--running); }
+  .cell.applied { background: var(--applied); }
+  .cell.blocked { background: var(--blocked); }
+  .cell.error { background: var(--error); }
+
+  .spinner {
+    width: 9px; height: 9px;
+    border: 2px solid rgba(255, 255, 255, 0.25);
+    border-top-color: #fff; border-radius: 50%;
+    animation: spin 0.9s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* Errors tab */
+  .errors-tab { padding: 14px 18px; }
+  .errors-tab h2 {
+    font-size: 13px; text-transform: uppercase; color: var(--fg-dim);
+    margin: 0 0 10px; letter-spacing: 0.05em;
+  }
+  .err-list { display: flex; flex-direction: column; gap: 10px; }
+  .err-item {
+    background: var(--bg-2); border: 1px solid var(--border);
+    border-left: 3px solid var(--error);
+    padding: 8px 10px; border-radius: 4px; font-size: 12px;
+  }
+  .err-hdr { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 4px; }
+  .err-model { font-weight: 600; }
+  .err-type { color: var(--error); }
+  .err-time { color: var(--fg-dim); margin-left: auto; }
+  .err-iv { color: var(--fg-dim); font-size: 11px; margin-bottom: 2px; }
+  .err-msg { word-break: break-word; }
+  .err-tb {
+    margin-top: 6px;
+    color: var(--fg-dim);
+    font-size: 11px;
+    white-space: pre-wrap;
+    background: var(--bg);
+    padding: 6px 8px;
+    border-radius: 3px;
+    max-height: 200px;
+    overflow: auto;
+  }
+  .empty { padding: 24px 18px; color: var(--fg-dim); }
+
+  /* Floating model tooltip — appended to <body> on hover, fixed
+     positioning so it survives sticky/overflow parents. */
+  .floating-tt {
+    position: fixed;
+    z-index: 1000;
+    background: var(--bg-2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 10px 12px;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5);
+    font-size: 12px;
+    min-width: 260px;
+    max-width: 360px;
+    pointer-events: none;
+  }
+  .floating-tt .tt-name {
+    font-weight: 700;
+    color: var(--fg);
+    margin-bottom: 8px;
+    font-size: 13px;
+  }
+  .floating-tt .tt-section {
+    color: var(--fg-dim);
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin: 6px 0 4px;
+  }
+  .floating-tt .tt-upstream {
+    display: flex; flex-wrap: wrap; gap: 4px;
+  }
+  .floating-tt .tt-up-chip {
+    background: var(--bg-3);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 1px 6px;
+    color: var(--fg);
+  }
+  .floating-tt .tt-none { color: var(--fg-dimmer); font-style: italic; }
+  .floating-tt .tt-grid {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    column-gap: 16px;
+    row-gap: 2px;
+  }
+  .floating-tt .tt-grid .lbl {
+    color: var(--fg-dim);
+    display: inline-flex; align-items: center; gap: 5px;
+  }
+  .floating-tt .tt-grid .num {
+    color: var(--fg-dimmer);
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+  .floating-tt .tt-grid .num.has {
+    color: var(--fg);
+    font-weight: 700;
+  }
+  .floating-tt .tt-body {
+    color: var(--fg-dim);
+    line-height: 1.55;
+    font-size: 12px;
+  }
+  .floating-tt .tt-body code {
+    background: var(--bg-3);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 0 4px;
+    color: var(--fg);
+  }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">bollhav</div>
+  <input id="filter" type="search" placeholder="filter…" autocomplete="off" />
+  <nav>
+    <button id="tab-models" class="active">models</button>
+    <button id="tab-errors">errors <span id="err-badge" class="dim"></span></button>
+  </nav>
+  <div class="status" id="status"></div>
+</header>
+<main>
+  <!-- MODELS TAB -->
+  <div id="models-view">
+    <div class="legend" id="legend">
+      <span class="lg-item" data-status="pending"><span class="lg pending"></span> pending</span>
+      <span class="lg-item" data-status="running"><span class="lg running"></span> running</span>
+      <span class="lg-item" data-status="applied"><span class="lg applied"></span> applied</span>
+      <span class="lg-item" data-status="blocked"><span class="lg blocked"></span> once blocked</span>
+      <span class="lg-item" data-status="error"><span class="lg error"></span> error</span>
+      <span class="dim" id="count" style="margin-left:auto"></span>
+    </div>
+    <div id="rows-scroll">
+      <div id="timeline-header">
+        <div class="meta">timeline</div>
+        <div class="ticks" id="timeline-ticks"></div>
+      </div>
+      <div id="rows"></div>
+    </div>
+  </div>
+
+  <!-- ERRORS TAB -->
+  <div id="errors-view" hidden>
+    <section class="errors-tab">
+      <h2>recent errors</h2>
+      <div id="errors-list" class="err-list"></div>
+    </section>
+  </div>
+</main>
+
+<script>
+  const POLL_MS = 2000;
+  let lastUpdate = null;
+  let activeTab = "models";
+
+  const $ = (id) => document.getElementById(id);
+
+  async function getJSON(path) {
+    const r = await fetch(path);
+    if (!r.ok) throw new Error(`${path}: ${r.status}`);
+    return r.json();
+  }
+
+  function fmtDay(s) { return new Date(s).toISOString().slice(0, 10); }
+  function ago(d) {
+    if (!d) return "—";
+    const s = Math.round((Date.now() - d.getTime()) / 1000);
+    return s < 2 ? "just now" : `${s}s ago`;
+  }
+  function tickStatus(err) {
+    $("status").innerHTML = err
+      ? `<span class="err">backend: ${err}</span>`
+      : `<span class="dim">${POLL_MS/1000}s · ${ago(lastUpdate)}</span>`;
+  }
+  setInterval(() => tickStatus(null), 500);
+
+  function statusLabel(s) {
+    return s === "blocked" ? "ONCE BLOCKED" : s.toUpperCase();
+  }
+
+  function fmtTs(s) {
+    // Compact timestamp like `2024-01-01 00:00 UTC`.
+    const d = new Date(s);
+    const date = d.toISOString().slice(0, 10);
+    const time = d.toISOString().slice(11, 16);
+    return `${date} ${time} UTC`;
+  }
+
+  function cellTooltipHtml(row) {
+    const kind = row.status;  // 'pending' | 'running' | 'applied' | 'blocked' | 'error'
+    const label = statusLabel(row.status);
+    function field(name, value) {
+      return (
+        `<span class="lbl">${name}</span>` +
+        `<span class="num has">${value}</span>`
+      );
+    }
+    const grid = [
+      field("start", fmtTs(row.since)),
+      field("end", fmtTs(row.until)),
+    ];
+    if (row.applied_at) grid.push(field("applied at", row.applied_at));
+    grid.push(field("run id", row.run_id.slice(0, 8)));
+
+    return (
+      `<div class="tt-name"><span class="lg ${kind}"></span> ${label}</div>` +
+      `<div class="tt-section">interval</div>` +
+      `<div class="tt-grid">${grid.join("")}</div>` +
+      (row.blocked_reason
+        ? `<div class="tt-section">reason</div>` +
+          `<div class="tt-body">${row.blocked_reason.replace(/</g, "&lt;")}</div>`
+        : "")
+    );
+  }
+
+  function cellNode(row) {
+    const el = document.createElement("div");
+    el.className = `cell ${row.status}`;
+    if (row.status === "running") {
+      const sp = document.createElement("span");
+      sp.className = "spinner";
+      el.appendChild(sp);
+    }
+    attachTooltip(el, cellTooltipHtml(row));
+    return el;
+  }
+
+  function tooltipHtml(entry) {
+    const c = entry.counts;
+    const upHtml = entry.upstream.length === 0
+      ? `<div class="tt-none">(none declared)</div>`
+      : `<div class="tt-upstream">${
+          entry.upstream.map(u => `<span class="tt-up-chip">${u}</span>`).join("")
+        }</div>`;
+
+    function row(label, n, kind) {
+      const cls = n > 0 ? "num has" : "num";
+      return (
+        `<span class="lbl"><span class="lg ${kind}"></span>${label}</span>` +
+        `<span class="${cls}">${n}</span>`
+      );
+    }
+
+    return (
+      `<div class="tt-name">${entry.full_name}</div>` +
+      `<div class="tt-section">upstream</div>` +
+      upHtml +
+      `<div class="tt-section">state</div>` +
+      `<div class="tt-grid">` +
+        row("pending", c.pending, "pending") +
+        row("running", c.running, "running") +
+        row("applied", c.applied, "applied") +
+        row("once blocked", c.blocked, "blocked") +
+        row("error", c.error, "error") +
+      `</div>`
+    );
+  }
+
+  // ── floating tooltip plumbing ─────────────────────────────────────
+  let _tt = null;
+  function showTooltip(target, html) {
+    hideTooltip();
+    const t = document.createElement("div");
+    t.className = "floating-tt";
+    t.innerHTML = html;
+    document.body.appendChild(t);
+    const r = target.getBoundingClientRect();
+    // Try to place below + slightly right; flip up if off-screen.
+    let top = r.bottom + 6;
+    let left = r.left;
+    const ttRect = t.getBoundingClientRect();
+    if (top + ttRect.height > window.innerHeight - 8) {
+      top = Math.max(8, r.top - ttRect.height - 6);
+    }
+    if (left + ttRect.width > window.innerWidth - 8) {
+      left = window.innerWidth - ttRect.width - 8;
+    }
+    t.style.top = `${top}px`;
+    t.style.left = `${left}px`;
+    _tt = t;
+  }
+  function hideTooltip() {
+    if (_tt) {
+      _tt.remove();
+      _tt = null;
+    }
+  }
+  // If the dashboard re-renders while a tooltip is open, drop it.
+  // (The hovered element will be replaced and the tooltip would orphan.)
+  function attachTooltip(meta, html) {
+    meta.addEventListener("mouseenter", () => showTooltip(meta, html));
+    meta.addEventListener("mouseleave", hideTooltip);
+    meta.addEventListener("focusin", () => showTooltip(meta, html));
+    meta.addEventListener("focusout", hideTooltip);
+  }
+
+  // Layout constants — must match the .cell CSS.
+  const DAY_PX = 17;        // pixels per calendar day on the timeline
+  const CELL_GAP_PX = 3;    // visual gap subtracted from each cell's width
+  const DAY_MS = 24 * 60 * 60 * 1000;
+  const MONTH_NAMES = [
+    "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+  ];
+
+  // Returns { start: Date, end: Date, totalDays: number } describing
+  // the date range that spans every interval across the visible
+  // models. All cells & ticks are positioned relative to `start`.
+  function timelineRange(stateLists) {
+    let minSince = null, maxUntil = null;
+    for (const list of stateLists) {
+      for (const r of list) {
+        const s = new Date(r.since);
+        const u = new Date(r.until);
+        if (minSince === null || s < minSince) minSince = s;
+        if (maxUntil === null || u > maxUntil) maxUntil = u;
+      }
+    }
+    if (minSince === null) return { start: null, end: null, totalDays: 0 };
+    const totalDays = Math.round((maxUntil - minSince) / DAY_MS);
+    return { start: minSince, end: maxUntil, totalDays };
+  }
+
+  function daysBetween(a, b) {
+    return Math.round((b - a) / DAY_MS);
+  }
+
+  function buildTimelineTicks(range) {
+    // Walk from start to end, day by day, marking each cross of a
+    // month or year boundary. Position is absolute from the
+    // timeline's start in DAY_PX units.
+    if (range.start === null) return "";
+    const parts = [];
+    let prevMonth = -1, prevYear = -1;
+    for (let i = 0; i <= range.totalDays; i++) {
+      const d = new Date(range.start.getTime() + i * DAY_MS);
+      const month = d.getUTCMonth();
+      const year = d.getUTCFullYear();
+      const leftPx = i * DAY_PX;
+      // Anchor labels at the LEFT of the date boundary so they read
+      // as "this is when X starts" — they extend to the right.
+      const style = `left:${leftPx}px;transform:translateX(0)`;
+      if (year !== prevYear) {
+        parts.push(`<span class="tick year" style="${style}">${year}</span>`);
+      } else if (month !== prevMonth) {
+        parts.push(`<span class="tick" style="${style}">${MONTH_NAMES[month]}</span>`);
+      }
+      prevMonth = month;
+      prevYear = year;
+    }
+    return parts.join("");
+  }
+
+  function setTimelineHeader(range) {
+    const w = range.totalDays * DAY_PX;
+    $("timeline-ticks").style.width = `${w}px`;
+    $("timeline-ticks").innerHTML = buildTimelineTicks(range);
+  }
+
+  function rowNode(entry, stateRows, range) {
+    const row = document.createElement("section");
+    row.className = "row";
+
+    // Meta block: name + info icon. Sticky on the left.
+    const meta = document.createElement("span");
+    meta.className = "meta";
+    meta.tabIndex = 0;
+
+    const nameSpan = document.createElement("span");
+    nameSpan.className = "name";
+    nameSpan.textContent = entry.full_name;
+    meta.appendChild(nameSpan);
+
+    const info = document.createElement("span");
+    info.className = "info";
+    info.textContent = "i";
+    meta.appendChild(info);
+
+    attachTooltip(meta, tooltipHtml(entry));
+    row.appendChild(meta);
+
+    // Cells — each interval rendered as an absolutely-positioned box
+    // whose width is proportional to its (until - since) duration.
+    // Daily intervals are ~14px wide; monthly intervals span ~28 days
+    // worth of pixels.
+    const cells = document.createElement("div");
+    cells.className = "cells";
+    cells.style.width = `${range.totalDays * DAY_PX}px`;
+
+    if (stateRows.length === 0) {
+      cells.innerHTML = `<span class="empty">no intervals</span>`;
+    } else {
+      for (const r of stateRows) {
+        const cell = cellNode(r);
+        const offsetDays = daysBetween(range.start, new Date(r.since));
+        const durationDays = daysBetween(new Date(r.since), new Date(r.until));
+        const width = Math.max(2, durationDays * DAY_PX - CELL_GAP_PX);
+        cell.style.left = `${offsetDays * DAY_PX}px`;
+        cell.style.width = `${width}px`;
+        cells.appendChild(cell);
+      }
+    }
+    row.appendChild(cells);
+
+    return row;
+  }
+
+  let cache = { summary: [], states: [], errors: [] };
+
+  function renderModels() {
+    const filter = $("filter").value.trim().toLowerCase();
+    const matched = filter
+      ? cache.summary.filter(e => e.full_name.toLowerCase().includes(filter))
+      : cache.summary;
+
+    $("count").textContent =
+      cache.summary.length === 0
+        ? ""
+        : `${matched.length} / ${cache.summary.length}`;
+
+    const rows = $("rows");
+    rows.innerHTML = "";
+    if (cache.summary.length === 0) {
+      $("timeline-ticks").innerHTML = "";
+      $("timeline-ticks").style.width = "0px";
+      rows.innerHTML = `<p class="empty">No models in library yet. Run a bollhav pipeline first.</p>`;
+      return;
+    }
+    if (matched.length === 0) {
+      $("timeline-ticks").innerHTML = "";
+      $("timeline-ticks").style.width = "0px";
+      rows.innerHTML = `<p class="empty">No models match.</p>`;
+      return;
+    }
+
+    // Unified date range across all *visible* models so each row
+    // positions its cells against the same time axis.
+    const visibleStates = matched.map(
+      e => cache.states[cache.summary.indexOf(e)] || []
+    );
+    const range = timelineRange(visibleStates);
+    setTimelineHeader(range);
+
+    matched.forEach((entry, idx) => {
+      rows.appendChild(rowNode(entry, visibleStates[idx], range));
+    });
+  }
+
+  function renderErrors() {
+    const filter = $("filter").value.trim().toLowerCase();
+    const matchedErrors = filter
+      ? cache.errors.filter(e => e.full_name.toLowerCase().includes(filter))
+      : cache.errors;
+
+    const list = $("errors-list");
+    list.innerHTML = "";
+    if (matchedErrors.length === 0) {
+      list.innerHTML = `<div class="dim">no errors recorded</div>`;
+    } else {
+      for (const e of matchedErrors) {
+        const li = document.createElement("div");
+        li.className = "err-item";
+        li.innerHTML =
+          `<div class="err-hdr">` +
+            `<span class="err-model">${e.full_name}</span>` +
+            `<span class="err-type">${e.error_type}</span>` +
+            `<span class="err-time">${new Date(e.created_at).toLocaleString()}</span>` +
+          `</div>` +
+          `<div class="err-iv">${new Date(e.since).toISOString().slice(0,16)} → ${new Date(e.until).toISOString().slice(0,16)}</div>` +
+          `<div class="err-msg">${(e.error_message ?? "").replace(/</g, "&lt;")}</div>` +
+          (e.traceback ? `<div class="err-tb">${e.traceback.replace(/</g, "&lt;")}</div>` : "");
+        list.appendChild(li);
+      }
+    }
+  }
+
+  function updateErrorBadge() {
+    const n = cache.errors.length;
+    $("err-badge").textContent = n > 0 ? `(${n})` : "";
+  }
+
+  function render() {
+    hideTooltip();
+    if (activeTab === "models") renderModels();
+    else renderErrors();
+    updateErrorBadge();
+  }
+
+  function switchTab(tab) {
+    activeTab = tab;
+    $("tab-models").classList.toggle("active", tab === "models");
+    $("tab-errors").classList.toggle("active", tab === "errors");
+    $("models-view").hidden = tab !== "models";
+    $("errors-view").hidden = tab !== "errors";
+    render();
+  }
+  $("tab-models").addEventListener("click", () => switchTab("models"));
+  $("tab-errors").addEventListener("click", () => switchTab("errors"));
+  $("filter").addEventListener("input", render);
+
+  // Status explanations on the legend — match the dashboard's
+  // floating-tooltip style.
+  const STATUS_INFO = {
+    pending: {
+      title: "pending",
+      body:
+        "Queued and ready to run. The user's loop iterates these. " +
+        "Set by `prefill` during the state bootstrap.",
+    },
+    running: {
+      title: "running",
+      body:
+        "Currently being processed by a worker. Set by " +
+        "`@state_tracker` immediately before invoking your `execute`. " +
+        "Cells spin in the grid.",
+    },
+    applied: {
+      title: "applied",
+      body:
+        "Completed successfully. Set by `@state_tracker` after a " +
+        "clean execute, or atomically by the staging flush.",
+    },
+    blocked: {
+      title: "once blocked",
+      body:
+        "Upstream isn't ready yet. The pipeline's discovery — " +
+        "re-evaluated every run, so this is transient: cells " +
+        "unblock automatically as their upstream catches up. " +
+        "Hover any blocked cell for the specific reason (STATE_001, " +
+        "STATE_002).",
+    },
+    error: {
+      title: "error",
+      body:
+        "Execute raised. Full details (type, message, traceback) " +
+        "are in the errors tab. Auto-retried on next run under " +
+        "STATE_MODE=respect.",
+    },
+  };
+
+  function statusTooltipHtml(status) {
+    const info = STATUS_INFO[status];
+    return (
+      `<div class="tt-name"><span class="lg ${status}"></span> ${info.title}</div>` +
+      `<div class="tt-body">${info.body}</div>`
+    );
+  }
+
+  for (const el of document.querySelectorAll("#legend .lg-item")) {
+    el.style.cursor = "help";
+    attachTooltip(el, statusTooltipHtml(el.dataset.status));
+  }
+
+  async function refresh() {
+    try {
+      const [summary, errors] = await Promise.all([
+        getJSON("/api/summary"),
+        getJSON("/api/errors?limit=50"),
+      ]);
+      const states = await Promise.all(
+        summary.map(e => getJSON(`/api/state/${encodeURIComponent(e.full_name)}`).catch(() => []))
+      );
+      cache = { summary, states, errors };
+      render();
+      lastUpdate = new Date();
+      tickStatus(null);
+    } catch (e) {
+      tickStatus(e.message);
+    }
+  }
+
+  refresh();
+  setInterval(refresh, POLL_MS);
+</script>
+</body>
+</html>
