@@ -4,6 +4,7 @@ from typing import Callable
 
 from bollhav.model.database import Database, DatabaseColumn, DatabaseIndex
 from bollhav.model.model_type import ModelType
+from bollhav.model.staging import Staging
 from bollhav.model.write_modes import WriteMode
 from bollhav.model.column_sorting import sort_columns
 from bollhav.model.target_schema import TargetSchema
@@ -26,6 +27,7 @@ class Target:
     extra: dict | None = None
     recreate_table: bool = False
     truncate_table: bool = False
+    staging: Staging | None = None
 
     sensitive: bool = field(init=False, default=False)
     unique_columns: list = field(init=False, default_factory=list)

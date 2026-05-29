@@ -18,6 +18,12 @@ from bollhav.model.runtime import apply_runtime_overrides
 from bollhav.model.model import Model
 from bollhav.model.ordering import UpstreamMode
 from bollhav.model.progress_bar import get_progress_level
+from bollhav.model.state import StateMode
+
+import logging
+from uuid import uuid4
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -37,6 +43,7 @@ class _RuntimeConfig:
     tz_override: tzinfo | None
     dry_run: bool
     dry_run_extra: bool
+    state_mode: StateMode
     debug: bool
     table_suffix: str = ""
 
@@ -86,13 +93,17 @@ def load_models(
                                       prints the exhaustive per-model block
                                       (schema, bounds, tags, source, upstream,
                                       …). Implies DRY_RUN=true
+        STATE_MODE                    respect (default) | disrespect. For
+                                      state-enabled models, controls how
+                                      pre-fill treats existing state rows.
+                                      respect = preserve applied rows;
+                                      disrespect = reset every row to pending.
     """
 
     def decorator(func: Callable[..., None]) -> Callable[[], None]:
         @wraps(func)
         def wrapper() -> None:
             cfg = _read_env()
-            _print_summary(cfg)
             models = apply_runtime_overrides(
                 folder=folder,
                 tags=cfg.tags,
@@ -107,11 +118,18 @@ def load_models(
                 lookback_override=cfg.lookback_override,
                 tz_override=cfg.tz_override,
             )
+            _print_summary(cfg, models)
             if cfg.dry_run:
                 from bollhav.model.dry_run import print_summary
 
                 print_summary(models, cfg)
                 return
+
+            # Bollhav owns the state bootstrap for fully-managed
+            # (staging) models. Other models pass through unchanged —
+            # the user owns ensure_tables / prefill / loop for those.
+            _bootstrap_state_for_staged_models(models, state_mode=cfg.state_mode)
+
             func(models=models, debug=cfg.debug)
 
         return wrapper
@@ -180,6 +198,7 @@ def _read_env() -> _RuntimeConfig:
         tz_override=tz_override,
         dry_run=_resolve_dry_run(),
         dry_run_extra=env_var_bool(name="DRY_RUN_EXTRA", default=False),
+        state_mode=_resolve_state_mode(),
         debug=env_var_bool(name="DEBUG", default=False),
     )
 
@@ -190,6 +209,61 @@ def _resolve_dry_run() -> bool:
     return env_var_bool(name="DRY_RUN", default=False) or env_var_bool(
         name="DRY_RUN_EXTRA", default=False
     )
+
+
+def _resolve_state_mode() -> StateMode:
+    raw = env_var(name="STATE_MODE", should_print_unset=False)
+    if raw is None:
+        return StateMode.RESPECT
+    valid = {m.value: m for m in StateMode}
+    if raw not in valid:
+        raise ValueError(f"STATE_MODE must be one of {list(valid.keys())}, got {raw!r}")
+    return valid[raw]
+
+
+def _bootstrap_state_for_staged_models(
+    models: list[Model], *, state_mode: StateMode
+) -> None:
+    """For each model with `target.staging` set:
+
+      1. Read the model's contract — the intervals it says should exist
+         under the current bounds + batching.
+      2. Ensure the state tables exist.
+      3. Pre-fill state with the contract (respect/disrespect mode).
+      4. Read pending intervals back from state.
+      5. Stash them on `model.intervals` — the user's loop iterates
+         only what's left to do; empty list = nothing to do, loop
+         exits cleanly.
+
+    State DB unreachable → log a warning, set `model.intervals = []`,
+    keep going. Other models in the batch still get their chance to
+    run."""
+    from bollhav.postgres import state as pg_state
+
+    for model in models:
+        if model.target.staging is None:
+            continue
+
+        contract = model.intervals  # step 1 — what should exist
+        run_id = uuid4()
+        model._state_run_id = run_id
+
+        try:
+            pg_state.ensure_tables(model)  # step 2
+            pg_state.prefill(  # step 3
+                model,
+                run_id=run_id,
+                intervals=contract,
+                state_mode=state_mode,
+            )
+            model.intervals = pg_state.read_pending(model)  # steps 4 + 5
+        except ConnectionError as exc:
+            logger.warning(
+                "state: bootstrap failed for %s — skipping (intervals=[]). %s",
+                model.target.full_name,
+                exc,
+            )
+            model.intervals = []
 
 
 def _resolve_tz_override() -> tzinfo | None:
@@ -218,7 +292,7 @@ def _resolve_upstream_mode() -> UpstreamMode:
     return valid[raw]
 
 
-def _print_summary(cfg: _RuntimeConfig) -> None:
+def _print_summary(cfg: _RuntimeConfig, models: list[Model]) -> None:
     def _row(key: str, val: str) -> None:
         print(f"  {key:<18}{val}")
 
@@ -256,6 +330,11 @@ def _print_summary(cfg: _RuntimeConfig) -> None:
         _row("lookback override", str(cfg.lookback_override))
     if cfg.latest and cfg.window_expression_override:
         _row("window override", cfg.window_expression_override)
+    # Show STATE_MODE only when at least one matched model actually
+    # has state — otherwise the env var is a no-op and listing it
+    # would be misleading clutter.
+    if any(m.target.staging is not None for m in models):
+        _row("state", cfg.state_mode.value)
     print("────────────────────────────")
 
 

@@ -82,31 +82,64 @@ def write(
 ) -> None:
     """Write data to Postgres using the write mode defined on the model.
 
-    Routes to `write_dataframes` for table-based modes, or `create_replace_view`
-    for VIEW mode. Validates that a DataFrame generator is provided (or not) as
-    appropriate for the selected mode.
+    Two paths, chosen by `model.target.staging`:
+
+      * **Direct** (`staging is None`, default) — each DataFrame in
+        `df_gen` is written straight to the target in its own
+        transaction. Fast, simple, but a crash mid-stream leaves
+        partial writes in the target.
+      * **Staged** (`staging=Staging(...)`) — each DataFrame COPYs
+        into a per-interval staging table. After the generator drains,
+        one transaction moves staging → target, drops staging, and
+        flips the model's state row to `applied`. A crash mid-stream
+        leaves no partial writes in the target (staging is GC'd on
+        next run); the state row stays `pending` and the interval
+        reruns.
+
+    The staged path requires `model.state = State(...)` and is currently
+    APPEND-only (enforced by `bollhav.postgres.staging.stage`).
 
     Args:
         conn: Active psycopg connection.
         model: Model describing the target and write behaviour.
         df_gen: Generator yielding DataFrames. Required for all non-VIEW modes.
-        since: Start of the overwrite window (UTC). Required for RECREATE_PARTITION.
-        until: End of the overwrite window (UTC, exclusive). Required for RECREATE_PARTITION.
+        since: Start of the overwrite window (UTC). Required for
+            RECREATE_PARTITION and for the staged path.
+        until: End of the overwrite window (UTC, exclusive). Required for
+            RECREATE_PARTITION and for the staged path.
         create_if_missing: If True, create the schema and table before writing.
 
     Raises:
-        ValueError: If `df_gen` is missing for a table mode, or provided for VIEW mode.
+        ValueError: If `df_gen` is missing for a table mode, provided for
+            VIEW mode, or if `since`/`until` are missing for the staged path.
     """
-    if model.target.write_mode in (
+    if model.target.write_mode == WriteMode.VIEW:
+        if df_gen:
+            raise ValueError("Modes VIEW does not need a dataframe")
+        create_replace_view(conn=conn, model=model)
+        return
+
+    if model.target.write_mode not in (
         WriteMode.APPEND,
         WriteMode.RECREATE_PARTITION,
         WriteMode.UPSERT_NO_DELETE,
     ):
-        if not df_gen:
+        raise ValueError(f"Unhandled write mode: {model.target.write_mode}")
+
+    if not df_gen:
+        raise ValueError(
+            "Modes APPEND, RECREATE_PARTITION, UPSERT_NO_DELETE need a dataframe"
+        )
+
+    if model.target.staging is not None:
+        # Staged path: chunks COPY into staging table; final tx atomically
+        # moves staging → target and flips the state row to applied.
+        if since is None or until is None:
             raise ValueError(
-                "Modes APPEND, RECREATE_PARTITION, UPSERT_NO_DELETE need a dataframe"
+                "since and until are required when target.staging is set — "
+                "they identify the state row to flip on flush"
             )
-        write_dataframes(
+        _write_staged(
             conn=conn,
             model=model,
             df_gen=df_gen,
@@ -114,7 +147,49 @@ def write(
             until=until,
             create_if_missing=create_if_missing,
         )
-    if model.target.write_mode == WriteMode.VIEW:
-        if df_gen:
-            raise ValueError("Modes VIEW does not need a dataframe")
-        create_replace_view(conn=conn, model=model)
+        return
+
+    # Direct path: each chunk writes straight to target, one tx per chunk.
+    write_dataframes(
+        conn=conn,
+        model=model,
+        df_gen=df_gen,
+        since=since,
+        until=until,
+        create_if_missing=create_if_missing,
+    )
+
+
+def _write_staged(
+    conn: Connection,
+    model: Model,
+    df_gen: Generator[pl.DataFrame, None, None],
+    since: datetime,
+    until: datetime,
+    create_if_missing: bool,
+) -> None:
+    """Staged write — stream chunks into a per-interval staging table,
+    then atomically flush staging → target + flip state row on exit.
+
+    Delegates to `bollhav.postgres.staging.stage` for the heavy lifting;
+    this function is just the glue between `write()`'s generator-based
+    API and `stage()`'s `.write(df)` API."""
+    from bollhav.postgres.staging import stage
+
+    if create_if_missing:
+        logger.debug("Ensuring schema and table for %s", model.target.full_name)
+        ensure_schema_and_table(conn=conn, model=model)
+
+    with stage(conn, model, since=since, until=until) as s:
+        for df in df_gen:
+            if len(df) == 0:
+                continue
+            df = df.select([col.name for col in model.target.columns])
+            logger.debug(
+                "Staging %d rows for %s (interval %s..%s)",
+                len(df),
+                model.target.full_name,
+                since,
+                until,
+            )
+            s.write(df)

@@ -239,7 +239,7 @@ def test_load_models_passes_table_suffix_to_apply_runtime_overrides():
         patch(
             "bollhav.model.load_models.apply_runtime_overrides", side_effect=_fake_apm
         ),
-        patch("bollhav.model.load_models._print_summary", lambda cfg: None),
+        patch("bollhav.model.load_models._print_summary", lambda cfg, models: None),
     ):
 
         @load_models
