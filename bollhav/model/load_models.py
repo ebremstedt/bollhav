@@ -258,7 +258,7 @@ def _resolve_dry_run() -> bool:
 def _resolve_state_mode() -> StateMode:
     raw = env_var(name="STATE_MODE", should_print_unset=False)
     if raw is None:
-        return StateMode.RESPECT
+        return StateMode.DISCOVER
     valid = {m.value: m for m in StateMode}
     if raw not in valid:
         raise ValueError(f"STATE_MODE must be one of {list(valid.keys())}, got {raw!r}")
@@ -296,17 +296,14 @@ def _bootstrap_state_for_staged_models(
     matched_names = {m.target.full_name for m in models}
 
     for model in models:
-        # Library-only registration path. Triggered for:
-        #   * Views — always (claimable upstream; no state needed).
-        #   * Tables with `library=True` but no `state` / no staging —
-        #     opt-in for static / no-state tables that should still be
-        #     discoverable as upstreams.
-        # No state table is created; the library row alone makes the
-        # model claimable. Every downstream interval that references
-        # one of these is satisfied by mere presence in the library.
-        is_register_only = model.target.is_view or (
-            model.library and model.target.staging is None
-        )
+        # Library-only registration path. Triggered when the user
+        # explicitly opts in via `Model(library=True)` and the model
+        # has no staging machinery — works the same for VIEW and
+        # state-less TABLE models. No state table is created; the
+        # library row alone makes the model claimable. Every
+        # downstream interval that references one of these is
+        # satisfied by mere presence in the library.
+        is_register_only = model.library and model.target.staging is None
         if is_register_only:
             try:
                 with pg_state._connect(model) as conn:

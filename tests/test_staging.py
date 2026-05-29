@@ -131,15 +131,15 @@ class TestPreconditions:
             "without state there is no state row to flip — UPDATE must not run"
         )
 
-    def test_per_interval_mode_without_state_drops_staging(self) -> None:
-        """In `StagingMode.PER_INTERVAL`, even without state, flush
+    def test_interval_mode_without_state_drops_staging(self) -> None:
+        """In `StagingMode.INTERVAL`, even without state, flush
         still drops the staging table — that's the mode's lifecycle.
         Confirms the no-state branch and the per-interval drop branch
         compose correctly."""
         from bollhav.model.staging import Staging, StagingMode
         from bollhav.postgres.staging import stage
 
-        model = _model(staging_cfg=Staging(mode=StagingMode.PER_INTERVAL))
+        model = _model(staging_cfg=Staging(mode=StagingMode.INTERVAL))
         model.state = None
         conn = _mock_conn()
         with stage(conn, model, since=SINCE, until=UNTIL):
@@ -239,14 +239,14 @@ class TestHappyPath:
         assert len(drop) == 0
         assert len(update_state) == 1
 
-    def test_flush_per_interval_mode_runs_three_statements(self) -> None:
-        """`StagingMode.PER_INTERVAL` flush issues INSERT, DROP, and
+    def test_flush_interval_mode_runs_three_statements(self) -> None:
+        """`StagingMode.INTERVAL` flush issues INSERT, DROP, and
         UPDATE state — each interval is self-contained."""
         from bollhav.model.staging import Staging, StagingMode
         from bollhav.postgres.staging import stage
 
         conn = _mock_conn()
-        model = _model(staging_cfg=Staging(mode=StagingMode.PER_INTERVAL))
+        model = _model(staging_cfg=Staging(mode=StagingMode.INTERVAL))
         with stage(conn, model, since=SINCE, until=UNTIL) as s:
             s.write(pl.DataFrame({"id": [1], "amount": [1.0]}))
 
@@ -431,15 +431,15 @@ class TestLoggedField:
 
 
 class TestKeepAfterFlush:
-    """`keep_after_flush` only applies to `StagingMode.PER_INTERVAL`
+    """`keep_after_flush` only applies to `StagingMode.INTERVAL`
     — REUSED mode always keeps the table for the next interval."""
 
-    def test_per_interval_default_drops_staging_on_flush(self) -> None:
+    def test_interval_default_drops_staging_on_flush(self) -> None:
         from bollhav.model.staging import Staging, StagingMode
         from bollhav.postgres.staging import stage
 
         conn = _mock_conn()
-        model = _model(staging_cfg=Staging(mode=StagingMode.PER_INTERVAL))
+        model = _model(staging_cfg=Staging(mode=StagingMode.INTERVAL))
         with stage(conn, model, since=SINCE, until=UNTIL) as s:
             s.write(pl.DataFrame({"id": [1], "amount": [1.0]}))
 
@@ -447,12 +447,12 @@ class TestKeepAfterFlush:
         drops = [q for q in executed if "DROP TABLE" in q]
         assert len(drops) == 1  # the staging table
 
-    def test_per_interval_keep_after_flush_skips_drop(self) -> None:
+    def test_interval_keep_after_flush_skips_drop(self) -> None:
         from bollhav.model.staging import Staging, StagingMode
         from bollhav.postgres.staging import stage
 
         model = _model(
-            staging_cfg=Staging(mode=StagingMode.PER_INTERVAL, keep_after_flush=True)
+            staging_cfg=Staging(mode=StagingMode.INTERVAL, keep_after_flush=True)
         )
         conn = _mock_conn()
         with stage(conn, model, since=SINCE, until=UNTIL) as s:

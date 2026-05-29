@@ -41,7 +41,7 @@ def _cfg(**overrides):
         tz_override=None,
         dry_run=True,
         dry_run_extra=False,
-        state_mode=StateMode.RESPECT,
+        state_mode=StateMode.DISCOVER,
         state_disabled=False,
         peek=False,
         debug=False,

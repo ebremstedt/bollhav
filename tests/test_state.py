@@ -37,8 +37,8 @@ class TestStateConfig:
 
 class TestStateMode:
     def test_values(self) -> None:
-        assert StateMode.RESPECT.value == "respect"
-        assert StateMode.DISRESPECT.value == "disrespect"
+        assert StateMode.DISCOVER.value == "discover"
+        assert StateMode.BULLDOZER.value == "bulldozer"
 
 
 class TestBlockCode:
@@ -1100,7 +1100,7 @@ def _make_cfg(**overrides):
         tz_override=None,
         dry_run=False,
         dry_run_extra=False,
-        state_mode=StateMode.RESPECT,
+        state_mode=StateMode.DISCOVER,
         state_disabled=False,
         peek=False,
         debug=False,
@@ -1287,7 +1287,7 @@ class TestLoadModelsStateBootstrap:
             patch("bollhav.postgres.state.prefill") as pf,
             patch("bollhav.postgres.state.read_actionable") as rp,
         ):
-            _bootstrap_state_for_staged_models([m], state_mode=StateMode.RESPECT)
+            _bootstrap_state_for_staged_models([m], state_mode=StateMode.DISCOVER)
 
         ensure.assert_not_called()
         pf.assert_not_called()
@@ -1310,7 +1310,7 @@ class TestLoadModelsStateBootstrap:
             patch("bollhav.postgres.state.prefill") as pf,
             patch("bollhav.postgres.state.read_actionable", return_value=pending) as rp,
         ):
-            _bootstrap_state_for_staged_models([m], state_mode=StateMode.RESPECT)
+            _bootstrap_state_for_staged_models([m], state_mode=StateMode.DISCOVER)
 
         ensure.assert_called_once_with(m)
         pf.assert_called_once()
@@ -1320,7 +1320,7 @@ class TestLoadModelsStateBootstrap:
         assert [r[0] for r in rows] == contract
         # No upstreams to check → everything is pending.
         assert all(r[1] == "pending" and r[2] is None for r in rows)
-        assert pf.call_args.kwargs["state_mode"] is StateMode.RESPECT
+        assert pf.call_args.kwargs["state_mode"] is StateMode.DISCOVER
         rp.assert_called_once_with(m)
         assert m.intervals == pending
 
@@ -1337,9 +1337,9 @@ class TestLoadModelsStateBootstrap:
             patch("bollhav.postgres.state.prefill") as pf,
             patch("bollhav.postgres.state.read_actionable", return_value=[]),
         ):
-            _bootstrap_state_for_staged_models([m], state_mode=StateMode.DISRESPECT)
+            _bootstrap_state_for_staged_models([m], state_mode=StateMode.BULLDOZER)
 
-        assert pf.call_args.kwargs["state_mode"] is StateMode.DISRESPECT
+        assert pf.call_args.kwargs["state_mode"] is StateMode.BULLDOZER
 
     def test_connection_failure_skips_model_with_empty_intervals(self) -> None:
         from bollhav.model.load_models import _bootstrap_state_for_staged_models
@@ -1360,7 +1360,7 @@ class TestLoadModelsStateBootstrap:
             patch("bollhav.postgres.state.prefill"),
             patch("bollhav.postgres.state.read_actionable", return_value=["p1"]),
         ):
-            _bootstrap_state_for_staged_models([m1, m2], state_mode=StateMode.RESPECT)
+            _bootstrap_state_for_staged_models([m1, m2], state_mode=StateMode.DISCOVER)
 
         # m1 gets intervals=[] (skipped), m2 still bootstraps.
         assert m1.intervals == []
@@ -1379,7 +1379,7 @@ class TestLoadModelsStateBootstrap:
             patch("bollhav.postgres.state.prefill"),
             patch("bollhav.postgres.state.read_actionable", return_value=[]),
         ):
-            _bootstrap_state_for_staged_models([m], state_mode=StateMode.RESPECT)
+            _bootstrap_state_for_staged_models([m], state_mode=StateMode.DISCOVER)
 
         assert m._state_run_id is not None
 
@@ -1394,25 +1394,25 @@ class TestStateMode_EnvVar:
             "bollhav.model.load_models.env_var",
             lambda name, **kw: None,
         ):
-            assert _resolve_state_mode() is StateMode.RESPECT
+            assert _resolve_state_mode() is StateMode.DISCOVER
 
     def test_respect_explicit(self) -> None:
         from bollhav.model.load_models import _resolve_state_mode
 
         with patch(
             "bollhav.model.load_models.env_var",
-            lambda name, **kw: "respect" if name == "STATE_MODE" else None,
+            lambda name, **kw: "discover" if name == "STATE_MODE" else None,
         ):
-            assert _resolve_state_mode() is StateMode.RESPECT
+            assert _resolve_state_mode() is StateMode.DISCOVER
 
     def test_disrespect(self) -> None:
         from bollhav.model.load_models import _resolve_state_mode
 
         with patch(
             "bollhav.model.load_models.env_var",
-            lambda name, **kw: "disrespect" if name == "STATE_MODE" else None,
+            lambda name, **kw: "bulldozer" if name == "STATE_MODE" else None,
         ):
-            assert _resolve_state_mode() is StateMode.DISRESPECT
+            assert _resolve_state_mode() is StateMode.BULLDOZER
 
     def test_unknown_raises(self) -> None:
         from bollhav.model.load_models import _resolve_state_mode
@@ -1456,6 +1456,9 @@ class TestModelIntervalsSetter:
             batching=Batch(interval=IntervalChunks(expression="@daily")),
             bounds=Bounds(begin=datetime(2024, 1, 1, tzinfo=timezone.utc)),
         )
+        # Backfill mode now requires directives.until — pin it so
+        # live-compute has a valid window.
+        m.directives.until = datetime(2024, 1, 3, tzinfo=timezone.utc)
         # Pre-stash, then clear: setter must drop back to computed.
         m.intervals = []
         assert m.intervals == []

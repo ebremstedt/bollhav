@@ -74,6 +74,8 @@ nav:
   - Concepts:
       - Modes: MODES.md
       - State: STATE.md
+      - Staging: STAGING.md
+      - Library: LIBRARY.md
       - Chunking: CHUNKING.md
   - Runtime:
       - Runtime overrides: RUNTIME_OVERRIDES.md

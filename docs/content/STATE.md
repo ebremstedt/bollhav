@@ -14,18 +14,18 @@ The `status` column on `<state_schema>.<target_name>_state` is one of:
 | `running` | Currently being processed. Set by `@state` immediately before invoking your `execute`. Visible in live dashboards. |
 | `applied` | Completed successfully. Set by `@state` after a clean execute, or atomically by the staging flush. |
 | `blocked` | Cannot run: an out-of-pipeline upstream isn't fulfilled. See `blocked_reason` for the [BLOCK CODE](BLOCK_CODES.md). |
-| `error` | Execute raised. Full details (type, message, traceback) are in the sibling `_errors` table. Auto-retried on next run under `STATE_MODE=respect`. |
+| `error` | Execute raised. Full details (type, message, traceback) are in the sibling `_errors` table. Auto-retried on next run under `STATE_MODE=discover`. |
 
 ## Re-evaluation on rerun
 
-Under `STATE_MODE=respect` (the default), `prefill` keeps `applied` rows untouched and re-evaluates everything else against the current upstream state. So:
+Under `STATE_MODE=discover` (the default), `prefill` keeps `applied` rows untouched and re-evaluates everything else against the current upstream state. So:
 
 - `pending` rows whose upstreams have since regressed → `blocked`
 - `blocked` rows whose upstreams now satisfy → `pending`
 - `error` rows → `pending` (automatic retry)
 - `running` rows orphaned by a process crash → `pending` (automatic recovery)
 
-Under `STATE_MODE=disrespect`, every row resets to the computed status regardless of prior value (`applied_at` cleared too).
+Under `STATE_MODE=bulldozer`, every row resets to the computed status regardless of prior value (`applied_at` cleared too).
 
 ## Concurrency: per-interval advisory locks
 
@@ -81,15 +81,15 @@ A downstream model with `state=State(...)` declares its upstreams by full name. 
 | Upstream kind | How it registers | What "satisfied" means |
 |---|---|---|
 | **TABLE with `state=State(...)`** | Automatic, on every run | An `applied` row in the upstream's state table matches or fully encapsulates the downstream's `(since, until)` window |
-| **VIEW** | Automatic, on every run (view-creating models always register) | The library row exists. Views are time-agnostic — once they're declared, every interval of the downstream is satisfied by their presence |
-| **TABLE with `library=True`** | Opt-in via `Model(target=..., library=True)`. Useful for static lookup tables or externally-loaded tables that don't track state themselves but need to be claimable as upstream | The library row exists. Same presence-based rule as views |
+| **VIEW with `library=True`** | Opt-in via `Model(..., library=True)`. A view declared without it is still a valid bollhav model (gets `CREATE OR REPLACE VIEW`d each run) but isn't claimable as upstream. | The library row exists. Views are time-agnostic — once they're declared, every interval of the downstream is satisfied by their presence |
+| **TABLE with `library=True`** | Opt-in via `Model(..., library=True)`. Useful for static lookup tables or externally-loaded tables that don't track state themselves but need to be claimable as upstream | The library row exists. Same presence-based rule as views |
 
 ### View example
 
 ```python
 from bollhav.model import Model, Target, TargetSchema, ModelType, WriteMode
 
-# This view-model auto-registers — no `library=True` needed.
+# Opt in with `library=True` so downstreams can claim this view.
 v_orders_summary = Model(
     target=Target(
         name="v_orders_summary",
@@ -98,6 +98,7 @@ v_orders_summary = Model(
         write_mode=WriteMode.VIEW,
         dsn_env_var="TARGET_DSN",
     ),
+    library=True,
 )
 
 # Downstream depends on the view; every interval is satisfied
@@ -145,6 +146,6 @@ When set: `@load_models` clears `state` and `target.staging` on every matched mo
 
 | Variable | Default | Effect |
 |---|---|---|
-| `STATE_MODE` | `respect` | `respect` preserves `applied` rows on re-evaluation; `disrespect` resets every row to the new computed status |
+| `STATE_MODE` | `discover` | `discover` preserves `applied` rows on re-evaluation and adds new pending intervals as discovered; `bulldozer` resets every row to the freshly-computed status |
 | `STATE_DISABLED` | `false` | When `true`, force no-state behavior on every matched model |
 | `PEEK` | `false` | When `true`, run bootstrap + print state banner, then exit without invoking `main()` |

@@ -9,7 +9,7 @@ Opt-in: set `state=State(...)` on a Model. The user is then expected to:
 
 Scope is intentionally narrow in this first cut:
   * one state table per model (no separate errors table yet)
-  * RESPECT / DISRESPECT modes only — DISCOVER, NUKE_STATE come later
+  * DISCOVER / BULLDOZER modes only — DISCOVER, NUKE_STATE come later
   * state always co-locates with the target DB (atomic flip with
     staging requires same DB); the `dsn_env_var` field exists on
     `State` for future use but isn't honored yet
@@ -60,13 +60,13 @@ class State:
 class StateMode(Enum):
     """How the pre-fill step treats existing state rows.
 
-    RESPECT    — preserve applied rows; only insert pending rows for
+    DISCOVER  — preserve applied rows; only insert pending rows for
                  new (since, until) intervals. The resumable mode.
-    DISRESPECT — reset every interval back to pending, regardless of
+    BULLDOZER — reset every interval back to pending, regardless of
                  prior status. The whole window reruns."""
 
-    RESPECT = "respect"
-    DISRESPECT = "disrespect"
+    DISCOVER = "discover"
+    BULLDOZER = "bulldozer"
 
 
 class BlockCode(Enum):
@@ -189,7 +189,7 @@ def state(func: Callable) -> Callable:
             # Visible state of "what's actively being processed right now"
             # for ops dashboards. On success → applied; on exception →
             # error. A row left as 'running' after a process crash is
-            # treated like 'pending' by the next RESPECT-mode pre-fill.
+            # treated like 'pending' by the next DISCOVER-mode pre-fill.
             _mark_running(model, run_id=run_id, since=since, until=until)
 
             try:

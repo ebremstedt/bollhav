@@ -58,8 +58,19 @@ def test_intervals_backfill_without_since_or_bounds_raises():
         m.intervals
 
 
-def test_intervals_backfill_without_runtime_since_falls_back_to_bounds():
+def test_intervals_backfill_falls_back_to_bounds_for_since_but_requires_until():
+    """`since` still falls back to `bounds.begin` when `directives.since`
+    is unset — that's been the contract since day one. `until` no
+    longer has a silent fallback in backfill mode; it must be set
+    via `directives.until` (i.e. `BACKFILL_UNTIL`)."""
     m = make_model(bounds=Bounds(begin=datetime(2026, 1, 1, tzinfo=timezone.utc)))
+    with pytest.raises(ValueError, match="backfill requires an explicit until"):
+        _ = m.intervals
+
+    # Set until → backfill window resolves cleanly using bounds.begin
+    # for the since side and directives.until for the until side.
+    m.directives.until = datetime(2026, 1, 3, tzinfo=timezone.utc)
     intervals = m.intervals
     assert len(intervals) > 0
     assert intervals[0].since == datetime(2026, 1, 1, tzinfo=timezone.utc)
+    assert intervals[-1].until == datetime(2026, 1, 3, tzinfo=timezone.utc)

@@ -296,12 +296,29 @@ class TestIntervalsLookback:
 
 
 class TestIntervalsNoneInputs:
-    @travel(datetime(2024, 6, 15, 14, 35, tzinfo=UTC))
-    def test_until_none_defaults_to_last_complete_hourly(self) -> None:
+    """Backfill mode is now strict: `directives.until` must be set,
+    no silent fallback to `latest_complete_interval()`. These tests
+    pin that behaviour so a future refactor can't bring the implicit
+    fallback back."""
+
+    def test_until_none_in_backfill_raises(self) -> None:
         model = _model(
             interval_expression="@hourly",
             interval_expression_override="0 * * * *",
             since=datetime(2024, 6, 15, 12, 0, tzinfo=UTC),
+        )
+        with pytest.raises(ValueError, match="backfill requires an explicit until"):
+            _ = model.intervals
+
+    @travel(datetime(2024, 6, 15, 14, 35, tzinfo=UTC))
+    def test_until_set_explicitly_in_backfill_is_honored(self) -> None:
+        """`directives.until` is now required — set it explicitly,
+        get the intervals the caller asked for."""
+        model = _model(
+            interval_expression="@hourly",
+            interval_expression_override="0 * * * *",
+            since=datetime(2024, 6, 15, 12, 0, tzinfo=UTC),
+            until=datetime(2024, 6, 15, 14, 0, tzinfo=UTC),
         )
         intervals = model.intervals
         assert intervals[0].since == datetime(2024, 6, 15, 12, 0, tzinfo=UTC)
@@ -309,37 +326,16 @@ class TestIntervalsNoneInputs:
         assert len(intervals) == 2
 
     @travel(datetime(2024, 6, 15, 14, 35, tzinfo=UTC))
-    def test_until_none_defaults_to_last_complete_daily(self) -> None:
+    def test_latest_mode_auto_derives_until(self) -> None:
+        """If you want the latest-complete-tick semantic, use `latest`
+        mode — which is what `LATEST_ENABLED=true` opts into."""
         model = _model(
-            interval_expression="@daily",
-            interval_expression_override="0 0 * * *",
-            since=datetime(2024, 6, 14, 0, 0, tzinfo=UTC),
-        )
-        intervals = model.intervals
-        assert intervals[0].since == datetime(2024, 6, 14, 0, 0, tzinfo=UTC)
-        assert intervals[-1].until == datetime(2024, 6, 15, 0, 0, tzinfo=UTC)
-        assert len(intervals) == 1
-
-    @travel(datetime(2024, 6, 15, 14, 35, tzinfo=UTC))
-    def test_until_none_uses_provided_interval_expression_first(self) -> None:
-        model = _model(
-            interval_expression="@daily",
-            tz=UTC,
+            interval_expression="@hourly",
             interval_expression_override="0 * * * *",
-            since=datetime(2024, 6, 15, 12, 0, tzinfo=UTC),
+            latest=True,
         )
         intervals = model.intervals
         assert intervals[-1].until == datetime(2024, 6, 15, 14, 0, tzinfo=UTC)
-
-    @travel(datetime(2024, 6, 15, 14, 35, tzinfo=UTC))
-    def test_until_none_falls_back_to_model_interval_expression(self) -> None:
-        model = _model(
-            interval_expression="@daily",
-            tz=UTC,
-            since=datetime(2024, 6, 14, 0, 0, tzinfo=UTC),
-        )
-        intervals = model.intervals
-        assert intervals[-1].until == datetime(2024, 6, 15, 0, 0, tzinfo=UTC)
 
     def test_since_none_without_latest_raises(self) -> None:
         model = _model(
