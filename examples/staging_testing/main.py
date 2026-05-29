@@ -41,6 +41,9 @@ def main(models: list[Model], debug: bool) -> None:
                 f"  {interval.since.date()} → {interval.until.date()}",
                 flush=True,
             )
+            # @state_tracker takes a per-interval advisory lock around
+            # each call — concurrent workers on the same model see the
+            # lock and skip the held interval, picking up the next one.
             execute(model=model, since=interval.since, until=interval.until)
         print()
 
