@@ -44,6 +44,8 @@ class _RuntimeConfig:
     dry_run: bool
     dry_run_extra: bool
     state_mode: StateMode
+    state_disabled: bool
+    peek: bool
     debug: bool
     table_suffix: str = ""
 
@@ -98,6 +100,21 @@ def load_models(
                                       pre-fill treats existing state rows.
                                       respect = preserve applied rows;
                                       disrespect = reset every row to pending.
+        PEEK                          bool; when true, run the state bootstrap
+                                      (so the state banner is accurate) and
+                                      then EXIT without invoking the wrapped
+                                      function. Distinct from DRY_RUN, which
+                                      skips the DB entirely.
+        STATE_DISABLED                bool; when true, force the pipeline to
+                                      run with NO state tracking — even for
+                                      models that declare state=State(...).
+                                      Useful for ad-hoc/dev runs against a DB
+                                      where the state tables don't exist or
+                                      you don't want to touch them. Skips the
+                                      bootstrap, banner, and any state-table
+                                      writes; @state_tracker becomes a
+                                      passthrough; write() uses the direct
+                                      path even on staging-enabled models.
     """
 
     def decorator(func: Callable[..., None]) -> Callable[[], None]:
@@ -118,6 +135,20 @@ def load_models(
                 lookback_override=cfg.lookback_override,
                 tz_override=cfg.tz_override,
             )
+            # STATE_DISABLED forces no-state semantics on every matched
+            # model — useful for ad-hoc/dev runs. Nulling `state` and
+            # `target.staging` makes the rest of the wrapper cascade
+            # naturally: bootstrap is a no-op, banner skips,
+            # @state_tracker becomes passthrough, write() routes direct.
+            if cfg.state_disabled:
+                for m in models:
+                    m.state = None
+                    m.target.staging = None
+                logger.info(
+                    "STATE_DISABLED: state + staging cleared on %d matched model(s)",
+                    len(models),
+                )
+
             _print_summary(cfg, models)
             if cfg.dry_run:
                 from bollhav.model.dry_run import print_summary
@@ -129,6 +160,17 @@ def load_models(
             # (staging) models. Other models pass through unchanged —
             # the user owns ensure_tables / prefill / loop for those.
             _bootstrap_state_for_staged_models(models, state_mode=cfg.state_mode)
+
+            # State banner: per-model breakdown of pending/applied/blocked
+            # rows after the bootstrap settled. Always shown when any
+            # matched model uses staging.
+            _print_state_banner(models)
+
+            if cfg.peek:
+                # PEEK: bootstrap + banner + exit. Lets the operator
+                # answer "what does state look like for this pipeline?"
+                # without running anything.
+                return
 
             func(models=models, debug=cfg.debug)
 
@@ -199,6 +241,8 @@ def _read_env() -> _RuntimeConfig:
         dry_run=_resolve_dry_run(),
         dry_run_extra=env_var_bool(name="DRY_RUN_EXTRA", default=False),
         state_mode=_resolve_state_mode(),
+        state_disabled=env_var_bool(name="STATE_DISABLED", default=False),
+        peek=env_var_bool(name="PEEK", default=False),
         debug=env_var_bool(name="DEBUG", default=False),
     )
 
@@ -229,34 +273,71 @@ def _bootstrap_state_for_staged_models(
       1. Read the model's contract — the intervals it says should exist
          under the current bounds + batching.
       2. Ensure the state tables exist.
-      3. Pre-fill state with the contract (respect/disrespect mode).
-      4. Read pending intervals back from state.
-      5. Stash them on `model.intervals` — the user's loop iterates
-         only what's left to do; empty list = nothing to do, loop
-         exits cleanly.
+      3. Ensure the cross-pipeline library exists; register/refresh
+         this model in it.
+      4. For each contract interval, decide its status:
+         * Upstreams in the matched set are assumed to run in topo
+           order — don't block on them.
+         * For out-of-pipeline upstreams: query the library for the
+           upstream's state table, then look for an applied row that
+           exactly matches or fully encapsulates `(since, until)`.
+           If any upstream fails this check, the interval becomes
+           `blocked` with a reason; otherwise `pending`.
+      5. Pre-fill state with the per-interval statuses (respect/
+         disrespect mode controls how existing rows are treated).
+      6. Read pending-only intervals back, stash on `model.intervals`.
 
-    State DB unreachable → log a warning, set `model.intervals = []`,
-    keep going. Other models in the batch still get their chance to
-    run."""
+    State DB unreachable → warn and set `model.intervals = []`. Other
+    models keep going."""
+    from bollhav.postgres import library as pg_library
     from bollhav.postgres import state as pg_state
+
+    matched_names = {m.target.full_name for m in models}
 
     for model in models:
         if model.target.staging is None:
             continue
 
-        contract = model.intervals  # step 1 — what should exist
+        contract = list(model.intervals)  # step 1
         run_id = uuid4()
         model._state_run_id = run_id
 
         try:
             pg_state.ensure_tables(model)  # step 2
-            pg_state.prefill(  # step 3
-                model,
-                run_id=run_id,
-                intervals=contract,
-                state_mode=state_mode,
-            )
-            model.intervals = pg_state.read_pending(model)  # steps 4 + 5
+
+            with pg_state._connect(model) as conn:
+                pg_library.ensure_library(conn)  # step 3
+                pg_library.register(conn, model)
+
+                # step 4 — per-interval status at bootstrap time.
+                # The decorator additionally re-checks at runtime,
+                # so blocked rows here are a snapshot that may flip
+                # back to processable as upstreams catch up.
+                upstreams_to_check = [
+                    u for u in model.upstream if u not in matched_names
+                ]
+                prefill_rows = []
+                for interval in contract:
+                    status, reason = _resolve_interval_status(
+                        conn,
+                        interval=interval,
+                        upstream_names=upstreams_to_check,
+                    )
+                    prefill_rows.append((interval, status, reason))
+
+                pg_state.prefill(  # step 5
+                    model,
+                    run_id=run_id,
+                    intervals=prefill_rows,
+                    state_mode=state_mode,
+                    conn=conn,
+                )
+
+            # step 6 — user's loop iterates EVERY non-applied row
+            # (pending, blocked, running, error). The decorator
+            # re-evaluates each one at runtime so blocked rows
+            # naturally unblock as their upstream catches up.
+            model.intervals = pg_state.read_actionable(model)
         except ConnectionError as exc:
             logger.warning(
                 "state: bootstrap failed for %s — skipping (intervals=[]). %s",
@@ -264,6 +345,119 @@ def _bootstrap_state_for_staged_models(
                 exc,
             )
             model.intervals = []
+
+
+def _print_state_banner(models: list[Model]) -> None:
+    """Print the post-bootstrap state banner.
+
+    Per staged model, two sub-sections:
+
+      upstream:  <model.upstream[0]>   fulfilled | blocked · CODE × N
+                 <model.upstream[1]>   ...
+                 (or "(none declared)" when the model has no upstreams)
+      state:     N pending   N applied   N blocked
+
+    The upstream section iterates `model.upstream` so the operator can
+    see *every* declared dependency and its status side-by-side —
+    upstreams not in `blocked_groups` show `fulfilled`; ones that
+    blocked something show the code(s) responsible. Look codes up in
+    docs/content/BLOCK_CODES.md.
+
+    No-op when no matched model has staging."""
+    from bollhav.postgres import state as pg_state
+
+    staged = [m for m in models if m.target.staging is not None]
+    if not staged:
+        return
+
+    width = 60
+    title = "── state "
+    print(title + "─" * max(0, width - len(title)))
+
+    for i, model in enumerate(staged):
+        if i > 0:
+            print()
+        print(f"  {model.target.full_name}")
+
+        try:
+            summary = pg_state.read_status_summary(model)
+        except Exception as exc:
+            print(f"    (state unavailable: {exc})")
+            continue
+
+        c = summary["counts"]
+        groups = summary["blocked_groups"]
+
+        # Map upstream name → list of (code, count) blocking it.
+        blockers_by_upstream: dict[str | None, list[tuple[str, int]]] = {}
+        for (code, up_name), n in groups.items():
+            blockers_by_upstream.setdefault(up_name, []).append((code, n))
+
+        upstreams = list(model.upstream)
+        if not upstreams:
+            print("    upstream:  (none declared)")
+        else:
+            up_w = max(len(u) for u in upstreams)
+            for j, upstream in enumerate(upstreams):
+                label = "upstream:  " if j == 0 else "           "
+                blockers = blockers_by_upstream.get(upstream, [])
+                if blockers:
+                    codes_str = ", ".join(f"{c} × {n}" for c, n in sorted(blockers))
+                    print(f"    {label}{upstream:<{up_w}}   blocked · {codes_str}")
+                else:
+                    print(f"    {label}{upstream:<{up_w}}   fulfilled")
+
+        print(
+            f"    state:     {c['pending']:>3} pending   "
+            f"{c.get('running', 0):>3} running   "
+            f"{c['applied']:>3} applied   "
+            f"{c['blocked']:>3} blocked   "
+            f"{c.get('error', 0):>3} error"
+        )
+    print("─" * width)
+
+
+def _resolve_interval_status(
+    conn,
+    *,
+    interval,
+    upstream_names: list[str],
+) -> tuple[str, str | None]:
+    """Decide whether one interval should be `pending` or `blocked`.
+    Returns `(status, blocked_reason)` — reason is None for pending,
+    otherwise a `S###: explanation` string keyed by `BlockCode`."""
+    from bollhav.model.state import BlockCode, format_block_reason
+    from bollhav.postgres import library as pg_library
+
+    for upstream_name in upstream_names:
+        entry = pg_library.lookup(conn, upstream_name)
+        if entry is None:
+            return (
+                "blocked",
+                format_block_reason(
+                    BlockCode.UPSTREAM_NOT_REGISTERED,
+                    f"upstream {upstream_name!r} not registered",
+                ),
+            )
+        _, up_state_schema, up_state_table = entry
+        if not pg_library.is_satisfied(
+            conn,
+            upstream_state_schema=up_state_schema,
+            upstream_state_table=up_state_table,
+            since=interval.since,
+            until=interval.until,
+        ):
+            return (
+                "blocked",
+                format_block_reason(
+                    BlockCode.UPSTREAM_NOT_SATISFIED,
+                    (
+                        f"upstream {upstream_name!r} has no applied row covering "
+                        f"{interval.since.isoformat()} → {interval.until.isoformat()}"
+                    ),
+                ),
+            )
+    return ("pending", None)
 
 
 def _resolve_tz_override() -> tzinfo | None:
@@ -332,10 +526,17 @@ def _print_summary(cfg: _RuntimeConfig, models: list[Model]) -> None:
         _row("window override", cfg.window_expression_override)
     # Show STATE_MODE only when at least one matched model actually
     # has state — otherwise the env var is a no-op and listing it
-    # would be misleading clutter.
-    if any(m.target.staging is not None for m in models):
+    # would be misleading clutter. STATE_DISABLED overrides with a
+    # plain "disabled" label.
+    has_staging = any(m.target.staging is not None for m in models)
+    if cfg.state_disabled:
+        _row("state", "disabled")
+    elif has_staging:
         _row("state", cfg.state_mode.value)
-    print("────────────────────────────")
+    # Drop the trailing rule when the state banner will follow —
+    # the two blocks should read as one without a divider in between.
+    if not has_staging:
+        print("────────────────────────────")
 
 
 __all__ = ["load_models", "Model"]

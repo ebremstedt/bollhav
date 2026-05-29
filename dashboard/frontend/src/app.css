@@ -1,0 +1,53 @@
+:root {
+  font-family:
+    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 14px;
+  line-height: 1.45;
+
+  --bg: #0e1116;
+  --bg-2: #161b22;
+  --bg-3: #1c2128;
+  --fg: #c9d1d9;
+  --fg-dim: #768390;
+  --fg-dimmer: #4d5764;
+  --border: #30363d;
+
+  --pending: #3a4150;
+  --running: #2f81f7;
+  --applied: #2da44e;
+  --blocked: #d29922;
+  --error: #f85149;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--fg);
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  background: var(--bg-3);
+  border: 1px solid var(--border);
+  padding: 4px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+button:hover {
+  background: var(--border);
+}
+
+a {
+  color: var(--running);
+  text-decoration: none;
+}
+a:hover {
+  text-decoration: underline;
+}
