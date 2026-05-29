@@ -13,6 +13,7 @@ dispatches internally on `model.target.staging` (set on the model in
 from __future__ import annotations
 
 import os
+import time
 from datetime import datetime
 
 import psycopg
@@ -24,6 +25,13 @@ from mock_read import read
 
 @state_tracker
 def execute(model: Model, since: datetime, until: datetime) -> None:
+    # Optional artificial delay — gives the dashboard time to show the
+    # `running` spinner before the row flips to `applied`. Default: no
+    # sleep. Set SLEEP_PER_INTERVAL=2 to slow each interval by 2s.
+    sleep_for = float(os.environ.get("SLEEP_PER_INTERVAL", "0"))
+    if sleep_for > 0:
+        time.sleep(sleep_for)
+
     df_gen = read(since=since, until=until)
     with psycopg.connect(os.environ[model.target.dsn_env_var]) as conn:
         write(conn=conn, model=model, df_gen=df_gen, since=since, until=until)

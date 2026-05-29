@@ -12,20 +12,37 @@ point of staging.
 
 from __future__ import annotations
 
+import os
 import random
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Generator
 
 import polars as pl
 
 
-ROWS_PER_INTERVAL = 5000
-CHUNK_SIZE = 2000
+ROWS_PER_INTERVAL = int(os.environ.get("ROWS_PER_INTERVAL", "500"))
+CHUNK_SIZE = int(os.environ.get("CHUNK_SIZE", "200"))
 
 
 def read(since: datetime, until: datetime) -> Generator[pl.DataFrame, None, None]:
     """Generate `ROWS_PER_INTERVAL` deterministic-ish rows for the
-    `(since, until)` window, yielded in `CHUNK_SIZE` chunks."""
+    `(since, until)` window, yielded in `CHUNK_SIZE` chunks.
+
+    Set `FAIL_ON=YYYY-MM-DD` to make the read raise for an interval
+    starting on that day — used to exercise the error path."""
+    # Normalize to UTC so date math doesn't land on DST transitions
+    # (psycopg returns timestamps in the session's local timezone,
+    # which can be Stockholm or similar where 2024-03-31 02:30 doesn't
+    # exist due to spring-forward).
+    since = since.astimezone(timezone.utc)
+    until = until.astimezone(timezone.utc)
+
+    fail_on = os.environ.get("FAIL_ON")
+    if fail_on and since.date().isoformat() == fail_on:
+        raise RuntimeError(
+            f"mock_read: simulated failure for interval starting {fail_on}"
+        )
+
     rng = random.Random(int(since.timestamp()))  # stable per-interval
     interval_span = (until - since).total_seconds()
 
