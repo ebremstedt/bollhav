@@ -51,6 +51,7 @@ def ensure_table(conn: psycopg.Connection, model: Model) -> None:
             )
         )
         target.mutations.recreated = True
+        logger.debug("mutation: %s.mutations.recreated = True", model.target.full_name)
 
     if not target.mutations.table_created:
         col_defs = sql.SQL(",\n").join(
@@ -68,6 +69,9 @@ def ensure_table(conn: psycopg.Connection, model: Model) -> None:
             )
         )
         target.mutations.table_created = True
+        logger.debug(
+            "mutation: %s.mutations.table_created = True", model.target.full_name
+        )
 
     if target.truncate_table and not target.mutations.truncated:
         conn.execute(
@@ -76,6 +80,7 @@ def ensure_table(conn: psycopg.Connection, model: Model) -> None:
             )
         )
         target.mutations.truncated = True
+        logger.debug("mutation: %s.mutations.truncated = True", model.target.full_name)
 
     if target.partitioned_by is not None and not target.mutations.indexes_created:
         index_name = f"{target.name_resolved}_{target.partitioned_by}_idx"
@@ -90,6 +95,9 @@ def ensure_table(conn: psycopg.Connection, model: Model) -> None:
             )
         )
         target.mutations.indexes_created = True
+        logger.debug(
+            "mutation: %s.mutations.indexes_created = True", model.target.full_name
+        )
 
     if target.unique_columns and not target.mutations.uniques_added:
         constraint_name = f"{target.name_resolved}_uq"
@@ -111,6 +119,9 @@ def ensure_table(conn: psycopg.Connection, model: Model) -> None:
             )
         )
         target.mutations.uniques_added = True
+        logger.debug(
+            "mutation: %s.mutations.uniques_added = True", model.target.full_name
+        )
 
 
 def ensure_schema_and_table(conn: psycopg.Connection, model: Model) -> None:
@@ -121,4 +132,8 @@ def ensure_schema_and_table(conn: psycopg.Connection, model: Model) -> None:
         if not target.mutations.schema_created:
             ensure_schema(conn=conn, schema=target.schema.resolved)
             target.mutations.schema_created = True
+            logger.debug(
+                "mutation: %s.mutations.schema_created = True",
+                model.target.full_name,
+            )
         ensure_table(conn=conn, model=model)

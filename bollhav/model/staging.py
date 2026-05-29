@@ -23,11 +23,11 @@ class StagingMode(Enum):
         first interval, `TRUNCATE`d at the start of every subsequent
         interval, never dropped by `flush` — survives across the
         whole pipeline. Cheapest on long backfills: 1 `CREATE` +
-        N `TRUNCATE`s vs `PER_INTERVAL`'s 2N catalog statements.
+        N `TRUNCATE`s vs `INTERVAL`'s 2N catalog statements.
         Fits the `Mutations` one-shot pattern via
         `mutations.staging_table_created`.
 
-    PER_INTERVAL
+    INTERVAL
         Fresh staging table per interval — `CREATE` on entry to
         `stage()`, `DROP` inside `flush`'s tx (unless
         `keep_after_flush=True`). Use when you want each interval's
@@ -41,7 +41,7 @@ class StagingMode(Enum):
     """
 
     REUSED = "reused"
-    PER_INTERVAL = "per_interval"
+    INTERVAL = "interval"
 
 
 @dataclass
@@ -64,7 +64,7 @@ class Staging:
         since the interval reruns from the top anyway. Set True for
         environments that mandate WAL on every write (compliance,
         replication policy).
-    `keep_after_flush` — applies to `PER_INTERVAL` mode only. When
+    `keep_after_flush` — applies to `INTERVAL` mode only. When
         False (default), the staging table is dropped inside the
         flush transaction. Set True to keep it after a successful
         flush — useful for audit (compare what was staged vs what

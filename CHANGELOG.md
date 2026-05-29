@@ -2,15 +2,92 @@
 
 ## [2.0.137] - 2026-05-29
 
-### Added
+Large release. Four previously-coupled feature surfaces — **state, staging, library, and target setup** — are decoupled so they can be opted into independently along orthogonal axes, plus a runtime mutation tracker on `Target` that skips redundant DDL on every interval after the first.
 
-- `Target.mutations` — per-pipeline-run tracker for one-shot setup DDL. Six flags (`schema_created`, `table_created`, `recreated`, `truncated`, `indexes_created`, `uniques_added`) flip the first time the corresponding statement fires in `ensure_schema_and_table`; subsequent intervals skip the work. `Target.setup_complete` property gates the whole function — on a 365-interval backfill, one setup transaction instead of 365. Each flag is "did that DDL fire?", and `setup_complete` reconciles them against the directive (e.g. `m.recreated OR not target.recreate_table`). Field is `init=False` so the verbose access path `target.mutations.X` always reads as runtime state, never config. See [Mutating targets](docs/content/MUTATIONS.md).
-- Views and library-only tables as upstreams in `z_bollhav.model_library`. View-models auto-register on every bootstrap; static / no-state tables opt in via `Model(library=True)`. The library gained a `model_type` column and made `state_schema` / `state_table` nullable; `is_satisfied` returns `True` on mere library presence when state pointers are NULL (zero SQL), otherwise runs the existing applied-row check. `lookup` now returns a `LibraryEntry` `NamedTuple`. Block reasons name the upstream's `model_type`. Documented in [STATE.md](docs/content/STATE.md#upstreams-views-and-library-only-tables).
-- New example [examples/state_with_view](examples/state_with_view/) — `warehouse.orders` (table, state + staging) → `warehouse.v_high_value_orders` (VIEW) → `warehouse.high_value_sums` (table, state + staging). Demonstrates view auto-registration and the downstream's satisfaction-by-presence path end-to-end.
+### Added — State: per-model interval state tables
 
-### Changed
+State tracking is opt-in via `Model(state=State(...))`. When set, bollhav creates and maintains per-model state in two tables alongside the target:
 
-- `ensure_library` migrates older `z_bollhav.model_library` tables with **additive, idempotent** ALTERs (sentinel-gated via `information_schema`) instead of `DROP TABLE`. The library is shared across multiple pipelines run by potentially-different bollhav images at the same time, so dropping would brick concurrent old-image writers — `ADD COLUMN model_type TEXT NOT NULL DEFAULT 'TABLE'` and `ALTER COLUMN state_schema/state_table DROP NOT NULL` let both versions coexist. Same constraint going forward: never drop, never tighten `NOT NULL`.
+| Table | Schema (default) | Contents |
+|---|---|---|
+| `<target_name>_state` | `z_<target_schema>` | One row per `(since, until)` interval the model says should exist. Columns: `id`, `run_id`, `since`, `until`, `status`, `blocked_reason`, `applied_at`. `(since, until)` is unique. |
+| `<target_name>_errors` | `z_<target_schema>` | One row per execute exception across all runs. Columns: `id`, `run_id`, `full_name`, `error_type`, `error_message`, `traceback`, `created_at`. Joinable with the state table on `(since, until)` for per-interval inspection or on `run_id` for per-invocation lookups. |
+
+The state schema defaults to `z_<target_schema>` so bollhav-owned tables stay out of the user's schemas. Override via `State(schema_prefix=...)` / `State(table_suffix=...)`.
+
+The status column is one of:
+
+| Status | Set by | Meaning |
+|---|---|---|
+| `pending` | bootstrap (prefill) | queued to run; the user's loop iterates these |
+| `running` | `@state` decorator (immediately before invoking `execute`) | currently being processed — visible in live dashboards |
+| `applied` | `@state` after a clean run, **or** the staged flush in the same transaction as the data move | completed successfully |
+| `blocked` | bootstrap or live re-check | an out-of-pipeline upstream isn't satisfied; reason carries a `STATE_NNN` block code |
+| `error` | `@state` when execute raises | full details written to the sibling `_errors` table, then re-raised; auto-retried on the next run under `STATE_MODE=discover` |
+
+`STATE_MODE=discover` (default) preserves `applied` rows on re-evaluation and recomputes everything else against the current upstream state; `STATE_MODE=bulldozer` resets every row to the freshly-computed status (`applied_at` cleared too). `STATE_DISABLED=true` forces a pipeline to run with no state tracking even when models declare it.
+
+Per-interval Postgres advisory locks (keyed by `(model.full_name, since, until)`) let multiple workers on the same model split intervals safely — same-interval collisions silently skip; different-interval workers don't conflict. An optional model-wide `model_lock` is still available for stricter one-pipeline-at-a-time semantics.
+
+See [State](docs/content/STATE.md) for the full status lifecycle, re-evaluation rules, locking, and env-var reference.
+
+### Added — `Target.mutations`: runtime tracker for one-shot setup DDL
+
+- `Target.mutations` field (type `Mutations`, `init=False`) — per-pipeline-run record of which setup statements have already fired. Eight flags so far: `schema_created`, `table_created`, `recreated`, `truncated`, `indexes_created`, `uniques_added`, `staging_schema_created`, `staging_table_created`. Each one flips the first time its DDL fires in `ensure_schema_and_table` or in the staging path; subsequent intervals short-circuit at the flag check. Each flag is "did that DDL fire?", and the access path `target.mutations.<flag>` is deliberately verbose so it always reads as runtime state, never config.
+- `Target.setup_complete` `@property` — reconciles every flag against its corresponding directive (`m.recreated OR not target.recreate_table`, `m.indexes_created OR target.partitioned_by is None`, etc.) so `ensure_schema_and_table` can early-return when there's nothing left to do. On a 365-interval backfill, this means **one** setup transaction instead of 365 — every subsequent interval pays zero `BEGIN`/`COMMIT` roundtrips for table setup.
+- New docs page [Mutating targets](docs/content/MUTATIONS.md) explaining the access-path-as-mutability-signal naming, the two-gate (directive + flag) pattern, and the per-pipeline-run lifetime. Linked from the Target page under `Computed: mutations`.
+
+### Added — Views and library-only tables as upstreams
+
+- `Model(library=True)` opt-in — register the model in `z_bollhav.model_library` so downstreams can claim it as upstream. One mechanism, three use cases:
+    - Static lookup tables / externally-loaded data with no state of their own.
+    - VIEW models that are intended to be claimed as upstream. A view without `library=True` is still a perfectly valid bollhav model (the `CREATE OR REPLACE VIEW` runs in the user's execute), it just won't appear in the library.
+    - Any other state-less model that should be discoverable cross-pipeline.
+- The library gained a `model_type` column (`TABLE` / `VIEW`) and made `state_schema` / `state_table` nullable so view rows and library-only TABLE rows can store NULL for state pointers.
+- `is_satisfied(entry=...)` dispatches by entry shape: NULL state pointers ⇒ presence in the library is the satisfaction (zero SQL, no `pg_views` lookup); set state pointers ⇒ the existing applied-row encapsulation check. Block reasons name the upstream's `model_type` so operators can tell at a glance which kind they're waiting on.
+- `lookup` now returns a `LibraryEntry` `NamedTuple` (`upstream`, `model_type`, `state_schema`, `state_table`) instead of a positional tuple — `is_upstream_satisfied_live` and `_resolve_interval_status` updated to pass it through.
+- Documented in [STATE.md → Upstreams: views and library-only tables](docs/content/STATE.md#upstreams-views-and-library-only-tables) with worked examples.
+
+### Added — Staging without state, and a two-mode staging lifecycle
+
+- Staging no longer requires `state=State(...)`. The previous `Model.__init__` validation is gone, `staging._assert_supported` no longer rejects, and `flush` only fires the state-row `UPDATE` when `model.state is not None`. Without state you keep both useful staging properties — memory-bounded chunked writes and atomic per-interval finalization (INSERT + UPDATE committed together) — and accept that re-runs re-process every interval because there's no `applied` gate.
+- `StagingMode` enum on `Staging(mode=...)` controls the staging-table lifecycle:
+    - `REUSED` (default) — one staging table per pipeline run. `CREATE TABLE` once (gated by `mutations.staging_table_created`), `TRUNCATE` at the start of every interval after the first, never `DROP` in flush. Cheapest on long backfills: ~4× less catalog churn (1 CREATE + N TRUNCATEs vs N CREATEs + N DROPs).
+    - `INTERVAL` — the previous behaviour. `CREATE TABLE` every interval, `DROP TABLE` inside `flush`'s tx (unless `keep_after_flush=True`). Use when you want each interval's staging artifact to be inspectable on crash.
+- `ensure_staging_schema` (`CREATE SCHEMA IF NOT EXISTS z_<schema>`) — new helper, gated by `mutations.staging_schema_created`. Previously the staging schema was created only as a side-effect of `pg_state.ensure_tables`; staging-without-state needs its own path.
+- `gc_orphan_staging_tables` is now **auto-invoked at bootstrap** for every staging model (previously defined and exported but never called). A crashed prior run's staging table is dropped on the next pipeline start, matching the long-standing docstring promise. Logs at `debug` per drop, `warning` on connection failure.
+
+### Added — Examples and tests
+
+- New runnable example [examples/state_with_view](examples/state_with_view/) — `warehouse.orders` (table, state + staging) → `warehouse.v_high_value_orders` (VIEW) → `warehouse.high_value_sums` (table, state + staging). Walks the topo-sorted chain end-to-end and demonstrates view auto-registration and the downstream's satisfaction-by-presence path.
+- ~25 new tests across `test_library.py`, `test_staging.py`, `test_state.py`, `test_write_modes.py` — covering both staging modes (REUSED 1-CREATE + N-TRUNCATEs across two intervals; INTERVAL still drops on flush), staging without state (both modes), library register/lookup for the new `model_type` + nullable-state-pointers shape, satisfaction-by-presence for view and library-only entries, `library=True` register-only bootstrap path, and the `Mutations` one-shot semantics for the two new staging flags.
+
+### Changed — Schema migrations on `z_bollhav.model_library` are additive
+
+- `ensure_library` migrates older library tables with **additive, idempotent** ALTERs (sentinel-gated via `information_schema`) instead of `DROP TABLE`. The library is shared across multiple pipelines run by potentially-different bollhav images at the same time — dropping would brick concurrent old-image writers. The new shape uses `ADD COLUMN model_type TEXT NOT NULL DEFAULT 'TABLE'` (old-image inserts that omit `model_type` land as `TABLE`) and `ALTER COLUMN state_schema/state_table DROP NOT NULL` (so the new code can write NULLs for view and library-only rows). Same rule going forward for any bollhav-owned shared table: never `DROP`, never tighten `NOT NULL`.
+
+### Changed — Validation
+
+- Removed `Model.__init__`'s "`target.staging` requires `state=State(...)`" check. Both combinations (with state, without state) are supported; see the staging section above for the trade-offs.
+- `model.intervals` in **backfill mode** now raises `ValueError` when `directives.until` (i.e. `BACKFILL_UNTIL`) is unset, instead of silently falling back to `latest_complete_interval()` ("today"). Backfill means a specific window — both ends must be pinned. For "to the latest complete tick" use `LATEST_ENABLED=true` (latest mode); for "to `bounds.end`" use reload mode. This was found via E2E: a programmatic caller that bypassed `@load_models` got 880 intervals instead of the 3 the model's `bounds` declared, because the silent fallback ignored `bounds.end`. Production callers driven by `@load_models` with `BACKFILL_UNTIL` set are unaffected.
+
+### Changed — `StateMode` rename + new default
+
+- `StateMode.RESPECT` → `StateMode.DISCOVER` (default). Same behaviour: prefill the contract intervals into the state table, preserve existing `applied` rows, re-evaluate everything else. `discover` is a clearer name for "the prefill + run-what's-left mode."
+- `StateMode.DISRESPECT` → `StateMode.BULLDOZER`. Same behaviour: reset every row to the freshly-computed status, regardless of prior value (`applied_at` cleared too).
+- Env var values follow: `STATE_MODE=discover|bulldozer`. Default is `discover`.
+
+### Changed — `StagingMode.PER_INTERVAL` → `StagingMode.INTERVAL`
+
+- Just a rename for symmetry (no behavioural change). `REUSED` is still the default; `INTERVAL` is the opt-in mode that creates+drops a staging table per interval.
+
+### Changed — Views need `library=True`, no auto-register
+
+- A `ModelType.VIEW` model no longer auto-registers in the library. Opt in via `Model(..., library=True)`, same mechanism as a state-less TABLE that wants to be claimable as upstream. A view without `library=True` is still a valid model (gets `CREATE OR REPLACE VIEW`d each run) — it just won't appear in `z_bollhav.model_library` and therefore can't be claimed as an upstream.
+
+### Note on coupling
+
+After this release the four feature surfaces compose along independent axes — pick any subset of `state=State(...)`, `target.staging=Staging(...)`, `library=True`, and (for state-tracked tables) `Mutations` runtime gating, and the cross-cutting concerns (upstream satisfaction, schema migration, DDL gating, orphan cleanup) all keep working. The view path is the one mandatory auto-registration; everything else is opt-in.
 
 ## [2.0.136] - 2026-05-28
 

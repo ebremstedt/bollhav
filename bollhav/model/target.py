@@ -46,7 +46,7 @@ class Mutations:
     # Staging-side one-shots. `staging_schema_created` is always one-
     # shot (same `z_<schema>` regardless of mode). `staging_table_created`
     # only flips in `StagingMode.REUSED` — one staging table reused
-    # across intervals. In `StagingMode.PER_INTERVAL` every interval
+    # across intervals. In `StagingMode.INTERVAL` every interval
     # creates and drops its own table, so this flag stays False and
     # has nothing to gate.
     staging_schema_created: bool = False

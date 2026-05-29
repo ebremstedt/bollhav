@@ -34,7 +34,7 @@ a missing registration is a louder signal.
 - Run the upstream model in any pipeline that matches it. Once
   `@load_models` bootstraps it, the library row exists; the
   downstream's next bootstrap re-evaluates and flips the row from
-  `blocked` to `pending` (under `STATE_MODE=respect`).
+  `blocked` to `pending` (under `STATE_MODE=discover`).
 - Double-check the spelling of `upstream` in the downstream's
   `Model(...)` definition — the string must match the upstream's
   `Target.full_name` exactly (`<schema>.<name>`).
@@ -64,13 +64,13 @@ run at different cadences without coordination.
 
 - Run the upstream over the missing window. Then re-run the
   downstream pipeline; blocked rows are re-evaluated under
-  `STATE_MODE=respect` and flip to pending once their upstream
+  `STATE_MODE=discover` and flip to pending once their upstream
   satisfies.
 - Check the upstream's state — it may have `pending` or `blocked`
   rows of its own for that window. The block propagates: a downstream
   can't unblock until the upstream is `applied`.
 - If you intentionally want to run without the upstream, set
-  `STATE_MODE=disrespect` to reset the blocked rows back to pending
+  `STATE_MODE=bulldozer` to reset the blocked rows back to pending
   on the downstream's next run. This bypasses the safety check; use
   with eyes open.
 

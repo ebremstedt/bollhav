@@ -268,9 +268,13 @@ class Model:
             @weekly     | 2024-06-09 00:00 UTC
 
         3. backfill (default)
-           since = directives.since
-           until = directives.until, or latest complete interval end
-                   (same fallback table as reload above)
+           since = directives.since, or bounds.begin if unset
+           until = directives.until — required. Raises if unset.
+
+           Backfill is the "specific window" mode: both ends must be
+           pinned. For "to the latest complete tick" use latest mode;
+           for "to bounds.end (with a latest-tick fallback)" use
+           reload mode. Backfill never silently extends to "now."
         """
         if self._intervals_cached is not None:
             return self._intervals_cached
@@ -317,7 +321,15 @@ class Model:
                     f"backfill requires a since value — set bounds.begin on model "
                     f"{self.target.full_name!r} or pass --since at runtime"
                 )
-            until = d.until or self.latest_complete_interval(expr).until
+            if d.until is None:
+                raise ValueError(
+                    f"backfill requires an explicit until on model "
+                    f"{self.target.full_name!r} — set BACKFILL_UNTIL (or "
+                    f"directives.until programmatically). Backfill means a "
+                    f'specific window; for "to the latest complete tick" use '
+                    f'latest mode, for "to bounds.end" use reload mode.'
+                )
+            until = d.until
 
         cron_expression = _resolve_cron(expr)
         if self.batching.interval.lookback:

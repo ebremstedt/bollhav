@@ -115,6 +115,10 @@ def ensure_staging_schema(conn: psycopg.Connection, model: "Model") -> None:
         )
     )
     model.target.mutations.staging_schema_created = True
+    logger.debug(
+        "mutation: %s.mutations.staging_schema_created = True",
+        model.target.full_name,
+    )
 
 
 def ensure_staging_table(
@@ -134,7 +138,7 @@ def ensure_staging_table(
     In `StagingMode.REUSED` (the default) the CREATE itself is also
     one-shot — gated by `mutations.staging_table_created` — so a
     365-interval backfill issues a single `CREATE TABLE` instead of
-    365. In `StagingMode.PER_INTERVAL` the CREATE fires every interval,
+    365. In `StagingMode.INTERVAL` the CREATE fires every interval,
     since the previous interval's flush dropped the table."""
     from bollhav.model.staging import StagingMode
     from bollhav.postgres.columns import PostgresColumn
@@ -168,6 +172,10 @@ def ensure_staging_table(
     )
     if mode is StagingMode.REUSED:
         model.target.mutations.staging_table_created = True
+        logger.debug(
+            "mutation: %s.mutations.staging_table_created = True",
+            model.target.full_name,
+        )
 
 
 def _staging_mode(model: "Model"):
@@ -269,8 +277,8 @@ def flush_to_target(
     keep = model.target.staging is not None and model.target.staging.keep_after_flush
     mode = _staging_mode(model)
     # REUSED keeps the table for the next interval (its TRUNCATE clears
-    # it). PER_INTERVAL drops unless the operator opted into keep.
-    drop_after_flush = mode is StagingMode.PER_INTERVAL and not keep
+    # it). INTERVAL drops unless the operator opted into keep.
+    drop_after_flush = mode is StagingMode.INTERVAL and not keep
 
     with conn.transaction():
         conn.execute(
@@ -432,7 +440,7 @@ def stage(
     # this pipeline run before `ensure_staging_table` flips the flag.
     # If the table already existed (mutations.staging_table_created
     # was True), we need a TRUNCATE to clear the prior interval's
-    # rows. PER_INTERVAL mode never needs TRUNCATE — every interval
+    # rows. INTERVAL mode never needs TRUNCATE — every interval
     # gets a freshly-CREATEd empty table.
     mode = _staging_mode(model)
     needs_truncate = (

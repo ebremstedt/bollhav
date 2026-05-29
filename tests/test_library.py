@@ -327,7 +327,7 @@ class TestBootstrapBlockedPath:
             patch("bollhav.postgres.state.prefill") as pf,
             patch("bollhav.postgres.state.read_actionable", return_value=[]),
         ):
-            _bootstrap_state_for_staged_models([m], state_mode=StateMode.RESPECT)
+            _bootstrap_state_for_staged_models([m], state_mode=StateMode.DISCOVER)
 
         rows = pf.call_args.kwargs["intervals"]
         assert len(rows) == 1
@@ -361,7 +361,7 @@ class TestBootstrapBlockedPath:
             patch("bollhav.postgres.state.prefill") as pf,
             patch("bollhav.postgres.state.read_actionable", return_value=[]),
         ):
-            _bootstrap_state_for_staged_models([m], state_mode=StateMode.RESPECT)
+            _bootstrap_state_for_staged_models([m], state_mode=StateMode.DISCOVER)
 
         _, status, reason = pf.call_args.kwargs["intervals"][0]
         assert status == "blocked"
@@ -394,7 +394,7 @@ class TestBootstrapBlockedPath:
             patch("bollhav.postgres.state.prefill") as pf,
             patch("bollhav.postgres.state.read_actionable", return_value=[]),
         ):
-            _bootstrap_state_for_staged_models([m], state_mode=StateMode.RESPECT)
+            _bootstrap_state_for_staged_models([m], state_mode=StateMode.DISCOVER)
 
         _, status, reason = pf.call_args.kwargs["intervals"][0]
         assert status == "pending"
@@ -433,7 +433,7 @@ class TestBootstrapBlockedPath:
             patch("bollhav.postgres.state.read_actionable", return_value=[]),
         ):
             _bootstrap_state_for_staged_models(
-                [downstream, upstream], state_mode=StateMode.RESPECT
+                [downstream, upstream], state_mode=StateMode.DISCOVER
             )
 
         lookup_mock.assert_not_called()
@@ -456,7 +456,39 @@ class TestLibraryOnlyRegistration:
         conn.__exit__ = MagicMock(return_value=None)
         return conn
 
-    def test_view_registers_without_state_machinery(self) -> None:
+    def test_view_with_library_true_registers_without_state_machinery(self) -> None:
+        from unittest.mock import patch
+
+        from bollhav.model.load_models import _bootstrap_state_for_staged_models
+        from bollhav.model.state import StateMode
+
+        m = MagicMock()
+        m.target.is_view = True
+        m.library = True
+        m.target.staging = None
+        m.target.full_name = "warehouse.v_orders"
+        m.upstream = []
+
+        conn = self._conn_ctx()
+        with (
+            patch("bollhav.postgres.state._connect", return_value=conn),
+            patch("bollhav.postgres.library.ensure_library") as el,
+            patch("bollhav.postgres.library.register") as reg,
+            patch("bollhav.postgres.state.ensure_tables") as et,
+            patch("bollhav.postgres.state.prefill") as pf,
+        ):
+            _bootstrap_state_for_staged_models([m], state_mode=StateMode.DISCOVER)
+
+        el.assert_called_once()
+        reg.assert_called_once()
+        et.assert_not_called()
+        pf.assert_not_called()
+
+    def test_view_without_library_true_does_not_register(self) -> None:
+        """A VIEW without `library=True` is a perfectly valid bollhav
+        model (the CREATE OR REPLACE VIEW still runs in the user's
+        execute), but it's not claimable as upstream — no library row
+        is upserted."""
         from unittest.mock import patch
 
         from bollhav.model.load_models import _bootstrap_state_for_staged_models
@@ -477,10 +509,10 @@ class TestLibraryOnlyRegistration:
             patch("bollhav.postgres.state.ensure_tables") as et,
             patch("bollhav.postgres.state.prefill") as pf,
         ):
-            _bootstrap_state_for_staged_models([m], state_mode=StateMode.RESPECT)
+            _bootstrap_state_for_staged_models([m], state_mode=StateMode.DISCOVER)
 
-        el.assert_called_once()
-        reg.assert_called_once()
+        el.assert_not_called()
+        reg.assert_not_called()
         et.assert_not_called()
         pf.assert_not_called()
 
@@ -505,7 +537,7 @@ class TestLibraryOnlyRegistration:
             patch("bollhav.postgres.state.ensure_tables") as et,
             patch("bollhav.postgres.state.prefill") as pf,
         ):
-            _bootstrap_state_for_staged_models([m], state_mode=StateMode.RESPECT)
+            _bootstrap_state_for_staged_models([m], state_mode=StateMode.DISCOVER)
 
         el.assert_called_once()
         reg.assert_called_once()

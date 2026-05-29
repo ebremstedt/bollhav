@@ -234,13 +234,13 @@ def prefill(
         is one of `'pending'` or `'blocked'` and `blocked_reason` is
         a string when status is `'blocked'`, else `None`.
 
-    RESPECT mode:
+    DISCOVER mode:
       * Applied rows are preserved untouched.
       * Pending/blocked rows are re-evaluated against the new status
         — so a blocked row whose upstreams now satisfy flips to
         pending, and vice versa.
 
-    DISRESPECT mode:
+    DISDISCOVER mode:
       * Every row is reset to the new computed status, regardless of
         prior value (applied_at cleared too).
 
@@ -257,7 +257,7 @@ def prefill(
     schema = _state_schema(model)
     table = _state_table(model)
 
-    if state_mode is StateMode.RESPECT:
+    if state_mode is StateMode.DISCOVER:
         # Preserve applied rows; re-evaluate everything else.
         on_conflict = sql.SQL(
             "ON CONFLICT (since, until) DO UPDATE SET "
@@ -269,7 +269,7 @@ def prefill(
             "              THEN {schema}.{table}.run_id ELSE EXCLUDED.run_id END"
         ).format(schema=sql.Identifier(schema), table=sql.Identifier(table))
     else:
-        # StateMode.DISRESPECT — reset every row to the new computed
+        # StateMode.BULLDOZER — reset every row to the new computed
         # status regardless of prior value. Enum is exhaustive so no
         # further branch is needed.
         on_conflict = sql.SQL(
@@ -532,7 +532,7 @@ def mark_running(
     just before invoking the user's execute. On success the same
     row flips to `'applied'`; on exception, to `'error'`. A row left
     as `'running'` after a process crash is treated like `'pending'`
-    by the next RESPECT-mode pre-fill (auto-recovered)."""
+    by the next DISCOVER-mode pre-fill (auto-recovered)."""
     schema = _state_schema(model)
     table = _state_table(model)
     update = sql.SQL(
@@ -562,7 +562,7 @@ def mark_blocked(
 ) -> None:
     """Flip the state row to `'blocked'` with the given reason. Set
     by `@state` when the live upstream check fails at run
-    time. Re-evaluated on the next RESPECT-mode bootstrap or run."""
+    time. Re-evaluated on the next DISCOVER-mode bootstrap or run."""
     schema = _state_schema(model)
     table = _state_table(model)
     update = sql.SQL(

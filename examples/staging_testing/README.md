@@ -113,11 +113,11 @@ Re-running `python main.py` is a no-op for already-applied intervals:
 
 - `@state` gates each interval on its state row. `applied`
   rows short-circuit before `execute` even reads.
-- The pre-fill step uses `StateMode.RESPECT` — applied rows survive,
+- The pre-fill step uses `StateMode.DISCOVER` — applied rows survive,
   only fresh intervals get pending rows inserted.
 
 To force a full rerun, drop the state table and the target table, or
-add a `StateMode.DISRESPECT` toggle to your bootstrap.
+add a `StateMode.BULLDOZER` toggle to your bootstrap.
 
 ## Inspecting staging mid-flight
 
