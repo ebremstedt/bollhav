@@ -27,6 +27,7 @@ class Model:
         batching: Batch | None = None,
         tagging: Tags | None = None,
         state: State | None = None,
+        library: bool = False,
         enabled: bool = True,
         debug: bool = False,
         description: str | None = None,
@@ -38,6 +39,13 @@ class Model:
         self.bounds = bounds or Bounds()
         self.batching = batching  # None signals to not chunk
         self.state = state
+        # Opt-in: register this model in the cross-pipeline library so
+        # downstream models can claim it as an upstream. Models with
+        # `state=State(...)` or `target.staging` already auto-register;
+        # this flag covers static / no-state tables that should still
+        # be discoverable. Views always auto-register, regardless of
+        # this flag.
+        self.library = library
         self.enabled = enabled
         self.debug = debug
         self.description = description
@@ -57,14 +65,6 @@ class Model:
             raise ValueError(
                 f"state tracking on model {target.name!r} requires batching "
                 f"to be configured — interval-only feature"
-            )
-
-        if target.staging is not None and state is None:
-            raise ValueError(
-                f"target.staging on model {target.name!r} requires state=State(...) — "
-                f"staging's atomic move + state flip is the durability story; "
-                f"without state it'd be memory bounding without recovery, which "
-                f"is a separate feature"
             )
 
         self.extra = kwargs

@@ -74,6 +74,63 @@ The errors table keeps full history across runs — joinable with the state tabl
 
 The one exception: if the staging flush already set state to `applied` (data is in target) and post-stage user code raises, we log the error but **do not** downgrade state to `error`. The write succeeded; the post-write code didn't.
 
+## Upstreams: views and library-only tables
+
+A downstream model with `state=State(...)` declares its upstreams by full name. Bollhav's library tracks every registered model and answers the satisfaction question per upstream:
+
+| Upstream kind | How it registers | What "satisfied" means |
+|---|---|---|
+| **TABLE with `state=State(...)`** | Automatic, on every run | An `applied` row in the upstream's state table matches or fully encapsulates the downstream's `(since, until)` window |
+| **VIEW** | Automatic, on every run (view-creating models always register) | The library row exists. Views are time-agnostic — once they're declared, every interval of the downstream is satisfied by their presence |
+| **TABLE with `library=True`** | Opt-in via `Model(target=..., library=True)`. Useful for static lookup tables or externally-loaded tables that don't track state themselves but need to be claimable as upstream | The library row exists. Same presence-based rule as views |
+
+### View example
+
+```python
+from bollhav.model import Model, Target, TargetSchema, ModelType, WriteMode
+
+# This view-model auto-registers — no `library=True` needed.
+v_orders_summary = Model(
+    target=Target(
+        name="v_orders_summary",
+        schema=TargetSchema(name="warehouse"),
+        model_type=ModelType.VIEW,
+        write_mode=WriteMode.VIEW,
+        dsn_env_var="TARGET_DSN",
+    ),
+)
+
+# Downstream depends on the view; every interval is satisfied
+# once the view-model has run once and registered.
+enriched = Model(
+    target=Target(name="enriched", ...),
+    upstream=["warehouse.v_orders_summary"],
+    state=State(),
+    batching=Batch(...),
+)
+```
+
+### `library=True` example
+
+```python
+# Static lookup table — written outside bollhav, has no state,
+# but downstreams need to claim it as an upstream.
+countries = Model(
+    target=Target(
+        name="countries",
+        schema=TargetSchema(name="lookup"),
+        dsn_env_var="TARGET_DSN",
+    ),
+    library=True,   # ← register-only opt-in
+)
+```
+
+Once `countries` has appeared in any pipeline run, downstreams referencing `lookup.countries` are satisfied by its mere presence — they don't wait for an applied row that will never come.
+
+### Library and state colocation
+
+The library lives in `z_bollhav.model_library` in the **state DB**. View and `library=True` models without their own state-DSN fall back to `target.dsn_env_var` — which is fine for single-DB setups (the common case where state and target share one Postgres database). If you split state to a separate database, library-only models also need their target DSN to point at that same instance, since they have no `state.dsn_env_var` to redirect them.
+
 ## Disabling state entirely: `STATE_DISABLED`
 
 Set `STATE_DISABLED=true` to force a pipeline to run with no state tracking, even when models declare `state=State(...)`. Useful for:
