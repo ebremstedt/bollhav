@@ -10,6 +10,8 @@ site_dir: site
 
 theme:
   name: material
+  logo: assets/bollhav_logo.png
+  favicon: assets/favicon.png
   features:
     - navigation.tabs
     - navigation.sections
