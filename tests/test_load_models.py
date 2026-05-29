@@ -113,7 +113,11 @@ def _run_decorator(**env):
         patch(
             "bollhav.model.load_models.apply_runtime_overrides", side_effect=_fake_apm
         ),
-        patch("bollhav.model.load_models._print_summary", lambda cfg: None),
+        patch("bollhav.model.load_models._print_summary", lambda cfg, models: None),
+        patch(
+            "bollhav.model.load_models._bootstrap_state_for_staged_models",
+            lambda models, state_mode: None,
+        ),
     ):
 
         @load_models
@@ -237,7 +241,11 @@ class TestDecoratorForms:
                 "bollhav.model.load_models.apply_runtime_overrides",
                 side_effect=_fake_apm,
             ),
-            patch("bollhav.model.load_models._print_summary", lambda cfg: None),
+            patch("bollhav.model.load_models._print_summary", lambda cfg, models: None),
+            patch(
+                "bollhav.model.load_models._bootstrap_state_for_staged_models",
+                lambda models, state_mode: None,
+            ),
         ):
 
             @load_models(folder="custom/path")

@@ -15,6 +15,8 @@ from bollhav.model.source_table import SourceTable
 from bollhav.model.target import Target
 from bollhav.model.bounds import Bounds
 from bollhav.model.batch import Batch, ChunkMode, IntervalChunks, RowChunks
+from bollhav.model.staging import Staging
+from bollhav.model.state import State, StateMode, state_tracker
 from bollhav.model.tags import Tags
 from bollhav.model.progress_bar import progress_bar, ProgressLevel, name_width_for
 
@@ -32,6 +34,10 @@ __all__ = [
     "Model",
     "ModelType",
     "sort_columns",
+    "Staging",
+    "State",
+    "StateMode",
+    "state_tracker",
     "TargetSchema",
     "SourceFile",
     "SourceTable",

@@ -11,6 +11,7 @@ from bollhav.model.bounds import Bounds
 from bollhav.model.batch import Batch, ChunkMode, _resolve_cron, _chunk_interval
 from bollhav.model.intervals import TZInterval
 from bollhav.model.directives import Directives
+from bollhav.model.state import State
 from bollhav.model.tags import Tags
 from roskarl import IntervalExpression, IntervalExpressionExtended
 
@@ -25,6 +26,7 @@ class Model:
         bounds: Bounds | None = None,
         batching: Batch | None = None,
         tagging: Tags | None = None,
+        state: State | None = None,
         enabled: bool = True,
         debug: bool = False,
         description: str | None = None,
@@ -35,6 +37,7 @@ class Model:
         self.target = target
         self.bounds = bounds or Bounds()
         self.batching = batching  # None signals to not chunk
+        self.state = state
         self.enabled = enabled
         self.debug = debug
         self.description = description
@@ -43,6 +46,26 @@ class Model:
         self.tags: set[str] = (tagging or Tags()).assemble(
             self.target.name, self.target.schema.name, self.target.catalog
         )
+
+        # When set, `intervals` returns this stashed list instead of
+        # recomputing from bounds. Used by @load_models to install
+        # the state-filtered (pending-only) interval set so the user's
+        # loop sees just what's left to do.
+        self._intervals_cached: list | None = None
+
+        if state is not None and batching is None:
+            raise ValueError(
+                f"state tracking on model {target.name!r} requires batching "
+                f"to be configured — interval-only feature"
+            )
+
+        if target.staging is not None and state is None:
+            raise ValueError(
+                f"target.staging on model {target.name!r} requires state=State(...) — "
+                f"staging's atomic move + state flip is the durability story; "
+                f"without state it'd be memory bounding without recovery, which "
+                f"is a separate feature"
+            )
 
         self.extra = kwargs
 
@@ -190,12 +213,12 @@ class Model:
     def intervals(self) -> list[TZInterval] | list[None]:
         """Resolve and chunk a time interval into TZIntervals.
 
-        Computed on every access — never cached. The result depends on
-        `datetime.now()` (via `latest_complete_interval`), so a cache
-        would freeze the first answer for the model's lifetime and
-        return stale windows once the wall clock crossed a cron tick.
-        If you read it more than once in the same code path, snapshot
-        it: `intervals = model.intervals`.
+        If a list has been assigned to `model.intervals` (e.g. by
+        `@load_models` after filtering against state), that stashed
+        list is returned. Otherwise computed on every access — the
+        result depends on `datetime.now()` (via
+        `latest_complete_interval`), so callers that read it more than
+        once should snapshot it: `intervals = model.intervals`.
 
         Returns `[None]` when the model has no `batching` configured — signalling
         to callers that no interval filtering should be applied to the read
@@ -249,6 +272,9 @@ class Model:
            until = directives.until, or latest complete interval end
                    (same fallback table as reload above)
         """
+        if self._intervals_cached is not None:
+            return self._intervals_cached
+
         if self.batching is None:
             return [None]
 
@@ -298,6 +324,14 @@ class Model:
             since = self._apply_lookback(cron_expression, since)
 
         return _chunk_interval(cron_expression, TZInterval(since, until))
+
+    @intervals.setter
+    def intervals(self, value: list | None) -> None:
+        """Stash a pre-computed interval list. `@load_models` uses this
+        after pre-filling and filtering against state, so the user's
+        loop iterates only the still-pending intervals. Assign `None`
+        to clear the cache and fall back to live computation."""
+        self._intervals_cached = value
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, Model):

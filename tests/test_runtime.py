@@ -173,3 +173,58 @@ class TestBatchingNone:
         m = Model(target=Target(name="t", schema=TargetSchema(suffix_appendix=None)))
         out = _apply(m, interval_expression_override="@daily")
         assert out.batching is None
+
+
+class TestStateAndStagingCarryThrough:
+    """Regression: `apply_runtime_overrides` rebuilds the model + target,
+    and used to silently drop `model.state` and `target.staging`. The
+    runtime path is what `@load_models` calls, so dropping them meant
+    `@state_tracker` and the staged write path were unreachable after
+    `@load_models` — the example pipeline appeared to do nothing."""
+
+    def test_state_carries_through(self) -> None:
+        from bollhav.model.state import State
+
+        s = State()
+        m = Model(
+            target=Target(
+                name="orders", schema=TargetSchema(name="public", suffix_appendix=None)
+            ),
+            batching=Batch(interval=IntervalChunks(expression="@hourly", tz=UTC)),
+            state=s,
+        )
+        out = _apply(m)
+        assert out.state is s
+
+    def test_state_None_stays_None(self) -> None:
+        out = _apply(_model())
+        assert out.state is None
+
+    def test_staging_carries_through(self) -> None:
+        from bollhav.model.staging import Staging
+        from bollhav.model.state import State
+
+        staging_cfg = Staging(
+            schema="ops", table_prefix="stg_", logged=True, keep_after_flush=True
+        )
+        m = Model(
+            target=Target(
+                name="orders",
+                schema=TargetSchema(name="public", suffix_appendix=None),
+                staging=staging_cfg,
+            ),
+            batching=Batch(interval=IntervalChunks(expression="@hourly", tz=UTC)),
+            state=State(),  # staging requires state
+        )
+        out = _apply(m)
+        out_staging = out.target.staging
+        assert out_staging is not None
+        assert out_staging is staging_cfg
+        assert out_staging.schema == "ops"
+        assert out_staging.table_prefix == "stg_"
+        assert out_staging.logged is True
+        assert out_staging.keep_after_flush is True
+
+    def test_staging_None_stays_None(self) -> None:
+        out = _apply(_model())
+        assert out.target.staging is None

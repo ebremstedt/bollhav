@@ -25,6 +25,7 @@ class _IntervalsTripwire:
 def _cfg(**overrides):
     from bollhav.model.load_models import _RuntimeConfig
     from bollhav.model.ordering import UpstreamMode
+    from bollhav.model.state import StateMode
 
     defaults = dict(
         tags="x",
@@ -40,6 +41,7 @@ def _cfg(**overrides):
         tz_override=None,
         dry_run=True,
         dry_run_extra=False,
+        state_mode=StateMode.RESPECT,
         debug=False,
     )
     defaults.update(overrides)
@@ -290,7 +292,7 @@ class TestLoadModelsShortCircuit:
                 lambda name: None,
             ),
             patch("bollhav.model.load_models.apply_runtime_overrides", return_value=[]),
-            patch("bollhav.model.load_models._print_summary", lambda cfg: None),
+            patch("bollhav.model.load_models._print_summary", lambda cfg, models: None),
             patch("bollhav.model.dry_run.print_summary"),
         ):
 
