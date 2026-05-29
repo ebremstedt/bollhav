@@ -1,4 +1,4 @@
-"""Tests for the @state_tracker decorator and the State config.
+"""Tests for the @state decorator and the State config.
 
 Postgres backend is mocked — these tests cover the decorator's
 gate/run/mark contract and the State + Model integration."""
@@ -9,7 +9,7 @@ from uuid import UUID
 
 import pytest
 
-from bollhav.model.state import State, StateMode, state_tracker
+from bollhav.model.state import State, StateMode, state
 
 
 SINCE = datetime(2024, 1, 1, tzinfo=timezone.utc)
@@ -161,7 +161,7 @@ class TestDecoratorPassthrough:
     def test_no_state_calls_inner_function(self) -> None:
         calls: list = []
 
-        @state_tracker
+        @state
         def execute(model, since, until):
             calls.append((since, until))
 
@@ -173,7 +173,7 @@ class TestDecoratorPassthrough:
     def test_no_batching_is_passthrough(self) -> None:
         calls: list = []
 
-        @state_tracker
+        @state
         def execute(model, since, until):
             calls.append((since, until))
 
@@ -186,7 +186,7 @@ class TestDecoratorPassthrough:
     def test_none_since_until_is_passthrough(self) -> None:
         calls: list = []
 
-        @state_tracker
+        @state
         def execute(model, since, until):
             calls.append((since, until))
 
@@ -201,7 +201,7 @@ class TestDecoratorGating:
     def test_applied_interval_is_skipped(self) -> None:
         calls: list = []
 
-        @state_tracker
+        @state
         def execute(model, since, until):
             calls.append((since, until))
 
@@ -219,7 +219,7 @@ class TestDecoratorGating:
     def test_pending_interval_runs_and_marks_applied(self) -> None:
         calls: list = []
 
-        @state_tracker
+        @state
         def execute(model, since, until):
             calls.append((since, until))
 
@@ -241,7 +241,7 @@ class TestDecoratorGating:
 
 
 class TestIntervalLock:
-    """`@state_tracker` takes a per-interval advisory lock so two
+    """`@state` takes a per-interval advisory lock so two
     workers can race on the same model without colliding. Whoever
     grabs an interval's lock processes it; the other one sees the
     lock held and moves on."""
@@ -249,7 +249,7 @@ class TestIntervalLock:
     def test_lock_acquired_runs_normally(self) -> None:
         calls: list = []
 
-        @state_tracker
+        @state
         def execute(model, since, until):
             calls.append((since, until))
 
@@ -274,7 +274,7 @@ class TestIntervalLock:
     def test_lock_held_by_another_worker_skips_silently(self) -> None:
         calls: list = []
 
-        @state_tracker
+        @state
         def execute(model, since, until):
             calls.append((since, until))
 
@@ -300,7 +300,7 @@ class TestIntervalLock:
         release.assert_called_once()  # finally still calls release; harmless.
 
     def test_lock_released_even_on_exception_in_func(self) -> None:
-        @state_tracker
+        @state
         def execute(model, since, until):
             raise RuntimeError("inside func")
 
@@ -323,14 +323,14 @@ class TestIntervalLock:
 
 
 class TestRunningStatus:
-    """`@state_tracker` flips state to 'running' just before invoking
+    """`@state` flips state to 'running' just before invoking
     the user's execute — so live ops dashboards can see exactly which
     intervals are being processed right now."""
 
     def test_pending_to_running_to_applied(self) -> None:
         order: list[str] = []
 
-        @state_tracker
+        @state
         def execute(model, since, until):
             order.append("execute")
 
@@ -359,7 +359,7 @@ class TestRunningStatus:
     def test_running_then_error_on_exception(self) -> None:
         order: list[str] = []
 
-        @state_tracker
+        @state
         def execute(model, since, until):
             order.append("execute")
             raise RuntimeError("boom")
@@ -463,7 +463,7 @@ class TestModelLock:
 
 class TestDecoratorExceptionPath:
     def test_exception_reraises_logs_failure_and_does_not_mark_applied(self) -> None:
-        @state_tracker
+        @state
         def execute(model, since, until):
             raise RuntimeError("boom")
 
@@ -496,7 +496,7 @@ class TestDecoratorExceptionPath:
         and then user code AFTER the with-block raises, we log the
         error but do NOT downgrade state. Data IS in target."""
 
-        @state_tracker
+        @state
         def execute(model, since, until):
             # Simulate the staging flush having set the marker.
             model._state_applied_via_staging = (since, until)
@@ -525,12 +525,12 @@ class TestDecoratorExceptionPath:
 
 
 class TestStagingBypass:
-    """When stage() flushes inside its own tx, @state_tracker must NOT
+    """When stage() flushes inside its own tx, @state must NOT
     re-issue mark_applied. The marker `_state_applied_via_staging` on
     the model signals 'already flipped for this interval'."""
 
     def test_marker_present_skips_mark_applied(self) -> None:
-        @state_tracker
+        @state
         def execute(model, since, until):
             model._state_applied_via_staging = (since, until)
 
@@ -552,7 +552,7 @@ class TestStagingBypass:
         assert model._state_applied_via_staging is None  # consumed
 
     def test_no_marker_still_marks_applied(self) -> None:
-        @state_tracker
+        @state
         def execute(model, since, until):
             pass
 
@@ -573,7 +573,7 @@ class TestStagingBypass:
         mark_applied.assert_called_once()
 
     def test_stale_marker_from_other_interval_does_not_skip(self) -> None:
-        @state_tracker
+        @state
         def execute(model, since, until):
             pass
 

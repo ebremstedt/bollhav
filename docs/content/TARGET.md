@@ -71,3 +71,7 @@ DSN env var for the target connection.
 ## Computed: `partitioned_by`
 
 A derived `@property` — set `partition_on=True` on the column you want to partition by; only one column may carry it.
+
+## Computed: `mutations`
+
+Per-pipeline-run tracker that records which one-shot setup operations (CREATE SCHEMA / CREATE TABLE / DROP / TRUNCATE / CREATE INDEX / ADD UNIQUE) have already fired during the current run. After the first interval, the flags short-circuit every subsequent call so no redundant DDL runs and no empty BEGIN/COMMIT transactions are opened. See [Mutating targets](MUTATIONS.md).

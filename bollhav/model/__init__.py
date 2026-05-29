@@ -21,7 +21,7 @@ from bollhav.model.state import (
     State,
     StateMode,
     model_lock,
-    state_tracker,
+    state,
 )
 from bollhav.model.tags import Tags
 from bollhav.model.progress_bar import progress_bar, ProgressLevel, name_width_for
@@ -43,7 +43,7 @@ __all__ = [
     "Staging",
     "State",
     "StateMode",
-    "state_tracker",
+    "state",
     "model_lock",
     "ModelLockedError",
     "TargetSchema",

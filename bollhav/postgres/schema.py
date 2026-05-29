@@ -31,62 +31,70 @@ def ensure_schema(conn: psycopg.Connection, schema: str) -> None:
 
 
 def ensure_table(conn: psycopg.Connection, model: Model) -> None:
-    schema_id = sql.Identifier(model.target.schema.resolved)
-    table_id = sql.Identifier(model.target.name_resolved)
+    """First call in a pipeline run: drop (if recreate_table), create,
+    truncate (if truncate_table), add indexes, add unique constraints.
+    Subsequent calls in the same run: complete no-op — every step is
+    gated by `target.mutations.*` flags. See `Mutations` docstring."""
+    target = model.target
+    schema_id = sql.Identifier(target.schema.resolved)
+    table_id = sql.Identifier(target.name_resolved)
     logger.debug(
         "Ensuring table: %s.%s",
-        model.target.schema.resolved,
-        model.target.name_resolved,
+        target.schema.resolved,
+        target.name_resolved,
     )
 
-    if model.target.recreate_table:
+    if target.recreate_table and not target.mutations.recreated:
         conn.execute(
             sql.SQL("DROP TABLE IF EXISTS {schema}.{table}").format(
                 schema=schema_id, table=table_id
             )
         )
+        target.mutations.recreated = True
 
-    col_defs = sql.SQL(",\n").join(
-        sql.SQL(_col_ddl(col))
-        for col in model.target.columns
-        if isinstance(col, PostgresColumn)
-    )
-    conn.execute(
-        sql.SQL("CREATE TABLE IF NOT EXISTS {schema}.{table} (\n{col_defs}\n)").format(
-            schema=schema_id,
-            table=table_id,
-            col_defs=col_defs,
+    if not target.mutations.table_created:
+        col_defs = sql.SQL(",\n").join(
+            sql.SQL(_col_ddl(col))
+            for col in target.columns
+            if isinstance(col, PostgresColumn)
         )
-    )
+        conn.execute(
+            sql.SQL(
+                "CREATE TABLE IF NOT EXISTS {schema}.{table} (\n{col_defs}\n)"
+            ).format(
+                schema=schema_id,
+                table=table_id,
+                col_defs=col_defs,
+            )
+        )
+        target.mutations.table_created = True
 
-    if model.target.truncate_table:
+    if target.truncate_table and not target.mutations.truncated:
         conn.execute(
             sql.SQL("TRUNCATE TABLE {schema}.{table}").format(
                 schema=schema_id, table=table_id
             )
         )
-    if model.target.partitioned_by is not None:
-        index_name = f"{model.target.name_resolved}_{model.target.partitioned_by}_idx"
+        target.mutations.truncated = True
+
+    if target.partitioned_by is not None and not target.mutations.indexes_created:
+        index_name = f"{target.name_resolved}_{target.partitioned_by}_idx"
         conn.execute(
             sql.SQL(
                 "CREATE INDEX IF NOT EXISTS {index} ON {schema}.{table} ({col})"
             ).format(
                 index=sql.Identifier(index_name),
-                schema=sql.Identifier(model.target.schema.resolved),
-                table=sql.Identifier(model.target.name_resolved),
-                col=sql.Identifier(model.target.partitioned_by),
+                schema=schema_id,
+                table=table_id,
+                col=sql.Identifier(target.partitioned_by),
             )
         )
+        target.mutations.indexes_created = True
 
-    unique_columns = [
-        col
-        for col in model.target.columns
-        if isinstance(col, PostgresColumn) and col.unique
-    ]
-    if unique_columns:
-        constraint_name = f"{model.target.name_resolved}_uq"
+    if target.unique_columns and not target.mutations.uniques_added:
+        constraint_name = f"{target.name_resolved}_uq"
         unique_col_ids = sql.SQL(", ").join(
-            sql.Identifier(col.name) for col in unique_columns
+            sql.Identifier(col.name) for col in target.unique_columns
         )
         conn.execute(
             sql.SQL("""
@@ -96,15 +104,21 @@ def ensure_table(conn: psycopg.Connection, model: Model) -> None:
                 EXCEPTION WHEN duplicate_table THEN NULL;
                 END $$
             """).format(
-                schema=sql.Identifier(model.target.schema.resolved),
-                table=sql.Identifier(model.target.name_resolved),
+                schema=schema_id,
+                table=table_id,
                 constraint=sql.Identifier(constraint_name),
                 cols=unique_col_ids,
             )
         )
+        target.mutations.uniques_added = True
 
 
 def ensure_schema_and_table(conn: psycopg.Connection, model: Model) -> None:
+    target = model.target
+    if target.setup_complete:
+        return
     with conn.transaction():
-        ensure_schema(conn=conn, schema=model.target.schema.resolved)
+        if not target.mutations.schema_created:
+            ensure_schema(conn=conn, schema=target.schema.resolved)
+            target.mutations.schema_created = True
         ensure_table(conn=conn, model=model)

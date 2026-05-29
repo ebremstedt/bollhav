@@ -528,7 +528,7 @@ def mark_running(
     since: datetime,
     until: datetime,
 ) -> None:
-    """Flip the state row to `'running'` — set by `@state_tracker`
+    """Flip the state row to `'running'` — set by `@state`
     just before invoking the user's execute. On success the same
     row flips to `'applied'`; on exception, to `'error'`. A row left
     as `'running'` after a process crash is treated like `'pending'`
@@ -561,7 +561,7 @@ def mark_blocked(
     reason: str,
 ) -> None:
     """Flip the state row to `'blocked'` with the given reason. Set
-    by `@state_tracker` when the live upstream check fails at run
+    by `@state` when the live upstream check fails at run
     time. Re-evaluated on the next RESPECT-mode bootstrap or run."""
     schema = _state_schema(model)
     table = _state_table(model)
@@ -609,7 +609,7 @@ def mark_applied(
     )
 
 
-# ── live upstream check (used by @state_tracker when polling) ───────
+# ── live upstream check (used by @state when polling) ───────
 
 
 def is_upstream_satisfied_live(
@@ -669,7 +669,7 @@ def is_upstream_satisfied_live(
 
 def _interval_lock_key(model: "Model", since: datetime, until: datetime) -> str:
     """Hash key for an interval-scoped lock: identifies the specific
-    `(model, since, until)` triple. Used by `@state_tracker` so two
+    `(model, since, until)` triple. Used by `@state` so two
     workers can race on the same model but different intervals
     without conflict."""
     return f"{model.target.full_name}|{since.isoformat()}|{until.isoformat()}"
@@ -705,7 +705,7 @@ def release_interval_lock(
 
 
 # Optional model-wide lock — kept for power users who want exclusive
-# access to a whole model run. Not used by `@state_tracker` (which
+# access to a whole model run. Not used by `@state` (which
 # uses per-interval locks above).
 
 

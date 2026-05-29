@@ -11,8 +11,8 @@ The `status` column on `<state_schema>.<target_name>_state` is one of:
 | Status | Meaning |
 |---|---|
 | `pending` | Queued to run. The user's loop iterates these. |
-| `running` | Currently being processed. Set by `@state_tracker` immediately before invoking your `execute`. Visible in live dashboards. |
-| `applied` | Completed successfully. Set by `@state_tracker` after a clean execute, or atomically by the staging flush. |
+| `running` | Currently being processed. Set by `@state` immediately before invoking your `execute`. Visible in live dashboards. |
+| `applied` | Completed successfully. Set by `@state` after a clean execute, or atomically by the staging flush. |
 | `blocked` | Cannot run: an out-of-pipeline upstream isn't fulfilled. See `blocked_reason` for the [BLOCK CODE](BLOCK_CODES.md). |
 | `error` | Execute raised. Full details (type, message, traceback) are in the sibling `_errors` table. Auto-retried on next run under `STATE_MODE=respect`. |
 
@@ -29,7 +29,7 @@ Under `STATE_MODE=disrespect`, every row resets to the computed status regardles
 
 ## Concurrency: per-interval advisory locks
 
-`@state_tracker` takes a **per-interval** Postgres advisory lock keyed by `(model.full_name, since, until)` for every interval it processes. Two workers running on the same model but different intervals don't conflict; two workers racing on the same interval — only one wins, the other silently skips that interval and moves on.
+`@state` takes a **per-interval** Postgres advisory lock keyed by `(model.full_name, since, until)` for every interval it processes. Two workers running on the same model but different intervals don't conflict; two workers racing on the same interval — only one wins, the other silently skips that interval and moves on.
 
 This means you can scale horizontally on the same model:
 
@@ -64,7 +64,7 @@ This takes one advisory lock keyed by the model's `full_name` and holds it for t
 
 ## Errors
 
-When an execute raises, `@state_tracker` does three things atomically:
+When an execute raises, `@state` does three things atomically:
 
 1. Insert a row into `<state_schema>.<target_name>_errors` with `full_name`, `error_type`, `error_message`, `traceback`, `created_at`.
 2. Flip the state row's `status` to `error`.
@@ -82,7 +82,7 @@ Set `STATE_DISABLED=true` to force a pipeline to run with no state tracking, eve
 - Quickly running the write path in isolation
 - Bypassing the state DB when you only want to test the read/write logic
 
-When set: `@load_models` clears `state` and `target.staging` on every matched model, the state bootstrap and banner are skipped, `@state_tracker` becomes a passthrough, and `write()` uses the direct (non-staged) path. State tables aren't read from or written to during the run.
+When set: `@load_models` clears `state` and `target.staging` on every matched model, the state bootstrap and banner are skipped, `@state` becomes a passthrough, and `write()` uses the direct (non-staged) path. State tables aren't read from or written to during the run.
 
 ## Env vars (state-related)
 

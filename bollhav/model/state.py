@@ -4,7 +4,7 @@ Opt-in: set `state=State(...)` on a Model. The user is then expected to:
   1. Call the backend's `ensure_tables(model)` once per pipeline run
   2. Call `prefill(model, run_id=..., intervals=..., state_mode=...)` with
      the intervals they intend to process
-  3. Wrap their `execute()` with `@state_tracker`, which gates on
+  3. Wrap their `execute()` with `@state`, which gates on
      applied rows and flips pending → applied after a successful run
 
 Scope is intentionally narrow in this first cut:
@@ -92,7 +92,7 @@ def format_block_reason(code: BlockCode, message: str) -> str:
     return f"{code.value}: {message}"
 
 
-def state_tracker(func: Callable) -> Callable:
+def state(func: Callable) -> Callable:
     """Execution decorator that records state in the model's state table.
 
     For models without `state`, the decorator is a zero-overhead
@@ -344,7 +344,7 @@ __all__ = [
     "StateMode",
     "BlockCode",
     "format_block_reason",
-    "state_tracker",
+    "state",
     "model_lock",
     "ModelLockedError",
 ]

@@ -41,14 +41,14 @@ def execute(model, since, until):
 
 See [Progress bar](PROGRESS_BAR.md) for the rendering details and the example outputs at each level.
 
-## `@state_tracker`
+## `@state`
 
 Wraps your `execute(model, since, until)` worker so each (since, until) interval gets recorded in the model's state table. On entry the decorator skips intervals already marked `applied`; on success it marks the row `applied`; on exception it writes to a sibling errors table (when `log_errors=True`) before re-raising.
 
 ```python
-from bollhav.model import state_tracker, progress_bar
+from bollhav.model import state, progress_bar
 
-@state_tracker   # outer — gates + marks + logs
+@state   # outer — gates + marks + logs
 @progress_bar    # inner — timing/display
 def execute(model, since, until):
     ...
@@ -57,4 +57,4 @@ def execute(model, since, until):
 State tracking is opt-in per model via `Model(state=State(...))` and is a no-op when `model.state is None`. See [State](STATE.md) for the full lifecycle, table shapes, and re-run semantics.
 
 !!! note
-    `@state_tracker` lives on the `state` feature branch and is not yet on `main` — the page above is a forward reference.
+    `@state` lives on the `state` feature branch and is not yet on `main` — the page above is a forward reference.

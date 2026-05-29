@@ -22,7 +22,7 @@ Total: 9 COPYs into staging, 3 atomic flushes, 3 state-row transitions.
 | Model config | `Target(staging=Staging())` + `state=State()` opt-in |
 | `write()` dispatch | Routes to the staged path because `target.staging is not None` |
 | `bollhav.postgres.staging` | DDL on UNLOGGED staging table, COPY per chunk, atomic flush, state row UPDATE |
-| `@state_tracker` | Bypasses its own `mark_applied` because the staged flush already did it |
+| `@state` | Bypasses its own `mark_applied` because the staged flush already did it |
 
 ## Setup
 
@@ -71,7 +71,7 @@ psql "$TARGET_DSN" -c "DROP SCHEMA IF EXISTS warehouse CASCADE; \
                        DROP SCHEMA IF EXISTS z_warehouse CASCADE;"
 ```
 
-A second run without dropping should be a no-op — `@state_tracker`
+A second run without dropping should be a no-op — `@state`
 gates each interval on its state row and skips applied ones.
 
 ## Verify
@@ -111,7 +111,7 @@ WHERE schemaname = 'z_warehouse' AND tablename LIKE 'orders_staging_%';
 
 Re-running `python main.py` is a no-op for already-applied intervals:
 
-- `@state_tracker` gates each interval on its state row. `applied`
+- `@state` gates each interval on its state row. `applied`
   rows short-circuit before `execute` even reads.
 - The pre-fill step uses `StateMode.RESPECT` — applied rows survive,
   only fresh intervals get pending rows inserted.
