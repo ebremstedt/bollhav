@@ -20,10 +20,8 @@ import logging
 import os
 import uuid
 from contextlib import contextmanager
-from dataclasses import dataclass
 from datetime import datetime, timezone, timedelta
 from typing import Generator
-from uuid import UUID
 
 import polars as pl
 import psycopg
@@ -480,10 +478,10 @@ def test_e2e_view_without_library_true_blocks_downstream(schema_name):
     downstream intervals come up `blocked` with STATE_001."""
     from bollhav.model.load_models import _bootstrap_state_for_staged_models
 
-    view = Model(
+    view = Model(  # noqa: F841 — constructed but not in matched set on purpose; see test docstring
         source=SourceTable(
             name="v_orphan",
-            query=f"SELECT 1 AS x",
+            query="SELECT 1 AS x",
         ),
         target=Target(
             name="v_orphan",

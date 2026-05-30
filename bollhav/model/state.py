@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import inspect
 import logging
+from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import Enum
 from functools import wraps
@@ -297,9 +298,6 @@ def _record_failure(
         traceback_text=traceback_text,
         update_state=update_state,
     )
-
-
-from contextlib import contextmanager
 
 
 class ModelLockedError(RuntimeError):
