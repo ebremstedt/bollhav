@@ -158,7 +158,7 @@ class TestStagedPathEndToEnd:
         )
         conn = _mock_conn()
 
-        with patch("bollhav.postgres.write_modes.ensure_schema_and_table"):
+        with patch("bollhav.postgres.write_modes.run_pre_model_actions"):
             write(conn, model, df_gen, since=SINCE, until=UNTIL)
 
         executed = [str(call.args[0]) for call in conn.execute.call_args_list]
@@ -178,7 +178,7 @@ class TestStagedPathEndToEnd:
         model = _model(staged=True)
         df_gen = _gen(pl.DataFrame({"id": [1], "amount": [1.0]}))
 
-        with patch("bollhav.postgres.write_modes.ensure_schema_and_table"):
+        with patch("bollhav.postgres.write_modes.run_pre_model_actions"):
             write(_mock_conn(), model, df_gen, since=SINCE, until=UNTIL)
 
         assert model._state_applied_via_staging == (SINCE, UNTIL)

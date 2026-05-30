@@ -10,7 +10,8 @@ sys.modules["icron"] = MagicMock()
 sys.modules["cron"] = cron_mock
 
 from bollhav.model.database import Database  # noqa: E402
-from bollhav.postgres.schema import _col_ddl, ensure_schema, ensure_table  # noqa: E402
+from bollhav.postgres.actions import run_pre_model_actions
+from bollhav.postgres.schema import _col_ddl, ensure_schema  # noqa: E402
 from bollhav.postgres.modes import (  # noqa: E402
     append,
     recreate_partition,
@@ -126,13 +127,13 @@ class TestEnsureSchema:
 class TestEnsureTable:
     def test_executes(self) -> None:
         conn = _conn()
-        ensure_table(conn=conn, model=_model())
+        run_pre_model_actions(conn=conn, model=_model())
         conn.execute.assert_called()
 
     def test_creates_index_when_partitioned(self) -> None:
         conn = _conn()
         model = _model(columns=[_col("id"), _col("ts", partition_on=True)])
-        ensure_table(conn=conn, model=model)
+        run_pre_model_actions(conn=conn, model=model)
         # CREATE SCHEMA + CREATE TABLE + CREATE INDEX — the action
         # runner fires schema_created, table_created, indexes_created.
         assert conn.execute.call_count == 3
@@ -142,7 +143,7 @@ class TestEnsureTable:
         model = _model(
             columns=[_col("a", unique=True), _col("b", unique=True), _col("val")]
         )
-        ensure_table(conn=conn, model=model)
+        run_pre_model_actions(conn=conn, model=model)
         # CREATE SCHEMA + CREATE TABLE + ALTER TABLE ADD UNIQUE
         assert conn.execute.call_count == 3
 
@@ -210,7 +211,7 @@ class TestOverwriteInsert:
 class TestEnsureTableRecreate:
     def test_drops_before_create_when_recreate_table(self) -> None:
         conn = _conn()
-        ensure_table(conn=conn, model=_model(recreate_table=True))
+        run_pre_model_actions(conn=conn, model=_model(recreate_table=True))
         statements = [str(call.args[0]) for call in conn.execute.call_args_list]
         assert any("DROP TABLE" in s for s in statements), statements
         assert any("CREATE TABLE" in s for s in statements), statements
@@ -219,7 +220,7 @@ class TestEnsureTableRecreate:
 class TestEnsureTableTruncate:
     def test_truncates_after_create_when_truncate_table(self) -> None:
         conn = _conn()
-        ensure_table(conn=conn, model=_model(truncate_table=True))
+        run_pre_model_actions(conn=conn, model=_model(truncate_table=True))
         statements = [str(call.args[0]) for call in conn.execute.call_args_list]
         assert any("CREATE TABLE" in s for s in statements), statements
         assert any("TRUNCATE TABLE" in s for s in statements), statements
