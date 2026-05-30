@@ -84,9 +84,7 @@ def upsert_no_delete(conn: psycopg.Connection, model: Model, df: pl.DataFrame) -
         for col in model.target.columns
         if col.name not in unique_columns
     )
-    # Narrow at the list level so pyright knows `col` is PostgresColumn
-    # inside the generator expression (it doesn't narrow on `if isinstance`
-    # filters in genexps).
+
     pg_cols = [c for c in model.target.columns if isinstance(c, PostgresColumn)]
     col_defs = sql.SQL(", ").join(
         sql.SQL("{name} {type}").format(

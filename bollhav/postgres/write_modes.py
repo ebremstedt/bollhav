@@ -12,7 +12,7 @@ from bollhav.postgres.modes import (
     create_replace_view,
     append,
 )
-from bollhav.postgres.schema import ensure_schema_and_table
+from bollhav.postgres.actions import run_pre_model_actions
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +57,7 @@ def write_dataframes(
 
     if create_if_missing:
         logger.debug("Ensuring schema and table for %s", model.target.full_name)
-        ensure_schema_and_table(conn=conn, model=model)
+        run_pre_model_actions(conn=conn, model=model)
 
     for df in df_gen:
         if len(df) == 0:
@@ -178,7 +178,7 @@ def _write_staged(
 
     if create_if_missing:
         logger.debug("Ensuring schema and table for %s", model.target.full_name)
-        ensure_schema_and_table(conn=conn, model=model)
+        run_pre_model_actions(conn=conn, model=model)
 
     with stage(conn, model, since=since, until=until) as s:
         for df in df_gen:
