@@ -97,57 +97,21 @@ def _assert_supported(model: "Model") -> None:
 # ── DDL ─────────────────────────────────────────────────────────────
 
 
-def ensure_staging_schema(conn: psycopg.Connection, model: "Model") -> None:
-    """Idempotently create the staging schema (`z_<target_schema>` by
-    default — co-located with state). Gated by
-    `target.mutations.staging_schema_created` so the `CREATE SCHEMA
-    IF NOT EXISTS` only fires on the first interval of a pipeline run.
-
-    Necessary on the staging-without-state path because nothing else
-    creates the schema: state-tracked staging gets it for free as a
-    side-effect of `pg_state.ensure_tables`."""
-    if model.target.mutations.staging_schema_created:
-        return
-    schema = _staging_schema(model)
-    conn.execute(
-        sql.SQL("CREATE SCHEMA IF NOT EXISTS {schema}").format(
-            schema=sql.Identifier(schema),
-        )
-    )
-    model.target.mutations.staging_schema_created = True
-    logger.debug(
-        "mutation: %s.mutations.staging_schema_created = True",
-        model.target.full_name,
-    )
-
-
-def ensure_staging_table(
+def ensure_staging_table_per_interval(
     conn: psycopg.Connection, model: "Model", run_id: UUID
 ) -> None:
-    """Create the staging table mirroring target columns.
+    """Create the per-interval staging table in `StagingMode.INTERVAL`.
 
-    No indexes, no constraints — staging is write-once via COPY then
-    drained by a single INSERT...SELECT. UNLOGGED by default: writes
-    skip WAL (~2-3x faster COPY), and a crash truncates staging —
-    fine, since the interval reruns from the top. Flip `Staging.logged`
-    to opt into LOGGED for compliance/replication environments.
+    Each interval gets its own freshly-CREATEd table; the prior
+    interval's `flush` dropped it. This is NOT in the PRE action set
+    because actions are one-shot per pipeline run while INTERVAL's
+    CREATE is per-interval — the action runner would skip subsequent
+    intervals.
 
-    The staging schema is ensured up-front via `ensure_staging_schema`,
-    which is a one-shot gated by `mutations.staging_schema_created`.
-
-    In `StagingMode.REUSED` (the default) the CREATE itself is also
-    one-shot — gated by `mutations.staging_table_created` — so a
-    365-interval backfill issues a single `CREATE TABLE` instead of
-    365. In `StagingMode.INTERVAL` the CREATE fires every interval,
-    since the previous interval's flush dropped the table."""
-    from bollhav.model.staging import StagingMode
+    In `StagingMode.REUSED` the CREATE happens once via the
+    `staging_table_created` PRE action; this function isn't called."""
     from bollhav.postgres.columns import PostgresColumn
     from bollhav.postgres.schema import _col_ddl
-
-    ensure_staging_schema(conn, model)
-    mode = _staging_mode(model)
-    if mode is StagingMode.REUSED and model.target.mutations.staging_table_created:
-        return
 
     schema = _staging_schema(model)
     table = _staging_table(model, run_id)
@@ -170,12 +134,6 @@ def ensure_staging_table(
             col_defs=col_defs,
         )
     )
-    if mode is StagingMode.REUSED:
-        model.target.mutations.staging_table_created = True
-        logger.debug(
-            "mutation: %s.mutations.staging_table_created = True",
-            model.target.full_name,
-        )
 
 
 def _staging_mode(model: "Model"):
@@ -435,19 +393,25 @@ def stage(
         )
 
     from bollhav.model.staging import StagingMode
+    from bollhav.postgres.actions import run_pre_model_actions
 
-    # REUSED mode: track whether this interval is the first one for
-    # this pipeline run before `ensure_staging_table` flips the flag.
-    # If the table already existed (mutations.staging_table_created
-    # was True), we need a TRUNCATE to clear the prior interval's
-    # rows. INTERVAL mode never needs TRUNCATE — every interval
-    # gets a freshly-CREATEd empty table.
     mode = _staging_mode(model)
-    needs_truncate = (
-        mode is StagingMode.REUSED and model.target.mutations.staging_table_created
-    )
-    ensure_staging_table(conn, model, run_id)
-    if needs_truncate:
+    if mode is StagingMode.INTERVAL:
+        # INTERVAL mode: fresh table per interval. The PRE
+        # `staging_table_created` action skips itself in this mode
+        # (one-shot wouldn't fit), so the CREATE happens here. We
+        # still call run_pre_model_actions to ensure the schema-level PRE
+        # actions (schema, staging schema) have fired.
+        run_pre_model_actions(conn, model)
+        ensure_staging_table_per_interval(conn, model, run_id)
+    else:
+        # REUSED mode: PRE actions create the staging schema and
+        # table on the first interval. `run_pre_model_actions` is
+        # idempotent (gated by `target._applied_model_actions`), so subsequent
+        # interval calls short-circuit. The TRUNCATE then clears
+        # any leftover from the previous interval. Harmless on the
+        # first interval where the table was just CREATEd empty.
+        run_pre_model_actions(conn, model)
         truncate_staging_table(conn, model, run_id)
     s = Stage(conn, model, run_id=run_id, since=since, until=until)
     try:
@@ -469,9 +433,10 @@ def stage(
 __all__ = [
     "Stage",
     "stage",
-    "ensure_staging_table",
+    "ensure_staging_table_per_interval",
     "copy_to_staging",
     "flush_to_target",
     "drop_staging_table",
+    "truncate_staging_table",
     "gc_orphan_staging_tables",
 ]

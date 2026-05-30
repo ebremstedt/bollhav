@@ -1,7 +1,8 @@
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Callable
+from typing import TYPE_CHECKING, Callable
 
+from bollhav.model.actions import OnFailure, Phase
 from bollhav.model.database import Database, DatabaseColumn, DatabaseIndex
 from bollhav.model.model_type import ModelType
 from bollhav.model.staging import Staging
@@ -9,48 +10,8 @@ from bollhav.model.write_modes import WriteMode
 from bollhav.model.column_sorting import sort_columns
 from bollhav.model.target_schema import TargetSchema
 
-
-@dataclass
-class Mutations:
-    """━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    ⚠  MUTATED AT RUNTIME — NOT CONFIG
-    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-    Lives on `Target.mutations`. Every read- or write-site spells out
-    its mutability in the access path: `target.mutations.recreated`
-    cannot be confused with a config field — and the plural reads as
-    "things that have already been mutated on this target."
-
-    Per-pipeline-run tracker for one-shot setup operations on a
-    Target. Every field below starts `False`. The first time the
-    corresponding DDL statement runs in `ensure_schema_and_table`
-    during a pipeline invocation, the flag flips to `True` so
-    subsequent intervals in the same loop skip the redundant work.
-
-    `apply_runtime_overrides` builds a fresh `Target` (and therefore
-    a fresh `Mutations`) for every `@load_models` invocation, so
-    these flags reset naturally between pipeline runs.
-
-    Single-worker only: two pipelines on the same model with
-    `recreate_table=True` each see their own fresh `Mutations` and
-    would both DROP, potentially clobbering each other. The flag
-    isn't a cross-process lock — see `model_lock` if you need that.
-    """
-
-    schema_created: bool = False
-    table_created: bool = False
-    recreated: bool = False  # `recreate_table` DROP done?
-    truncated: bool = False  # `truncate_table` TRUNCATE done?
-    indexes_created: bool = False
-    uniques_added: bool = False
-    # Staging-side one-shots. `staging_schema_created` is always one-
-    # shot (same `z_<schema>` regardless of mode). `staging_table_created`
-    # only flips in `StagingMode.REUSED` — one staging table reused
-    # across intervals. In `StagingMode.INTERVAL` every interval
-    # creates and drops its own table, so this flag stays False and
-    # has nothing to gate.
-    staging_schema_created: bool = False
-    staging_table_created: bool = False
+if TYPE_CHECKING:
+    from bollhav.model.actions import Action
 
 
 @dataclass
@@ -68,22 +29,40 @@ class Target:
     dsn_env_var: str | None = None
     column_sorting: Callable | None = sort_columns
     extra: dict | None = None
-    # ⚠ Destructive one-shot ops. Run ONCE on the first
-    # `ensure_schema_and_table` call of a pipeline run (gated by
-    # `mutations` below). NOT SAFE for parallel runs of the same
-    # model — see `Mutations` docstring.
+    # ⚠ Destructive PRE actions. Each runs ONCE on the first write of a
+    # pipeline run; the runner records that in `_applied_model_actions`. NOT SAFE for
+    # parallel runs of the same model — see ACTIONS.md.
     recreate_table: bool = False
     truncate_table: bool = False
     staging: Staging | None = None
+
+    # Two lists. Execution order is `default_actions ++ actions` per
+    # phase: framework defaults run first, then user-added ones.
+    #
+    # `default_actions` — framework-provided actions (CREATE SCHEMA /
+    # TABLE / INDEX / UNIQUE / staging setup, etc.). `None` means
+    # "resolve lazily from the backend's `default_actions()` factory"
+    # so this Target stays backend-agnostic. Set to `[]` to opt out
+    # of every framework default. Set to a custom list (e.g.
+    # `[a for a in default_actions() if a.name != "truncated"]`) to
+    # opt out selectively.
+    #
+    # `actions` — user-added actions. Always run after defaults.
+    default_actions: "list[Action] | None" = None
+    actions: "list[Action]" = field(default_factory=list)
+
+    # POST-action failure policy. PRE is always fail-fast.
+    on_failure: OnFailure = OnFailure.FAIL_FAST
 
     sensitive: bool = field(init=False, default=False)
     unique_columns: list = field(init=False, default_factory=list)
     primary_key_columns: list = field(init=False, default_factory=list)
     partitioned_by_index: bool = field(init=False, default=False)
-    # ⚠ MUTATED AT RUNTIME — see Mutations docstring above. Fields
-    # default to all-False (nothing's been done yet). Do not pre-set
-    # these in your `Target(...)` call; they're filled in for you.
-    mutations: Mutations = field(init=False, default_factory=Mutations)
+
+    # ⚠ MUTATED AT RUNTIME — the runner records "this action fired
+    # this pipeline run" by setting `_applied_model_actions[action.name] = True`.
+    # Do not pre-populate; the runner owns this dict.
+    _applied_model_actions: dict[str, bool] = field(init=False, default_factory=dict)
 
     @property
     def name_resolved(self) -> str:
@@ -126,24 +105,41 @@ class Target:
         return None
 
     @property
-    def setup_complete(self) -> bool:
-        """True iff every *applicable* one-shot setup op has been
-        done. A flag staying False is fine when its directive isn't
-        set: e.g. `mutations.recreated` only flips when
-        `recreate_table=True`, so on a non-recreate target the flag
-        stays False forever and we treat that as "nothing to do."
+    def effective_actions(self) -> "list[Action]":
+        """The full list of actions the runner will execute, in
+        execution order: framework defaults first, then user-added.
 
-        Lets `ensure_schema_and_table` short-circuit the empty
-        BEGIN/COMMIT roundtrip on intervals after the first."""
-        m = self.mutations
-        return (
-            m.schema_created
-            and m.table_created
-            and (m.recreated or not self.recreate_table)
-            and (m.truncated or not self.truncate_table)
-            and (m.indexes_created or self.partitioned_by is None)
-            and (m.uniques_added or not self.unique_columns)
-        )
+        `default_actions=None` means "framework defaults haven't been
+        resolved yet" — returns just `actions`. The runner calls
+        `resolve_default_actions()` on first use so this property
+        starts returning the merged list."""
+        if self.default_actions is None:
+            return list(self.actions)
+        return [*self.default_actions, *self.actions]
+
+    @property
+    def setup_complete(self) -> bool:
+        """True iff every applicable PRE action has already fired
+        this pipeline run.
+
+        Walks `effective_actions`, filters to `Phase.PRE_MODEL`, and checks
+        whether each action that *would apply* (i.e. `should_run`
+        returns True) is recorded in `_applied_model_actions`. An action whose
+        `should_run` is False is treated as "nothing to do," not
+        "not done."
+
+        Lets `run_pre_model_actions` short-circuit the empty BEGIN/COMMIT
+        roundtrip on intervals after the first."""
+        if self.default_actions is None:
+            return False  # not yet resolved; runner will populate
+        for action in self.effective_actions:
+            if action.phase is not Phase.PRE_MODEL:
+                continue
+            if not action.should_run(self):
+                continue
+            if not self._applied_model_actions.get(action.name):
+                return False
+        return True
 
     @property
     def merge_key_columns(self) -> list:

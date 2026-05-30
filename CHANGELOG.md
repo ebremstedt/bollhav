@@ -1,5 +1,38 @@
 # Changelog
 
+## [2.0.138] - 2026-05-29
+
+Replaces the closed-shape `Mutations` struct from `2.0.137` with a pluggable **Actions** system. Same target-setup behaviour as before for built-in operations; users can now extend it.
+
+### Added — Pluggable actions
+
+- `bollhav.model.actions` introduces `Action`, `Phase`, and `OnFailure`. Each lifecycle operation (CREATE SCHEMA, CREATE TABLE, TRUNCATE, ADD UNIQUE, staging setup, user `GRANT` / `ANALYZE` / `COMMENT`, …) is now a callable wrapped in an `Action(name, phase, run, should_run)`. The runner walks the list, calls `should_run(target)` to gate, runs the action, records it in `target._applied_model_actions[name] = True`. See [Actions](docs/content/ACTIONS.md).
+- **Four phases** on `Phase` — a 2×2 grid of (model-level vs interval-level) × (pre vs post):
+  - `PRE_MODEL` — once per pipeline run, before the user's loop (current home for CREATE TABLE, indexes, staging setup).
+  - `POST_MODEL` — once per pipeline run, after the user's loop returns cleanly (current home for staging cleanup; future home for user `ANALYZE` / `GRANT`).
+  - `PRE_INTERVAL` and `POST_INTERVAL` — placeholder values for the eventual collapse of `@state`'s `mark_running` / `mark_applied` / `record_failure` into the action system. Enum values exist; runners aren't shipped yet.
+- **Two lists on `Target`** so framework defaults and user-added actions stay separately addressable:
+  - `default_actions: list[Action] | None = None` — framework's; `None` means "resolve lazily from the backend's `default_actions()` factory." Set to `[]` to opt out of every framework default. Set to a filtered list to opt out selectively.
+  - `actions: list[Action] = []` — user-added. Always runs after defaults.
+  - `effective_actions` property returns `default_actions ++ actions`.
+- `Target.on_failure: OnFailure = FAIL_FAST` — per-target policy for `POST_MODEL` action failures. `FAIL_FAST` halts the pipeline POST sweep; `SKIP` logs and continues. `PRE_MODEL` is always fail-fast.
+- Backend-specific defaults live in `bollhav.postgres.actions.default_actions()`, which returns the canonical 10-action list (8 PRE_MODEL + 2 POST_MODEL).
+- Public runners: `run_pre_model_actions(conn, model)` and `run_post_model_actions(conn, model)`. Called from `write()` (PRE) and `@load_models` after `main()` returns cleanly (POST).
+
+### Changed — `Mutations` removed; user-extension story
+
+- `Target.mutations` (struct of 8 bools) is gone. Same information now lives in `target._applied_model_actions: dict[str, bool]` keyed by action name. Field is `init=False`; the runner owns the dict.
+- `target.setup_complete` now walks `effective_actions` filtered to `Phase.PRE_MODEL` against `_applied_model_actions` — semantically identical to the old reconciliation, mechanically generalised.
+- `ensure_schema_and_table(conn, model)` and `ensure_table(conn, model)` retained as backwards-compatible shims that forward to `run_pre_model_actions`. New code should call the runner directly.
+- `staging.ensure_staging_schema` removed (now `staging_schema_created` action). `staging.ensure_staging_table` split into `ensure_staging_table_per_interval` (for `StagingMode.INTERVAL`, which doesn't fit the one-shot pattern) plus the `staging_table_created` action (for `StagingMode.REUSED`).
+
+### Migration
+
+- Replace `target.mutations.X` reads with `target._applied_model_actions.get("X")` — same key, same boolean.
+- Replace `target.mutations.X = True` writes with `target._applied_model_actions["X"] = True` (rarely done outside the runner).
+- For custom DDL that should run once per pipeline run, define an `Action(name, Phase.PRE_MODEL or Phase.POST_MODEL, run_callable)` and append to `Target(actions=[...])`. The framework defaults still fire because they live in `default_actions`.
+- Test fixtures that set `mutations = Mutations()` should now set `_applied_model_actions = {}` and `actions = []` (and `default_actions = None` to trigger lazy resolution, or `default_actions = default_actions()` to pin them eagerly).
+
 ## [2.0.137] - 2026-05-29
 
 Large release. Four previously-coupled feature surfaces — **state, staging, library, and target setup** — are decoupled so they can be opted into independently along orthogonal axes, plus a runtime mutation tracker on `Target` that skips redundant DDL on every interval after the first.

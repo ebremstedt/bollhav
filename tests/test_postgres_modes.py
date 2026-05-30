@@ -133,7 +133,9 @@ class TestEnsureTable:
         conn = _conn()
         model = _model(columns=[_col("id"), _col("ts", partition_on=True)])
         ensure_table(conn=conn, model=model)
-        assert conn.execute.call_count == 2
+        # CREATE SCHEMA + CREATE TABLE + CREATE INDEX — the action
+        # runner fires schema_created, table_created, indexes_created.
+        assert conn.execute.call_count == 3
 
     def test_creates_composite_unique_constraint(self) -> None:
         conn = _conn()
@@ -141,7 +143,8 @@ class TestEnsureTable:
             columns=[_col("a", unique=True), _col("b", unique=True), _col("val")]
         )
         ensure_table(conn=conn, model=model)
-        assert conn.execute.call_count == 2  # CREATE TABLE + composite UNIQUE
+        # CREATE SCHEMA + CREATE TABLE + ALTER TABLE ADD UNIQUE
+        assert conn.execute.call_count == 3
 
 
 class TestAppend:

@@ -119,6 +119,10 @@ def _run_decorator(**env):
             lambda models, **kw: None,
         ),
         patch("bollhav.model.load_models._print_state_banner", lambda models: None),
+        patch(
+            "bollhav.model.load_models._run_post_model_actions_for_models",
+            lambda models: None,
+        ),
     ):
 
         @load_models

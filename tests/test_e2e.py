@@ -277,27 +277,22 @@ def test_e2e_state_lifecycle(schema_name):
 # ── 2. mutations one-shot: setup runs once per pipeline run ──────────
 
 
-def test_e2e_mutations_one_shot_setup(schema_name, caplog):
+def test_e2e_actions_one_shot_setup(schema_name, caplog):
     """Across 3 intervals: target table is CREATEd once; subsequent
-    intervals short-circuit at `setup_complete`. The mutations debug
-    logs should appear exactly once per flag."""
-    caplog.set_level(logging.DEBUG, logger="bollhav.postgres.schema")
-    caplog.set_level(logging.DEBUG, logger="bollhav.postgres.staging")
+    intervals short-circuit at `target.setup_complete`. The action
+    debug logs should appear exactly once per applicable PRE action."""
+    caplog.set_level(logging.DEBUG, logger="bollhav.postgres.actions")
     m = _orders_model(schema_name, state=State(), staging=Staging())
     _run_intervals(m)
 
-    flags = [r.message for r in caplog.records if "mutation:" in r.message]
-    # Exactly one log per applicable flag across the whole run.
-    # Match exact field names so `table_created` doesn't double-count
+    flags = [r.message for r in caplog.records if "action:" in r.message]
+    # Exactly one log per applicable PRE action across the whole run.
+    # Match suffix so `table_created` doesn't double-count
     # `staging_table_created`.
-    assert sum(f.endswith(".mutations.table_created = True") for f in flags) == 1
-    assert sum(f.endswith(".mutations.schema_created = True") for f in flags) == 1
-    assert (
-        sum(f.endswith(".mutations.staging_schema_created = True") for f in flags) == 1
-    )
-    assert (
-        sum(f.endswith(".mutations.staging_table_created = True") for f in flags) == 1
-    )
+    assert sum(f.endswith(".table_created done") for f in flags) == 1
+    assert sum(f.endswith(".schema_created done") for f in flags) == 1
+    assert sum(f.endswith(".staging_schema_created done") for f in flags) == 1
+    assert sum(f.endswith(".staging_table_created done") for f in flags) == 1
 
 
 # ── 3. staging REUSED mode (default): CREATE once, TRUNCATE between ──

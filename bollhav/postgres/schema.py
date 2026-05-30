@@ -1,7 +1,27 @@
+"""Thin backwards-compatibility shim over `bollhav.postgres.actions`.
+
+Historically `ensure_schema_and_table(conn, model)` did the full
+schema + table + indexes + uniques setup inline, gated by a
+`Mutations` struct on the target. That now lives in the action
+system: each step is an `Action` in `default_actions()`, the
+runner manages "did this fire?" state, and users plug in their own
+DDL by appending Actions.
+
+This module keeps two helpers used by other parts of the codebase
+(`ensure_schema` for the state-table bootstrap, `_col_ddl` for the
+staging table DDL), plus an `ensure_schema_and_table` wrapper that
+forwards to `run_pre_model_actions` so the old import path still works.
+New code should call `run_pre_model_actions` directly.
+"""
+
+from __future__ import annotations
+
 import logging
+from typing import cast, LiteralString
+
 import psycopg
 from psycopg import sql
-from typing import cast, LiteralString
+
 from bollhav.model.model import Model
 from bollhav.postgres.columns import PostgresColumn
 
@@ -24,116 +44,27 @@ def _col_ddl(col: PostgresColumn) -> LiteralString:
 
 
 def ensure_schema(conn: psycopg.Connection, schema: str) -> None:
+    """Idempotent `CREATE SCHEMA IF NOT EXISTS`. Used by the state
+    bootstrap (which needs its `z_<schema>` ahead of any actions),
+    not gated by the action system."""
     logger.debug("Ensuring schema: %s", schema)
     conn.execute(
         sql.SQL("CREATE SCHEMA IF NOT EXISTS {}").format(sql.Identifier(schema))
     )
 
 
-def ensure_table(conn: psycopg.Connection, model: Model) -> None:
-    """First call in a pipeline run: drop (if recreate_table), create,
-    truncate (if truncate_table), add indexes, add unique constraints.
-    Subsequent calls in the same run: complete no-op — every step is
-    gated by `target.mutations.*` flags. See `Mutations` docstring."""
-    target = model.target
-    schema_id = sql.Identifier(target.schema.resolved)
-    table_id = sql.Identifier(target.name_resolved)
-    logger.debug(
-        "Ensuring table: %s.%s",
-        target.schema.resolved,
-        target.name_resolved,
-    )
-
-    if target.recreate_table and not target.mutations.recreated:
-        conn.execute(
-            sql.SQL("DROP TABLE IF EXISTS {schema}.{table}").format(
-                schema=schema_id, table=table_id
-            )
-        )
-        target.mutations.recreated = True
-        logger.debug("mutation: %s.mutations.recreated = True", model.target.full_name)
-
-    if not target.mutations.table_created:
-        col_defs = sql.SQL(",\n").join(
-            sql.SQL(_col_ddl(col))
-            for col in target.columns
-            if isinstance(col, PostgresColumn)
-        )
-        conn.execute(
-            sql.SQL(
-                "CREATE TABLE IF NOT EXISTS {schema}.{table} (\n{col_defs}\n)"
-            ).format(
-                schema=schema_id,
-                table=table_id,
-                col_defs=col_defs,
-            )
-        )
-        target.mutations.table_created = True
-        logger.debug(
-            "mutation: %s.mutations.table_created = True", model.target.full_name
-        )
-
-    if target.truncate_table and not target.mutations.truncated:
-        conn.execute(
-            sql.SQL("TRUNCATE TABLE {schema}.{table}").format(
-                schema=schema_id, table=table_id
-            )
-        )
-        target.mutations.truncated = True
-        logger.debug("mutation: %s.mutations.truncated = True", model.target.full_name)
-
-    if target.partitioned_by is not None and not target.mutations.indexes_created:
-        index_name = f"{target.name_resolved}_{target.partitioned_by}_idx"
-        conn.execute(
-            sql.SQL(
-                "CREATE INDEX IF NOT EXISTS {index} ON {schema}.{table} ({col})"
-            ).format(
-                index=sql.Identifier(index_name),
-                schema=schema_id,
-                table=table_id,
-                col=sql.Identifier(target.partitioned_by),
-            )
-        )
-        target.mutations.indexes_created = True
-        logger.debug(
-            "mutation: %s.mutations.indexes_created = True", model.target.full_name
-        )
-
-    if target.unique_columns and not target.mutations.uniques_added:
-        constraint_name = f"{target.name_resolved}_uq"
-        unique_col_ids = sql.SQL(", ").join(
-            sql.Identifier(col.name) for col in target.unique_columns
-        )
-        conn.execute(
-            sql.SQL("""
-                DO $$ BEGIN
-                    ALTER TABLE {schema}.{table}
-                    ADD CONSTRAINT {constraint} UNIQUE ({cols});
-                EXCEPTION WHEN duplicate_table THEN NULL;
-                END $$
-            """).format(
-                schema=schema_id,
-                table=table_id,
-                constraint=sql.Identifier(constraint_name),
-                cols=unique_col_ids,
-            )
-        )
-        target.mutations.uniques_added = True
-        logger.debug(
-            "mutation: %s.mutations.uniques_added = True", model.target.full_name
-        )
-
-
 def ensure_schema_and_table(conn: psycopg.Connection, model: Model) -> None:
-    target = model.target
-    if target.setup_complete:
-        return
-    with conn.transaction():
-        if not target.mutations.schema_created:
-            ensure_schema(conn=conn, schema=target.schema.resolved)
-            target.mutations.schema_created = True
-            logger.debug(
-                "mutation: %s.mutations.schema_created = True",
-                model.target.full_name,
-            )
-        ensure_table(conn=conn, model=model)
+    """Backwards-compatible entry point — forwards to `run_pre_model_actions`.
+    New code should import and call `run_pre_model_actions` directly."""
+    from bollhav.postgres.actions import run_pre_model_actions
+
+    run_pre_model_actions(conn, model)
+
+
+def ensure_table(conn: psycopg.Connection, model: Model) -> None:
+    """Backwards-compatible entry point — forwards to `run_pre_model_actions`.
+    The old split between `ensure_table` and `ensure_schema_and_table`
+    is gone; both now run the same PRE action set."""
+    from bollhav.postgres.actions import run_pre_model_actions
+
+    run_pre_model_actions(conn, model)
