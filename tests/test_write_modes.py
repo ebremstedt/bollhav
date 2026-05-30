@@ -27,7 +27,7 @@ def _model(*, staged=False, with_state=False, write_mode=None, staging_cfg=None)
     from bollhav.model.write_modes import WriteMode
     from bollhav.postgres.columns import PostgresColumn, PostgresType
 
-    from bollhav.model.target import Mutations
+    # (removed) Mutations replaced by Actions system
 
     model = MagicMock()
     model.state = State() if (staged or with_state) else None
@@ -42,7 +42,17 @@ def _model(*, staged=False, with_state=False, write_mode=None, staging_cfg=None)
         PostgresColumn(name="id", data_type=PostgresType.BIGINT),
         PostgresColumn(name="amount", data_type=PostgresType.NUMERIC),
     ]
-    model.target.mutations = Mutations()
+    from bollhav.postgres.actions import default_actions as _da
+
+    model.target._applied_model_actions = {}
+    model.target.actions = []
+    model.target.default_actions = _da()
+    model.target.effective_actions = list(model.target.default_actions)
+    model.target.setup_complete = False
+    model.target.recreate_table = False
+    model.target.truncate_table = False
+    model.target.partitioned_by = None
+    model.target.unique_columns = []
     model._state_run_id = RUN_ID
     model._state_applied_via_staging = None
     return model

@@ -27,7 +27,7 @@ RUN_ID = UUID("00000000-0000-0000-0000-00000000beef")
 def _model(*, write_mode=None, staging_cfg=None):
     from bollhav.model.staging import Staging
     from bollhav.model.state import State
-    from bollhav.model.target import Mutations
+    # (removed) Mutations replaced by Actions system
     from bollhav.model.write_modes import WriteMode
     from bollhav.postgres.columns import PostgresColumn, PostgresType
 
@@ -44,10 +44,25 @@ def _model(*, write_mode=None, staging_cfg=None):
         PostgresColumn(name="id", data_type=PostgresType.BIGINT),
         PostgresColumn(name="amount", data_type=PostgresType.NUMERIC),
     ]
-    # Real Mutations — the staging path reads mutations.staging_table_created
-    # to decide CREATE-vs-skip. A MagicMock would make the flag truthy and
-    # short-circuit the very first CREATE.
-    model.target.mutations = Mutations()
+    # Action runtime state — `_applied` empty so PRE actions fire,
+    # `actions=None` so the runner resolves defaults, `setup_complete`
+    # explicitly False so the runner doesn't short-circuit.
+    from bollhav.postgres.actions import default_actions as _da
+
+    model.target._applied_model_actions = {}
+    model.target.actions = []
+    model.target.default_actions = _da()
+    # `effective_actions` is a property on real Target; MagicMock
+    # doesn't compute it, so pin it to defaults+user explicitly.
+    model.target.effective_actions = list(model.target.default_actions)
+    model.target.setup_complete = False
+    # Directive flags pinned so should_run gates evaluate predictably.
+    # A MagicMock attribute is truthy by default, which would make
+    # every PRE action's should_run() pass and break tests.
+    model.target.recreate_table = False
+    model.target.truncate_table = False
+    model.target.partitioned_by = None
+    model.target.unique_columns = []
     model._state_run_id = RUN_ID
     model._state_applied_via_staging = None
     return model
@@ -82,29 +97,47 @@ class TestPreconditions:
             with stage(_mock_conn(), model, since=SINCE, until=UNTIL):
                 pass
 
-    def test_ensure_staging_schema_is_one_shot(self) -> None:
-        """`CREATE SCHEMA IF NOT EXISTS` fires on the first call,
-        flips `mutations.staging_schema_created`, and is a complete
-        no-op on every subsequent call within the same pipeline run."""
-        from bollhav.model.target import Mutations
-        from bollhav.postgres.staging import ensure_staging_schema
+    def test_pre_actions_are_one_shot(self) -> None:
+        """`run_pre_model_actions` runs the full PRE action list on the
+        first call, records each in `target._applied_model_actions`, and is a
+        complete no-op on every subsequent call within the same
+        pipeline run because `setup_complete` short-circuits."""
+        from bollhav.postgres.actions import default_actions, run_pre_model_actions
+        from bollhav.model.actions import Phase
 
         model = _model()
-        model.target.mutations = Mutations()
-        conn = _mock_conn()
+        model.target._applied_model_actions = {}
+        model.target.actions = []
+        model.target.default_actions = default_actions()
+        model.target.effective_actions = list(model.target.default_actions)
 
-        ensure_staging_schema(conn, model)
-        assert model.target.mutations.staging_schema_created is True
-        first_call_count = conn.execute.call_count
-        assert first_call_count >= 1
-        assert any(
-            "CREATE SCHEMA IF NOT EXISTS" in str(c.args[0])
-            for c in conn.execute.call_args_list
+        # MagicMock doesn't compute properties, so emulate
+        # `setup_complete` against the live `_applied` dict.
+        def _live_setup_complete() -> bool:
+            for a in model.target.effective_actions:
+                if a.phase is not Phase.PRE_MODEL:
+                    continue
+                if not a.should_run(model.target):
+                    continue
+                if not model.target._applied_model_actions.get(a.name):
+                    return False
+            return True
+
+        type(model.target).setup_complete = property(
+            lambda _self: _live_setup_complete()
         )
 
-        ensure_staging_schema(conn, model)
-        ensure_staging_schema(conn, model)
-        # Two more calls into the helper, zero new DDL — flag short-circuits.
+        conn = _mock_conn()
+
+        run_pre_model_actions(conn, model)
+        assert model.target._applied_model_actions.get("staging_schema_created") is True
+        assert model.target._applied_model_actions.get("staging_table_created") is True
+        first_call_count = conn.execute.call_count
+        assert first_call_count >= 1
+
+        run_pre_model_actions(conn, model)
+        run_pre_model_actions(conn, model)
+        # Two more calls, zero new DDL — setup_complete short-circuits.
         assert conn.execute.call_count == first_call_count
 
     def test_accepts_missing_state(self) -> None:
@@ -371,10 +404,13 @@ class TestStagingSchemaOverride:
         with stage(conn, model, since=SINCE, until=UNTIL) as s:
             s.write(pl.DataFrame({"id": [1], "amount": [1.0]}))
 
+        # Filter for the staging CREATE TABLE — the action set also
+        # creates the target table (`public.orders`), which mentions
+        # neither `ops` nor `z_public`.
         ddl = next(
             str(call.args[0])
             for call in conn.execute.call_args_list
-            if "CREATE" in str(call.args[0]) and "TABLE" in str(call.args[0])
+            if "UNLOGGED TABLE" in str(call.args[0])
         )
         assert "Identifier('ops')" in ddl
         assert "z_public" not in ddl
@@ -402,13 +438,13 @@ class TestLoggedField:
         with stage(conn, _model(), since=SINCE, until=UNTIL):
             pass
 
-        # Filter for the CREATE TABLE — `stage()` also issues
-        # CREATE SCHEMA via `ensure_staging_schema`, which doesn't
-        # mention TABLE.
+        # `stage()` runs the full PRE action set, which includes
+        # CREATE TABLE for the target AND CREATE UNLOGGED TABLE for
+        # the staging table. Filter to the staging one.
         ddl = next(
             str(call.args[0])
             for call in conn.execute.call_args_list
-            if "CREATE" in str(call.args[0]) and "TABLE" in str(call.args[0])
+            if "UNLOGGED" in str(call.args[0])
         )
         assert "UNLOGGED TABLE" in ddl
 
@@ -421,13 +457,16 @@ class TestLoggedField:
         with stage(conn, model, since=SINCE, until=UNTIL):
             pass
 
-        ddl = next(
+        # Logged=True: filter for the staging table CREATE, which now
+        # says "CREATE TABLE IF NOT EXISTS z_public.orders_staging_..."
+        ddls = [
             str(call.args[0])
             for call in conn.execute.call_args_list
-            if "CREATE" in str(call.args[0]) and "TABLE" in str(call.args[0])
-        )
-        assert "UNLOGGED" not in ddl
-        assert "CREATE TABLE" in ddl
+            if "CREATE TABLE IF NOT EXISTS" in str(call.args[0])
+            and "staging_" in str(call.args[0])
+        ]
+        assert ddls, "expected a staging CREATE TABLE statement"
+        assert all("UNLOGGED" not in d for d in ddls)
 
 
 class TestKeepAfterFlush:
@@ -481,18 +520,22 @@ class TestKeepAfterFlush:
             s.write(pl.DataFrame({"id": [2], "amount": [2.0]}))
 
         executed = [str(call.args[0]) for call in conn.execute.call_args_list]
-        creates = [q for q in executed if "CREATE" in q and "TABLE" in q]
+        # Filter for staging CREATEs only — `run_pre_model_actions` also
+        # fires `CREATE TABLE` for the target on the first interval.
+        creates = [q for q in executed if "UNLOGGED TABLE" in q]
         truncates = [q for q in executed if "TRUNCATE TABLE" in q]
         drops = [q for q in executed if "DROP TABLE" in q]
         # Exactly one staging-table CREATE across the two intervals.
         assert len(creates) == 1
-        # TRUNCATE fires at the start of the SECOND interval, not
-        # the first (first interval got a fresh empty CREATE).
-        assert len(truncates) == 1
+        # TRUNCATE fires at the start of EVERY interval — including
+        # the first (where the table was just CREATEd empty and the
+        # TRUNCATE is a no-op). Keeping the logic simple here is
+        # worth the trivial cost on UNLOGGED tables.
+        assert len(truncates) == 2
         # No DROPs — staging stays for the next pipeline run's GC.
         assert len(drops) == 0
-        assert model.target.mutations.staging_table_created is True
-        assert model.target.mutations.staging_schema_created is True
+        assert model.target._applied_model_actions.get("staging_table_created") is True
+        assert model.target._applied_model_actions.get("staging_schema_created") is True
 
     def test_reused_mode_never_drops_on_flush(self) -> None:
         """The default mode keeps the staging table after every

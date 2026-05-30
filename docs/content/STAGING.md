@@ -38,7 +38,7 @@ The staging table can live for the whole pipeline run or be recreated each inter
 | `REUSED` (**default**) | `TRUNCATE TABLE` (only from interval 2 onward) | 1 × `CREATE SCHEMA` + 1 × `CREATE TABLE` + 364 × `TRUNCATE` | almost always — minimal catalog churn |
 | `INTERVAL` | `CREATE TABLE` + `DROP TABLE` (in flush) | 1 × `CREATE SCHEMA` + 365 × `CREATE` + 365 × `DROP` | you want a forensic snapshot of the crashed-interval staging table on failure |
 
-`REUSED` flips two flags on `target.mutations` — `staging_schema_created` and `staging_table_created` — so subsequent intervals short-circuit before issuing the `CREATE`s. See [Mutating targets](MUTATIONS.md).
+`REUSED` records two PRE_MODEL actions in `target._applied_model_actions` — `staging_schema_created` and `staging_table_created` — so subsequent intervals short-circuit before issuing the `CREATE`s. See [Actions](ACTIONS.md).
 
 `INTERVAL` doesn't flip `staging_table_created` (the table is genuinely new each interval, so the "did this DDL fire?" flag has nothing to gate).
 

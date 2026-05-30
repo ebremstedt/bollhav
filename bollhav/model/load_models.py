@@ -174,6 +174,12 @@ def load_models(
 
             func(models=models, debug=cfg.debug)
 
+            # POST sweep — fires only after the user's loop returns
+            # cleanly. Per-target `on_failure` decides whether a POST
+            # exception (e.g. ANALYZE locked, GRANT denied) halts the
+            # whole sweep or just logs and continues.
+            _run_post_model_actions_for_models(models)
+
         return wrapper
 
     # Allow both @load_models and @load_models(folder=...).
@@ -396,6 +402,35 @@ def _bootstrap_state_for_staged_models(
                 exc,
             )
             model.intervals = []
+
+
+def _run_post_model_actions_for_models(models: list[Model]) -> None:
+    """Run POST actions for each matched model whose target declared
+    any. Called by `@load_models` AFTER the user's loop returns
+    cleanly. A loop that raises bypasses this entirely — the operator
+    re-runs and gets POST on the next clean exit.
+
+    Failure semantics per-model are controlled by `Target.on_failure`:
+    FAIL_FAST (default) re-raises and halts the sweep across models;
+    SKIP logs a warning and continues to the next action."""
+    from bollhav.postgres import state as pg_state
+    from bollhav.postgres.actions import run_post_model_actions
+
+    for model in models:
+        # Library-only models (view-only, library=True with no
+        # state/staging) — no target writes happened, so there's no
+        # POST work to do.
+        if model.target.is_view:
+            continue
+        try:
+            with pg_state._connect(model) as conn:
+                run_post_model_actions(conn, model)
+        except ConnectionError as exc:
+            logger.warning(
+                "post-actions: connection failed for %s — %s",
+                model.target.full_name,
+                exc,
+            )
 
 
 def _print_state_banner(models: list[Model]) -> None:

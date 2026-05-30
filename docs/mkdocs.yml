@@ -60,7 +60,7 @@ nav:
   - Model:
       - Overview: MODEL.md
       - Target: TARGET.md
-      - Mutating targets: MUTATIONS.md
+      - Actions: ACTIONS.md
       - TargetSchema: TARGETSCHEMA.md
       - SourceTable: SOURCETABLE.md
       - SourceFile: SOURCEFILE.md

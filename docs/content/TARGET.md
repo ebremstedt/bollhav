@@ -72,6 +72,12 @@ DSN env var for the target connection.
 
 A derived `@property` — set `partition_on=True` on the column you want to partition by; only one column may carry it.
 
-## Computed: `mutations`
+## actions / default_actions
 
-Per-pipeline-run tracker that records which one-shot setup operations (CREATE SCHEMA / CREATE TABLE / DROP / TRUNCATE / CREATE INDEX / ADD UNIQUE) have already fired during the current run. After the first interval, the flags short-circuit every subsequent call so no redundant DDL runs and no empty BEGIN/COMMIT transactions are opened. See [Mutating targets](MUTATIONS.md).
+Two lists of `Action` objects that drive the target's lifecycle. `default_actions` holds framework-supplied operations (CREATE SCHEMA / CREATE TABLE / DROP / TRUNCATE / CREATE INDEX / ADD UNIQUE / staging setup). `actions` holds user-added operations (GRANT / ANALYZE / COMMENT / project-specific hooks). The runner walks `default_actions ++ actions` once per pipeline run, gated by `target._applied_model_actions` so subsequent intervals short-circuit. See [Actions](ACTIONS.md).
+
+## on_failure
+
+Type: `OnFailure` · Default: `FAIL_FAST`
+
+Per-target failure policy for `POST_MODEL` actions. `FAIL_FAST` re-raises and halts the pipeline POST sweep; `SKIP` logs a warning and continues to the next action. `PRE_MODEL` is always fail-fast — a half-failed setup cannot safely proceed to a write. See [Actions](ACTIONS.md).
