@@ -181,9 +181,13 @@ def append(
 
 def create_replace_view(conn: pyodbc.Connection, model: Model) -> None:
     """Create or alter a view using the query defined on model.source."""
-    if model.source is None or model.source.query is None:
+    from bollhav.model.source_table import SourceTable
+
+    if not isinstance(model.source, SourceTable) or model.source.query is None:
         raise ValueError(
-            f"model.source.query must be set for {model.target.write_mode.value}"
+            f"create_replace_view requires model.source to be a SourceTable "
+            f"with .query set, got {type(model.source).__name__} on "
+            f"{model.target.full_name!r}"
         )
     schema = model.target.schema.resolved
     view = model.target.name

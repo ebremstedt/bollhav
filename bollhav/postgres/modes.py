@@ -5,6 +5,7 @@ import polars as pl
 from typing import cast, LiteralString
 from datetime import datetime, timedelta
 from bollhav.model.model import Model
+from bollhav.postgres.columns import PostgresColumn
 from bollhav.postgres.schema import ensure_schema
 
 logger = logging.getLogger(__name__)
@@ -42,6 +43,12 @@ def recreate_partition(
 ) -> None:
     _assert_utc(since, "since")
     _assert_utc(until, "until")
+    partition_col = model.target.partitioned_by
+    if partition_col is None:
+        raise ValueError(
+            f"recreate_partition requires model.target to have a column with "
+            f"partition_on=True (got none on {model.target.full_name!r})"
+        )
     with conn.transaction():
         conn.execute(
             sql.SQL(
@@ -49,7 +56,7 @@ def recreate_partition(
             ).format(
                 schema=sql.Identifier(model.target.schema.resolved),
                 table=sql.Identifier(model.target.name),
-                col=sql.Identifier(model.target.partitioned_by),
+                col=sql.Identifier(partition_col),
             ),
             [since, until],
         )
@@ -77,12 +84,16 @@ def upsert_no_delete(conn: psycopg.Connection, model: Model, df: pl.DataFrame) -
         for col in model.target.columns
         if col.name not in unique_columns
     )
+    # Narrow at the list level so pyright knows `col` is PostgresColumn
+    # inside the generator expression (it doesn't narrow on `if isinstance`
+    # filters in genexps).
+    pg_cols = [c for c in model.target.columns if isinstance(c, PostgresColumn)]
     col_defs = sql.SQL(", ").join(
         sql.SQL("{name} {type}").format(
             name=sql.Identifier(col.name),
             type=sql.SQL(col.data_type.value),
         )
-        for col in model.target.columns
+        for col in pg_cols
     )
 
     with conn.transaction():
@@ -126,9 +137,13 @@ def create_replace_view(
     conn: psycopg.Connection,
     model: Model,
 ) -> None:
-    if model.source.query is None:
+    from bollhav.model.source_table import SourceTable
+
+    if not isinstance(model.source, SourceTable) or model.source.query is None:
         raise ValueError(
-            f"model.source.query must be set for {model.target.write_mode.value}"
+            f"create_replace_view requires model.source to be a SourceTable "
+            f"with .query set, got {type(model.source).__name__} on "
+            f"{model.target.full_name!r}"
         )
 
     with conn.transaction():

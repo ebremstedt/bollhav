@@ -43,6 +43,10 @@ def _resolve_cron_interval(
         if tick >= now:
             break
         prev, curr = curr, tick
+    # Loop invariant: cron is seeded `interval_size * 3` before now,
+    # so at least 2 ticks have been consumed before the break and both
+    # `prev` and `curr` are populated.
+    assert prev is not None and curr is not None
     return prev, curr
 
 
