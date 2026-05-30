@@ -183,9 +183,7 @@ def _run_staging_schema_created(conn: psycopg.Connection, model: "Model") -> Non
 def _run_staging_table_created(conn: psycopg.Connection, model: "Model") -> None:
     from bollhav.postgres.columns import PostgresColumn
 
-    logged = (
-        model.target.staging is not None and model.target.staging.logged
-    )
+    logged = model.target.staging is not None and model.target.staging.logged
     table_keyword = "TABLE" if logged else "UNLOGGED TABLE"
     col_defs = sql.SQL(",\n").join(
         sql.SQL(_col_ddl(c))
@@ -193,10 +191,7 @@ def _run_staging_table_created(conn: psycopg.Connection, model: "Model") -> None
         if isinstance(c, PostgresColumn)
     )
     conn.execute(
-        sql.SQL(
-            f"CREATE {table_keyword} IF NOT EXISTS "
-            "{}.{} (\n{}\n)"
-        ).format(
+        sql.SQL(f"CREATE {table_keyword} IF NOT EXISTS {{}}.{{}} (\n{{}}\n)").format(
             sql.Identifier(_staging_schema_name(model)),
             sql.Identifier(_staging_table_name(model)),
             col_defs,
@@ -241,10 +236,7 @@ def _staging_reused_cleanup_applies(target: "Target") -> bool:
 def _staging_table_created_applies(target: "Target") -> bool:
     from bollhav.model.staging import StagingMode
 
-    return (
-        target.staging is not None
-        and target.staging.mode is StagingMode.REUSED
-    )
+    return target.staging is not None and target.staging.mode is StagingMode.REUSED
 
 
 # ── default action set ──────────────────────────────────────────────
@@ -350,9 +342,7 @@ def run_pre_model_actions(conn: psycopg.Connection, model: "Model") -> None:
                 continue
             action.run(conn, model)
             target._applied_model_actions[action.name] = True
-            logger.debug(
-                "action: %s.%s done", target.full_name, action.name
-            )
+            logger.debug("action: %s.%s done", target.full_name, action.name)
 
 
 def run_post_model_actions(conn: psycopg.Connection, model: "Model") -> None:
@@ -385,9 +375,7 @@ def run_post_model_actions(conn: psycopg.Connection, model: "Model") -> None:
         try:
             action.run(conn, model)
             target._applied_model_actions[action.name] = True
-            logger.debug(
-                "action: %s.%s done", target.full_name, action.name
-            )
+            logger.debug("action: %s.%s done", target.full_name, action.name)
         except Exception:
             if target.on_failure is OnFailure.SKIP:
                 logger.warning(

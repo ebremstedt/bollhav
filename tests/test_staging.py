@@ -27,6 +27,7 @@ RUN_ID = UUID("00000000-0000-0000-0000-00000000beef")
 def _model(*, write_mode=None, staging_cfg=None):
     from bollhav.model.staging import Staging
     from bollhav.model.state import State
+
     # (removed) Mutations replaced by Actions system
     from bollhav.model.write_modes import WriteMode
     from bollhav.postgres.columns import PostgresColumn, PostgresType
