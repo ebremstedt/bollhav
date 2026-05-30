@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone, tzinfo
+from uuid import UUID
 
 from icron import croniter
 from bollhav.model.source_file import SourceFile
@@ -60,6 +61,18 @@ class Model:
         # the state-filtered (pending-only) interval set so the user's
         # loop sees just what's left to do.
         self._intervals_cached: list | None = None
+
+        # Runtime state stashed by the @state decorator + action runners.
+        # Declared up-front so type-checkers don't complain at the
+        # mutation sites scattered around state.py / actions.py.
+        self._state_run_id: UUID | None = None
+        self._state_applied_via_staging: tuple[datetime, datetime] | None = None
+        # Interval window stashed by `run_pre_interval_actions` /
+        # `run_post_interval_actions` so action callables can read
+        # the current interval without it being threaded through the
+        # `Action.run(conn, model)` signature.
+        self._interval_since: datetime | None = None
+        self._interval_until: datetime | None = None
 
         if state is not None and batching is None:
             raise ValueError(
@@ -200,9 +213,26 @@ class Model:
             if tick >= now:
                 break
             prev, curr = curr, tick
+        # Loop invariant: at least 2 ticks consumed before the break
+        # (the cron is seeded `interval_size * 3` before now), so both
+        # `prev` and `curr` are populated. Assert is for type-narrowing —
+        # if this ever fires it means the cron iterator returned a
+        # tick >= now on the first or second call.
+        assert prev is not None and curr is not None
         return TZInterval(prev, curr)
 
     def _apply_lookback(self, cron_expression: str, since: datetime) -> datetime:
+        if self.batching is None:
+            raise ValueError(
+                f"_apply_lookback called on model {self.target.full_name!r} "
+                f"with no batching configured — lookback is an interval feature"
+            )
+        if self.batching.interval.lookback is None:
+            raise ValueError(
+                f"_apply_lookback called on model {self.target.full_name!r} "
+                f"with batching.interval.lookback unset — set a non-negative "
+                f"int to enable lookback"
+            )
         it = croniter(cron_expression, since)
         tick1 = it.get_next(datetime)
         tick2 = it.get_next(datetime)

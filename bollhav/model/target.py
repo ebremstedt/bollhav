@@ -135,9 +135,12 @@ class Target:
         for action in self.effective_actions:
             if action.phase is not Phase.PRE_MODEL:
                 continue
-            if not action.should_run(self):
-                continue
-            if not self._applied_model_actions.get(action.name):
+            # Runner records every processed PRE_MODEL action in
+            # `_applied_model_actions` — True if it ran, False if
+            # `should_run` skipped it. Either way the key being
+            # present means "the runner already made the call about
+            # this action this pipeline run."
+            if action.name not in self._applied_model_actions:
                 return False
         return True
 

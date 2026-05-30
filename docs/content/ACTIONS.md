@@ -18,7 +18,15 @@ CREATE UNLOGGED TABLE <staging>        (when staging is set, REUSED mode)
 … plus POST_MODEL staging cleanup on REUSED mode
 ```
 
-These ten operations live in `bollhav.postgres.actions.default_actions()` — a plain list of `Action` objects. Each one is gated by a `should_run` predicate so it only fires when applicable to your target. Nothing magical: the list is open for inspection, extension, or replacement.
+Plus two **interval-level** actions that only fire when `state=State(...)` is set on the model:
+
+```
+PRE_INTERVAL  mark_running    state row pending → running       (when model.state is set)
+POST_INTERVAL mark_applied    state row → applied               (when state set and not already
+                                                                 flipped by the staging flush)
+```
+
+These twelve operations live in `bollhav.postgres.actions.default_actions()` — a plain list of `Action` objects. Each one is gated by a `should_run` predicate so it only fires when applicable to your model. Nothing magical: the list is open for inspection, extension, or replacement.
 
 ## Why "actions" instead of hardcoded DDL
 
@@ -47,12 +55,30 @@ The runner calls `should_run(target)` to gate, calls `run(conn, model)` to do th
 |---|---|---|
 | `PRE_MODEL` | Once per pipeline run, before user's loop | `CREATE TABLE`, `CREATE INDEX`, staging schema setup |
 | `POST_MODEL` | Once per pipeline run, after user's loop returns cleanly | `ANALYZE the_whole_table`, `GRANT`, drop staging |
-| `PRE_INTERVAL` | Per interval, before each `execute()` | (placeholder — future home for `@state`'s `mark_running`, lock acquire) |
-| `POST_INTERVAL` | Per interval, after each `execute()` returns | (placeholder — future home for `@state`'s `mark_applied`, per-interval metrics) |
+| `PRE_INTERVAL` | Per interval, before each `execute()` | `mark_running` (state row pending → running), per-interval metrics, lock acquire, user logging |
+| `POST_INTERVAL` | Per interval, after each `execute()` returns | `mark_applied` (state row → applied), per-interval cleanup, Prometheus increment, downstream notify |
 
-Model-level phases are gated by `target._applied_model_actions` and short-circuit on intervals 2..N via `target.setup_complete`. Interval phases (when implemented) will fire every interval; they don't use the model-level dict.
+Model-level phases are recorded in `target._applied_model_actions` and short-circuit on intervals 2..N via `target.setup_complete`. Interval phases fire every interval — they're **not** recorded in the model-level dict because they're meant to repeat. Their runners (`run_pre_interval_actions(conn, model, since, until)` and `run_post_interval_actions(conn, model, since, until)`) stash the interval window on the model as `_interval_since` / `_interval_until` so action callables can read it without it being threaded through the `Action.run(conn, model)` signature.
 
-The `PRE_INTERVAL` / `POST_INTERVAL` values exist on the `Phase` enum today but the runners (`run_pre_interval_actions` / `run_post_interval_actions`) aren't shipped yet. The naming pins the design: `@state`'s `mark_running` / `mark_applied` are naturally per-interval actions, so the long-term shape is "add these state-tracking actions to your model" instead of "wrap execute with `@state`."
+The `@state` decorator on `execute()` is what wraps the interval runners around the user's function today. State-enabled models get the `mark_running` and `mark_applied` actions automatically — they're in `default_actions()` with `should_run` gated on `model.state is not None`, so they only fire when state is opted in.
+
+```python
+# Reading the current interval inside a custom interval action:
+def emit_metric(conn, model):
+    duration = (model._interval_until - model._interval_since).total_seconds()
+    metrics.histogram("interval.duration", duration, tag=model.target.full_name)
+
+orders = Model(
+    target=Target(
+        name="orders",
+        ...,
+        actions=[
+            Action("emit_metric", Phase.POST_INTERVAL, emit_metric),
+        ],
+    ),
+    state=State(),
+)
+```
 
 ## Two lists on Target
 
@@ -97,9 +123,13 @@ default_actions()  # returns these, in this order:
 # ── POST_MODEL ──
 #   staging_table_truncated TRUNCATE staging table          (REUSED, after loop)
 #   staging_table_dropped   DROP TABLE staging              (REUSED, after loop)
+# ── PRE_INTERVAL ──
+#   mark_running            state row pending → running     (when model.state is set)
+# ── POST_INTERVAL ──
+#   mark_applied            state row → applied             (when state set + not flushed)
 ```
 
-Each one's `should_run` reads the relevant directive from Target so the action skips itself when not applicable. List position is execution order.
+Each one's `should_run` reads the relevant attribute from Model or Target so the action skips itself when not applicable. List position is execution order. The state actions only fire when `model.state is not None` — state-less models pay zero overhead for them.
 
 ## Adding your own actions
 
@@ -219,8 +249,8 @@ def comment_on_table(conn, model):
 
 ## What is NOT in the action system (yet)
 
-- **Per-interval state machinery** — `@state` decorator handles "is this interval already applied," "mark running," "mark applied." It's headed into the action system as PRE_INTERVAL / POST_INTERVAL actions but isn't there yet. Today, use `@state` as a decorator on `execute()`.
-- **The atomic flush in staged writes** — `INSERT INTO target SELECT * FROM staging` happens per-interval inside `flush_to_target`, not as an action. Per-interval data movement doesn't fit the one-shot pattern.
+- **Per-interval state lifecycle** — `mark_running` and `mark_applied` ARE actions now (PRE_INTERVAL / POST_INTERVAL). The `@state` decorator still owns the control flow around them (is-applied gate, lock acquire/release, upstream-satisfied check, exception path with `record_failure`), but the lifecycle calls themselves go through the runners.
+- **The atomic flush in staged writes** — `INSERT INTO target SELECT * FROM staging` happens per-interval inside `flush_to_target`, not as an action. Per-interval data movement doesn't fit the action pattern.
 - **Connection management** — runners accept an open connection; opening / closing / pooling is the caller's job.
 
 ## Limitations

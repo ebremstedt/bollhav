@@ -102,17 +102,21 @@ class Action:
     done")` lines, so keep it short and snake_case.
 
     `run(conn, model)` does the work. The model-level runners manage
-    the enclosing transaction; interval-level runners may not.
+    the enclosing transaction; interval-level runners may not. For
+    interval actions, the runner stashes `model._interval_since` and
+    `model._interval_until` before invoking so actions can read them.
 
-    `should_run(target)` gates whether this action applies to this
-    target at all. Use it for directive-conditional actions like
-    `should_run=lambda t: t.recreate_table`. Defaults to "always."
+    `should_run(model)` gates whether this action applies to the
+    current model. Use it for directive-conditional actions like
+    `should_run=lambda m: m.target.recreate_table` or feature-gated
+    ones like `should_run=lambda m: m.state is not None`. Defaults
+    to "always."
     """
 
     name: str
     phase: Phase
     run: Callable[["psycopg.Connection", "Model"], None]
-    should_run: Callable[["Target"], bool] = field(default=lambda t: True)
+    should_run: Callable[["Model"], bool] = field(default=lambda m: True)
 
 
 __all__ = ["Phase", "OnFailure", "Action"]

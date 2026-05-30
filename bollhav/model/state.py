@@ -186,12 +186,17 @@ def state(func: Callable) -> Callable:
                     )
                     return None
 
-            # Flip pending → running before invoking the user's execute.
-            # Visible state of "what's actively being processed right now"
-            # for ops dashboards. On success → applied; on exception →
-            # error. A row left as 'running' after a process crash is
-            # treated like 'pending' by the next DISCOVER-mode pre-fill.
-            _mark_running(model, run_id=run_id, since=since, until=until)
+            # PRE_INTERVAL actions — for state-enabled models this
+            # fires the `mark_running` action (pending → running),
+            # plus any user-added per-interval hooks (metrics, log,
+            # idempotency markers). The runner stashes since/until on
+            # the model so action callables can read them.
+            from bollhav.postgres.actions import (
+                run_pre_interval_actions,
+                run_post_interval_actions,
+            )
+
+            run_pre_interval_actions(lock_conn, model, since, until)
 
             try:
                 result = func(*args, **kwargs)
@@ -218,14 +223,20 @@ def state(func: Callable) -> Callable:
                     model._state_applied_via_staging = None
                 raise
 
-            # When `stage()` flushed staging → target in its own tx, it
-            # already flipped the state row atomically. Re-issuing
-            # mark_applied here would be a redundant UPDATE.
+            # POST_INTERVAL actions — for state-enabled models this
+            # fires `mark_applied` (gated by `should_run` to skip
+            # when the staging flush already flipped the row), plus
+            # any user-added per-interval hooks. Consume the staging
+            # marker first so `mark_applied`'s should_run can see it.
             staged = getattr(model, "_state_applied_via_staging", None)
             if staged == (since, until):
+                # Leave the marker in place across the POST_INTERVAL
+                # sweep — `_mark_applied_should_run` reads it to decide
+                # whether to skip — then clear after.
+                run_post_interval_actions(lock_conn, model, since, until)
                 model._state_applied_via_staging = None
             else:
-                _mark_applied(model, run_id=run_id, since=since, until=until)
+                run_post_interval_actions(lock_conn, model, since, until)
             return result
         finally:
             try:
@@ -267,14 +278,6 @@ def _backend(model: "Model"):
 
 def _is_applied(model: "Model", *, since, until) -> bool:
     return _backend(model).is_applied(model=model, since=since, until=until)
-
-
-def _mark_running(model: "Model", *, run_id: UUID, since, until) -> None:
-    _backend(model).mark_running(model=model, run_id=run_id, since=since, until=until)
-
-
-def _mark_applied(model: "Model", *, run_id: UUID, since, until) -> None:
-    _backend(model).mark_applied(model=model, run_id=run_id, since=since, until=until)
 
 
 def _record_failure(

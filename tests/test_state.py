@@ -154,10 +154,28 @@ class TestModelStateField:
 
 
 def _state_enabled_model():
+    from bollhav.postgres.actions import default_actions
+
     model = MagicMock()
     model.state = State()
     model.batching = MagicMock()
     model.target.full_name = "public.orders"
+    # Populate the action list so the interval runners can iterate
+    # and find `mark_running` / `mark_applied`. The MagicMock target
+    # doesn't compute the `effective_actions` property dynamically,
+    # so we pin it explicitly. `_applied_model_actions` is the
+    # per-pipeline-run record dict.
+    model.target.default_actions = default_actions()
+    model.target.actions = []
+    model.target.effective_actions = list(model.target.default_actions)
+    model.target._applied_model_actions = {}
+    # Directive flags pinned so any PRE_MODEL action's `should_run`
+    # gate doesn't accidentally fire (MagicMock attrs are truthy).
+    model.target.recreate_table = False
+    model.target.truncate_table = False
+    model.target.partitioned_by = None
+    model.target.unique_columns = []
+    model.target.staging = None
     model._state_run_id = RUN_ID
     model._state_applied_via_staging = None
     return model

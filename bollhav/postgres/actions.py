@@ -34,6 +34,8 @@ from psycopg import sql
 from bollhav.model.actions import Action, OnFailure, Phase
 
 if TYPE_CHECKING:
+    from datetime import datetime
+
     from bollhav.model.database import DatabaseColumn
     from bollhav.model.model import Model
     from bollhav.model.target import Target
@@ -220,10 +222,80 @@ def _run_staging_table_dropped(conn: psycopg.Connection, model: "Model") -> None
     )
 
 
+# ── INTERVAL action implementations (state machinery) ─────────────
+
+
+def _interval_run_ctx(model: "Model"):
+    """Resolve the (run_id, since, until) triple that an interval-level
+    state action needs. Centralises the not-None narrowing so each
+    action body doesn't redo the assertions.
+
+    Raises if any of the three are missing — these are stashed by
+    the interval runner / pipeline bootstrap, so missing means the
+    runner was bypassed or the model didn't go through `@load_models`."""
+    from bollhav.model.state import _run_id_for
+
+    run_id = _run_id_for(model)  # mints one lazily if unset
+    since = model._interval_since
+    until = model._interval_until
+    if since is None or until is None:
+        raise ValueError(
+            f"interval action on {model.target.full_name!r} needs "
+            f"`model._interval_since` and `_interval_until` to be set — "
+            f"normally `run_pre_interval_actions` / "
+            f"`run_post_interval_actions` stash them before invoking."
+        )
+    return run_id, since, until
+
+
+def _run_mark_running(_conn: psycopg.Connection, model: "Model") -> None:
+    """State lifecycle: flip `pending` → `running` for the current
+    interval before the user's execute.
+
+    Reads the interval window from `model._interval_since` /
+    `_interval_until` which the interval runner stashes before
+    invoking. The `_conn` parameter is part of the Action protocol
+    but unused here — `pg_state.mark_running` opens its own
+    connection because the state UPDATE may need to live in a
+    different transaction than the user's write."""
+    del _conn  # Action-protocol parameter; mark_running opens its own conn.
+    from bollhav.postgres import state as pg_state
+
+    run_id, since, until = _interval_run_ctx(model)
+    pg_state.mark_running(model=model, run_id=run_id, since=since, until=until)
+
+
+def _run_mark_applied(_conn: psycopg.Connection, model: "Model") -> None:
+    """State lifecycle: flip → `applied` after a successful execute.
+
+    Skipped when the staging flush has already set the state row to
+    `applied` atomically with the data move (the `@state` decorator
+    consumes the `_state_applied_via_staging` marker before calling
+    POST_INTERVAL, so this action only fires for the non-staged path).
+    `_conn` unused — `pg_state.mark_applied` opens its own conn."""
+    del _conn  # Action-protocol parameter; mark_applied opens its own conn.
+    from bollhav.postgres import state as pg_state
+
+    run_id, since, until = _interval_run_ctx(model)
+    pg_state.mark_applied(model=model, run_id=run_id, since=since, until=until)
+
+
+def _mark_applied_should_run(model: "Model") -> bool:
+    """Skip when staging already flipped the state row inside the
+    flush transaction."""
+    if model.state is None:
+        return False
+    return model._state_applied_via_staging != (
+        model._interval_since,
+        model._interval_until,
+    )
+
+
 # ── should_run gates ────────────────────────────────────────────────
 
 
-def _staging_reused_cleanup_applies(target: "Target") -> bool:
+def _staging_reused_cleanup_applies(model: "Model") -> bool:
+    target = model.target
     from bollhav.model.staging import StagingMode
 
     return (
@@ -233,7 +305,8 @@ def _staging_reused_cleanup_applies(target: "Target") -> bool:
     )
 
 
-def _staging_table_created_applies(target: "Target") -> bool:
+def _staging_table_created_applies(model: "Model") -> bool:
+    target = model.target
     from bollhav.model.staging import StagingMode
 
     return target.staging is not None and target.staging.mode is StagingMode.REUSED
@@ -256,32 +329,32 @@ def default_actions() -> list[Action]:
             "recreated",
             Phase.PRE_MODEL,
             _run_recreated,
-            should_run=lambda t: t.recreate_table,
+            should_run=lambda m: m.target.recreate_table,
         ),
         Action("table_created", Phase.PRE_MODEL, _run_table_created),
         Action(
             "truncated",
             Phase.PRE_MODEL,
             _run_truncated,
-            should_run=lambda t: t.truncate_table,
+            should_run=lambda m: m.target.truncate_table,
         ),
         Action(
             "indexes_created",
             Phase.PRE_MODEL,
             _run_indexes_created,
-            should_run=lambda t: t.partitioned_by is not None,
+            should_run=lambda m: m.target.partitioned_by is not None,
         ),
         Action(
             "uniques_added",
             Phase.PRE_MODEL,
             _run_uniques_added,
-            should_run=lambda t: bool(t.unique_columns),
+            should_run=lambda m: bool(m.target.unique_columns),
         ),
         Action(
             "staging_schema_created",
             Phase.PRE_MODEL,
             _run_staging_schema_created,
-            should_run=lambda t: t.staging is not None,
+            should_run=lambda m: m.target.staging is not None,
         ),
         Action(
             "staging_table_created",
@@ -301,6 +374,19 @@ def default_actions() -> list[Action]:
             Phase.POST_MODEL,
             _run_staging_table_dropped,
             should_run=_staging_reused_cleanup_applies,
+        ),
+        # ── INTERVAL: state machinery (only fires when state is set) ──
+        Action(
+            "mark_running",
+            Phase.PRE_INTERVAL,
+            _run_mark_running,
+            should_run=lambda m: m.state is not None,
+        ),
+        Action(
+            "mark_applied",
+            Phase.POST_INTERVAL,
+            _run_mark_applied,
+            should_run=_mark_applied_should_run,
         ),
     ]
 
@@ -336,9 +422,13 @@ def run_pre_model_actions(conn: psycopg.Connection, model: "Model") -> None:
         for action in target.effective_actions:
             if action.phase is not Phase.PRE_MODEL:
                 continue
-            if target._applied_model_actions.get(action.name):
+            if action.name in target._applied_model_actions:
                 continue
-            if not action.should_run(target):
+            if not action.should_run(model):
+                # Record as not-applicable so `setup_complete` can
+                # see that the runner already made its call about
+                # this action.
+                target._applied_model_actions[action.name] = False
                 continue
             action.run(conn, model)
             target._applied_model_actions[action.name] = True
@@ -368,9 +458,10 @@ def run_post_model_actions(conn: psycopg.Connection, model: "Model") -> None:
     for action in target.effective_actions:
         if action.phase is not Phase.POST_MODEL:
             continue
-        if target._applied_model_actions.get(action.name):
+        if action.name in target._applied_model_actions:
             continue
-        if not action.should_run(target):
+        if not action.should_run(model):
+            target._applied_model_actions[action.name] = False
             continue
         try:
             action.run(conn, model)
@@ -393,8 +484,100 @@ def run_post_model_actions(conn: psycopg.Connection, model: "Model") -> None:
             raise
 
 
+def run_pre_interval_actions(
+    conn: psycopg.Connection,
+    model: "Model",
+    since: "datetime",
+    until: "datetime",
+) -> None:
+    """Run every applicable PRE_INTERVAL action, in declared list
+    order, before each interval's execute.
+
+    Interval actions are NOT recorded in `_applied_model_actions`
+    (they fire every interval, not pipeline-once), so this runner
+    re-evaluates `should_run` every time. The interval's window is
+    stashed on the model as `_interval_since` / `_interval_until`
+    so action callables can read it.
+
+    PRE_INTERVAL is fail-fast — an exception propagates out so the
+    `@state` decorator (or whoever called the runner) can decide
+    whether to abort the interval."""
+    target = model.target
+    _resolve_actions(target)
+    model._interval_since = since
+    model._interval_until = until
+    for action in target.effective_actions:
+        if action.phase is not Phase.PRE_INTERVAL:
+            continue
+        if not action.should_run(model):
+            continue
+        action.run(conn, model)
+        logger.debug(
+            "action: %s.%s done (interval %s..%s)",
+            target.full_name,
+            action.name,
+            since,
+            until,
+        )
+
+
+def run_post_interval_actions(
+    conn: psycopg.Connection,
+    model: "Model",
+    since: "datetime",
+    until: "datetime",
+) -> None:
+    """Run every applicable POST_INTERVAL action after a successful
+    interval execute. Same conventions as PRE_INTERVAL: not recorded
+    in `_applied_model_actions`, `should_run` re-evaluated each
+    interval, `model._interval_since` / `_interval_until` available
+    on the model.
+
+    POST_INTERVAL fires on success only — the caller (`@state` etc.)
+    is responsible for handling the exception path and routing to a
+    separate error action chain if needed.
+
+    Failure policy uses `Target.on_failure` (FAIL_FAST default, SKIP
+    opt-in) the same way `run_post_model_actions` does."""
+    target = model.target
+    _resolve_actions(target)
+    model._interval_since = since
+    model._interval_until = until
+    for action in target.effective_actions:
+        if action.phase is not Phase.POST_INTERVAL:
+            continue
+        if not action.should_run(model):
+            continue
+        try:
+            action.run(conn, model)
+            logger.debug(
+                "action: %s.%s done (interval %s..%s)",
+                target.full_name,
+                action.name,
+                since,
+                until,
+            )
+        except Exception:
+            if target.on_failure is OnFailure.SKIP:
+                logger.warning(
+                    "action: %s.%s failed (on_failure=SKIP, continuing)",
+                    target.full_name,
+                    action.name,
+                    exc_info=True,
+                )
+                continue
+            logger.exception(
+                "action: %s.%s failed — halting interval POST sweep",
+                target.full_name,
+                action.name,
+            )
+            raise
+
+
 __all__ = [
     "default_actions",
     "run_pre_model_actions",
     "run_post_model_actions",
+    "run_pre_interval_actions",
+    "run_post_interval_actions",
 ]

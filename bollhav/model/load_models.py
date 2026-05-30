@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, tzinfo
 from functools import wraps
-from typing import Callable
+from typing import Callable, cast, overload
 from zoneinfo import ZoneInfo
 
 from roskarl import (
@@ -50,11 +50,21 @@ class _RuntimeConfig:
     table_suffix: str = ""
 
 
+@overload
+def load_models(_func: Callable[..., None]) -> Callable[[], None]: ...
+
+
+@overload
+def load_models(
+    _func: None = None, *, folder: str = ...
+) -> Callable[[Callable[..., None]], Callable[[], None]]: ...
+
+
 def load_models(
     _func: Callable[..., None] | None = None,
     *,
     folder: str = "src/models",
-) -> Callable[..., None]:
+) -> Callable[[], None] | Callable[[Callable[..., None]], Callable[[], None]]:
     """Decorator that reads runtime overrides from env vars, matches models
     in `folder` by `TAGS`, bakes the overrides in, and calls the wrapped
     function with `(models, debug)`.
@@ -189,8 +199,12 @@ def load_models(
 
 
 def _read_env() -> _RuntimeConfig:
-    latest = env_var_bool(name="LATEST_ENABLED", default=False)
-    backfill_enabled = env_var_bool(name="BACKFILL_ENABLED", default=not latest)
+    # env_var_bool is typed `bool | None` even when `default` is given.
+    # `default=...` guarantees a non-None result at runtime, so cast.
+    latest = cast(bool, env_var_bool(name="LATEST_ENABLED", default=False))
+    backfill_enabled = cast(
+        bool, env_var_bool(name="BACKFILL_ENABLED", default=not latest)
+    )
     if latest and backfill_enabled:
         raise ValueError("LATEST_ENABLED and BACKFILL_ENABLED cannot both be true")
 
@@ -202,14 +216,14 @@ def _read_env() -> _RuntimeConfig:
         dt = env_var_iso8601_datetime(name=name)
         return _apply_tz(dt, tz_override) if tz_override else dt
 
-    use_schema_suffix = env_var_bool(name="USE_SCHEMA_SUFFIX", default=True)
-    raw_suffix = env_var(name="SCHEMA_SUFFIX", default="")
+    use_schema_suffix = cast(bool, env_var_bool(name="USE_SCHEMA_SUFFIX", default=True))
+    raw_suffix = cast(str, env_var(name="SCHEMA_SUFFIX", default=""))
     if use_schema_suffix and raw_suffix == "":
         raise ValueError("USE_SCHEMA_SUFFIX=True requires non-empty SCHEMA_SUFFIX")
     schema_suffix = raw_suffix if use_schema_suffix else ""
 
-    use_table_suffix = env_var_bool(name="USE_TABLE_SUFFIX", default=False)
-    raw_table_suffix = env_var(name="TABLE_SUFFIX", default="")
+    use_table_suffix = cast(bool, env_var_bool(name="USE_TABLE_SUFFIX", default=False))
+    raw_table_suffix = cast(str, env_var(name="TABLE_SUFFIX", default=""))
     if use_table_suffix and raw_table_suffix == "":
         raise ValueError("USE_TABLE_SUFFIX=True requires non-empty TABLE_SUFFIX")
     table_suffix = raw_table_suffix if use_table_suffix else ""
@@ -230,7 +244,7 @@ def _read_env() -> _RuntimeConfig:
         )
 
     return _RuntimeConfig(
-        tags=env_var(name="TAGS", required=True),
+        tags=cast(str, env_var(name="TAGS", required=True)),
         schema_suffix=schema_suffix,
         table_suffix=table_suffix,
         upstream_mode=_resolve_upstream_mode(),
@@ -245,19 +259,19 @@ def _read_env() -> _RuntimeConfig:
         lookback_override=lookback_override,
         tz_override=tz_override,
         dry_run=_resolve_dry_run(),
-        dry_run_extra=env_var_bool(name="DRY_RUN_EXTRA", default=False),
+        dry_run_extra=cast(bool, env_var_bool(name="DRY_RUN_EXTRA", default=False)),
         state_mode=_resolve_state_mode(),
-        state_disabled=env_var_bool(name="STATE_DISABLED", default=False),
-        peek=env_var_bool(name="PEEK", default=False),
-        debug=env_var_bool(name="DEBUG", default=False),
+        state_disabled=cast(bool, env_var_bool(name="STATE_DISABLED", default=False)),
+        peek=cast(bool, env_var_bool(name="PEEK", default=False)),
+        debug=cast(bool, env_var_bool(name="DEBUG", default=False)),
     )
 
 
 def _resolve_dry_run() -> bool:
     """DRY_RUN_EXTRA implies DRY_RUN — setting just the verbose flag
     should still short-circuit the wrapper."""
-    return env_var_bool(name="DRY_RUN", default=False) or env_var_bool(
-        name="DRY_RUN_EXTRA", default=False
+    return cast(bool, env_var_bool(name="DRY_RUN", default=False)) or cast(
+        bool, env_var_bool(name="DRY_RUN_EXTRA", default=False)
     )
 
 
