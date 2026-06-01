@@ -226,8 +226,9 @@ class TestStageEndToEnd:
         # CREATE staging schema and table fired
         assert any("CREATE SCHEMA" in q for q in executed)
         assert any("CREATE TABLE" in q and "orders_staging_" in q for q in executed)
-        # REUSED is the default → TRUNCATE before each batch
-        assert any("TRUNCATE TABLE" in q for q in executed)
+        # Fresh table per interval → no TRUNCATE; the table is dropped on flush
+        assert not any("TRUNCATE TABLE" in q for q in executed)
+        assert any("DROP TABLE" in q and "orders_staging_" in q for q in executed)
         # Two bulk inserts via fast_executemany — one per chunk
         assert conn.cursor.return_value.executemany.call_count == 2
         # Final flush: INSERT INTO target SELECT FROM staging
@@ -252,14 +253,13 @@ class TestStageEndToEnd:
 
         assert m._state_applied_via_staging == (SINCE, UNTIL)
 
-    def test_interval_mode_drops_staging_in_flush(self) -> None:
+    def test_drops_staging_in_flush(self) -> None:
         from unittest.mock import patch
 
-        from bollhav.model.staging import Staging, StagingMode
         from bollhav.mssql.write_modes import write
 
         conn = _mock_conn()
-        m = _model(staging_cfg=Staging(mode=StagingMode.INTERVAL))
+        m = _model()
         with patch("bollhav.mssql.write_modes.ensure_schema_table_and_indexes"):
             write(
                 conn,
@@ -272,19 +272,17 @@ class TestStageEndToEnd:
         executed = [
             str(c.args[0]) for c in conn.cursor.return_value.execute.call_args_list
         ]
-        # INTERVAL mode: staging table dropped in the flush
+        # Fresh table per interval: staging table dropped in the flush
         assert any("DROP TABLE" in q and "orders_staging_" in q for q in executed)
 
-    def test_interval_mode_keep_after_apply_does_not_drop(self) -> None:
+    def test_keep_after_apply_does_not_drop(self) -> None:
         from unittest.mock import patch
 
-        from bollhav.model.staging import Staging, StagingMode
+        from bollhav.model.staging import Staging
         from bollhav.mssql.write_modes import write
 
         conn = _mock_conn()
-        m = _model(
-            staging_cfg=Staging(mode=StagingMode.INTERVAL, keep_after_apply=True)
-        )
+        m = _model(staging_cfg=Staging(keep_after_apply=True))
         with patch("bollhav.mssql.write_modes.ensure_schema_table_and_indexes"):
             write(
                 conn,

@@ -12,7 +12,7 @@ Real-DB exercise lives in the runnable example."""
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 from uuid import UUID
 
 import polars as pl
@@ -133,7 +133,6 @@ class TestPreconditions:
 
         run_pre_model_actions(conn, model)
         assert model.target._applied_model_actions.get("staging_schema_created") is True
-        assert model.target._applied_model_actions.get("staging_table_created") is True
         first_call_count = conn.execute.call_count
         assert first_call_count >= 1
 
@@ -147,9 +146,8 @@ class TestPreconditions:
         memory bounding + atomic per-interval finalization remain
         useful even without resumability. The flush still issues
         the atomic INSERT, but the state UPDATE doesn't run (no
-        state row to flip). In the default REUSED mode the staging
-        table also stays — the next interval's TRUNCATE will clear
-        it; orphan-GC handles it across runs."""
+        state row to flip). The staging table is still dropped on
+        flush — staging self-cleans regardless of state."""
         from bollhav.postgres.staging import stage
 
         model = _model()
@@ -166,15 +164,14 @@ class TestPreconditions:
             "without state there is no state row to flip — UPDATE must not run"
         )
 
-    def test_interval_mode_without_state_drops_staging(self) -> None:
-        """In `StagingMode.INTERVAL`, even without state, flush
-        still drops the staging table — that's the mode's lifecycle.
-        Confirms the no-state branch and the per-interval drop branch
-        compose correctly."""
-        from bollhav.model.staging import Staging, StagingMode
+    def test_without_state_still_drops_staging(self) -> None:
+        """Even without state, flush still drops the staging table —
+        staging self-cleans. Confirms the no-state branch and the
+        per-interval drop compose correctly."""
+        from bollhav.model.staging import Staging
         from bollhav.postgres.staging import stage
 
-        model = _model(staging_cfg=Staging(mode=StagingMode.INTERVAL))
+        model = _model(staging_cfg=Staging())
         model.state = None
         conn = _mock_conn()
         with stage(conn, model, since=SINCE, until=UNTIL):
@@ -255,33 +252,13 @@ class TestHappyPath:
         assert s.rows_written == 0
         assert conn.cursor.return_value.copy.call_count == 0
 
-    def test_flush_reused_mode_runs_two_statements(self) -> None:
-        """Default `StagingMode.REUSED` flush issues INSERT and
-        UPDATE state — no DROP (staging stays for next interval)."""
-        from bollhav.postgres.staging import stage
-
-        conn = _mock_conn()
-        with stage(conn, _model(), since=SINCE, until=UNTIL) as s:
-            s.write(pl.DataFrame({"id": [1], "amount": [1.0]}))
-
-        executed = [str(call.args[0]) for call in conn.execute.call_args_list]
-        insert_select = [q for q in executed if "INSERT INTO" in q and "SELECT" in q]
-        drop = [q for q in executed if "DROP TABLE" in q and "staging" in q]
-        update_state = [
-            q for q in executed if "UPDATE" in q and "status = 'applied'" in q
-        ]
-        assert len(insert_select) == 1
-        assert len(drop) == 0
-        assert len(update_state) == 1
-
-    def test_flush_interval_mode_runs_three_statements(self) -> None:
-        """`StagingMode.INTERVAL` flush issues INSERT, DROP, and
+    def test_flush_runs_three_statements(self) -> None:
+        """Flush issues INSERT, DROP (fresh table per interval), and
         UPDATE state — each interval is self-contained."""
-        from bollhav.model.staging import Staging, StagingMode
         from bollhav.postgres.staging import stage
 
         conn = _mock_conn()
-        model = _model(staging_cfg=Staging(mode=StagingMode.INTERVAL))
+        model = _model()
         with stage(conn, model, since=SINCE, until=UNTIL) as s:
             s.write(pl.DataFrame({"id": [1], "amount": [1.0]}))
 
@@ -353,10 +330,7 @@ class TestGc:
         conn = _mock_conn()
         conn.execute.return_value.fetchall.return_value = rows
 
-        with patch("bollhav.postgres.state._connect") as connect:
-            connect.return_value.__enter__ = MagicMock(return_value=conn)
-            connect.return_value.__exit__ = MagicMock(return_value=None)
-            gc_orphan_staging_tables(model, keep_run_id=RUN_ID)
+        gc_orphan_staging_tables(conn, model, keep_run_id=RUN_ID)
 
         dropped = [
             str(call.args[0])
@@ -372,10 +346,7 @@ class TestGc:
         model = _model(staging_cfg=Staging(keep_after_apply=True))
         conn = _mock_conn()
 
-        with patch("bollhav.postgres.state._connect") as connect:
-            connect.return_value.__enter__ = MagicMock(return_value=conn)
-            connect.return_value.__exit__ = MagicMock(return_value=None)
-            gc_orphan_staging_tables(model, keep_run_id=RUN_ID)
+        gc_orphan_staging_tables(conn, model, keep_run_id=RUN_ID)
 
         # Never even queried pg_tables — no GC at all.
         conn.execute.assert_not_called()
@@ -471,15 +442,14 @@ class TestLoggedField:
 
 
 class TestKeepAfterFlush:
-    """`keep_after_apply` only applies to `StagingMode.INTERVAL`
-    — REUSED mode always keeps the table for the next interval."""
+    """Staging makes a fresh table per interval and drops it on flush;
+    `keep_after_apply` skips that drop."""
 
-    def test_interval_default_drops_staging_on_flush(self) -> None:
-        from bollhav.model.staging import Staging, StagingMode
+    def test_default_drops_staging_on_flush(self) -> None:
         from bollhav.postgres.staging import stage
 
         conn = _mock_conn()
-        model = _model(staging_cfg=Staging(mode=StagingMode.INTERVAL))
+        model = _model()
         with stage(conn, model, since=SINCE, until=UNTIL) as s:
             s.write(pl.DataFrame({"id": [1], "amount": [1.0]}))
 
@@ -487,13 +457,11 @@ class TestKeepAfterFlush:
         drops = [q for q in executed if "DROP TABLE" in q]
         assert len(drops) == 1  # the staging table
 
-    def test_interval_keep_after_apply_skips_drop(self) -> None:
-        from bollhav.model.staging import Staging, StagingMode
+    def test_keep_after_apply_skips_drop(self) -> None:
+        from bollhav.model.staging import Staging
         from bollhav.postgres.staging import stage
 
-        model = _model(
-            staging_cfg=Staging(mode=StagingMode.INTERVAL, keep_after_apply=True)
-        )
+        model = _model(staging_cfg=Staging(keep_after_apply=True))
         conn = _mock_conn()
         with stage(conn, model, since=SINCE, until=UNTIL) as s:
             s.write(pl.DataFrame({"id": [1], "amount": [1.0]}))
@@ -504,11 +472,10 @@ class TestKeepAfterFlush:
         # state row still gets flipped — that's the atomicity story
         assert any("status = 'applied'" in q for q in executed)
 
-    def test_reused_mode_lifecycle_across_two_intervals(self) -> None:
-        """`StagingMode.REUSED` (default) issues `CREATE TABLE`
-        exactly once for the pipeline run, then `TRUNCATE` before
-        each subsequent interval to clear the prior interval's
-        rows. No DROP between intervals."""
+    def test_lifecycle_across_two_intervals(self) -> None:
+        """Each interval CREATEs a fresh staging table and DROPs it on
+        flush — so across two intervals there are two staging CREATEs
+        and two DROPs, and no TRUNCATE."""
         from datetime import timedelta
 
         from bollhav.postgres.staging import stage
@@ -521,36 +488,15 @@ class TestKeepAfterFlush:
             s.write(pl.DataFrame({"id": [2], "amount": [2.0]}))
 
         executed = [str(call.args[0]) for call in conn.execute.call_args_list]
-        # Filter for staging CREATEs only — `run_pre_model_actions` also
-        # fires `CREATE TABLE` for the target on the first interval.
+        # `UNLOGGED TABLE` only appears for the staging CREATE (the target
+        # CREATE on interval 1 is a plain TABLE).
         creates = [q for q in executed if "UNLOGGED TABLE" in q]
         truncates = [q for q in executed if "TRUNCATE TABLE" in q]
         drops = [q for q in executed if "DROP TABLE" in q]
-        # Exactly one staging-table CREATE across the two intervals.
-        assert len(creates) == 1
-        # TRUNCATE fires at the start of EVERY interval — including
-        # the first (where the table was just CREATEd empty and the
-        # TRUNCATE is a no-op). Keeping the logic simple here is
-        # worth the trivial cost on UNLOGGED tables.
-        assert len(truncates) == 2
-        # No DROPs — staging stays for the next pipeline run's GC.
-        assert len(drops) == 0
-        assert model.target._applied_model_actions.get("staging_table_created") is True
+        assert len(creates) == 2  # fresh staging table each interval
+        assert len(truncates) == 0  # no reuse → no truncate
+        assert len(drops) == 2  # dropped on each flush
         assert model.target._applied_model_actions.get("staging_schema_created") is True
-
-    def test_reused_mode_never_drops_on_flush(self) -> None:
-        """The default mode keeps the staging table after every
-        flush — the next interval's TRUNCATE clears it."""
-        from bollhav.postgres.staging import stage
-
-        conn = _mock_conn()
-        with stage(conn, _model(), since=SINCE, until=UNTIL) as s:
-            s.write(pl.DataFrame({"id": [1], "amount": [1.0]}))
-
-        executed = [str(call.args[0]) for call in conn.execute.call_args_list]
-        drops = [q for q in executed if "DROP TABLE" in q]
-        assert drops == []
-        assert any("status = 'applied'" in q for q in executed)
 
 
 # ── write_mode combinations ──────────────────────────────────────────

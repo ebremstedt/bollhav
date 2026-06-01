@@ -22,12 +22,9 @@ Inside `stage(conn, model, since=..., until=...) as s:`:
 
 ```mermaid
 flowchart TD
-    A[stage context enter] --> B{first interval<br>this run?}
-    B -- yes --> C[run PRE actions:<br>schema, table, staging schema, staging table]
-    B -- no --> D[skip PRE - already applied this run]
-    C --> E[TRUNCATE staging<br>REUSED mode only]
-    D --> E
-    E --> F[s.write chunk - dispatches on<br>staging.write_mode]
+    A[stage context enter] --> B[run schema-level PRE actions:<br>target schema/table, staging schema<br>one-shot, idempotent]
+    B --> C[CREATE a fresh staging table<br>for this interval]
+    C --> F[s.write chunk - dispatches on<br>staging.write_mode]
     F --> G{more chunks?}
     G -- yes --> F
     G -- no --> H[apply_atomically_to_target<br>in a single transaction]
@@ -35,16 +32,17 @@ flowchart TD
     I -- APPEND --> J[INSERT INTO target<br>SELECT FROM staging]
     I -- UPSERT_NO_DELETE --> K[INSERT ... ON CONFLICT<br>DO UPDATE - Postgres<br>or MERGE - MSSQL]
     I -- RECREATE_PARTITION --> L[DELETE target window<br>+ INSERT FROM staging]
-    J --> M{state set?}
-    K --> M
-    L --> M
+    J --> D[DROP staging table<br>unless keep_after_apply]
+    K --> D
+    L --> D
+    D --> M{state set?}
     M -- yes --> N[UPDATE state row<br>SET status = 'applied']
     M -- no --> O[skip]
-    N --> P[COMMIT - target rows + state flip<br>atomically visible]
+    N --> P[COMMIT - target rows + drop + state flip<br>atomically visible]
     O --> P
 ```
 
-The dotted "first interval this run?" guard is what makes the PRE actions one-shot — subsequent intervals short-circuit via `target._applied_model_actions` and don't re-issue the CREATE statements.
+The staging table is **created fresh each interval and dropped in that interval's apply transaction**, so staging always self-cleans on the write connection. The schema-level PRE actions (target/staging schema) are one-shot — subsequent intervals short-circuit via `target._applied_model_actions` and don't re-issue those CREATEs.
 
 ## Per-run flow
 
@@ -58,12 +56,11 @@ flowchart TD
     C -- no --> E[no filtering: user loop runs<br>every contract interval every time]
     D --> F[user loop iterates model.intervals]
     E --> F
-    F --> G[per interval: see per-interval flow]
+    F --> G[per interval: see per-interval flow<br>each interval drops its own staging table]
     G --> H{more intervals?}
     H -- yes --> G
-    H -- no --> I[run POST actions]
-    I --> J[staging_table_dropped<br>REUSED + !keep_after_apply only]
-    J --> K[done]
+    H -- no --> I[run POST actions<br>user-defined, if any]
+    I --> K[done]
 ```
 
 Without state, the bootstrap still mints a `run_id` (the staging table name uses it) and still GCs orphans — staging-only models benefit from cleanup just like state-tracked ones.
@@ -117,20 +114,13 @@ The two write_modes compose orthogonally — four interesting cells:
 
 See [examples/staging_append/](../examples/staging_append/) and [examples/staging_upsert/](../examples/staging_upsert/) for runnable demos.
 
-## `StagingMode` — table lifecycle across intervals
+## Table lifecycle across intervals
 
-Independent of write_mode; configures whether the staging table persists for the whole pipeline run or gets created fresh per interval.
+Each interval gets a **fresh staging table**, created on entry to `stage()` and `DROP`ped inside that interval's apply transaction (unless `keep_after_apply=True`). On a 365-interval backfill that's `1 × CREATE SCHEMA + 365 × CREATE + 365 × DROP`. Because the drop rides the apply transaction, staging self-cleans on the write connection — no end-of-run cleanup pass and no separate DSN required.
 
-| Mode | DDL per interval | Total DDL on a 365-interval backfill | Use it when |
-|---|---|---|---|
-| `REUSED` *(default)* | `TRUNCATE TABLE` (only from interval 2 onward) | 1 × `CREATE SCHEMA` + 1 × `CREATE TABLE` + 364 × `TRUNCATE` + 1 × `DROP` at POST | almost always — minimal catalog churn |
-| `INTERVAL` | `CREATE TABLE` + `DROP TABLE` (in apply) | 1 × `CREATE SCHEMA` + 365 × `CREATE` + 365 × `DROP` | you want a forensic snapshot of the crashed-interval staging table on failure |
+The staging-table CREATE is *not* a one-shot PRE action (it's genuinely new each interval); only the schema-level setup (`staging_schema_created`) is recorded in `target._applied_model_actions` and short-circuited on later intervals. See [Actions](ACTIONS.md).
 
-`REUSED` records two PRE_MODEL actions in `target._applied_model_actions` — `staging_schema_created` and `staging_table_created` — so subsequent intervals short-circuit before issuing the `CREATE`s. See [Actions](ACTIONS.md).
-
-`INTERVAL` doesn't flip `staging_table_created` (the table is genuinely new each interval, so the "did this DDL fire?" flag has nothing to gate).
-
-Both modes share the same table-name shape (`<prefix><run_id_short>`), so parallel workers on the same model don't collide regardless of mode.
+The table name is `<prefix><run_id_short>`, so parallel workers on different runs of the same model don't collide.
 
 ## Staging without state
 
@@ -152,19 +142,18 @@ Target(
 
 ## Orphan staging tables
 
-A crash mid-stream leaves the per-pipeline-run staging table behind. The next pipeline's bootstrap **auto-invokes `gc_orphan_staging_tables(model)`** for every staging model, dropping any staging table matching the prefix from a prior run. Logs at `debug` per drop, `warning` on connection failure.
+A crash *mid-interval* (before the apply) leaves that interval's staging table behind. For models bollhav manages (a `dsn_env_var` is set), the next pipeline's bootstrap **auto-invokes `gc_orphan_staging_tables(conn, model)`**, dropping any staging table matching the prefix from a prior run. When you own the connection (no `dsn_env_var`), call `gc_orphan_staging_tables(conn, model)` yourself with your connection — it's exported from both `bollhav.postgres` and `bollhav.mssql`.
 
-You can opt out of auto-GC by setting `Staging(keep_after_apply=True)` — the operator is then responsible for manual cleanup. `keep_after_apply=True` is meaningful in `INTERVAL` mode only; in `REUSED` mode the staging table always stays until the POST `staging_table_dropped` action runs at the end of the pipeline.
+You can opt out of dropping entirely with `Staging(keep_after_apply=True)` — the apply skips its `DROP TABLE` and auto orphan-GC is disabled for the model; manual cleanup is then the operator's responsibility.
 
 ## Fields
 
 | Field | Default | Purpose |
 |---|---|---|
 | `write_mode` | `WriteMode.APPEND` | How chunks land in staging — APPEND or UPSERT_NO_DELETE. See "Staging.write_mode" above. |
-| `mode` | `StagingMode.REUSED` | Lifecycle across intervals — see the `StagingMode` table above. |
 | `schema` | `None` | Override the default `z_<target_schema>` staging schema. |
 | `table_prefix` | `None` | Override the default `<target_name>_staging_` prefix. The `<run_id>` short-hex is always appended. |
-| `keep_after_apply` | `False` | `INTERVAL`-only. When `True`, the apply tx skips its `DROP TABLE`. Also disables auto orphan-GC for the model. |
+| `keep_after_apply` | `False` | When `True`, the apply tx skips its `DROP TABLE` (tables persist for audit). Also disables auto orphan-GC for the model. |
 
 ### Postgres-specific (`PostgresStaging`)
 

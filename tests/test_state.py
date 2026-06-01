@@ -948,23 +948,28 @@ class TestReadStatusSummary:
 
 
 class TestStateBanner:
-    """`_print_state_banner` queries the state for each staged model
-    and prints a one-line summary. No-op when no model has staging."""
+    """`_print_state_banner` queries the state for each state-enabled
+    model and prints a one-line summary. No-op when no model has
+    state tracking (staging-only models don't have a state table)."""
 
     def _staged_model(self, full_name, summary, upstream=None):
         from bollhav.model.staging import Staging
+        from bollhav.model.state import State
 
         model = MagicMock()
         model.target.staging = Staging()
+        model.state = State()
         model.target.full_name = full_name
         model.upstream = list(upstream) if upstream is not None else []
         return model, summary
 
-    def test_skips_non_staged_models(self, capsys) -> None:
+    def test_skips_models_without_state(self, capsys) -> None:
         from bollhav.model.load_models import _print_state_banner
 
+        # Staging set but no State() — must NOT touch the state table.
         m = MagicMock()
-        m.target.staging = None
+        m.target.staging = MagicMock()
+        m.state = None
         with patch("bollhav.postgres.state.read_status_summary") as rss:
             _print_state_banner([m])
 

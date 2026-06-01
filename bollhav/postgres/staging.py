@@ -20,13 +20,13 @@ API:
             s.write(chunk)
     # context exit: apply_atomically_to_target(...)
     #   INSERT/UPSERT/(DELETE+INSERT) staging -> target
-    #   DROP staging (if mode=INTERVAL and not keep_after_apply)
+    #   DROP staging (unless keep_after_apply)
     #   UPDATE state SET applied
     # all in one transaction.
 
 Crash mid-stream: staging table is left in place, state row stays
-pending. The next invocation's `gc_orphan_staging_tables(model)` GCs
-it by name pattern.
+pending. The next invocation's `gc_orphan_staging_tables(conn, model)`
+GCs it by name pattern.
 """
 
 from __future__ import annotations
@@ -131,16 +131,13 @@ def _assert_supported(model: "Model") -> None:
 def ensure_staging_table_per_interval(
     conn: psycopg.Connection, model: "Model", run_id: UUID
 ) -> None:
-    """Create the per-interval staging table in `StagingMode.INTERVAL`.
+    """Create the per-interval staging table.
 
     Each interval gets its own freshly-CREATEd table; the prior
-    interval's `flush` dropped it. This is NOT in the PRE action set
-    because actions are one-shot per pipeline run while INTERVAL's
-    CREATE is per-interval — the action runner would skip subsequent
-    intervals.
-
-    In `StagingMode.REUSED` the CREATE happens once via the
-    `staging_table_created` PRE action; this function isn't called."""
+    interval's `flush` dropped it (unless `keep_after_apply`). This is
+    NOT a PRE action because actions are one-shot per pipeline run while
+    the CREATE is per-interval — the action runner would skip
+    subsequent intervals."""
     from bollhav.postgres.columns import PostgresColumn
     from bollhav.postgres.schema import _col_ddl
 
@@ -162,31 +159,6 @@ def ensure_staging_table_per_interval(
             schema=sql.Identifier(schema),
             table=sql.Identifier(table),
             col_defs=col_defs,
-        )
-    )
-
-
-def _staging_mode(model: "Model"):
-    """Resolve the configured `StagingMode` for the model. Defaults
-    to `StagingMode.REUSED` when staging is set without an explicit
-    mode (matches the `Staging` dataclass default)."""
-    from bollhav.model.staging import StagingMode
-
-    if model.target.staging is None or model.target.staging.mode is None:
-        return StagingMode.REUSED
-    return model.target.staging.mode
-
-
-def truncate_staging_table(
-    conn: psycopg.Connection, model: "Model", run_id: UUID
-) -> None:
-    """Clear the reused staging table before the next interval's
-    COPY. Only called in `StagingMode.REUSED`. Cheap on UNLOGGED
-    tables — essentially a relfilenode swap."""
-    conn.execute(
-        sql.SQL("TRUNCATE TABLE {schema}.{table}").format(
-            schema=sql.Identifier(_staging_schema(model)),
-            table=sql.Identifier(_staging_table(model, run_id)),
         )
     )
 
@@ -449,11 +421,8 @@ def apply_atomically_to_target(
     target_schema = model.target.schema.resolved
     target_table = model.target.name_resolved
 
-    from bollhav.model.staging import StagingMode
-
     keep = model.target.staging is not None and model.target.staging.keep_after_apply
-    mode = _staging_mode(model)
-    drop_after_apply = mode is StagingMode.INTERVAL and not keep
+    drop_after_apply = not keep
 
     table_names = dict(
         staging_schema=staging_schema,
@@ -506,7 +475,7 @@ def apply_atomically_to_target(
 
 
 def gc_orphan_staging_tables(
-    model: "Model", *, keep_run_id: UUID | None = None
+    conn: psycopg.Connection, model: "Model", *, keep_run_id: UUID | None = None
 ) -> None:
     """Drop staging tables left behind by crashed runs.
 
@@ -516,7 +485,10 @@ def gc_orphan_staging_tables(
 
     No-op when `Staging.keep_after_apply=True` — the operator has
     declared they want kept tables to live; auto-GC would defeat that.
-    Manual cleanup is on them."""
+    Manual cleanup is on them.
+
+    Connection management is the caller's responsibility — pass in an
+    open psycopg connection (your own; no DSN required)."""
     if model.target.staging is not None and model.target.staging.keep_after_apply:
         logger.debug(
             "stage: GC skipped for %s — Staging.keep_after_apply=True",
@@ -528,26 +500,22 @@ def gc_orphan_staging_tables(
     prefix = _staging_table_prefix(model)
     keep = f"{prefix}{str(keep_run_id)[:8]}" if keep_run_id is not None else None
 
-    with pg_state._connect(model) as conn:
-        rows = conn.execute(
-            "SELECT tablename FROM pg_tables "
-            "WHERE schemaname = %s AND tablename LIKE %s",
-            [schema, f"{prefix}%"],
-        ).fetchall()
+    rows = conn.execute(
+        "SELECT tablename FROM pg_tables WHERE schemaname = %s AND tablename LIKE %s",
+        [schema, f"{prefix}%"],
+    ).fetchall()
 
-        with conn.transaction():
-            for (tablename,) in rows:
-                if keep is not None and tablename == keep:
-                    continue
-                conn.execute(
-                    sql.SQL("DROP TABLE IF EXISTS {schema}.{table}").format(
-                        schema=sql.Identifier(schema),
-                        table=sql.Identifier(tablename),
-                    )
+    with conn.transaction():
+        for (tablename,) in rows:
+            if keep is not None and tablename == keep:
+                continue
+            conn.execute(
+                sql.SQL("DROP TABLE IF EXISTS {schema}.{table}").format(
+                    schema=sql.Identifier(schema),
+                    table=sql.Identifier(tablename),
                 )
-                logger.debug(
-                    "stage: gc'd orphan staging table %s.%s", schema, tablename
-                )
+            )
+            logger.debug("stage: gc'd orphan staging table %s.%s", schema, tablename)
 
 
 # ── context manager ─────────────────────────────────────────────────
@@ -616,27 +584,14 @@ def stage(
             f"{model.target.full_name!r}."
         )
 
-    from bollhav.model.staging import StagingMode
     from bollhav.postgres.actions import run_pre_model_actions
 
-    mode = _staging_mode(model)
-    if mode is StagingMode.INTERVAL:
-        # INTERVAL mode: fresh table per interval. The PRE
-        # `staging_table_created` action skips itself in this mode
-        # (one-shot wouldn't fit), so the CREATE happens here. We
-        # still call run_pre_model_actions to ensure the schema-level PRE
-        # actions (schema, staging schema) have fired.
-        run_pre_model_actions(conn, model)
-        ensure_staging_table_per_interval(conn, model, run_id)
-    else:
-        # REUSED mode: PRE actions create the staging schema and
-        # table on the first interval. `run_pre_model_actions` is
-        # idempotent (gated by `target._applied_model_actions`), so subsequent
-        # interval calls short-circuit. The TRUNCATE then clears
-        # any leftover from the previous interval. Harmless on the
-        # first interval where the table was just CREATEd empty.
-        run_pre_model_actions(conn, model)
-        truncate_staging_table(conn, model, run_id)
+    # Fresh table per interval. The schema-level PRE actions (target
+    # schema, staging schema) are one-shot and idempotent; the staging
+    # table itself is created here because its CREATE is per-interval
+    # (the prior interval's flush dropped it).
+    run_pre_model_actions(conn, model)
+    ensure_staging_table_per_interval(conn, model, run_id)
     s = Stage(conn, model, run_id=run_id, since=since, until=until)
     try:
         yield s
@@ -662,6 +617,5 @@ __all__ = [
     "write_to_staging",
     "apply_atomically_to_target",
     "drop_staging_table",
-    "truncate_staging_table",
     "gc_orphan_staging_tables",
 ]

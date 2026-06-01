@@ -26,7 +26,6 @@ from __future__ import annotations
 
 import logging
 from typing import TYPE_CHECKING, cast, LiteralString
-from uuid import UUID
 
 import psycopg
 from psycopg import sql
@@ -73,22 +72,6 @@ def _staging_schema_name(model: "Model") -> str:
     if model.target.staging is not None and model.target.staging.schema:
         return model.target.staging.schema
     return pg_state._state_schema(model)
-
-
-def _staging_table_name(model: "Model") -> str:
-    run_id: UUID | None = getattr(model, "_state_run_id", None)
-    if run_id is None:
-        raise ValueError(
-            f"staging action on {model.target.full_name!r} needs "
-            f"`model._state_run_id` to be set — normally the bootstrap "
-            f"mints one. Got None."
-        )
-    prefix = (
-        model.target.staging.table_prefix
-        if model.target.staging is not None and model.target.staging.table_prefix
-        else f"{model.target.name}_staging_"
-    )
-    return f"{prefix}{str(run_id)[:8]}"
 
 
 # ── PRE action implementations ─────────────────────────────────────
@@ -182,37 +165,6 @@ def _run_staging_schema_created(conn: psycopg.Connection, model: "Model") -> Non
     )
 
 
-def _run_staging_table_created(conn: psycopg.Connection, model: "Model") -> None:
-    from bollhav.postgres.columns import PostgresColumn
-    from bollhav.postgres.staging import _logged
-
-    table_keyword = "TABLE" if _logged(model) else "UNLOGGED TABLE"
-    col_defs = sql.SQL(",\n").join(
-        sql.SQL(_col_ddl(c))
-        for c in model.target.columns
-        if isinstance(c, PostgresColumn)
-    )
-    conn.execute(
-        sql.SQL(f"CREATE {table_keyword} IF NOT EXISTS {{}}.{{}} (\n{{}}\n)").format(
-            sql.Identifier(_staging_schema_name(model)),
-            sql.Identifier(_staging_table_name(model)),
-            col_defs,
-        )
-    )
-
-
-# ── POST action implementations ────────────────────────────────────
-
-
-def _run_staging_table_dropped(conn: psycopg.Connection, model: "Model") -> None:
-    conn.execute(
-        sql.SQL("DROP TABLE IF EXISTS {}.{}").format(
-            sql.Identifier(_staging_schema_name(model)),
-            sql.Identifier(_staging_table_name(model)),
-        )
-    )
-
-
 # ── INTERVAL action implementations (state machinery) ─────────────
 
 
@@ -285,29 +237,6 @@ def _mark_applied_should_run(model: "Model") -> bool:
 # ── should_run gates ────────────────────────────────────────────────
 
 
-def _staging_reused_cleanup_applies(model: "Model") -> bool:
-    """POST cleanup of the reused staging table only makes sense when
-    PRE actually created it this run. If the pipeline had no work to do
-    (every interval was already applied so `stage()` never ran), the
-    table doesn't exist and TRUNCATE/DROP would either fail or no-op."""
-    target = model.target
-    from bollhav.model.staging import StagingMode
-
-    return (
-        target.staging is not None
-        and target.staging.mode is StagingMode.REUSED
-        and not target.staging.keep_after_apply
-        and target._applied_model_actions.get("staging_table_created") is True
-    )
-
-
-def _staging_table_created_applies(model: "Model") -> bool:
-    target = model.target
-    from bollhav.model.staging import StagingMode
-
-    return target.staging is not None and target.staging.mode is StagingMode.REUSED
-
-
 # ── default action set ──────────────────────────────────────────────
 
 
@@ -352,23 +281,9 @@ def default_actions() -> list[Action]:
             _run_staging_schema_created,
             should_run=lambda m: m.target.staging is not None,
         ),
-        Action(
-            "staging_table_created",
-            Phase.PRE_MODEL,
-            _run_staging_table_created,
-            should_run=_staging_table_created_applies,
-        ),
-        # ── POST: teardown ──
-        # Per-interval TRUNCATE at the start of each interval (inline in
-        # `stage()`) handles the inter-interval cleanup. After the last
-        # interval, DROP makes the residue irrelevant — no need to
-        # TRUNCATE first.
-        Action(
-            "staging_table_dropped",
-            Phase.POST_MODEL,
-            _run_staging_table_dropped,
-            should_run=_staging_reused_cleanup_applies,
-        ),
+        # The staging table itself is created per-interval inside
+        # `stage()` and dropped in each interval's apply transaction —
+        # no model-level PRE/POST staging-table action needed.
         # ── INTERVAL: state machinery (only fires when state is set) ──
         Action(
             "mark_running",

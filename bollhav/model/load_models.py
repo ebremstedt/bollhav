@@ -285,6 +285,17 @@ def _resolve_state_mode() -> StateMode:
     return valid[raw]
 
 
+def _configured_dsn_env_var(model: Model) -> str | None:
+    """The env var bollhav would use to open its own connection to the
+    model's database (state.dsn_env_var wins, else target.dsn_env_var).
+    `None` means no DSN is configured — the user owns the connection in
+    their execute, so bollhav can't (and shouldn't try to) run its
+    managed bootstrap / post-model steps for this model."""
+    return (
+        model.state.dsn_env_var if model.state is not None else None
+    ) or model.target.dsn_env_var
+
+
 def _bootstrap_state_for_staged_models(
     models: list[Model], *, state_mode: StateMode
 ) -> None:
@@ -352,11 +363,8 @@ def _bootstrap_state_for_staged_models(
         # needn't manage it, so skip rather than crash. State() makes a
         # DSN mandatory, so state-enabled models fall through to the
         # clear error raised by ensure_tables below.
-        dsn_env = (
-            model.state.dsn_env_var if model.state is not None else None
-        ) or model.target.dsn_env_var
-        if dsn_env is None and model.state is None:
-            logger.warning(
+        if _configured_dsn_env_var(model) is None and model.state is None:
+            logger.debug(
                 "staging: %s has no dsn_env_var — skipping bollhav's "
                 "managed staging bootstrap (orphan-table GC). Your execute "
                 "owns the connection; every contract interval runs.",
@@ -366,7 +374,8 @@ def _bootstrap_state_for_staged_models(
 
         # Orphan staging tables from earlier crashed runs GC'd.
         try:
-            pg_staging.gc_orphan_staging_tables(model)
+            with pg_state._connect(model) as conn:
+                pg_staging.gc_orphan_staging_tables(conn, model)
         except ConnectionError as exc:
             logger.warning(
                 "staging: orphan GC failed for %s — %s",
@@ -456,6 +465,13 @@ def _run_post_model_actions_for_models(models: list[Model]) -> None:
         # POST work to do.
         if model.target.is_view:
             continue
+        # No dsn_env_var → the user owns the connection in their execute
+        # (e.g. a staging model they drive themselves). bollhav can't
+        # open its own connection to run managed POST actions, and the
+        # user's own staging teardown already ran — skip rather than
+        # crash on a missing DSN.
+        if _configured_dsn_env_var(model) is None:
+            continue
         try:
             with pg_state._connect(model) as conn:
                 run_post_model_actions(conn, model)
@@ -483,18 +499,18 @@ def _print_state_banner(models: list[Model]) -> None:
     blocked something show the code(s) responsible. Look codes up in
     docs/content/BLOCK_CODES.md.
 
-    No-op when no matched model has staging."""
+    No-op when no matched model has state tracking."""
     from bollhav.postgres import state as pg_state
 
-    staged = [m for m in models if m.target.staging is not None]
-    if not staged:
+    stateful = [m for m in models if m.state is not None]
+    if not stateful:
         return
 
     width = 60
     title = "── state "
     print(title + "─" * max(0, width - len(title)))
 
-    for i, model in enumerate(staged):
+    for i, model in enumerate(stateful):
         if i > 0:
             print()
         print(f"  {model.target.full_name}")
@@ -653,11 +669,10 @@ def _print_summary(cfg: _RuntimeConfig, models: list[Model]) -> None:
         _row("state", "disabled")
     elif has_state:
         _row("state", cfg.state_mode.value)
-    # Drop the trailing rule when the state banner will follow —
-    # the two blocks should read as one without a divider in between.
-    # The state banner prints for any staged model.
-    has_staging = any(m.target.staging is not None for m in models)
-    if not has_staging:
+    # Drop the trailing rule when the state banner will follow (it
+    # prints only for state-enabled models) so the two read as one
+    # block; otherwise close the runtime box here.
+    if not has_state:
         print("────────────────────────────")
 
 
