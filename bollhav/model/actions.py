@@ -71,7 +71,6 @@ if TYPE_CHECKING:
     import psycopg
 
     from bollhav.model.model import Model
-    from bollhav.model.target import Target
 
 
 class Phase(Enum):
