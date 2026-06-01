@@ -92,7 +92,7 @@ class IntervalChunks:
 @dataclass
 class Batch:
     """
-    Controls how a model's work is chunked.
+    Controls how a model's work is chunked
 
     `interval` holds the time-interval chunking config — the cron
     expression whose ticks define the `(since, until)` windows the model
