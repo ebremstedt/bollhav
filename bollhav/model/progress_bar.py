@@ -35,9 +35,6 @@ def _model_display_label(model) -> str:
     name = model.target.full_name
     if getattr(model, "batching", None) is None:
         return name
-    mode = model.batching.mode.value.lower()
-    if mode == "row":
-        return f"{name} ({model.batching.row.batch_size} rows)"
     return f"{name} ({model.batching.interval.expression.lstrip('@')})"
 
 
@@ -51,7 +48,7 @@ def name_width_for(models) -> int:
 class _State:
     current_model: str = ""
     current_mode: str = (
-        ""  # "interval" | "rows" | "" — set per-model from batching.mode
+        ""  # interval expression label | "" — set per-model from batching
     )
     start: float = 0.0
     count: int = 0
@@ -183,9 +180,8 @@ def progress_bar(func: Callable) -> Callable:
         model isn't a bollhav Model (or has no batching configured).
 
         Examples of mode_label:
-            "10000 rows"      (ROW mode, batching.row.batch_size)
-            "hourly"          (INTERVAL with @hourly alias — @ stripped)
-            "*/15 * * * *"    (INTERVAL with a raw cron)"""
+            "hourly"          (@hourly alias — @ stripped)
+            "*/15 * * * *"    (a raw cron)"""
         bound = sig.bind(*args, **kwargs)
         bound.apply_defaults()
         model = bound.arguments.get("model")
@@ -200,13 +196,9 @@ def progress_bar(func: Callable) -> Callable:
         if getattr(model, "batching", None) is None:
             return name, ""
 
-        m = model.batching.mode.value.lower()
-        if m == "row":
-            return name, f"{model.batching.row.batch_size} rows"
-
-        # INTERVAL mode — show the effective interval expression.
-        # Strip the leading "@" from cron aliases for cleaner display
-        # (`@hourly` -> `hourly`); raw crons pass through unchanged.
+        # Show the effective interval expression. Strip the leading "@"
+        # from cron aliases for cleaner display (`@hourly` -> `hourly`);
+        # raw crons pass through unchanged.
         return name, model.batching.interval.expression.lstrip("@")
 
     def _begin_model(name: str, mode: str) -> None:

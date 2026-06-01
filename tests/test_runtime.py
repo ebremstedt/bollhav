@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
 from bollhav.model.runtime import _apply_to_model
-from bollhav.model.batch import Batch, ChunkMode, IntervalChunks, RowChunks
+from bollhav.model.batch import Batch, IntervalChunks
 from bollhav.model.bounds import Bounds
 from bollhav.model.model import Model
 from bollhav.model.target import Target
@@ -124,46 +124,23 @@ class TestDirectives:
         assert m.directives.until == until
 
 
-class TestTagReloadBakedIntoBatching:
-    def test_reload_mode_baked_into_batching(self) -> None:
+class TestBatchingCarryThrough:
+    def test_size_carried_through(self) -> None:
         m = Model(
             target=Target(
                 name="events", schema=TargetSchema(name="raw", suffix_appendix=None)
             ),
             batching=Batch(
-                mode=ChunkMode.INTERVAL,
                 interval=IntervalChunks(expression="@hourly", tz=UTC),
-                row=RowChunks(batch_size=5000),
+                size=5000,
             ),
             bounds=Bounds(begin=datetime(2024, 1, 1, tzinfo=UTC)),
         )
-        m.directives.reload = True
-        m.directives.reload_mode = ChunkMode.ROW
-        m.directives.reload_batch_size = 100
-
         out = _apply(m)
-        assert out.batching.mode is ChunkMode.ROW
-        assert out.batching.row.batch_size == 100
-        # Overrides absorbed — directives fields cleared.
-        assert out.directives.reload_mode is None
-        assert out.directives.reload_batch_size is None
+        assert out.batching.size == 5000
 
-    def test_reload_interval_expression_baked_into_batching(self) -> None:
+    def test_pipe_override_sets_interval_expression(self) -> None:
         m = _model(expression="@hourly")
-        m.directives.reload = True
-        m.directives.reload_interval_expression = "@daily"
-
-        out = _apply(m)
-        assert out.batching.interval.expression == "@daily"
-        assert out.directives.reload_interval_expression is None
-
-    def test_pipe_override_wins_over_tag_reload_expression(self) -> None:
-        """If both a tag and the runtime supply an interval expression, the
-        runtime override wins — the explicit env knob beats the tag."""
-        m = _model(expression="@hourly")
-        m.directives.reload = True
-        m.directives.reload_interval_expression = "@daily"
-
         out = _apply(m, interval_expression_override="*/15 * * * *")
         assert out.batching.interval.expression == "*/15 * * * *"
 

@@ -9,7 +9,7 @@ from bollhav.model.source_file import SourceFile
 from bollhav.model.source_table import SourceTable
 from bollhav.model.target import Target
 from bollhav.model.bounds import Bounds
-from bollhav.model.batch import Batch, ChunkMode, _resolve_cron, _chunk_interval
+from bollhav.model.batch import Batch, _resolve_cron, _chunk_interval
 from bollhav.model.intervals import TZInterval
 from bollhav.model.directives import Directives
 from bollhav.model.state import State
@@ -140,10 +140,9 @@ class Model:
             lines += [
                 "",
                 "  batching:",
-                f"    mode:        {self.batching.mode.value}",
                 f"    interval:    expression={self.batching.interval.expression}, "
                 f"lookback={self.batching.interval.lookback}",
-                f"    row:         batch_size={self.batching.row.batch_size}",
+                f"    size:        {self.batching.size}",
                 f"    retries:     {self.batching.retries}",
             ]
         lines += [
@@ -313,12 +312,6 @@ class Model:
             return [None]
 
         d = self.directives
-        if self.batching.mode is ChunkMode.ROW and not d.reload:
-            raise ValueError(
-                f"Model {self.target.full_name!r} is configured with "
-                f"Batch(mode=ROW). ROW-mode models can only be reloaded — "
-                f"latest and backfill require mode=INTERVAL."
-            )
         tz = self.batching.interval.tz
         expr = self.batching.interval.expression
 
@@ -327,16 +320,6 @@ class Model:
             interval = self.latest_complete_interval(windowexpr, tz)
             since, until = interval.since, interval.until
         elif d.reload:
-            if self.batching.mode is ChunkMode.ROW:
-                raise ValueError(
-                    f"model.intervals cannot be read in reload mode on "
-                    f"model {self.target.full_name!r}: batching.mode is ROW, "
-                    f"which chunks work by row count instead of time. "
-                    f"model.intervals only produces time intervals, so "
-                    f"time-based chunks would be meaningless here. Callers "
-                    f"must branch on `model.batching.mode` and use the "
-                    f"row-batching execution path for ROW-mode reloads."
-                )
             if self.bounds.begin is None:
                 raise ValueError(
                     f"reload requires bounds.begin to be set on model "

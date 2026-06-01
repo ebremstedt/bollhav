@@ -1,0 +1,4 @@
+# The example imports bollhav from the repo root (pip install -e ../.. or
+# run from a venv that already has it). These are its direct deps:
+pyodbc>=5.0
+polars>=1.0

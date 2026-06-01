@@ -14,7 +14,7 @@ from bollhav.model.source_file import SourceFile
 from bollhav.model.source_table import SourceTable
 from bollhav.model.target import Target
 from bollhav.model.bounds import Bounds
-from bollhav.model.batch import Batch, ChunkMode, IntervalChunks, RowChunks
+from bollhav.model.batch import Batch, IntervalChunks
 from bollhav.model.staging import Staging
 from bollhav.model.state import (
     ModelLockedError,
@@ -52,9 +52,7 @@ __all__ = [
     "Target",
     "Bounds",
     "Batch",
-    "ChunkMode",
     "IntervalChunks",
-    "RowChunks",
     "Tags",
     "progress_bar",
     "ProgressLevel",

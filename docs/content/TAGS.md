@@ -63,7 +63,7 @@ Prefix `r:` (or the long-form alias `reload:`) to mark matched models for reload
 | <code>[r:(foo&#124;bar)]</code> | match `foo` OR `bar`, reload |
 | `r:[foo & bar]` | match `foo` AND `bar`, reload all |
 
-For advanced reload prefixes that control chunk sizes (`r_row_<N>:`, `r_interval_<@alias>:`), see [Advanced tag prefixes](ADVANCED_TAGS.md).
+For combining `r:` with `not:` and group-level reload, see [Advanced tag prefixes](ADVANCED_TAGS.md). Chunking config (interval, row `size`) lives on the model's `Batch`, not in tags.
 
 
 

@@ -81,8 +81,7 @@ visibility in logs.
 
 ## Notes
 
-- The `(interval)` label next to each model name is read from
-  `model.batching.mode` — see the [row_mode example](../row_mode/README.md)
-  for the corresponding `(rows)` label on ROW-mode models.
+- The label next to each model name is the model's interval expression
+  (e.g. `(daily)`), read from `model.batching.interval.expression`.
 - See [PROGRESS_BAR.md](../../docs/content/PROGRESS_BAR.md) for the
   full level reference.

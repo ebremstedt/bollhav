@@ -1,7 +1,6 @@
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone, tzinfo
-from enum import Enum
 
 from icron import croniter
 from bollhav.model.intervals import TZInterval
@@ -17,7 +16,7 @@ MAX_BATCH_SIZE = 10000
 
 def validate_batch_size(batch_size: int, source: str) -> None:
     """Raise if `batch_size` exceeds the hard cap. `source` names where the
-    value came from for the error message (e.g. 'RowChunks', 'r_row_ tag')."""
+    value came from for the error message (e.g. 'Batch.size')."""
     if batch_size > MAX_BATCH_SIZE:
         raise ValueError(
             f"{source} batch_size={batch_size} exceeds max {MAX_BATCH_SIZE}"
@@ -65,15 +64,10 @@ def _chunk_interval(cron: str, incoming_interval: TZInterval) -> list[TZInterval
     return outgoing_intervals
 
 
-class ChunkMode(Enum):
-    INTERVAL = "INTERVAL"
-    ROW = "ROW"
-
-
 @dataclass
 class IntervalChunks:
     """
-    Time-interval chunking config — used when `Batch.mode == INTERVAL`.
+    Time-interval chunking config.
 
     `expression` is a cron expression that defines the chunk size. For example,
     "0 * * * *" means each chunk is one hour, "0 0 * * *" means one day.
@@ -96,43 +90,25 @@ class IntervalChunks:
 
 
 @dataclass
-class RowChunks:
-    """
-    Row-count chunking config — used when `Batch.mode == ROW`.
-
-    `batch_size` is the number of rows per chunk. Capped at
-    `MAX_BATCH_SIZE` (10000). Compatible with `WriteMode.APPEND` and
-    `WriteMode.UPSERT_NO_DELETE` — other write modes are rejected at
-    `Model` construction time because they assume they see the whole
-    dataset in one shot.
-    """
-
-    batch_size: int = 10000
-
-    def __post_init__(self) -> None:
-        validate_batch_size(self.batch_size, "RowChunks")
-
-
-@dataclass
 class Batch:
     """
     Controls how a model's work is chunked.
 
-    `mode` selects between time-interval chunking (INTERVAL, the default)
-    and row-count chunking (ROW). A model with `mode=ROW` can only be
-    reloaded — latest and backfill runs require INTERVAL mode.
+    `interval` holds the time-interval chunking config — the cron
+    expression whose ticks define the `(since, until)` windows the model
+    iterates. Always present.
 
-    `interval` holds the time-interval chunking config. Always present;
-    read when `mode == INTERVAL` and when reload uses interval chunking.
-
-    `row` holds the row-count chunking config. Always present; read when
-    `mode == ROW` or when a tag override forces row-mode reload.
+    `size` is the number of rows per read chunk, capped at
+    `MAX_BATCH_SIZE` (10000). The framework hands `(since, until)` to the
+    user's read function; the row-level sub-batching within an interval
+    is honored by the read helpers, which slice the source by `size`.
 
     `retries` is the number of times a failed chunk should be retried.
-    Applies to both modes.
     """
 
-    mode: ChunkMode = ChunkMode.INTERVAL
     interval: IntervalChunks = field(default_factory=IntervalChunks)
-    row: RowChunks = field(default_factory=RowChunks)
+    size: int = 10000
     retries: int | None = None
+
+    def __post_init__(self) -> None:
+        validate_batch_size(self.size, "Batch.size")

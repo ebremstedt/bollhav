@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, tzinfo
 
-from bollhav.model.batch import Batch, IntervalChunks, RowChunks
+from bollhav.model.batch import Batch, IntervalChunks
 from bollhav.model.directives import Directives
 from bollhav.model.matching import match_models
 from bollhav.model.model import Model
@@ -33,16 +33,12 @@ def apply_runtime_overrides(
         * `target.schema.suffix` set to `schema_suffix`.
         * `target.suffix` set to `table_suffix`.
         * `batching.interval.expression` overridden by
-          `directives.reload_interval_expression` (tag) or
           `interval_expression_override` (pipe) when set.
         * `batching.interval.window_expression` overridden by
           `window_expression_override` when set.
         * `batching.interval.lookback` overridden by `lookback_override` when
           set.
         * `batching.interval.tz` overridden by `tz_override` when set.
-        * `batching.mode` overridden by `directives.reload_mode` when set.
-        * `batching.row.batch_size` overridden by
-          `directives.reload_batch_size` when set.
         * `directives.reload` preserved; tag-driven override fields cleared.
         * `directives.latest`, `since`, `until` set from the pipe args.
 
@@ -84,7 +80,6 @@ def _apply_to_model(
         bounds=model.bounds,
         batching=_batching_with_overrides(
             model.batching,
-            model.directives,
             interval_expression_override=interval_expression_override,
             window_expression_override=window_expression_override,
             lookback_override=lookback_override,
@@ -139,7 +134,6 @@ def _target_with_suffix(
 
 def _batching_with_overrides(
     batching: Batch | None,
-    d: Directives,
     *,
     interval_expression_override: str | None,
     window_expression_override: str | None,
@@ -148,13 +142,8 @@ def _batching_with_overrides(
 ) -> Batch | None:
     if batching is None:
         return None
-    # Tag reload overrides win over the model's static batching. Pipe-level
-    # overrides win over tag-driven ones (explicit env > tag).
-    expression = (
-        interval_expression_override
-        or d.reload_interval_expression
-        or batching.interval.expression
-    )
+    # Pipe-level override wins over the model's static interval expression.
+    expression = interval_expression_override or batching.interval.expression
     window_expression = (
         window_expression_override or batching.interval.window_expression
     )
@@ -164,21 +153,14 @@ def _batching_with_overrides(
         else batching.interval.lookback
     )
     tz = tz_override or batching.interval.tz
-    mode = d.reload_mode or batching.mode
-    batch_size = (
-        d.reload_batch_size
-        if d.reload_batch_size is not None
-        else batching.row.batch_size
-    )
     return Batch(
-        mode=mode,
         interval=IntervalChunks(
             expression=expression,
             window_expression=window_expression,
             tz=tz,
             lookback=lookback,
         ),
-        row=RowChunks(batch_size=batch_size),
+        size=batching.size,
         retries=batching.retries,
     )
 
@@ -192,9 +174,6 @@ def _directives_with_pipe(
 ) -> Directives:
     return Directives(
         reload=d.reload,
-        reload_mode=None,
-        reload_batch_size=None,
-        reload_interval_expression=None,
         latest=latest and not d.reload,
         since=backfill_since,
         until=backfill_until,
