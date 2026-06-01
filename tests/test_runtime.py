@@ -201,11 +201,11 @@ class TestStateAndStagingCarryThrough:
         assert out.state is None
 
     def test_staging_carries_through(self) -> None:
-        from bollhav.model.staging import Staging
         from bollhav.model.state import State
+        from bollhav.postgres.staging import PostgresStaging
 
-        staging_cfg = Staging(
-            schema="ops", table_prefix="stg_", logged=True, keep_after_flush=True
+        staging_cfg = PostgresStaging(
+            schema="ops", table_prefix="stg_", logged=True, keep_after_apply=True
         )
         m = Model(
             target=Target(
@@ -223,7 +223,7 @@ class TestStateAndStagingCarryThrough:
         assert out_staging.schema == "ops"
         assert out_staging.table_prefix == "stg_"
         assert out_staging.logged is True
-        assert out_staging.keep_after_flush is True
+        assert out_staging.keep_after_apply is True
 
     def test_staging_None_stays_None(self) -> None:
         out = _apply(_model())

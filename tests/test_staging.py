@@ -89,12 +89,13 @@ def _mock_conn():
 
 
 class TestPreconditions:
-    def test_rejects_non_append_write_mode(self) -> None:
+    def test_rejects_view_write_mode(self) -> None:
         from bollhav.model.write_modes import WriteMode
         from bollhav.postgres.staging import stage
 
-        model = _model(write_mode=WriteMode.UPSERT_NO_DELETE)
-        with pytest.raises(NotImplementedError, match="WriteMode.APPEND only"):
+        model = _model()
+        model.target.write_mode = WriteMode.VIEW
+        with pytest.raises(NotImplementedError, match="VIEW"):
             with stage(_mock_conn(), model, since=SINCE, until=UNTIL):
                 pass
 
@@ -364,11 +365,11 @@ class TestGc:
         ]
         assert len(dropped) == 2
 
-    def test_skipped_when_keep_after_flush(self) -> None:
+    def test_skipped_when_keep_after_apply(self) -> None:
         from bollhav.model.staging import Staging
         from bollhav.postgres.staging import gc_orphan_staging_tables
 
-        model = _model(staging_cfg=Staging(keep_after_flush=True))
+        model = _model(staging_cfg=Staging(keep_after_apply=True))
         conn = _mock_conn()
 
         with patch("bollhav.postgres.state._connect") as connect:
@@ -450,10 +451,9 @@ class TestLoggedField:
         assert "UNLOGGED TABLE" in ddl
 
     def test_logged_true_omits_unlogged(self) -> None:
-        from bollhav.model.staging import Staging
-        from bollhav.postgres.staging import stage
+        from bollhav.postgres.staging import PostgresStaging, stage
 
-        model = _model(staging_cfg=Staging(logged=True))
+        model = _model(staging_cfg=PostgresStaging(logged=True))
         conn = _mock_conn()
         with stage(conn, model, since=SINCE, until=UNTIL):
             pass
@@ -471,7 +471,7 @@ class TestLoggedField:
 
 
 class TestKeepAfterFlush:
-    """`keep_after_flush` only applies to `StagingMode.INTERVAL`
+    """`keep_after_apply` only applies to `StagingMode.INTERVAL`
     — REUSED mode always keeps the table for the next interval."""
 
     def test_interval_default_drops_staging_on_flush(self) -> None:
@@ -487,12 +487,12 @@ class TestKeepAfterFlush:
         drops = [q for q in executed if "DROP TABLE" in q]
         assert len(drops) == 1  # the staging table
 
-    def test_interval_keep_after_flush_skips_drop(self) -> None:
+    def test_interval_keep_after_apply_skips_drop(self) -> None:
         from bollhav.model.staging import Staging, StagingMode
         from bollhav.postgres.staging import stage
 
         model = _model(
-            staging_cfg=Staging(mode=StagingMode.INTERVAL, keep_after_flush=True)
+            staging_cfg=Staging(mode=StagingMode.INTERVAL, keep_after_apply=True)
         )
         conn = _mock_conn()
         with stage(conn, model, since=SINCE, until=UNTIL) as s:
@@ -551,3 +551,168 @@ class TestKeepAfterFlush:
         drops = [q for q in executed if "DROP TABLE" in q]
         assert drops == []
         assert any("status = 'applied'" in q for q in executed)
+
+
+# ── write_mode combinations ──────────────────────────────────────────
+
+
+def _rendered(conn) -> list[str]:
+    """Render every psycopg Composed object on the conn into actual
+    SQL text via `as_string(None)`. `str()` on a Composed gives its
+    Python repr, not the SQL, so substring matches against quoted
+    identifiers fail. `as_string` does the real rendering."""
+    from psycopg.sql import Composable
+
+    out = []
+    for call in conn.execute.call_args_list:
+        q = call.args[0]
+        out.append(q.as_string(None) if isinstance(q, Composable) else str(q))
+    return out
+
+
+def _model_with_unique():
+    """Model with a unique column so UPSERT_NO_DELETE-style merges
+    have something to merge on."""
+    from bollhav.postgres.columns import PostgresColumn, PostgresType
+
+    m = _model()
+    m.target.columns = [
+        PostgresColumn(
+            name="id",
+            data_type=PostgresType.BIGINT,
+            primary_key=True,
+            nullable=False,
+        ),
+        PostgresColumn(name="amount", data_type=PostgresType.NUMERIC),
+    ]
+    m.target.unique_columns = [m.target.columns[0]]
+    return m
+
+
+class TestStagingWriteModeAppend:
+    """staging.write_mode=APPEND (default) — chunks COPY into staging."""
+
+    def test_each_chunk_copies_no_on_conflict_into_staging(self) -> None:
+        from bollhav.postgres.staging import stage
+
+        conn = _mock_conn()
+        with stage(conn, _model(), since=SINCE, until=UNTIL) as s:
+            s.write(pl.DataFrame({"id": [1], "amount": [1.0]}))
+            s.write(pl.DataFrame({"id": [2], "amount": [2.0]}))
+
+        executed = _rendered(conn)
+        # No ON CONFLICT INTO staging — APPEND just COPYs.
+        merges_into_staging = [
+            q
+            for q in executed
+            if "ON CONFLICT" in q and 'INTO "z_public"."orders_staging_' in q
+        ]
+        assert not merges_into_staging
+
+
+class TestStagingWriteModeUpsert:
+    """staging.write_mode=UPSERT_NO_DELETE — chunks upsert into staging
+    via a temp table + ON CONFLICT."""
+
+    def test_each_chunk_upserts_into_staging(self) -> None:
+        from bollhav.model.staging import Staging
+        from bollhav.model.write_modes import WriteMode
+        from bollhav.postgres.staging import stage
+
+        conn = _mock_conn()
+        m = _model_with_unique()
+        m.target.write_mode = WriteMode.UPSERT_NO_DELETE
+        m.target.staging = Staging(write_mode=WriteMode.UPSERT_NO_DELETE)
+        with stage(conn, m, since=SINCE, until=UNTIL) as s:
+            s.write(pl.DataFrame({"id": [1], "amount": [1.0]}))
+            s.write(pl.DataFrame({"id": [1], "amount": [2.0]}))  # duplicate key
+
+        executed = _rendered(conn)
+        staging_upserts = [
+            q
+            for q in executed
+            if "ON CONFLICT" in q and 'INTO "z_public"."orders_staging_' in q
+        ]
+        assert len(staging_upserts) == 2
+
+
+class TestApplyTargetAppend:
+    """target.write_mode=APPEND — apply does INSERT FROM staging."""
+
+    def test_apply_issues_insert_select(self) -> None:
+        from bollhav.postgres.staging import stage
+
+        conn = _mock_conn()
+        with stage(conn, _model(), since=SINCE, until=UNTIL) as s:
+            s.write(pl.DataFrame({"id": [1], "amount": [1.0]}))
+
+        executed = _rendered(conn)
+        applies = [
+            q
+            for q in executed
+            if 'INSERT INTO "public"."orders"' in q
+            and 'FROM "z_public"."orders_staging_' in q
+            and "ON CONFLICT" not in q
+        ]
+        assert len(applies) == 1
+
+
+class TestApplyTargetUpsert:
+    """target.write_mode=UPSERT_NO_DELETE — apply does INSERT FROM
+    staging ... ON CONFLICT DO UPDATE."""
+
+    def test_apply_issues_insert_with_on_conflict(self) -> None:
+        from bollhav.model.write_modes import WriteMode
+        from bollhav.postgres.staging import stage
+
+        conn = _mock_conn()
+        m = _model_with_unique()
+        m.target.write_mode = WriteMode.UPSERT_NO_DELETE
+        with stage(conn, m, since=SINCE, until=UNTIL) as s:
+            s.write(pl.DataFrame({"id": [1], "amount": [1.0]}))
+
+        executed = _rendered(conn)
+        target_upserts = [
+            q
+            for q in executed
+            if 'INSERT INTO "public"."orders"' in q
+            and 'FROM "z_public"."orders_staging_' in q
+            and "ON CONFLICT" in q
+        ]
+        assert len(target_upserts) == 1
+
+
+class TestApplyTargetRecreatePartition:
+    """target.write_mode=RECREATE_PARTITION — apply deletes the window
+    then INSERTs from staging, all in one transaction."""
+
+    def test_apply_issues_delete_window_then_insert(self) -> None:
+        from bollhav.model.write_modes import WriteMode
+        from bollhav.postgres.columns import PostgresColumn, PostgresType
+        from bollhav.postgres.staging import stage
+
+        conn = _mock_conn()
+        m = _model()
+        m.target.columns = [
+            PostgresColumn(name="ts", data_type=PostgresType.TIMESTAMPTZ),
+            PostgresColumn(name="amount", data_type=PostgresType.NUMERIC),
+        ]
+        m.target.write_mode = WriteMode.RECREATE_PARTITION
+        m.target.partitioned_by = "ts"
+        with stage(conn, m, since=SINCE, until=UNTIL) as s:
+            s.write(pl.DataFrame({"ts": [SINCE], "amount": [1.0]}))
+
+        executed = _rendered(conn)
+        target_deletes = [
+            q
+            for q in executed
+            if 'DELETE FROM "public"."orders"' in q and '"ts" >= %s AND "ts" < %s' in q
+        ]
+        assert len(target_deletes) == 1
+        target_inserts = [
+            q
+            for q in executed
+            if 'INSERT INTO "public"."orders"' in q
+            and 'FROM "z_public"."orders_staging_' in q
+        ]
+        assert len(target_inserts) == 1

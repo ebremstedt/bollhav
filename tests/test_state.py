@@ -484,6 +484,65 @@ class TestModelLock:
             release.assert_called_once_with(conn, model)
             conn.close.assert_called_once()
 
+    def test_noop_when_state_is_None(self) -> None:
+        """`model_lock` is a no-op when the model has no state — safe
+        to wrap any model preventively without checking config first."""
+        from bollhav.model.state import model_lock
+
+        model = MagicMock()
+        model.target.full_name = "warehouse.orders"
+        model.state = None
+
+        with (
+            patch("bollhav.postgres.state._connect") as connect,
+            patch("bollhav.postgres.state.try_acquire_lock") as acquire,
+        ):
+            with model_lock(model):
+                pass
+            connect.assert_not_called()
+            acquire.assert_not_called()
+
+    def test_noop_when_exclusive_run_is_False(self) -> None:
+        """The common case: state is set but exclusive_run defaults to
+        False, so model_lock is a no-op. @state's per-interval lock is
+        what's actually serializing work."""
+        from bollhav.model.state import State, model_lock
+
+        model = MagicMock()
+        model.target.full_name = "warehouse.orders"
+        model.state = State()  # exclusive_run defaults to False
+        model.batching = MagicMock()
+
+        with (
+            patch("bollhav.postgres.state._connect") as connect,
+            patch("bollhav.postgres.state.try_acquire_lock") as acquire,
+        ):
+            with model_lock(model):
+                pass
+            connect.assert_not_called()
+            acquire.assert_not_called()
+
+    def test_acquires_lock_when_exclusive_run_True(self) -> None:
+        from bollhav.model.state import State, model_lock
+
+        model = MagicMock()
+        model.target.full_name = "warehouse.orders"
+        model.state = State(exclusive_run=True)
+        model.batching = MagicMock()
+
+        conn = MagicMock()
+        with (
+            patch("bollhav.postgres.state._connect", return_value=conn),
+            patch(
+                "bollhav.postgres.state.try_acquire_lock", return_value=True
+            ) as acquire,
+            patch("bollhav.postgres.state.release_lock") as release,
+        ):
+            with model_lock(model):
+                pass
+            acquire.assert_called_once_with(conn, model)
+            release.assert_called_once_with(conn, model)
+
 
 class TestDecoratorExceptionPath:
     def test_exception_reraises_logs_failure_and_does_not_mark_applied(self) -> None:

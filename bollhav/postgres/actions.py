@@ -184,9 +184,9 @@ def _run_staging_schema_created(conn: psycopg.Connection, model: "Model") -> Non
 
 def _run_staging_table_created(conn: psycopg.Connection, model: "Model") -> None:
     from bollhav.postgres.columns import PostgresColumn
+    from bollhav.postgres.staging import _logged
 
-    logged = model.target.staging is not None and model.target.staging.logged
-    table_keyword = "TABLE" if logged else "UNLOGGED TABLE"
+    table_keyword = "TABLE" if _logged(model) else "UNLOGGED TABLE"
     col_defs = sql.SQL(",\n").join(
         sql.SQL(_col_ddl(c))
         for c in model.target.columns
@@ -202,15 +202,6 @@ def _run_staging_table_created(conn: psycopg.Connection, model: "Model") -> None
 
 
 # ── POST action implementations ────────────────────────────────────
-
-
-def _run_staging_table_truncated(conn: psycopg.Connection, model: "Model") -> None:
-    conn.execute(
-        sql.SQL("TRUNCATE TABLE {}.{}").format(
-            sql.Identifier(_staging_schema_name(model)),
-            sql.Identifier(_staging_table_name(model)),
-        )
-    )
 
 
 def _run_staging_table_dropped(conn: psycopg.Connection, model: "Model") -> None:
@@ -295,13 +286,18 @@ def _mark_applied_should_run(model: "Model") -> bool:
 
 
 def _staging_reused_cleanup_applies(model: "Model") -> bool:
+    """POST cleanup of the reused staging table only makes sense when
+    PRE actually created it this run. If the pipeline had no work to do
+    (every interval was already applied so `stage()` never ran), the
+    table doesn't exist and TRUNCATE/DROP would either fail or no-op."""
     target = model.target
     from bollhav.model.staging import StagingMode
 
     return (
         target.staging is not None
         and target.staging.mode is StagingMode.REUSED
-        and not target.staging.keep_after_flush
+        and not target.staging.keep_after_apply
+        and target._applied_model_actions.get("staging_table_created") is True
     )
 
 
@@ -363,12 +359,10 @@ def default_actions() -> list[Action]:
             should_run=_staging_table_created_applies,
         ),
         # ── POST: teardown ──
-        Action(
-            "staging_table_truncated",
-            Phase.POST_MODEL,
-            _run_staging_table_truncated,
-            should_run=_staging_reused_cleanup_applies,
-        ),
+        # Per-interval TRUNCATE at the start of each interval (inline in
+        # `stage()`) handles the inter-interval cleanup. After the last
+        # interval, DROP makes the residue irrelevant — no need to
+        # TRUNCATE first.
         Action(
             "staging_table_dropped",
             Phase.POST_MODEL,

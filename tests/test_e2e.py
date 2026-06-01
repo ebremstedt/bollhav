@@ -620,3 +620,425 @@ def test_e2e_state_rerun_is_noop_for_applied_intervals(schema_name):
     _run_intervals(m2)
     # No new rows landed — every interval was already applied.
     assert _row_count(schema_name, "orders") == 15
+
+
+# ── 14. write_mode combinations: big source → interval-paced apply ──
+#
+# The pattern these tests follow:
+#   1. Plant a "source" table in Postgres with a known number of rows
+#      across the 3-interval window (and known dup patterns for upsert).
+#   2. Drive `stage()` interval by interval — each interval reads its
+#      own window from source via SELECT and pipes the rows into the
+#      target via the staged path.
+#   3. Verify final target state and (via caplog) confirm the right
+#      SQL pattern fired at each step.
+#
+# Run with `-s` or capture DEBUG via caplog to inspect the SQL.
+
+DEBUG_LOGGERS = (
+    "bollhav.postgres.staging",
+    "bollhav.postgres.actions",
+    "bollhav.model.state",
+)
+
+
+def _enable_debug_logging(caplog):
+    """Turn on DEBUG capture for the bollhav loggers that emit
+    interesting SQL/action-level events. Tests can then assert against
+    log messages and the user can read the captured output on failure."""
+    for name in DEBUG_LOGGERS:
+        caplog.set_level(logging.DEBUG, logger=name)
+
+
+def _plant_source_table(schema: str, table: str, rows: list[dict]) -> None:
+    """Materialize a source table from a row list. Used by the
+    interval-paced apply tests as the input to read from."""
+    with psycopg.connect(_dsn()) as conn:
+        conn.execute(
+            f'CREATE SCHEMA IF NOT EXISTS "{schema}"; '
+            f'DROP TABLE IF EXISTS "{schema}"."{table}"; '
+            f'CREATE TABLE "{schema}"."{table}" ('
+            f"  id BIGINT NOT NULL,"
+            f"  customer_id BIGINT NOT NULL,"
+            f"  total NUMERIC NOT NULL,"
+            f"  order_date TIMESTAMPTZ NOT NULL,"
+            f"  status TEXT"
+            f")"
+        )
+        with conn.cursor().copy(
+            f'COPY "{schema}"."{table}" '
+            f"(id, customer_id, total, order_date, status) FROM STDIN"
+        ) as copy:
+            for r in rows:
+                copy.write_row(
+                    (
+                        r["id"],
+                        r["customer_id"],
+                        r["total"],
+                        r["order_date"],
+                        r.get("status"),
+                    )
+                )
+        conn.commit()
+
+
+def _read_source_for_interval(
+    source_schema: str,
+    source_table: str,
+    since: datetime,
+    until: datetime,
+    chunk_size: int = 100,
+) -> Generator[pl.DataFrame, None, None]:
+    """Yield chunks from the source table for the given window.
+
+    Reads everything for the window into memory FIRST and closes the
+    connection, then yields slices. The connection-per-generator
+    pattern (open conn, cursor with `fetchmany`, yield) leaves the
+    connection in "idle in transaction" if the consumer doesn't fully
+    exhaust the generator — which would block the subsequent
+    `DROP SCHEMA CASCADE` cleanup on the source table. Fully reading
+    up front avoids that footgun and is fine for test-sized data."""
+    with psycopg.connect(_dsn()) as conn:
+        rows = conn.execute(
+            f"SELECT id, customer_id, total, order_date, status "
+            f'FROM "{source_schema}"."{source_table}" '
+            f"WHERE order_date >= %s AND order_date < %s "
+            f"ORDER BY order_date",
+            [since, until],
+        ).fetchall()
+
+    for start in range(0, len(rows), chunk_size):
+        batch = rows[start : start + chunk_size]
+        yield pl.DataFrame(
+            {
+                "id": [r[0] for r in batch],
+                "customer_id": [r[1] for r in batch],
+                "total": [float(r[2]) for r in batch],
+                "order_date": [r[3] for r in batch],
+                "status": [r[4] for r in batch],
+            },
+            schema={
+                "id": pl.Int64,
+                "customer_id": pl.Int64,
+                "total": pl.Float64,
+                "order_date": pl.Datetime("us", "UTC"),
+                "status": pl.Utf8,
+            },
+        )
+
+
+def _orders_columns_with_status(*, unique_id: bool = False):
+    """Variant of `_orders_columns` that adds `status` and optionally
+    flags `id` as primary key for upsert tests."""
+    return [
+        PostgresColumn(
+            name="id",
+            data_type=PostgresType.BIGINT,
+            nullable=False,
+            primary_key=unique_id,
+            unique=unique_id,
+        ),
+        PostgresColumn(
+            name="customer_id", data_type=PostgresType.BIGINT, nullable=False
+        ),
+        PostgresColumn(name="total", data_type=PostgresType.NUMERIC, nullable=False),
+        PostgresColumn(
+            name="order_date", data_type=PostgresType.TIMESTAMPTZ, nullable=False
+        ),
+        PostgresColumn(name="status", data_type=PostgresType.TEXT, nullable=True),
+    ]
+
+
+def _drive_through_intervals(
+    model: Model,
+    source_schema: str,
+    source_table: str,
+    chunk_size: int = 100,
+):
+    """Drive `model` through its intervals, reading each from the
+    planted source table. Mirrors `_run_intervals` but uses real
+    SELECT-from-source as the data feed."""
+    from bollhav.model.load_models import _bootstrap_state_for_staged_models
+
+    model._intervals_cached = None
+    contract = list(model.intervals)
+    _bootstrap_state_for_staged_models([model], state_mode=StateMode.DISCOVER)
+    intervals = list(model.intervals) if model.state is not None else contract
+    for interval in intervals:
+        df_gen = _read_source_for_interval(
+            source_schema,
+            source_table,
+            interval.since,
+            interval.until,
+            chunk_size=chunk_size,
+        )
+        with psycopg.connect(_dsn()) as conn:
+            write(
+                conn=conn,
+                model=model,
+                df_gen=df_gen,
+                since=interval.since,
+                until=interval.until,
+            )
+
+
+def test_e2e_staging_append_target_append(schema_name, caplog):
+    """staging.write_mode=APPEND + target.write_mode=APPEND.
+
+    600 source rows across 3 daily intervals. Each interval COPYs
+    chunks into staging (no dedup), then INSERTs staging → target."""
+    _enable_debug_logging(caplog)
+    source_schema = f"src_{schema_name}"
+    _plant_source_table(
+        source_schema,
+        "orders_source",
+        [
+            {
+                "id": i,
+                "customer_id": (i % 50) + 1,
+                "total": float(i),
+                "order_date": SINCE + timedelta(hours=i),
+                "status": None,
+            }
+            # 200 rows per day, 3 days = 600 rows
+            for i in range(72)
+        ],
+    )
+    try:
+        m = _orders_model(schema_name, state=State(), staging=Staging())
+        # Switch the columns to the status-aware ones — source carries it.
+        m.target.columns = _orders_columns_with_status(unique_id=False)
+        m.target.write_mode = WriteMode.APPEND
+        _drive_through_intervals(m, source_schema, "orders_source")
+
+        # All 72 rows landed.
+        assert _row_count(schema_name, "orders") == 72
+        # State table has 3 applied rows.
+        state_rows = _state_rows(f"z_{schema_name}", "orders_state")
+        assert len(state_rows) == 3
+        assert all(status == "applied" for status, _, _ in state_rows)
+        # Debug logs show write_to_staging in APPEND mode (3 intervals × N chunks).
+        write_logs = [
+            r.message
+            for r in caplog.records
+            if "stage: wrote" in r.message and "(APPEND)" in r.message
+        ]
+        assert len(write_logs) >= 3  # at least one chunk per interval
+        # Apply logs show APPEND target mode.
+        apply_logs = [
+            r.message
+            for r in caplog.records
+            if "stage: applied" in r.message and "(APPEND)" in r.message
+        ]
+        assert len(apply_logs) == 3
+    finally:
+        _drop_schemas(source_schema)
+
+
+def test_e2e_staging_append_target_upsert(schema_name, caplog):
+    """staging.write_mode=APPEND + target.write_mode=UPSERT_NO_DELETE.
+
+    Source has UNIQUE keys (no in-stream dupes); staging COPYs raw
+    rows; the final apply MERGEs staging → target ON CONFLICT DO UPDATE.
+
+    Note: Postgres `INSERT ... ON CONFLICT DO UPDATE` cannot handle
+    multiple source rows for the same conflict key in one statement,
+    so APPEND-staging + UPSERT-target is only well-defined when the
+    source itself is deduped. For a stream WITH duplicates, see
+    `test_e2e_staging_upsert_target_upsert` which dedupes via the
+    staging-side UPSERT."""
+    _enable_debug_logging(caplog)
+    source_schema = f"src_{schema_name}"
+
+    # 100 distinct ids per day, no duplicates within the source.
+    rows = [
+        {
+            "id": 1000 * day + order_idx,
+            "customer_id": (order_idx % 20) + 1,
+            "total": float(order_idx),
+            "order_date": SINCE + timedelta(days=day, minutes=order_idx),
+            "status": "pending",
+        }
+        for day in range(3)
+        for order_idx in range(100)
+    ]
+    _plant_source_table(source_schema, "orders_source", rows)
+    try:
+        m = _orders_model(schema_name, state=State(), staging=Staging())
+        m.target.columns = _orders_columns_with_status(unique_id=True)
+        m.target.write_mode = WriteMode.UPSERT_NO_DELETE
+        m.target.unique_columns = [m.target.columns[0]]  # id
+        _drive_through_intervals(m, source_schema, "orders_source")
+
+        # 100 distinct ids × 3 days = 300 rows in target.
+        assert _row_count(schema_name, "orders") == 300
+        # No duplicate ids.
+        with _conn() as c:
+            dupes = c.execute(
+                f'SELECT id, count(*) FROM "{schema_name}"."orders" '
+                f"GROUP BY id HAVING count(*) > 1"
+            ).fetchall()
+        assert dupes == []
+        # Apply logs show UPSERT_NO_DELETE target mode.
+        apply_logs = [
+            r.message
+            for r in caplog.records
+            if "stage: applied" in r.message and "UPSERT_NO_DELETE" in r.message
+        ]
+        assert len(apply_logs) == 3
+    finally:
+        _drop_schemas(source_schema)
+
+
+def test_e2e_staging_upsert_target_upsert(schema_name, caplog):
+    """staging.write_mode=UPSERT_NO_DELETE + target.write_mode=UPSERT_NO_DELETE.
+
+    Source has the same id appearing in multiple chunks with status
+    progression — exactly the CDC-stream pattern where staging UPSERT
+    is the right shape. Each chunk has unique ids (one status round)
+    but the SAME ids appear across chunks. Staging MERGEs each chunk,
+    keeping one row per id; the final apply MERGEs that deduped
+    staging into the target."""
+    _enable_debug_logging(caplog)
+    source_schema = f"src_{schema_name}"
+
+    # 4 rounds of 50 orders each. Each round is one chunk's worth and
+    # contains unique ids (no within-chunk dupes), but the same id
+    # appears in all 4 rounds with progressing status. Timestamps space
+    # rounds an hour apart so ORDER BY order_date groups by round.
+    statuses = ["pending", "processing", "shipped", "delivered"]
+    rows = []
+    for day in range(3):
+        for step, status in enumerate(statuses):
+            for order_idx in range(50):
+                rows.append(
+                    {
+                        "id": 1000 * day + order_idx,
+                        "customer_id": (order_idx % 20) + 1,
+                        "total": float(order_idx),
+                        "order_date": SINCE
+                        + timedelta(days=day, hours=step, seconds=order_idx),
+                        "status": status,
+                    }
+                )
+    _plant_source_table(source_schema, "orders_source", rows)
+    try:
+        m = _orders_model(
+            schema_name,
+            state=State(),
+            staging=Staging(write_mode=WriteMode.UPSERT_NO_DELETE),
+        )
+        m.target.columns = _orders_columns_with_status(unique_id=True)
+        m.target.write_mode = WriteMode.UPSERT_NO_DELETE
+        m.target.unique_columns = [m.target.columns[0]]
+        # chunk_size=50 aligns each chunk to a single status round → each
+        # chunk has unique ids, so chunk-level `INSERT ... ON CONFLICT`
+        # into staging works. Dupes (different statuses for the same id)
+        # span across chunks; staging UPSERT collapses them.
+        _drive_through_intervals(m, source_schema, "orders_source", chunk_size=50)
+
+        # 50 distinct ids × 3 days = 150 rows.
+        assert _row_count(schema_name, "orders") == 150
+        # Confirm staging-side write logs show UPSERT mode (not append).
+        write_logs = [
+            r.message
+            for r in caplog.records
+            if "stage: wrote" in r.message and "(UPSERT_NO_DELETE)" in r.message
+        ]
+        assert len(write_logs) >= 3  # at least one chunk per interval
+        # And apply-side logs show UPSERT mode too.
+        apply_logs = [
+            r.message
+            for r in caplog.records
+            if "stage: applied" in r.message and "UPSERT_NO_DELETE" in r.message
+        ]
+        assert len(apply_logs) == 3
+    finally:
+        _drop_schemas(source_schema)
+
+
+def test_e2e_staging_append_target_recreate_partition(schema_name, caplog):
+    """staging.write_mode=APPEND + target.write_mode=RECREATE_PARTITION.
+
+    Source has pre-existing rows in the target's window (planted
+    directly). When the apply runs, it DELETEs the target window then
+    INSERTs from staging — net effect: target's contents for that
+    window are completely replaced by what was in staging."""
+    _enable_debug_logging(caplog)
+    source_schema = f"src_{schema_name}"
+
+    # Plant the SOURCE table with 600 rows we want to land via staging.
+    _plant_source_table(
+        source_schema,
+        "orders_source",
+        [
+            {
+                "id": i,
+                "customer_id": (i % 50) + 1,
+                "total": float(i) + 100.0,  # distinguishable from pre-existing
+                "order_date": SINCE + timedelta(hours=i),
+                "status": None,
+            }
+            for i in range(72)
+        ],
+    )
+    try:
+        # Pre-populate the target with junk rows in the window — these
+        # MUST get overwritten by the RECREATE_PARTITION apply.
+        with psycopg.connect(_dsn()) as conn:
+            conn.execute(f'CREATE SCHEMA IF NOT EXISTS "{schema_name}"')
+            conn.execute(
+                f'CREATE TABLE "{schema_name}"."orders" ('
+                f"  id BIGINT NOT NULL,"
+                f"  customer_id BIGINT NOT NULL,"
+                f"  total NUMERIC NOT NULL,"
+                f"  order_date TIMESTAMPTZ NOT NULL,"
+                f"  status TEXT"
+                f")"
+            )
+            conn.execute(
+                f'INSERT INTO "{schema_name}"."orders" VALUES '
+                f"(99999, 1, -1.0, '2024-01-01T00:00:00Z', 'junk'),"
+                f"(99998, 1, -1.0, '2024-01-02T00:00:00Z', 'junk'),"
+                f"(99997, 1, -1.0, '2024-01-03T00:00:00Z', 'junk')"
+            )
+            conn.commit()
+
+        m = _orders_model(schema_name, state=State(), staging=Staging())
+        m.target.columns = [
+            PostgresColumn(name="id", data_type=PostgresType.BIGINT, nullable=False),
+            PostgresColumn(
+                name="customer_id", data_type=PostgresType.BIGINT, nullable=False
+            ),
+            PostgresColumn(
+                name="total", data_type=PostgresType.NUMERIC, nullable=False
+            ),
+            PostgresColumn(
+                name="order_date",
+                data_type=PostgresType.TIMESTAMPTZ,
+                nullable=False,
+                partition_on=True,  # required for RECREATE_PARTITION
+            ),
+            PostgresColumn(name="status", data_type=PostgresType.TEXT, nullable=True),
+        ]
+        m.target.write_mode = WriteMode.RECREATE_PARTITION
+        # `partitioned_by` is a @property derived from columns; setting
+        # `partition_on=True` on the order_date column above is enough.
+        _drive_through_intervals(m, source_schema, "orders_source")
+
+        # 72 fresh rows, the 3 junk rows wiped.
+        assert _row_count(schema_name, "orders") == 72
+        with _conn() as c:
+            junk = c.execute(
+                f'SELECT count(*) FROM "{schema_name}"."orders" WHERE status = \'junk\''
+            ).fetchone()
+        assert junk[0] == 0
+        # Apply logs show RECREATE_PARTITION mode.
+        apply_logs = [
+            r.message
+            for r in caplog.records
+            if "stage: applied" in r.message and "RECREATE_PARTITION" in r.message
+        ]
+        assert len(apply_logs) == 3
+    finally:
+        _drop_schemas(source_schema)

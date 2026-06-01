@@ -11,8 +11,10 @@ atomic-or-neither.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
+
+from bollhav.model.write_modes import WriteMode
 
 
 class StagingMode(Enum):
@@ -30,7 +32,7 @@ class StagingMode(Enum):
     INTERVAL
         Fresh staging table per interval — `CREATE` on entry to
         `stage()`, `DROP` inside `flush`'s tx (unless
-        `keep_after_flush=True`). Use when you want each interval's
+        `keep_after_apply=True`). Use when you want each interval's
         staging artifact to be inspectable on crash, or when your
         Postgres flavour treats `TRUNCATE` poorly. Pays catalog churn
         in exchange for the per-interval lifecycle.
@@ -46,7 +48,13 @@ class StagingMode(Enum):
 
 @dataclass
 class Staging:
-    """Opt-in staging config for a Target.
+    """Neutral, database-agnostic staging config for a Target.
+
+    Backend-specific options live on subclasses next to each backend's
+    staging module — see `bollhav.postgres.staging.PostgresStaging`
+    (`logged` for UNLOGGED tables) and `bollhav.mssql.staging.MssqlStaging`.
+    `Target.staging` accepts any subclass; each backend's staging module
+    isinstance-checks for its own fields.
 
     `schema` — override the default staging schema. When unset (the
         normal case), staging tables live in `z_<target.schema.resolved>`
@@ -58,13 +66,7 @@ class Staging:
     `mode` — how the staging table relates to intervals. See
         `StagingMode` for the trade-offs. Default `REUSED` minimises
         catalog churn and is the right choice for ~all use cases.
-    `logged` — when False (default), staging tables are created
-        UNLOGGED: writes skip the WAL, giving ~2-3x faster COPY
-        throughput. A crash will truncate the staging table — fine,
-        since the interval reruns from the top anyway. Set True for
-        environments that mandate WAL on every write (compliance,
-        replication policy).
-    `keep_after_flush` — applies to `INTERVAL` mode only. When
+    `keep_after_apply` — applies to `INTERVAL` mode only. When
         False (default), the staging table is dropped inside the
         flush transaction. Set True to keep it after a successful
         flush — useful for audit (compare what was staged vs what
@@ -73,13 +75,37 @@ class Staging:
         `REUSED` mode this flag has no effect — the staging table
         always stays until the next pipeline run's bootstrap GC
         drops it.
+    `write_mode` — how each chunk lands IN the staging table. Default
+        `APPEND` bulk-inserts every chunk; pick `UPSERT_NO_DELETE` to
+        MERGE chunks into staging by `target.unique_columns`, which
+        keeps staging deduped as data arrives. Independent of how
+        staging then moves into the target: that's driven by
+        `target.write_mode` at flush time.
+
+        The four supported pairings:
+          (staging APPEND,  target APPEND)  — raw stream-and-load
+          (staging APPEND,  target UPSERT)  — collect raw, MERGE once at end
+          (staging UPSERT,  target UPSERT)  — dedup early, MERGE at end
+          (staging UPSERT,  target APPEND)  — pre-dedup before append
+        `target.write_mode = RECREATE_PARTITION` is also supported on
+        the flush side regardless of staging mode.
     """
 
     schema: str | None = None
     table_prefix: str | None = None
     mode: StagingMode = StagingMode.REUSED
-    logged: bool = False
-    keep_after_flush: bool = False
+    keep_after_apply: bool = False
+    write_mode: WriteMode = field(default=WriteMode.APPEND)
+
+    def __post_init__(self) -> None:
+        if self.write_mode not in (WriteMode.APPEND, WriteMode.UPSERT_NO_DELETE):
+            raise ValueError(
+                f"Staging.write_mode must be WriteMode.APPEND or "
+                f"WriteMode.UPSERT_NO_DELETE — got "
+                f"{self.write_mode!r}. RECREATE_PARTITION and VIEW are "
+                f"target-side concepts that don't apply to chunks landing "
+                f"in a staging table."
+            )
 
 
 __all__ = ["Staging", "StagingMode"]
