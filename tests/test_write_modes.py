@@ -166,10 +166,9 @@ class TestStagedPathEndToEnd:
         assert any("CREATE UNLOGGED TABLE" in q for q in executed)
         # Two COPY contexts on the cursor (one per chunk).
         assert conn.cursor.return_value.copy.call_count == 2
-        # Default `StagingMode.REUSED` flush: INSERT + UPDATE only —
-        # the staging table stays for the next interval.
+        # Flush: INSERT + DROP (fresh table per interval) + state UPDATE.
         assert any("INSERT INTO" in q and "SELECT" in q for q in executed)
-        assert not any("DROP TABLE" in q and "staging" in q for q in executed)
+        assert any("DROP TABLE" in q and "staging" in q for q in executed)
         assert any("status = 'applied'" in q for q in executed)
 
     def test_marker_set_after_successful_flush(self) -> None:

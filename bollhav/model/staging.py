@@ -12,38 +12,8 @@ atomic-or-neither.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import Enum
 
 from bollhav.model.write_modes import WriteMode
-
-
-class StagingMode(Enum):
-    """How the staging table's lifecycle relates to intervals.
-
-    REUSED (default)
-        One staging table per pipeline run. Created once on the
-        first interval, `TRUNCATE`d at the start of every subsequent
-        interval, never dropped by `flush` — survives across the
-        whole pipeline. Cheapest on long backfills: 1 `CREATE` +
-        N `TRUNCATE`s vs `INTERVAL`'s 2N catalog statements.
-        Fits the `Mutations` one-shot pattern via
-        `mutations.staging_table_created`.
-
-    INTERVAL
-        Fresh staging table per interval — `CREATE` on entry to
-        `stage()`, `DROP` inside `flush`'s tx (unless
-        `keep_after_apply=True`). Use when you want each interval's
-        staging artifact to be inspectable on crash, or when your
-        Postgres flavour treats `TRUNCATE` poorly. Pays catalog churn
-        in exchange for the per-interval lifecycle.
-
-    Both modes share the same table-name shape (`<prefix><run_id>`),
-    so parallel workers on the same model don't collide regardless
-    of mode.
-    """
-
-    REUSED = "reused"
-    INTERVAL = "interval"
 
 
 @dataclass
@@ -63,18 +33,13 @@ class Staging:
     `table_prefix` — override the default `<target.name>_staging_`
         prefix. Each run still appends its short `run_id` to disambiguate
         concurrent or successive runs.
-    `mode` — how the staging table relates to intervals. See
-        `StagingMode` for the trade-offs. Default `REUSED` minimises
-        catalog churn and is the right choice for ~all use cases.
-    `keep_after_apply` — applies to `INTERVAL` mode only. When
-        False (default), the staging table is dropped inside the
-        flush transaction. Set True to keep it after a successful
-        flush — useful for audit (compare what was staged vs what
-        landed). Auto orphan-GC is disabled for the model when this
-        is True; manual cleanup is the operator's responsibility. In
-        `REUSED` mode this flag has no effect — the staging table
-        always stays until the next pipeline run's bootstrap GC
-        drops it.
+    `keep_after_apply` — when False (default), each interval's staging
+        table is dropped inside the flush transaction, so staging always
+        self-cleans on the write connection. Set True to keep tables
+        after a successful flush — useful for audit (compare what was
+        staged vs what landed). Auto orphan-GC is disabled for the model
+        when this is True; manual cleanup is the operator's
+        responsibility.
     `write_mode` — how each chunk lands IN the staging table. Default
         `APPEND` bulk-inserts every chunk; pick `UPSERT_NO_DELETE` to
         MERGE chunks into staging by `target.unique_columns`, which
@@ -88,12 +53,11 @@ class Staging:
           (staging UPSERT,  target UPSERT)  — dedup early, MERGE at end
           (staging UPSERT,  target APPEND)  — pre-dedup before append
         `target.write_mode = RECREATE_PARTITION` is also supported on
-        the flush side regardless of staging mode.
+        the flush side.
     """
 
     schema: str | None = None
     table_prefix: str | None = None
-    mode: StagingMode = StagingMode.REUSED
     keep_after_apply: bool = False
     write_mode: WriteMode = field(default=WriteMode.APPEND)
 
@@ -108,4 +72,4 @@ class Staging:
             )
 
 
-__all__ = ["Staging", "StagingMode"]
+__all__ = ["Staging"]

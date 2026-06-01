@@ -4,9 +4,9 @@ then atomically apply the staged content to the target.
 Use case: an interval produces more rows than fit in memory (or one
 transaction), but the unit of recovery stays at `(since, until)`.
 Sub-batches bulk-insert (or MERGE) into a staging table; the context
-exit applies staging → target and (in INTERVAL mode) drops staging in
-one transaction, so a crash mid-stream cannot leave a half-applied
-interval visible in the target.
+exit applies staging → target and drops staging in one transaction, so
+a crash mid-stream cannot leave a half-applied interval visible in the
+target.
 
 Scope:
   * Target write modes: APPEND, UPSERT_NO_DELETE, RECREATE_PARTITION
@@ -21,7 +21,7 @@ API:
             s.write(chunk)
     # context exit: apply_atomically_to_target(...)
     #   INSERT/MERGE/(DELETE+INSERT) staging -> target
-    #   DROP staging (if mode=INTERVAL and not keep_after_apply)
+    #   DROP staging (unless keep_after_apply)
     #   commit
     # all in one transaction.
 
@@ -117,16 +117,6 @@ def _assert_supported(model: "Model") -> None:
 # ── DDL ─────────────────────────────────────────────────────────────
 
 
-def _staging_mode(model: "Model"):
-    """Resolve the configured `StagingMode` for the model. Defaults to
-    REUSED when staging is set without an explicit mode."""
-    from bollhav.model.staging import StagingMode
-
-    if model.target.staging is None or model.target.staging.mode is None:
-        return StagingMode.REUSED
-    return model.target.staging.mode
-
-
 def ensure_staging_schema(conn: pyodbc.Connection, model: "Model") -> None:
     """Idempotent CREATE SCHEMA for the staging schema. MSSQL requires
     CREATE SCHEMA to be the first statement in a batch, so it runs in
@@ -143,11 +133,10 @@ def ensure_staging_schema(conn: pyodbc.Connection, model: "Model") -> None:
 
 
 def ensure_staging_table(conn: pyodbc.Connection, model: "Model", run_id: UUID) -> None:
-    """Create the staging table if missing. Works for both REUSED (one
-    table per run) and INTERVAL (fresh per interval) — the IF NOT
-    EXISTS guard makes the REUSED case idempotent across intervals,
-    and the INTERVAL case calls this with a fresh `run_id`-derived
-    name each interval.
+    """Create the per-interval staging table if missing. Each interval's
+    apply drops it (unless `keep_after_apply`), so the next interval's
+    call CREATEs a fresh one; the IF NOT EXISTS guard just makes it
+    crash-safe to re-enter.
 
     Staging tables are always regular (fully logged) tables. Use
     `MssqlStaging` rather than the neutral `Staging` if/when MSSQL-
@@ -166,18 +155,6 @@ def ensure_staging_table(conn: pyodbc.Connection, model: "Model", run_id: UUID) 
         schema,
         table,
     )
-    cursor.commit()
-
-
-def truncate_staging_table(
-    conn: pyodbc.Connection, model: "Model", run_id: UUID
-) -> None:
-    """Clear the reused staging table before the next interval's bulk
-    insert. Only called in `StagingMode.REUSED`."""
-    schema = _staging_schema(model)
-    table = _staging_table(model, run_id)
-    cursor = conn.cursor()
-    cursor.execute(f"TRUNCATE TABLE {_b(schema)}.{_b(table)}")
     cursor.commit()
 
 
@@ -377,19 +354,16 @@ def apply_atomically_to_target(
     remains intact (GC'd on next run) and the interval reruns from the
     top — no half-applied rows, no out-of-sync state row.
 
-    On success: data is in target; staging is gone (INTERVAL mode) or
-    intact for the next interval (REUSED mode).
-    On failure: rollback. No partial write visible in target."""
+    On success: data is in target and the staging table is dropped
+    (unless `keep_after_apply`). On failure: rollback. No partial write
+    visible in target."""
     staging_schema = _staging_schema(model)
     staging_table = _staging_table(model, run_id)
     target_schema = model.target.schema.resolved
     target_table = model.target.name_resolved
 
-    from bollhav.model.staging import StagingMode
-
     keep = model.target.staging is not None and model.target.staging.keep_after_apply
-    mode = _staging_mode(model)
-    drop_after_apply = mode is StagingMode.INTERVAL and not keep
+    drop_after_apply = not keep
 
     table_names = dict(
         staging_schema=staging_schema,
@@ -541,16 +515,8 @@ def stage(
             f"{model.target.full_name!r}."
         )
 
-    from bollhav.model.staging import StagingMode
-
-    mode = _staging_mode(model)
     ensure_staging_schema(conn, model)
     ensure_staging_table(conn, model, run_id)
-    if mode is StagingMode.REUSED:
-        # The CREATE above is no-op once the table exists; TRUNCATE
-        # clears any leftover from the previous interval. Harmless on
-        # the first interval where the table was just created empty.
-        truncate_staging_table(conn, model, run_id)
     s = Stage(conn, model, run_id=run_id, since=since, until=until)
     try:
         yield s
@@ -577,6 +543,5 @@ __all__ = [
     "write_to_staging",
     "apply_atomically_to_target",
     "drop_staging_table",
-    "truncate_staging_table",
     "gc_orphan_staging_tables",
 ]

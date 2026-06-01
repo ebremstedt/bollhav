@@ -19,7 +19,6 @@ from bollhav.mssql.staging import (
     apply_atomically_to_target,
     gc_orphan_staging_tables,
     stage,
-    truncate_staging_table,
 )
 from bollhav.mssql.write_modes import write, write_dataframes
 
@@ -45,7 +44,6 @@ __all__ = [
     "gc_orphan_staging_tables",
     "merge",
     "stage",
-    "truncate_staging_table",
     "write",
     "write_dataframes",
 ]

@@ -14,9 +14,9 @@ ALTER TABLE … ADD CONSTRAINT … UNIQUE  (when columns have unique=True)
 DROP TABLE IF EXISTS …                 (when target.recreate_table=True)
 TRUNCATE TABLE …                       (when target.truncate_table=True)
 CREATE SCHEMA z_<target_schema>        (when staging is set)
-CREATE UNLOGGED TABLE <staging>        (when staging is set, REUSED mode)
-… plus POST_MODEL staging cleanup on REUSED mode
 ```
+
+(The staging *table* itself isn't a model-level action — it's created fresh per interval inside `stage()` and dropped in that interval's apply transaction.)
 
 Plus two **interval-level** actions that only fire when `state=State(...)` is set on the model:
 
@@ -26,7 +26,7 @@ POST_INTERVAL mark_applied    state row → applied               (when state se
                                                                  flipped by the staging flush)
 ```
 
-These twelve operations live in `bollhav.postgres.actions.default_actions()` — a plain list of `Action` objects. Each one is gated by a `should_run` predicate so it only fires when applicable to your model. Nothing magical: the list is open for inspection, extension, or replacement.
+These operations live in `bollhav.postgres.actions.default_actions()` — a plain list of `Action` objects. Each one is gated by a `should_run` predicate so it only fires when applicable to your model. Nothing magical: the list is open for inspection, extension, or replacement.
 
 ## Why "actions" instead of hardcoded DDL
 
@@ -98,8 +98,8 @@ Four behaviours fall out:
 
 | `default_actions` | `actions` | What runs |
 |---|---|---|
-| `None` (default) | `[]` (default) | The framework's 10 setup actions only — CREATE SCHEMA, CREATE TABLE, INDEX, UNIQUE, staging setup, staging cleanup. Every model that doesn't customise lands here. |
-| `None` | `[my_action]` | The framework's 10, then your action. Most common extension pattern — add a GRANT or ANALYZE without losing schema/table setup. |
+| `None` (default) | `[]` (default) | The framework's setup actions only — CREATE SCHEMA, CREATE TABLE, INDEX, UNIQUE, staging schema. Every model that doesn't customise lands here. |
+| `None` | `[my_action]` | The framework's defaults, then your action. Most common extension pattern — add a GRANT or ANALYZE without losing schema/table setup. |
 | `[]` | `[my_action]` | **Only** your action. CREATE TABLE does not run. The model will fail unless your action handles it. Use only when you want to take full control of setup. |
 | `[a for a in default_actions() if a.name != "indexes_created"]` | `[smart_indexes]` | The framework's 9 setup actions plus your smarter index action, replacing the default `indexes_created`. The most common selective-override pattern. |
 
@@ -119,10 +119,9 @@ default_actions()  # returns these, in this order:
 #   indexes_created         CREATE INDEX     (when target has a partitioned-by col)
 #   uniques_added           ADD CONSTRAINT   (when target has unique columns)
 #   staging_schema_created  CREATE SCHEMA z_<target_schema> (when staging is set)
-#   staging_table_created   CREATE staging table            (REUSED mode only)
 # ── POST_MODEL ──
-#   staging_table_truncated TRUNCATE staging table          (REUSED, after loop)
-#   staging_table_dropped   DROP TABLE staging              (REUSED, after loop)
+#   (none by default — the staging table is created/dropped per interval
+#    inside stage(), not via a model-level action)
 # ── PRE_INTERVAL ──
 #   mark_running            state row pending → running     (when model.state is set)
 # ── POST_INTERVAL ──

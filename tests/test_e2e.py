@@ -1,8 +1,8 @@
 """End-to-end tests against a real Postgres.
 
 These tests cover the features introduced on the `state2` branch:
-state lifecycle, mutations one-shot setup, both staging modes
-(REUSED + INTERVAL) — with and without state, library registration
+state lifecycle, mutations one-shot setup, staging (fresh table per
+interval, dropped on flush) — with and without state, library registration
 (state-tracked, VIEW with library=True, library-only TABLE),
 satisfaction-by-presence vs satisfaction-by-applied-row, auto orphan
 staging GC at bootstrap, and additive library schema migration.
@@ -41,7 +41,6 @@ from bollhav.model import (
     TargetSchema,
     WriteMode,
 )
-from bollhav.model.staging import StagingMode
 from bollhav.model.state import StateMode
 from bollhav.postgres import (
     PostgresColumn,
@@ -284,91 +283,48 @@ def test_e2e_actions_one_shot_setup(schema_name, caplog):
     _run_intervals(m)
 
     flags = [r.message for r in caplog.records if "action:" in r.message]
-    # Exactly one log per applicable PRE action across the whole run.
-    # Match suffix so `table_created` doesn't double-count
-    # `staging_table_created`.
+    # Exactly one log per applicable model-level PRE action across the run.
     assert sum(f.endswith(".table_created done") for f in flags) == 1
     assert sum(f.endswith(".schema_created done") for f in flags) == 1
     assert sum(f.endswith(".staging_schema_created done") for f in flags) == 1
-    assert sum(f.endswith(".staging_table_created done") for f in flags) == 1
+    # The staging table is created per-interval inside stage(), not via a
+    # model-level PRE action — so there is no `staging_table_created` flag.
 
 
-# ── 3. staging REUSED mode (default): CREATE once, TRUNCATE between ──
+# ── 3. staging: fresh table per interval, dropped on flush ───────────
 
 
-def test_e2e_staging_reused_mode_lifecycle(schema_name):
-    """Default mode keeps one staging table for the whole pipeline.
-    After 3 intervals: target has 15 rows, staging table still
-    exists in the state schema (empty), no orphans."""
-    m = _orders_model(
-        schema_name, state=State(), staging=Staging(mode=StagingMode.REUSED)
-    )
+def test_e2e_staging_drops_each_interval(schema_name):
+    """Staging creates a fresh table per interval and drops it inside
+    each flush. After 3 intervals: target has 15 rows and NO staging
+    tables remain."""
+    m = _orders_model(schema_name, state=State(), staging=Staging())
     _run_intervals(m)
 
     assert _row_count(schema_name, "orders") == 15
 
     state_schema = f"z_{schema_name}"
-    tables = _list_tables(state_schema)
-    staging_tables = [t for t in tables if t.startswith("orders_staging_")]
-    # Exactly one staging table — the reused one.
-    assert len(staging_tables) == 1
-    # It's empty: the last flush moved its rows into target and TRUNCATE
-    # never re-ran. (REUSED only TRUNCATEs at the *start* of each
-    # interval, not after flush.)
-    # Actually after the last interval's flush, the table still has
-    # those rows — the next pipeline's first interval would TRUNCATE.
-    # So we expect the last interval's rows here.
-    # 5 rows from the final interval.
-    assert _row_count(state_schema, staging_tables[0]) == 5
-
-
-# ── 4. staging INTERVAL mode: CREATE/DROP each interval ──────────────
-
-
-def test_e2e_staging_interval_mode_drops_each_time(schema_name):
-    """`StagingMode.INTERVAL` drops the staging table inside each
-    flush. After 3 intervals there should be NO staging tables."""
-    m = _orders_model(
-        schema_name, state=State(), staging=Staging(mode=StagingMode.INTERVAL)
-    )
-    _run_intervals(m)
-
-    assert _row_count(schema_name, "orders") == 15
-
-    state_schema = f"z_{schema_name}"
-    tables = _list_tables(state_schema)
-    staging_tables = [t for t in tables if t.startswith("orders_staging_")]
+    staging_tables = [
+        t for t in _list_tables(state_schema) if t.startswith("orders_staging_")
+    ]
     assert staging_tables == []
 
 
-# ── 5. staging without state — REUSED ────────────────────────────────
+# ── 4. staging without state — same self-cleaning behavior ───────────
 
 
-def test_e2e_staging_without_state_reused(schema_name):
-    """Staging works without state in REUSED mode: rows land in
-    target via atomic flush, no state row exists. Re-run reloads
+def test_e2e_staging_without_state(schema_name):
+    """Staging works without state: rows land in target via atomic
+    flush, no state row exists, staging self-cleans. Re-run reloads
     every interval (no `applied` gate)."""
-    m = _orders_model(schema_name, state=None, staging=Staging(mode=StagingMode.REUSED))
+    m = _orders_model(schema_name, state=None, staging=Staging())
     _run_intervals(m)
 
     assert _row_count(schema_name, "orders") == 15
-    # No state table was created.
     state_schema = f"z_{schema_name}"
     tables = _list_tables(state_schema)
     assert "orders_state" not in tables
-
-
-# ── 6. staging without state — INTERVAL ──────────────────────────────
-
-
-def test_e2e_staging_without_state_interval(schema_name):
-    m = _orders_model(
-        schema_name, state=None, staging=Staging(mode=StagingMode.INTERVAL)
-    )
-    _run_intervals(m)
-    assert _row_count(schema_name, "orders") == 15
-    state_schema = f"z_{schema_name}"
-    staging_tables = [t for t in _list_tables(state_schema) if "staging_" in t]
+    staging_tables = [t for t in tables if t.startswith("orders_staging_")]
     assert staging_tables == []
 
 
