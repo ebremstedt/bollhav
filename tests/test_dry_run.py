@@ -10,18 +10,6 @@ SINCE = datetime(2024, 1, 1, tzinfo=timezone.utc)
 UNTIL = datetime(2024, 1, 2, tzinfo=timezone.utc)
 
 
-class _IntervalsTripwire:
-    """Sentinel for `model.intervals`. Iterating or measuring it fires —
-    used to assert the dry-run code skips the intervals branch for ROW
-    mode, since reading it on a real Model would raise ValueError."""
-
-    def __iter__(self):
-        raise AssertionError("intervals should not be accessed for ROW mode")
-
-    def __len__(self):
-        raise AssertionError("intervals should not be accessed for ROW mode")
-
-
 def _cfg(**overrides):
     from bollhav.model.load_models import _RuntimeConfig
     from bollhav.model.ordering import UpstreamMode
@@ -73,12 +61,10 @@ def _mk_model(
     model.source = None
     model.description = None
     if with_batching:
-        from bollhav.model.batch import ChunkMode
-
         model.batching = MagicMock()
-        model.batching.mode = ChunkMode.INTERVAL
         model.batching.interval.expression = "@daily"
         model.batching.interval.lookback = None
+        model.batching.size = 10000
         # `intervals` is a @property on Model; MagicMock instances accept
         # arbitrary attribute assignment so we just set the value directly.
         model.intervals = [TZInterval(SINCE, UNTIL)]
@@ -124,38 +110,17 @@ class TestConcise:
         out = capsys.readouterr().out
         assert "1 × @daily" in out
 
-    def test_row_mode_shows_batch_size_not_intervals(self, capsys) -> None:
-        from bollhav.model.batch import ChunkMode
-
-        m = _mk_model()
-        m.batching.mode = ChunkMode.ROW
-        m.batching.row.batch_size = 1000
-        # Make sure `intervals` is NOT read for row mode — it raises on a
-        # real Model. Tripwire fires if dry_run iterates/measures it.
-        m.intervals = _IntervalsTripwire()
-
-        print_summary([m], _cfg())
-        out = capsys.readouterr().out
-        assert "1000 rows/chunk" in out
-
-    def test_mixed_modes_in_one_schema(self, capsys) -> None:
-        """A single schema with INTERVAL, ROW, and no-batching models — all
-        three should render side by side without crashing."""
-        from bollhav.model.batch import ChunkMode
-
+    def test_mixed_batched_and_unbatched_in_one_schema(self, capsys) -> None:
+        """A single schema with batched and no-batching models — both
+        should render side by side without crashing."""
         interval = _mk_model(full_name="public.a", name="a", schema="public")
-        row = _mk_model(full_name="public.b", name="b", schema="public")
-        row.batching.mode = ChunkMode.ROW
-        row.batching.row.batch_size = 500
-        row.intervals = _IntervalsTripwire()
         view = _mk_model(
             full_name="public.c", name="c", schema="public", with_batching=False
         )
 
-        print_summary([interval, row, view], _cfg())
+        print_summary([interval, view], _cfg())
         out = capsys.readouterr().out
         assert "1 × @daily" in out  # interval
-        assert "500 rows/chunk" in out  # row
         # view: just the name, no tail
         assert "\n  c\n" in out  # padding-respecting: just the name on its own
 

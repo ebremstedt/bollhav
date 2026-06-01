@@ -20,26 +20,6 @@ def _model_matches(
     for group in potential_tag_groups:
         if group_matches(model.tags, group):
             model.directives.reload = any(tag.reload for tag in group.tags)
-            model.directives.reload_mode = next(
-                (tag.reload_mode for tag in group.tags if tag.reload_mode is not None),
-                None,
-            )
-            model.directives.reload_batch_size = next(
-                (
-                    tag.reload_batch_size
-                    for tag in group.tags
-                    if tag.reload_batch_size is not None
-                ),
-                None,
-            )
-            model.directives.reload_interval_expression = next(
-                (
-                    tag.reload_interval_expression
-                    for tag in group.tags
-                    if tag.reload_interval_expression is not None
-                ),
-                None,
-            )
             return model
     return None
 
@@ -102,17 +82,9 @@ def match_models(
         [reload:foo]            same as [r:foo] — "reload" is a full-word alias
         [r:(foo | bar)]         match "foo" or "bar", reload=True
         r:[foo & bar]           match "foo" and "bar", reload=True for all
-        [r_row_100:foo]         match "foo", reload=True, ROW mode, batch_size=100
-        r_row_500:[foo & bar]   match "foo" and "bar", reload with ROW/500 for all
-        [r_interval_@daily:foo] reload "foo" in INTERVAL mode, interval_expression="@daily"
-        reload_interval_@hourly:[foo]   group-level, same but hourly for all
 
-    Allowed cron aliases for r_interval_ are sourced from roskarl's
-    INTERVAL_EXPRESSION_SHORTCUTS: @minutely/@minute, @hourly/@hour,
-    @daily/@day, @weekly/@week, @monthly/@month. For custom cron
-    expressions, configure the model statically or use
-    INTERVAL_EXPRESSION_OVERRIDE — arbitrary cron strings are not accepted
-    inside tags.
+    Interval and chunk size are model config, not tag overrides. To change
+    the interval expression at runtime, use INTERVAL_EXPRESSION_OVERRIDE.
 
     Raises:
         ValueError: If tags is not provided or the expression is invalid.

@@ -3,8 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 
-from bollhav.model.batch import ChunkMode
-
 
 @dataclass
 class Directives:
@@ -21,9 +19,6 @@ class Directives:
 
     # Tag-driven (set by matching)
     reload: bool = False
-    reload_mode: ChunkMode | None = None
-    reload_batch_size: int | None = None
-    reload_interval_expression: str | None = None
 
     # Pipe-driven
     latest: bool = False

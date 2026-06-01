@@ -5,7 +5,6 @@ The decorator runs everything up to and including apply_runtime_overrides,
 then calls into here instead of invoking the user's main(). Strictly
 read-only — no side effects."""
 
-from bollhav.model.batch import ChunkMode
 from bollhav.model.load_models import _RuntimeConfig
 from bollhav.model.model import Model
 from bollhav.model.tagexpr import explain_groups
@@ -91,11 +90,9 @@ def _print_models_concise(models: list[Model]) -> None:
 
 def _concise_tail(model: Model) -> str | None:
     """Right-hand column for a model row. None means no tail (view / no
-    batching). ROW-mode and INTERVAL-mode get different shapes."""
+    batching)."""
     if model.batching is None:
         return None
-    if model.batching.mode is ChunkMode.ROW:
-        return f"{model.batching.row.batch_size} rows/chunk"
     count = _format_interval_count(model.intervals)
     return f"{count} × {model.batching.interval.expression}"
 
@@ -111,16 +108,13 @@ def _print_model_extra(model: Model) -> None:
     print(f"    write mode   : {model.target.write_mode.value}")
 
     if model.batching is not None:
-        if model.batching.mode is ChunkMode.ROW:
-            print("    mode         : row")
-            print(f"    batch size   : {model.batching.row.batch_size}")
-        else:
-            intervals = model.intervals
-            print(f"    cron         : {model.batching.interval.expression}")
-            print(f"    window       : {_format_window(intervals)}")
-            print(f"    intervals    : {_format_interval_count(intervals)}")
-            if model.batching.interval.lookback:
-                print(f"    lookback     : {model.batching.interval.lookback}")
+        intervals = model.intervals
+        print(f"    cron         : {model.batching.interval.expression}")
+        print(f"    window       : {_format_window(intervals)}")
+        print(f"    intervals    : {_format_interval_count(intervals)}")
+        print(f"    batch size   : {model.batching.size}")
+        if model.batching.interval.lookback:
+            print(f"    lookback     : {model.batching.interval.lookback}")
 
     print(f"    bounds       : {_format_bounds(model)}")
     print(f"    tags         : {_format_tags(model)}")

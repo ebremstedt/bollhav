@@ -2,7 +2,7 @@
 
 # Batch
 
-How a model's work gets split into chunks. The fields below control chunk size, timezone, lookback, and retry behavior. For the higher-level "INTERVAL vs ROW" choice (and the proposed ID mode), see [Chunking](CHUNKING.md).
+How a model's work gets split into chunks. The fields below control the interval expression, row `size`, timezone, lookback, and retry behavior. For the bigger picture — intervals as the recovery unit and `size` as the streaming unit — see [Chunking](CHUNKING.md).
 
 ## interval_expression
 
@@ -29,6 +29,12 @@ Timezone used for interval resolution.
 Type: `int` · Default: `None`
 
 Extends each interval's start backwards by N cron-ticks **of the `interval_expression`**. Units are ticks, not calendar days/hours — e.g. with `interval_expression="*/15 * * * *"`, `lookback=5` is 75 minutes, not 5 days. See [RUNTIME_OVERRIDES.md](RUNTIME_OVERRIDES.md#lookback).
+
+## size
+
+Type: `int` · Default: `10000`
+
+Rows per read chunk, capped at 10000. Within a single interval, the read helpers slice the source into `size`-row frames — the streaming unit that bounds memory and gives staging fixed-size sub-batches. Independent of `interval_expression`, which controls the `(since, until)` recovery windows. See [Chunking](CHUNKING.md).
 
 ## retries
 

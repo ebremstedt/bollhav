@@ -190,7 +190,7 @@ graph TD
 
 ## Debug
 
-When `debug=True`, the model is pretty-printed at construction time — every field is dumped to stdout in a readable layout so you can see exactly how bollhav resolved the configuration: the target (catalog/schema/name, columns, write mode), source, bounds, batching (chunk mode, interval/window expressions, lookback, retries), tags (both user-supplied and auto-assembled), upstream dependencies, and directives. Use this when you're not sure what bollhav inferred from your `Model(...)` call, or when a runtime override or tag-driven mutation has reshaped the model and you want to see the final state.
+When `debug=True`, the model is pretty-printed at construction time — every field is dumped to stdout in a readable layout so you can see exactly how bollhav resolved the configuration: the target (catalog/schema/name, columns, write mode), source, bounds, batching (interval/window expressions, size, lookback, retries), tags (both user-supplied and auto-assembled), upstream dependencies, and directives. Use this when you're not sure what bollhav inferred from your `Model(...)` call, or when a runtime override or tag-driven mutation has reshaped the model and you want to see the final state.
 
 You can also call it manually at any point:
 
