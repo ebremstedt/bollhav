@@ -51,11 +51,19 @@ class State:
         to the target name to derive the state table name. Example: a
         target `orders` with default suffix produces `orders_state`;
         with `table_suffix="_history"` you get `orders_history`.
+    `exclusive_run` — when True, `model_lock(model)` takes a
+        Postgres advisory lock keyed by the model's full name, serializing
+        whole-pipeline runs of this model. Default False — `@state`'s
+        per-interval lock is enough for typical workloads (it lets two
+        workers race the same model on different intervals). Flip this
+        on if interval ordering matters or if your loop has side effects
+        that would conflict between concurrent workers.
     """
 
     dsn_env_var: str | None = None
     schema_prefix: str | None = None
     table_suffix: str | None = None
+    exclusive_run: bool = False
 
 
 class StateMode(Enum):
@@ -311,19 +319,32 @@ class ModelLockedError(RuntimeError):
 
 @contextmanager
 def model_lock(model: "Model"):
-    """Acquire a Postgres advisory lock on `model` for the duration
-    of the with-block — prevents two pipelines from concurrently
-    processing the same model. Released automatically on exit
-    (success OR exception). The user's loop wraps this around its
-    per-model iteration:
+    """Optionally acquire a Postgres advisory lock on `model` — gated
+    by `State(exclusive_run=True)`. The user's loop wraps this around
+    its per-model iteration:
 
         for model in models:
-            with model_lock(model):
+            with model_lock(model):     # no-op unless exclusive_run
                 for interval in model.intervals:
                     execute(model=model, since=interval.since, until=interval.until)
 
-    Raises `ModelLockedError` if the lock can't be acquired (another
-    pipeline holds it). Catch it to skip / wait / fail as you prefer."""
+    Behavior:
+      * `model.state is None` — no-op. Without state, there's no
+        coordination layer; lock acquisition isn't meaningful.
+      * `model.state.exclusive_run is False` (the default) — no-op.
+        `@state` already takes a per-interval advisory lock, which is
+        enough for typical workloads (lets two workers race the same
+        model on different intervals).
+      * `model.state.exclusive_run is True` — acquire a Postgres
+        advisory lock keyed by the model's full name. Released
+        automatically on exit (success OR exception). Raises
+        `ModelLockedError` if another pipeline holds it; catch to
+        skip / wait / fail.
+    """
+    if model.state is None or not model.state.exclusive_run:
+        yield
+        return
+
     backend = _backend(model)
     conn = backend._connect(model)
     try:

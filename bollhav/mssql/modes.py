@@ -108,21 +108,34 @@ def _set_input_sizes(cursor: pyodbc.Cursor, columns: list[MssqlColumn]) -> None:
     cursor.setinputsizes([_input_size_for(c) for c in columns])
 
 
-def merge(
-    conn: pyodbc.Connection,
+def _merge_via_temp(
+    cursor: pyodbc.Cursor,
+    target_table: str,
     model: Model,
     df: pl.DataFrame,
+    *,
     fast_executemany: bool = True,
 ) -> None:
-    """Upsert into target using MSSQL MERGE via a temp staging table."""
-    schema = model.target.schema.resolved
-    table = model.target.name
-    temp = f"#tmp_{table}"
+    """MERGE one DataFrame into `target_table` via a session-scoped
+    `#tmp` table.
 
+    `target_table` is the fully-bracketed `[schema].[table]` string of
+    whatever table this MERGE lands in — the real target for direct
+    upserts, or a staging table for staged upserts. The merge keys come
+    from `model.target.merge_key_columns` either way (staging mirrors
+    the target's PK/unique constraint).
+
+    Does not commit — the caller decides when to flush, so multiple
+    operations can share a transaction."""
     mssql_cols = [c for c in model.target.columns if isinstance(c, MssqlColumn)]
     all_col_names = [c.name for c in mssql_cols]
     unique_col_names = [c.name for c in model.target.merge_key_columns]
     non_unique_col_names = [c for c in all_col_names if c not in unique_col_names]
+
+    # `#tmp_` names are session-scoped in tempdb. Hash the target_table
+    # so concurrent merges into different tables in the same session
+    # don't collide on the temp name.
+    temp = f"#tmp_merge_{abs(hash(target_table)) % 10_000_000:07d}"
 
     col_defs = ", ".join(f"{_b(c.name)} {_col_type(c)}" for c in mssql_cols)
     on_clause = " AND ".join(
@@ -131,7 +144,6 @@ def merge(
     insert_cols = ", ".join(_b(c) for c in all_col_names)
     insert_vals = ", ".join(f"source.{_b(c)}" for c in all_col_names)
 
-    cursor = conn.cursor()
     cursor.execute(f"IF OBJECT_ID('tempdb..{temp}') IS NOT NULL DROP TABLE {temp}")
     cursor.execute(f"CREATE TABLE {temp} ({col_defs})")
     _bulk_insert(
@@ -147,11 +159,26 @@ def merge(
         matched_clause = ""
 
     cursor.execute(
-        f"MERGE INTO {_b(schema)}.{_b(table)} AS target "
+        f"MERGE INTO {target_table} AS target "
         f"USING {temp} AS source ON {on_clause} "
         f"{matched_clause} "
         f"WHEN NOT MATCHED THEN INSERT ({insert_cols}) VALUES ({insert_vals});"
     )
+
+
+def merge(
+    conn: pyodbc.Connection,
+    model: Model,
+    df: pl.DataFrame,
+    fast_executemany: bool = True,
+) -> None:
+    """Upsert directly into the target table using MSSQL MERGE.
+
+    Thin wrapper over `_merge_via_temp` that opens a cursor, runs the
+    merge against the target table, and commits."""
+    target_table = f"{_b(model.target.schema.resolved)}.{_b(model.target.name)}"
+    cursor = conn.cursor()
+    _merge_via_temp(cursor, target_table, model, df, fast_executemany=fast_executemany)
     cursor.commit()
 
 

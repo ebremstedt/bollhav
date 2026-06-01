@@ -45,11 +45,15 @@ Both bootstraps see the same pending rows; both loops try the same intervals; th
 
 ### Optional model-wide lock
 
-If you want stricter "one whole-pipeline run at a time per model" semantics, `model_lock` is still available:
+The per-interval lock is the right default — two workers safely parallelize across different intervals of the same model. For stricter **"one whole-pipeline run at a time per model"** semantics (rare — usually only when interval ordering matters or your loop has cross-interval side effects), set `State(exclusive_run=True)` and wrap with `model_lock`:
 
 ```python
-from bollhav.model import model_lock, ModelLockedError
+from bollhav.model import Model, State, model_lock, ModelLockedError
 
+# In the model:
+Model(state=State(exclusive_run=True), ...)
+
+# In the loop:
 for model in models:
     try:
         with model_lock(model):
@@ -60,7 +64,7 @@ for model in models:
         continue
 ```
 
-This takes one advisory lock keyed by the model's `full_name` and holds it for the entire loop. Useful when you want to prevent any parallel processing on a model, not just same-interval collisions.
+`model_lock` is a **no-op** when `state is None` or `exclusive_run is False` (the default) — safe to wrap any model preventively; the flag on `State` is what actually decides. When `exclusive_run=True`, it takes a Postgres advisory lock keyed by the model's `full_name` and holds it for the entire loop, preventing any parallel processing on that model.
 
 ## Errors
 
