@@ -340,11 +340,31 @@ def _bootstrap_state_for_staged_models(
         if model.target.staging is None:
             continue
 
-        # Every staging model — with or without state — needs:
-        #   * a run_id stashed for per-interval staging table naming
-        #   * orphan staging tables from earlier crashed runs GC'd
+        # Every staging model needs a run_id stashed for per-interval
+        # staging table naming — even when the user owns the connection.
         run_id = uuid4()
         model._state_run_id = run_id
+
+        # bollhav's managed staging bootstrap (orphan-table GC here, and
+        # state ensure/prefill below) needs a DSN to reach the DB. A
+        # staging model with no dsn_env_var configured is one where the
+        # user owns the connection in their execute — bollhav can't and
+        # needn't manage it, so skip rather than crash. State() makes a
+        # DSN mandatory, so state-enabled models fall through to the
+        # clear error raised by ensure_tables below.
+        dsn_env = (
+            model.state.dsn_env_var if model.state is not None else None
+        ) or model.target.dsn_env_var
+        if dsn_env is None and model.state is None:
+            logger.warning(
+                "staging: %s has no dsn_env_var — skipping bollhav's "
+                "managed staging bootstrap (orphan-table GC). Your execute "
+                "owns the connection; every contract interval runs.",
+                model.target.full_name,
+            )
+            continue
+
+        # Orphan staging tables from earlier crashed runs GC'd.
         try:
             pg_staging.gc_orphan_staging_tables(model)
         except ConnectionError as exc:
@@ -625,15 +645,18 @@ def _print_summary(cfg: _RuntimeConfig, models: list[Model]) -> None:
         _row("window override", cfg.window_expression_override)
     # Show STATE_MODE only when at least one matched model actually
     # has state — otherwise the env var is a no-op and listing it
-    # would be misleading clutter. STATE_DISABLED overrides with a
+    # would be misleading clutter (a staging-only model has no state
+    # table, prefill, or applied-gate). STATE_DISABLED overrides with a
     # plain "disabled" label.
-    has_staging = any(m.target.staging is not None for m in models)
+    has_state = any(m.state is not None for m in models)
     if cfg.state_disabled:
         _row("state", "disabled")
-    elif has_staging:
+    elif has_state:
         _row("state", cfg.state_mode.value)
     # Drop the trailing rule when the state banner will follow —
     # the two blocks should read as one without a divider in between.
+    # The state banner prints for any staged model.
+    has_staging = any(m.target.staging is not None for m in models)
     if not has_staging:
         print("────────────────────────────")
 
