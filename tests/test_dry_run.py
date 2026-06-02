@@ -31,7 +31,6 @@ def _cfg(**overrides):
         dry_run_extra=False,
         state_mode=StateMode.DISCOVER,
         state_disabled=False,
-        peek=False,
         debug=False,
     )
     defaults.update(overrides)
@@ -65,8 +64,8 @@ def _mk_model(
         model.batching.interval.expression = "@daily"
         model.batching.interval.lookback = None
         model.batching.size = 10000
-        # `intervals` is a @property on Model; MagicMock instances accept
-        # arbitrary attribute assignment so we just set the value directly.
+        # @load_models stashes the computed contract on `model.intervals`;
+        # dry-run reads the attribute.
         model.intervals = [TZInterval(SINCE, UNTIL)]
     else:
         model.batching = None

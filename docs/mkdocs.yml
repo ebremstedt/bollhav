@@ -89,4 +89,6 @@ nav:
   - Implementations:
       - Postgres: POSTGRES.md
       - MSSQL: MSSQL.md
+  - Design notes:
+      - Lifecycle redesign: LIFECYCLE_REDESIGN.md
   - About: ABOUT.md

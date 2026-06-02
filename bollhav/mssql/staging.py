@@ -531,7 +531,6 @@ def stage(
         raise
 
     apply_atomically_to_target(conn, model, run_id=run_id, since=since, until=until)
-    model._state_applied_via_staging = (since, until)
 
 
 __all__ = [

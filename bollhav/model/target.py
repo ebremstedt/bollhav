@@ -2,7 +2,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Callable
 
-from bollhav.model.actions import OnFailure, Phase
+from bollhav.model.actions import Level, OnFailure, Phase
 from bollhav.model.database import Database, DatabaseColumn, DatabaseIndex
 from bollhav.model.model_type import ModelType
 from bollhav.model.staging import Staging
@@ -55,6 +55,7 @@ class Target:
     on_failure: OnFailure = OnFailure.FAIL_FAST
 
     sensitive: bool = field(init=False, default=False)
+    staging_activated: bool = field(init=False, default=False)
     unique_columns: list = field(init=False, default_factory=list)
     primary_key_columns: list = field(init=False, default_factory=list)
     partitioned_by_index: bool = field(init=False, default=False)
@@ -122,7 +123,7 @@ class Target:
         """True iff every applicable PRE action has already fired
         this pipeline run.
 
-        Walks `effective_actions`, filters to `Phase.PRE_MODEL`, and checks
+        Walks `effective_actions`, filters to MODEL/PRE, and checks
         whether each action that *would apply* (i.e. `should_run`
         returns True) is recorded in `_applied_model_actions`. An action whose
         `should_run` is False is treated as "nothing to do," not
@@ -133,9 +134,9 @@ class Target:
         if self.default_actions is None:
             return False  # not yet resolved; runner will populate
         for action in self.effective_actions:
-            if action.phase is not Phase.PRE_MODEL:
+            if not (action.level is Level.MODEL and action.phase is Phase.PRE):
                 continue
-            # Runner records every processed PRE_MODEL action in
+            # Runner records every processed MODEL/PRE action in
             # `_applied_model_actions` — True if it ran, False if
             # `should_run` skipped it. Either way the key being
             # present means "the runner already made the call about
@@ -184,6 +185,7 @@ class Target:
             if self.columns
             else False
         )
+        self.staging_activated = self.staging is not None
         self.unique_columns = (
             [c for c in self.columns if getattr(c, "unique", False)]
             if self.columns

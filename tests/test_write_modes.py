@@ -54,7 +54,6 @@ def _model(*, staged=False, with_state=False, write_mode=None, staging_cfg=None)
     model.target.partitioned_by = None
     model.target.unique_columns = []
     model._state_run_id = RUN_ID
-    model._state_applied_via_staging = None
     return model
 
 
@@ -166,21 +165,11 @@ class TestStagedPathEndToEnd:
         assert any("CREATE UNLOGGED TABLE" in q for q in executed)
         # Two COPY contexts on the cursor (one per chunk).
         assert conn.cursor.return_value.copy.call_count == 2
-        # Flush: INSERT + DROP (fresh table per interval) + state UPDATE.
+        # Flush: INSERT + DROP (fresh table per interval). The state flip
+        # is decoupled — `@interval_lifecycle` does it on the state conn.
         assert any("INSERT INTO" in q and "SELECT" in q for q in executed)
         assert any("DROP TABLE" in q and "staging" in q for q in executed)
-        assert any("status = 'applied'" in q for q in executed)
-
-    def test_marker_set_after_successful_flush(self) -> None:
-        from bollhav.postgres.write_modes import write
-
-        model = _model(staged=True)
-        df_gen = _gen(pl.DataFrame({"id": [1], "amount": [1.0]}))
-
-        with patch("bollhav.postgres.write_modes.run_pre_model_actions"):
-            write(_mock_conn(), model, df_gen, since=SINCE, until=UNTIL)
-
-        assert model._state_applied_via_staging == (SINCE, UNTIL)
+        assert not any("status = 'applied'" in q for q in executed)
 
 
 # ── VIEW + unhandled modes (regression coverage on the dispatcher) ──

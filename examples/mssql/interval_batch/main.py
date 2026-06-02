@@ -61,7 +61,7 @@ def main() -> None:
     # an explicit --until rather than reading bounds.end.
     events.directives.reload = True
 
-    intervals = events.intervals
+    intervals = events.compute_intervals()
     print(
         f"\n{events.target.full_name}  "
         f"{len(intervals)} interval(s), size={events.batching.size}"

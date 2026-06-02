@@ -156,8 +156,8 @@ class TestStateAndStagingCarryThrough:
     """Regression: `apply_runtime_overrides` rebuilds the model + target,
     and used to silently drop `model.state` and `target.staging`. The
     runtime path is what `@load_models` calls, so dropping them meant
-    `@state` and the staged write path were unreachable after
-    `@load_models` — the example pipeline appeared to do nothing."""
+    the lifecycle hooks and the staged write path were unreachable
+    after `@load_models` — the example pipeline appeared to do nothing."""
 
     def test_state_carries_through(self) -> None:
         from bollhav.model.state import State

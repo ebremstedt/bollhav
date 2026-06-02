@@ -16,12 +16,12 @@ from bollhav.model.target import Target
 from bollhav.model.bounds import Bounds
 from bollhav.model.batch import Batch, IntervalChunks
 from bollhav.model.staging import Staging
+from bollhav.model.lifecycle import interval_lifecycle, model_lifecycle
 from bollhav.model.state import (
     ModelLockedError,
     State,
+    StateBackend,
     StateMode,
-    model_lock,
-    state,
 )
 from bollhav.model.tags import Tags
 from bollhav.model.progress_bar import progress_bar, ProgressLevel, name_width_for
@@ -42,9 +42,10 @@ __all__ = [
     "sort_columns",
     "Staging",
     "State",
+    "StateBackend",
     "StateMode",
-    "state",
-    "model_lock",
+    "model_lifecycle",
+    "interval_lifecycle",
     "ModelLockedError",
     "TargetSchema",
     "SourceFile",

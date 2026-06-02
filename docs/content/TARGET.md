@@ -80,4 +80,4 @@ Two lists of `Action` objects that drive the target's lifecycle. `default_action
 
 Type: `OnFailure` · Default: `FAIL_FAST`
 
-Per-target failure policy for `POST_MODEL` actions. `FAIL_FAST` re-raises and halts the pipeline POST sweep; `SKIP` logs a warning and continues to the next action. `PRE_MODEL` is always fail-fast — a half-failed setup cannot safely proceed to a write. See [Actions](ACTIONS.md).
+Per-target failure policy for MODEL/POST actions. `FAIL_FAST` re-raises and halts the pipeline POST sweep; `SKIP` logs a warning and continues to the next action. MODEL/PRE actions are always fail-fast — a half-failed setup cannot safely proceed to a write. See [Actions](ACTIONS.md).

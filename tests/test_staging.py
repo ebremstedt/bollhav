@@ -2,9 +2,9 @@
 
 Postgres connection is mocked. Covers:
   * `stage()` happy path (DDL → COPY → flush tx)
-  * exception path (no flush, marker not set)
+  * exception path (no flush)
   * preconditions (write mode, state, batching, run_id)
-  * @state bypass after a flush
+  * apply is decoupled from the state flip (no UPDATE in flush)
   * orphan staging-table GC
 
 Real-DB exercise lives in the runnable example."""
@@ -65,7 +65,6 @@ def _model(*, write_mode=None, staging_cfg=None):
     model.target.partitioned_by = None
     model.target.unique_columns = []
     model._state_run_id = RUN_ID
-    model._state_applied_via_staging = None
     return model
 
 
@@ -105,7 +104,7 @@ class TestPreconditions:
         complete no-op on every subsequent call within the same
         pipeline run because `setup_complete` short-circuits."""
         from bollhav.postgres.actions import default_actions, run_pre_model_actions
-        from bollhav.model.actions import Phase
+        from bollhav.model.actions import Level, Phase
 
         model = _model()
         model.target._applied_model_actions = {}
@@ -117,7 +116,7 @@ class TestPreconditions:
         # `setup_complete` against the live `_applied` dict.
         def _live_setup_complete() -> bool:
             for a in model.target.effective_actions:
-                if a.phase is not Phase.PRE_MODEL:
+                if not (a.level is Level.MODEL and a.phase is Phase.PRE):
                     continue
                 if not a.should_run(model.target):
                     continue
@@ -252,9 +251,10 @@ class TestHappyPath:
         assert s.rows_written == 0
         assert conn.cursor.return_value.copy.call_count == 0
 
-    def test_flush_runs_three_statements(self) -> None:
-        """Flush issues INSERT, DROP (fresh table per interval), and
-        UPDATE state — each interval is self-contained."""
+    def test_flush_runs_insert_and_drop(self) -> None:
+        """Flush issues INSERT and DROP (fresh table per interval). The
+        state flip is no longer coupled to the apply — `@interval_lifecycle`
+        marks applied separately on the state connection."""
         from bollhav.postgres.staging import stage
 
         conn = _mock_conn()
@@ -270,16 +270,7 @@ class TestHappyPath:
         ]
         assert len(insert_select) == 1
         assert len(drop) == 1
-        assert len(update_state) == 1
-
-    def test_flush_sets_state_applied_marker(self) -> None:
-        from bollhav.postgres.staging import stage
-
-        model = _model()
-        with stage(_mock_conn(), model, since=SINCE, until=UNTIL) as s:
-            s.write(pl.DataFrame({"id": [1], "amount": [1.0]}))
-
-        assert model._state_applied_via_staging == (SINCE, UNTIL)
+        assert update_state == []  # apply no longer flips state
 
 
 # ── exception path ───────────────────────────────────────────────────
@@ -298,7 +289,6 @@ class TestExceptionPath:
         executed = [str(call.args[0]) for call in conn.execute.call_args_list]
         flush_queries = [q for q in executed if "INSERT INTO" in q and "SELECT" in q]
         assert flush_queries == []
-        assert model._state_applied_via_staging is None
 
 
 # ── naming + GC ──────────────────────────────────────────────────────
@@ -469,8 +459,8 @@ class TestKeepAfterFlush:
         executed = [str(call.args[0]) for call in conn.execute.call_args_list]
         drops = [q for q in executed if "DROP TABLE" in q]
         assert drops == []
-        # state row still gets flipped — that's the atomicity story
-        assert any("status = 'applied'" in q for q in executed)
+        # apply no longer flips state — that's `@interval_lifecycle`'s job now
+        assert not any("status = 'applied'" in q for q in executed)
 
     def test_lifecycle_across_two_intervals(self) -> None:
         """Each interval CREATEs a fresh staging table and DROPs it on

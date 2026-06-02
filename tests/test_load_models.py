@@ -93,6 +93,18 @@ def _patches(
     ]
 
 
+class _FakeModel:
+    """Minimal stand-in for a Model: `@load_models` computes + stashes
+    `intervals` on each matched model, so the fake needs
+    `compute_intervals()` and an assignable `intervals` attribute."""
+
+    def __init__(self, name: str) -> None:
+        self.name = name
+
+    def compute_intervals(self):
+        return (None,)
+
+
 def _run_decorator(**env):
     """Apply patches, define a @load_models main, call it, return the kwargs
     apply_runtime_overrides was called with plus what main received."""
@@ -102,7 +114,7 @@ def _run_decorator(**env):
 
     def _fake_apm(**kwargs):
         apm_kwargs.update(kwargs)
-        return ["fake-model-1", "fake-model-2"]
+        return [_FakeModel("fake-model-1"), _FakeModel("fake-model-2")]
 
     with (
         patches[0],
@@ -114,15 +126,6 @@ def _run_decorator(**env):
             "bollhav.model.load_models.apply_runtime_overrides", side_effect=_fake_apm
         ),
         patch("bollhav.model.load_models._print_summary", lambda cfg, models: None),
-        patch(
-            "bollhav.model.load_models._bootstrap_state_for_staged_models",
-            lambda models, **kw: None,
-        ),
-        patch("bollhav.model.load_models._print_state_banner", lambda models: None),
-        patch(
-            "bollhav.model.load_models._run_post_model_actions_for_models",
-            lambda models: None,
-        ),
     ):
 
         @load_models
@@ -142,7 +145,10 @@ class TestEnvReading:
         assert apm["schema_suffix"] == "dev"
         assert apm["latest"] is False
         assert apm["upstream_mode"] is UpstreamMode.ENFORCE
-        assert received["models"] == ["fake-model-1", "fake-model-2"]
+        assert [m.name for m in received["models"]] == [
+            "fake-model-1",
+            "fake-model-2",
+        ]
         assert received["debug"] is False
 
     def test_latest_enabled_passes_through(self) -> None:
@@ -247,10 +253,6 @@ class TestDecoratorForms:
                 side_effect=_fake_apm,
             ),
             patch("bollhav.model.load_models._print_summary", lambda cfg, models: None),
-            patch(
-                "bollhav.model.load_models._bootstrap_state_for_staged_models",
-                lambda models, state_mode: None,
-            ),
         ):
 
             @load_models(folder="custom/path")

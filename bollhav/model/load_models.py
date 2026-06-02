@@ -21,7 +21,6 @@ from bollhav.model.progress_bar import get_progress_level
 from bollhav.model.state import StateMode
 
 import logging
-from uuid import uuid4
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +44,6 @@ class _RuntimeConfig:
     dry_run_extra: bool
     state_mode: StateMode
     state_disabled: bool
-    peek: bool
     debug: bool
     table_suffix: str = ""
 
@@ -105,26 +103,21 @@ def load_models(
                                       prints the exhaustive per-model block
                                       (schema, bounds, tags, source, upstream,
                                       …). Implies DRY_RUN=true
-        STATE_MODE                    respect (default) | disrespect. For
-                                      state-enabled models, controls how
-                                      pre-fill treats existing state rows.
-                                      respect = preserve applied rows;
-                                      disrespect = reset every row to pending.
-        PEEK                          bool; when true, run the state bootstrap
-                                      (so the state banner is accurate) and
-                                      then EXIT without invoking the wrapped
-                                      function. Distinct from DRY_RUN, which
-                                      skips the DB entirely.
+        STATE_MODE                    discover (default) | bulldozer. For
+                                      state-enabled models, controls how the
+                                      `@model_lifecycle` prefill treats
+                                      existing state rows. discover = preserve
+                                      applied rows; bulldozer = reset every
+                                      row to pending.
         STATE_DISABLED                bool; when true, force the pipeline to
                                       run with NO state tracking — even for
                                       models that declare state=State(...).
                                       Useful for ad-hoc/dev runs against a DB
                                       where the state tables don't exist or
-                                      you don't want to touch them. Skips the
-                                      bootstrap, banner, and any state-table
-                                      writes; @state becomes a
-                                      passthrough; write() uses the direct
-                                      path even on staging-enabled models.
+                                      you don't want to touch them. Nulls
+                                      `state` + `target.staging` so the
+                                      lifecycle hooks pass through and write()
+                                      uses the direct path.
     """
 
     def decorator(func: Callable[..., None]) -> Callable[[], None]:
@@ -147,9 +140,8 @@ def load_models(
             )
             # STATE_DISABLED forces no-state semantics on every matched
             # model — useful for ad-hoc/dev runs. Nulling `state` and
-            # `target.staging` makes the rest of the wrapper cascade
-            # naturally: bootstrap is a no-op, banner skips,
-            # @state becomes passthrough, write() routes direct.
+            # `target.staging` makes the lifecycle hooks pass through
+            # (no bootstrap, no transitions) and write() route direct.
             if cfg.state_disabled:
                 for m in models:
                     m.state = None
@@ -159,6 +151,14 @@ def load_models(
                     len(models),
                 )
 
+            # Compute each model's interval contract once — now that
+            # directives are final (apply_runtime_overrides baked the env
+            # overrides in) — and stash it on `model.intervals`. Everyone
+            # downstream reads the attribute; for state models,
+            # `@model_lifecycle` later narrows it to the actionable subset.
+            for model in models:
+                model.intervals = model.compute_intervals()
+
             _print_summary(cfg, models)
             if cfg.dry_run:
                 from bollhav.model.dry_run import print_summary
@@ -166,29 +166,12 @@ def load_models(
                 print_summary(models, cfg)
                 return
 
-            # Bollhav owns the state bootstrap for fully-managed
-            # (staging) models. Other models pass through unchanged —
-            # the user owns ensure_tables / prefill / loop for those.
-            _bootstrap_state_for_staged_models(models, state_mode=cfg.state_mode)
-
-            # State banner: per-model breakdown of pending/applied/blocked
-            # rows after the bootstrap settled. Always shown when any
-            # matched model uses staging.
-            _print_state_banner(models)
-
-            if cfg.peek:
-                # PEEK: bootstrap + banner + exit. Lets the operator
-                # answer "what does state look like for this pipeline?"
-                # without running anything.
-                return
-
+            # @load_models is discovery only: read env, apply overrides,
+            # match models, hand them to the user. State bootstrap (state
+            # tables, library registration, prefill, interval filtering)
+            # and the POST-model sweep now live in `@model_lifecycle`,
+            # which runs with the connection the user opens in `main()`.
             func(models=models, debug=cfg.debug)
-
-            # POST sweep — fires only after the user's loop returns
-            # cleanly. Per-target `on_failure` decides whether a POST
-            # exception (e.g. ANALYZE locked, GRANT denied) halts the
-            # whole sweep or just logs and continues.
-            _run_post_model_actions_for_models(models)
 
         return wrapper
 
@@ -262,7 +245,6 @@ def _read_env() -> _RuntimeConfig:
         dry_run_extra=cast(bool, env_var_bool(name="DRY_RUN_EXTRA", default=False)),
         state_mode=_resolve_state_mode(),
         state_disabled=cast(bool, env_var_bool(name="STATE_DISABLED", default=False)),
-        peek=cast(bool, env_var_bool(name="PEEK", default=False)),
         debug=cast(bool, env_var_bool(name="DEBUG", default=False)),
     )
 
@@ -285,274 +267,6 @@ def _resolve_state_mode() -> StateMode:
     return valid[raw]
 
 
-def _configured_dsn_env_var(model: Model) -> str | None:
-    """The env var bollhav would use to open its own connection to the
-    model's database (state.dsn_env_var wins, else target.dsn_env_var).
-    `None` means no DSN is configured — the user owns the connection in
-    their execute, so bollhav can't (and shouldn't try to) run its
-    managed bootstrap / post-model steps for this model."""
-    return (
-        model.state.dsn_env_var if model.state is not None else None
-    ) or model.target.dsn_env_var
-
-
-def _bootstrap_state_for_staged_models(
-    models: list[Model], *, state_mode: StateMode
-) -> None:
-    """For each model with `target.staging` set:
-
-      1. Read the model's contract — the intervals it says should exist
-         under the current bounds + batching.
-      2. Ensure the state tables exist.
-      3. Ensure the cross-pipeline library exists; register/refresh
-         this model in it.
-      4. For each contract interval, decide its status:
-         * Upstreams in the matched set are assumed to run in topo
-           order — don't block on them.
-         * For out-of-pipeline upstreams: query the library for the
-           upstream's state table, then look for an applied row that
-           exactly matches or fully encapsulates `(since, until)`.
-           If any upstream fails this check, the interval becomes
-           `blocked` with a reason; otherwise `pending`.
-      5. Pre-fill state with the per-interval statuses (respect/
-         disrespect mode controls how existing rows are treated).
-      6. Read pending-only intervals back, stash on `model.intervals`.
-
-    State DB unreachable → warn and set `model.intervals = []`. Other
-    models keep going."""
-    from bollhav.postgres import library as pg_library
-    from bollhav.postgres import staging as pg_staging
-    from bollhav.postgres import state as pg_state
-
-    matched_names = {m.target.full_name for m in models}
-
-    for model in models:
-        # Library-only registration path. Triggered when the user
-        # explicitly opts in via `Model(library=True)` and the model
-        # has no staging machinery — works the same for VIEW and
-        # state-less TABLE models. No state table is created; the
-        # library row alone makes the model claimable. Every
-        # downstream interval that references one of these is
-        # satisfied by mere presence in the library.
-        is_register_only = model.library and model.target.staging is None
-        if is_register_only:
-            try:
-                with pg_state._connect(model) as conn:
-                    pg_library.ensure_library(conn)
-                    pg_library.register(conn, model)
-            except ConnectionError as exc:
-                logger.warning(
-                    "library: registration failed for %s — %s",
-                    model.target.full_name,
-                    exc,
-                )
-            continue
-
-        if model.target.staging is None:
-            continue
-
-        # Every staging model needs a run_id stashed for per-interval
-        # staging table naming — even when the user owns the connection.
-        run_id = uuid4()
-        model._state_run_id = run_id
-
-        # bollhav's managed staging bootstrap (orphan-table GC here, and
-        # state ensure/prefill below) needs a DSN to reach the DB. A
-        # staging model with no dsn_env_var configured is one where the
-        # user owns the connection in their execute — bollhav can't and
-        # needn't manage it, so skip rather than crash. State() makes a
-        # DSN mandatory, so state-enabled models fall through to the
-        # clear error raised by ensure_tables below.
-        if _configured_dsn_env_var(model) is None and model.state is None:
-            logger.debug(
-                "staging: %s has no dsn_env_var — skipping bollhav's "
-                "managed staging bootstrap (orphan-table GC). Your execute "
-                "owns the connection; every contract interval runs.",
-                model.target.full_name,
-            )
-            continue
-
-        # Orphan staging tables from earlier crashed runs GC'd.
-        try:
-            with pg_state._connect(model) as conn:
-                pg_staging.gc_orphan_staging_tables(conn, model)
-        except ConnectionError as exc:
-            logger.warning(
-                "staging: orphan GC failed for %s — %s",
-                model.target.full_name,
-                exc,
-            )
-
-        if model.state is None:
-            # Staging without state — register in library if opted in
-            # (so downstreams can claim this table) and we're done.
-            # No state-table ensure, no prefill, no interval filtering;
-            # the user's loop runs every contract interval every time.
-            if model.library:
-                try:
-                    with pg_state._connect(model) as conn:
-                        pg_library.ensure_library(conn)
-                        pg_library.register(conn, model)
-                except ConnectionError as exc:
-                    logger.warning(
-                        "library: registration failed for %s — %s",
-                        model.target.full_name,
-                        exc,
-                    )
-            continue
-
-        contract = list(model.intervals)
-
-        try:
-            pg_state.ensure_tables(model)
-
-            with pg_state._connect(model) as conn:
-                pg_library.ensure_library(conn)
-                pg_library.register(conn, model)
-
-                # The decorator additionally re-checks at runtime, so
-                # blocked rows here are a snapshot that may flip back
-                # to processable as upstreams catch up.
-                upstreams_to_check = [
-                    u for u in model.upstream if u not in matched_names
-                ]
-                prefill_rows = []
-                for interval in contract:
-                    status, reason = _resolve_interval_status(
-                        conn,
-                        interval=interval,
-                        upstream_names=upstreams_to_check,
-                    )
-                    prefill_rows.append((interval, status, reason))
-
-                pg_state.prefill(
-                    model,
-                    run_id=run_id,
-                    intervals=prefill_rows,
-                    state_mode=state_mode,
-                    conn=conn,
-                )
-
-            # User's loop iterates EVERY non-applied row (pending,
-            # blocked, running, error). The decorator re-evaluates
-            # each one at runtime so blocked rows naturally unblock
-            # as their upstream catches up.
-            model.intervals = pg_state.read_actionable(model)
-        except ConnectionError as exc:
-            logger.warning(
-                "state: bootstrap failed for %s — skipping (intervals=[]). %s",
-                model.target.full_name,
-                exc,
-            )
-            model.intervals = []
-
-
-def _run_post_model_actions_for_models(models: list[Model]) -> None:
-    """Run POST actions for each matched model whose target declared
-    any. Called by `@load_models` AFTER the user's loop returns
-    cleanly. A loop that raises bypasses this entirely — the operator
-    re-runs and gets POST on the next clean exit.
-
-    Failure semantics per-model are controlled by `Target.on_failure`:
-    FAIL_FAST (default) re-raises and halts the sweep across models;
-    SKIP logs a warning and continues to the next action."""
-    from bollhav.postgres import state as pg_state
-    from bollhav.postgres.actions import run_post_model_actions
-
-    for model in models:
-        # Library-only models (view-only, library=True with no
-        # state/staging) — no target writes happened, so there's no
-        # POST work to do.
-        if model.target.is_view:
-            continue
-        # No dsn_env_var → the user owns the connection in their execute
-        # (e.g. a staging model they drive themselves). bollhav can't
-        # open its own connection to run managed POST actions, and the
-        # user's own staging teardown already ran — skip rather than
-        # crash on a missing DSN.
-        if _configured_dsn_env_var(model) is None:
-            continue
-        try:
-            with pg_state._connect(model) as conn:
-                run_post_model_actions(conn, model)
-        except ConnectionError as exc:
-            logger.warning(
-                "post-actions: connection failed for %s — %s",
-                model.target.full_name,
-                exc,
-            )
-
-
-def _print_state_banner(models: list[Model]) -> None:
-    """Print the post-bootstrap state banner.
-
-    Per staged model, two sub-sections:
-
-      upstream:  <model.upstream[0]>   fulfilled | blocked · CODE × N
-                 <model.upstream[1]>   ...
-                 (or "(none declared)" when the model has no upstreams)
-      state:     N pending   N applied   N blocked
-
-    The upstream section iterates `model.upstream` so the operator can
-    see *every* declared dependency and its status side-by-side —
-    upstreams not in `blocked_groups` show `fulfilled`; ones that
-    blocked something show the code(s) responsible. Look codes up in
-    docs/content/BLOCK_CODES.md.
-
-    No-op when no matched model has state tracking."""
-    from bollhav.postgres import state as pg_state
-
-    stateful = [m for m in models if m.state is not None]
-    if not stateful:
-        return
-
-    width = 60
-    title = "── state "
-    print(title + "─" * max(0, width - len(title)))
-
-    for i, model in enumerate(stateful):
-        if i > 0:
-            print()
-        print(f"  {model.target.full_name}")
-
-        try:
-            summary = pg_state.read_status_summary(model)
-        except Exception as exc:
-            print(f"    (state unavailable: {exc})")
-            continue
-
-        c = summary["counts"]
-        groups = summary["blocked_groups"]
-
-        # Map upstream name → list of (code, count) blocking it.
-        blockers_by_upstream: dict[str | None, list[tuple[str, int]]] = {}
-        for (code, up_name), n in groups.items():
-            blockers_by_upstream.setdefault(up_name, []).append((code, n))
-
-        upstreams = list(model.upstream)
-        if not upstreams:
-            print("    upstream:  (none declared)")
-        else:
-            up_w = max(len(u) for u in upstreams)
-            for j, upstream in enumerate(upstreams):
-                label = "upstream:  " if j == 0 else "           "
-                blockers = blockers_by_upstream.get(upstream, [])
-                if blockers:
-                    codes_str = ", ".join(f"{c} × {n}" for c, n in sorted(blockers))
-                    print(f"    {label}{upstream:<{up_w}}   blocked · {codes_str}")
-                else:
-                    print(f"    {label}{upstream:<{up_w}}   fulfilled")
-
-        print(
-            f"    state:     {c['pending']:>3} pending   "
-            f"{c.get('running', 0):>3} running   "
-            f"{c['applied']:>3} applied   "
-            f"{c['blocked']:>3} blocked   "
-            f"{c.get('error', 0):>3} error"
-        )
-    print("─" * width)
-
-
 def _resolve_interval_status(
     conn,
     *,
@@ -568,13 +282,11 @@ def _resolve_interval_status(
     for upstream_name in upstream_names:
         entry = pg_library.lookup(conn, upstream_name)
         if entry is None:
-            return (
-                "blocked",
-                format_block_reason(
-                    BlockCode.UPSTREAM_NOT_REGISTERED,
-                    f"upstream {upstream_name!r} not registered",
-                ),
-            )
+            # Not in the library → not an enforced dependency. Only
+            # state-tracked models register, so an unregistered name
+            # (a view, a state-less table, or a typo) is treated as
+            # documentation and does not block.
+            continue
         if not pg_library.is_satisfied(
             conn,
             entry=entry,

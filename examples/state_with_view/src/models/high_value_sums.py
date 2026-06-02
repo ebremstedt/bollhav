@@ -1,25 +1,18 @@
-"""Downstream of the view — state-tracked, claims the view as upstream.
+"""Downstream of the view — state-tracked, references the view as upstream.
 
-This is the point of the example: a state-tracked model whose
-upstream is a VIEW.
+The point of the example: a state-tracked model whose `upstream` is a
+VIEW. Views don't register in the library (only state-tracked models
+do), so this dependency is **not enforced** — it's documentation.
 
-At bootstrap:
-  1. `warehouse.orders` is in the matched set → skipped from upstream
-     check (topo order handles it).
-  2. `warehouse.v_high_value_orders` is also in the matched set →
-     skipped from upstream check.
-  3. So at bootstrap time every interval lands as `pending`.
+At bootstrap and at each interval's live re-check, the upstream
+`warehouse.v_high_value_orders` is looked up in the library and found
+to be absent. An unregistered upstream is treated as documentation, so
+the interval is **not blocked** — it proceeds as `pending` and runs.
 
-At runtime (`@state` decorator's live re-check before each interval):
-  1. Library lookup for `warehouse.v_high_value_orders`.
-  2. Entry has `model_type=VIEW`, `state_schema=NULL`, `state_table=NULL`.
-  3. `is_satisfied` returns True on presence alone — no applied-row
-     query against a non-existent state table.
-
-If you run this model WITHOUT first having run the view (e.g.
-`TAGS=[sums]` with no view registered yet), the bootstrap blocks
-every interval with `STATE_001: upstream 'warehouse.v_high_value_orders'
-not registered`.
+Enforcement happens only between state-tracked models (both registered):
+there the downstream waits for the upstream's matching interval to be
+`applied`. A view (or any state-less table) can be referenced for
+documentation, but bollhav won't gate on it.
 """
 
 from datetime import datetime, timezone
