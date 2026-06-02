@@ -28,7 +28,6 @@ class Model:
         batching: Batch | None = None,
         tagging: Tags | None = None,
         state: State | None = None,
-        library: bool = False,
         enabled: bool = True,
         debug: bool = False,
         description: str | None = None,
@@ -38,15 +37,8 @@ class Model:
         self.source = source
         self.target = target
         self.bounds = bounds or Bounds()
-        self.batching = batching  # None signals to not chunk
+        self.batching = batching
         self.state = state
-        # Opt-in: register this model in the cross-pipeline library so
-        # downstream models can claim it as an upstream. Models with
-        # `state=State(...)` or `target.staging` already auto-register;
-        # this flag covers static / no-state tables that should still
-        # be discoverable. Views always auto-register, regardless of
-        # this flag.
-        self.library = library
         self.enabled = enabled
         self.debug = debug
         self.description = description
@@ -55,24 +47,12 @@ class Model:
         self.tags: set[str] = (tagging or Tags()).assemble(
             self.target.name, self.target.schema.name, self.target.catalog
         )
+        self.intervals: tuple[TZInterval, ...] | tuple[None] = (None,)
 
-        # When set, `intervals` returns this stashed list instead of
-        # recomputing from bounds. Used by @load_models to install
-        # the state-filtered (pending-only) interval set so the user's
-        # loop sees just what's left to do.
-        self._intervals_cached: list | None = None
-
-        # Runtime state stashed by the @state decorator + action runners.
+        # Runtime state stashed by the lifecycle hooks + action runners.
         # Declared up-front so type-checkers don't complain at the
-        # mutation sites scattered around state.py / actions.py.
+        # mutation sites in state.py / lifecycle.py / actions.py.
         self._state_run_id: UUID | None = None
-        self._state_applied_via_staging: tuple[datetime, datetime] | None = None
-        # Interval window stashed by `run_pre_interval_actions` /
-        # `run_post_interval_actions` so action callables can read
-        # the current interval without it being threaded through the
-        # `Action.run(conn, model)` signature.
-        self._interval_since: datetime | None = None
-        self._interval_until: datetime | None = None
 
         if state is not None and batching is None:
             raise ValueError(
@@ -153,6 +133,14 @@ class Model:
         ]
         logger.debug("\n".join(lines))
 
+    @property
+    def state_activated(self) -> bool:
+        """True when this model tracks interval state (`state=State(...)`).
+
+        A live derivation, not a cached flag — `STATE_DISABLED` nulls
+        `self.state` at runtime, and the lifecycle hooks must see that."""
+        return self.state is not None
+
     def __repr__(self) -> str:
         return (
             f"Model("
@@ -214,10 +202,14 @@ class Model:
             prev, curr = curr, tick
         # Loop invariant: at least 2 ticks consumed before the break
         # (the cron is seeded `interval_size * 3` before now), so both
-        # `prev` and `curr` are populated. Assert is for type-narrowing —
-        # if this ever fires it means the cron iterator returned a
-        # tick >= now on the first or second call.
-        assert prev is not None and curr is not None
+        # `prev` and `curr` are populated. If this ever fires the cron
+        # iterator returned a tick >= now on the first or second call.
+        if prev is None or curr is None:
+            raise RuntimeError(
+                f"cron seeding invariant violated for {cron_expression!r} on "
+                f"{self.target.full_name!r}: iterator returned a tick >= now "
+                f"within the first two steps"
+            )
         return TZInterval(prev, curr)
 
     def _apply_lookback(self, cron_expression: str, since: datetime) -> datetime:
@@ -238,20 +230,19 @@ class Model:
         tick_size = tick2 - tick1
         return since - (tick_size * self.batching.interval.lookback)
 
-    @property
-    def intervals(self) -> list[TZInterval] | list[None]:
+    def compute_intervals(self) -> tuple[TZInterval, ...] | tuple[None]:
         """Resolve and chunk a time interval into TZIntervals.
 
-        If a list has been assigned to `model.intervals` (e.g. by
-        `@load_models` after filtering against state), that stashed
-        list is returned. Otherwise computed on every access — the
-        result depends on `datetime.now()` (via
-        `latest_complete_interval`), so callers that read it more than
-        once should snapshot it: `intervals = model.intervals`.
+        Pure computation from the model's own settings + `directives`.
+        Call this once — at a point where directives are final (e.g.
+        `@load_models` discovery, after pipe overrides bake in) — and
+        assign the result to `model.intervals`. The result depends on
+        `datetime.now()` (via `latest_complete_interval`), which is the
+        reason it isn't recomputed on every read: snapshot it once.
 
-        Returns `[None]` when the model has no `batching` configured — signalling
-        to callers that no interval filtering should be applied to the read
-        (the model runs once, unfiltered).
+        Returns `(None,)` when the model has no `batching` configured —
+        signalling to callers that no interval filtering should be
+        applied to the read (the model runs once, unfiltered).
 
         All inputs come from the model's own settings (with pipe overrides
         already baked in by `apply_pipe`) and its `directives`.
@@ -305,11 +296,8 @@ class Model:
            for "to bounds.end (with a latest-tick fallback)" use
            reload mode. Backfill never silently extends to "now."
         """
-        if self._intervals_cached is not None:
-            return self._intervals_cached
-
         if self.batching is None:
-            return [None]
+            return (None,)
 
         d = self.directives
         tz = self.batching.interval.tz
@@ -348,15 +336,7 @@ class Model:
         if self.batching.interval.lookback:
             since = self._apply_lookback(cron_expression, since)
 
-        return _chunk_interval(cron_expression, TZInterval(since, until))
-
-    @intervals.setter
-    def intervals(self, value: list | None) -> None:
-        """Stash a pre-computed interval list. `@load_models` uses this
-        after pre-filling and filtering against state, so the user's
-        loop iterates only the still-pending intervals. Assign `None`
-        to clear the cache and fall back to live computation."""
-        self._intervals_cached = value
+        return tuple(_chunk_interval(cron_expression, TZInterval(since, until)))
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, Model):

@@ -2,10 +2,10 @@
 
 These tests cover the features introduced on the `state2` branch:
 state lifecycle, mutations one-shot setup, staging (fresh table per
-interval, dropped on flush) — with and without state, library registration
-(state-tracked, VIEW with library=True, library-only TABLE),
-satisfaction-by-presence vs satisfaction-by-applied-row, auto orphan
-staging GC at bootstrap, and additive library schema migration.
+interval, dropped on flush) — with and without state, library
+registration (state-tracked models only), enforced upstreams vs
+unregistered-upstream-as-documentation, auto orphan staging GC at
+bootstrap, and additive library schema migration.
 
 Each test uses a unique `warehouse_e2e_<n>` schema so multiple tests
 can run in parallel safely. The state schema (`z_warehouse_e2e_<n>`)
@@ -132,7 +132,6 @@ def _orders_model(
     staging: Staging | None = None,
     bounds_end: datetime = UNTIL,
     upstream: list[str] | None = None,
-    library: bool = False,
 ) -> Model:
     m = Model(
         target=Target(
@@ -145,7 +144,6 @@ def _orders_model(
             columns=_orders_columns(),
         ),
         state=state,
-        library=library,
         batching=Batch(interval=IntervalChunks(expression="@daily")),
         bounds=Bounds(begin=SINCE, end=bounds_end),
         upstream=upstream or [],
@@ -184,18 +182,35 @@ def _gen_rows(
     )
 
 
+def _bootstrap(models, *, state_mode: StateMode = StateMode.DISCOVER) -> None:
+    """Run the `@model_lifecycle` setup for each model directly, on a
+    single autocommit connection — what the user's `execute_model` would
+    trigger. Stateful models go through `_bootstrap_model` (state table +
+    prefill + interval filtering); the rest through `_setup_non_state_model`
+    (staging GC + library registration)."""
+    from bollhav.model.lifecycle import _bootstrap_model, _setup_non_state_model
+    from bollhav.postgres import state as pg_state
+
+    with psycopg.connect(_dsn(), autocommit=True) as conn:
+        for model in models:
+            if model.state is not None:
+                _bootstrap_model(
+                    pg_state,
+                    model,
+                    data_conn=conn,
+                    state_conn=conn,
+                    state_mode=state_mode,
+                )
+            else:
+                _setup_non_state_model(model, data_conn=conn)
+
+
 def _run_intervals(model: Model, *, error_on_interval: int | None = None):
-    """Drive a model's intervals through the staged write path, the
-    way a user's loop would after the @load_models bootstrap.
-
-    Bootstrap is invoked directly via `_bootstrap_state_for_staged_models`
-    so we don't need env-var plumbing for `@load_models`."""
-    from bollhav.model.load_models import _bootstrap_state_for_staged_models
-
+    """Drive a model's intervals through the staged write path, the way a
+    user's `@model_lifecycle`-wrapped loop would after the bootstrap."""
     # Mint the contract before bootstrap so we know the full interval set.
-    model._intervals_cached = None  # ensure recompute
-    contract = list(model.intervals)
-    _bootstrap_state_for_staged_models([model], state_mode=StateMode.DISCOVER)
+    contract = list(model.compute_intervals())
+    _bootstrap([model])
 
     # `model.intervals` is the bootstrap's filtered set (only
     # non-applied rows when state is set). An empty list is
@@ -216,6 +231,19 @@ def _run_intervals(model: Model, *, error_on_interval: int | None = None):
             else:
                 df_gen = _gen_rows(since, until)
                 write(conn=conn, model=model, df_gen=df_gen, since=since, until=until)
+                # State flip is now a separate step (staging no longer flips
+                # it). Mark applied on the SAME connection — what
+                # @interval_lifecycle does — no new connection opened.
+                if model.state is not None:
+                    from bollhav.postgres import state as pg_state
+
+                    pg_state.mark_applied(
+                        model,
+                        run_id=model._state_run_id,
+                        since=since,
+                        until=until,
+                        conn=conn,
+                    )
 
 
 # ── helpers / queries ────────────────────────────────────────────────
@@ -345,40 +373,17 @@ def test_e2e_library_state_tracked_table_registers(schema_name):
     assert st_tbl == "orders_state"
 
 
-# ── 8. library-only TABLE: `library=True`, no state ──────────────────
+# ── 8. view-as-upstream: unregistered upstream is documentation ──────
 
 
-def test_e2e_library_only_table_registers_with_null_state(schema_name):
-    m = Model(
-        target=Target(
-            name="countries",
-            schema=TargetSchema(name=schema_name),
-            dsn_env_var="TARGET_DSN",
-        ),
-        library=True,
-    )
-    from bollhav.model.load_models import _bootstrap_state_for_staged_models
+def test_e2e_view_as_upstream_does_not_block_downstream(schema_name):
+    """orders (state+staging) → v_high_value (VIEW) → enriched
+    (state+staging, upstream=[v_high_value]).
 
-    _bootstrap_state_for_staged_models([m], state_mode=StateMode.DISCOVER)
-
-    rows = _library_rows()
-    fq = f"{schema_name}.countries"
-    matches = [r for r in rows if r[0] == fq]
-    assert len(matches) == 1
-    _, model_type, st_sch, st_tbl = matches[0]
-    assert model_type == "TABLE"
-    assert st_sch is None
-    assert st_tbl is None
-
-
-# ── 9. view-as-upstream end-to-end ───────────────────────────────────
-
-
-def test_e2e_view_as_upstream_satisfies_downstream(schema_name):
-    """orders (state+staging) → v_high_value (VIEW, library=True) →
-    enriched (state+staging, upstream=[v_high_value]). Verify
-    enriched intervals all come up as `applied` after a full run."""
-    from bollhav.model.load_models import _bootstrap_state_for_staged_models
+    Only state-tracked models register in the library, so the view is
+    NOT registered. A state downstream referencing it finds no library
+    entry and treats the upstream as documentation (not enforced) — so
+    enriched's intervals all come up `applied`, not blocked."""
 
     orders = _orders_model(schema_name, state=State(), staging=Staging())
 
@@ -394,7 +399,6 @@ def test_e2e_view_as_upstream_satisfies_downstream(schema_name):
             write_mode=WriteMode.VIEW,
             dsn_env_var="TARGET_DSN",
         ),
-        library=True,
     )
 
     enriched = _orders_model(
@@ -405,11 +409,7 @@ def test_e2e_view_as_upstream_satisfies_downstream(schema_name):
         upstream=[f"{schema_name}.v_high_value"],
     )
 
-    # Bootstrap all three at once so the library has the view row
-    # before enriched's upstream check.
-    _bootstrap_state_for_staged_models(
-        [orders, view, enriched], state_mode=StateMode.DISCOVER
-    )
+    _bootstrap([orders, view, enriched])
 
     # Run in topo order.
     _run_intervals(orders)
@@ -421,70 +421,18 @@ def test_e2e_view_as_upstream_satisfies_downstream(schema_name):
     assert len(enriched_rows) == 3
     assert all(status == "applied" for status, _, _ in enriched_rows)
 
-    lib = {r[0]: r for r in _library_rows()}
-    assert lib[f"{schema_name}.v_high_value"][1] == "VIEW"
-    assert lib[f"{schema_name}.v_high_value"][2] is None  # state_schema NULL
+    # The view is state-less → it does not register in the library.
+    lib = {r[0] for r in _library_rows()}
+    assert f"{schema_name}.v_high_value" not in lib
 
 
-# ── 10. view WITHOUT library=True does not satisfy downstream ────────
-
-
-def test_e2e_view_without_library_true_blocks_downstream(schema_name):
-    """A VIEW declared without `library=True` doesn't register —
-    downstream intervals come up `blocked` with STATE_001."""
-    from bollhav.model.load_models import _bootstrap_state_for_staged_models
-
-    view = Model(  # noqa: F841 — constructed but not in matched set on purpose; see test docstring
-        source=SourceTable(
-            name="v_orphan",
-            query="SELECT 1 AS x",
-        ),
-        target=Target(
-            name="v_orphan",
-            schema=TargetSchema(name=schema_name),
-            model_type=ModelType.VIEW,
-            write_mode=WriteMode.VIEW,
-            dsn_env_var="TARGET_DSN",
-        ),
-        # library=False (default)
-    )
-
-    enriched = _orders_model(
-        schema_name,
-        name="enriched",
-        state=State(),
-        staging=Staging(),
-        upstream=[f"{schema_name}.v_orphan"],
-    )
-
-    # Bootstrap only enriched — putting the (unregistered) view in
-    # the matched set would make the bootstrap skip the upstream
-    # check (in-pipeline upstreams are trusted to come up via topo
-    # order). The whole point of this test is that the *missing*
-    # library entry should cause STATE_001.
-    _bootstrap_state_for_staged_models([enriched], state_mode=StateMode.DISCOVER)
-
-    state_schema = f"z_{schema_name}"
-    # Enriched should have 3 blocked rows.
-    with _conn() as c:
-        rows = c.execute(
-            f'SELECT status, blocked_reason FROM "{state_schema}"."enriched_state" '
-            "ORDER BY since"
-        ).fetchall()
-    assert len(rows) == 3
-    assert all(status == "blocked" for status, _ in rows)
-    assert all(reason.startswith("STATE_001:") for _, reason in rows)
-    assert all("v_orphan" in reason for _, reason in rows)
-
-
-# ── 11. orphan staging GC at bootstrap ───────────────────────────────
+# ── 9. orphan staging GC at bootstrap ────────────────────────────────
 
 
 def test_e2e_orphan_staging_gc_at_bootstrap(schema_name):
     """Seed an orphan staging table from a prior fake run, then
     bootstrap a new run on the same model. The orphan should be
     dropped by the auto-GC at bootstrap."""
-    from bollhav.model.load_models import _bootstrap_state_for_staged_models
 
     state_schema = f"z_{schema_name}"
     # Make the schema and a fake orphan staging table.
@@ -499,7 +447,7 @@ def test_e2e_orphan_staging_gc_at_bootstrap(schema_name):
     assert "orders_staging_dead0000" in before
 
     m = _orders_model(schema_name, state=State(), staging=Staging())
-    _bootstrap_state_for_staged_models([m], state_mode=StateMode.DISCOVER)
+    _bootstrap([m])
 
     after = [t for t in _list_tables(state_schema) if "staging_" in t]
     assert "orders_staging_dead0000" not in after
@@ -512,7 +460,7 @@ def test_e2e_library_migration_is_additive(schema_name):
     """Seed an old-shape `model_library` (no model_type column,
     state_schema/table NOT NULL). Bootstrap should ALTER it in place
     — no DROP — and the existing row should survive."""
-    from bollhav.postgres.library import ensure_library
+    from bollhav.postgres.library import library_ensure
 
     _drop_library()
     with psycopg.connect(_dsn(), autocommit=True) as c:
@@ -533,7 +481,7 @@ def test_e2e_library_migration_is_additive(schema_name):
         )
 
     with psycopg.connect(_dsn()) as c:
-        ensure_library(c)
+        library_ensure(c)
         c.commit()
 
     # New column present
@@ -714,11 +662,9 @@ def _drive_through_intervals(
     """Drive `model` through its intervals, reading each from the
     planted source table. Mirrors `_run_intervals` but uses real
     SELECT-from-source as the data feed."""
-    from bollhav.model.load_models import _bootstrap_state_for_staged_models
 
-    model._intervals_cached = None
-    contract = list(model.intervals)
-    _bootstrap_state_for_staged_models([model], state_mode=StateMode.DISCOVER)
+    contract = list(model.compute_intervals())
+    _bootstrap([model])
     intervals = list(model.intervals) if model.state is not None else contract
     for interval in intervals:
         df_gen = _read_source_for_interval(
@@ -736,6 +682,18 @@ def _drive_through_intervals(
                 since=interval.since,
                 until=interval.until,
             )
+            # Staging no longer flips state — mark applied on the same
+            # connection, the way @interval_lifecycle does.
+            if model.state is not None:
+                from bollhav.postgres import state as pg_state
+
+                pg_state.mark_applied(
+                    model,
+                    run_id=model._state_run_id,
+                    since=interval.since,
+                    until=interval.until,
+                    conn=conn,
+                )
 
 
 def test_e2e_staging_append_target_append(schema_name, caplog):

@@ -45,7 +45,11 @@ def _resolve_cron_interval(
     # Loop invariant: cron is seeded `interval_size * 3` before now,
     # so at least 2 ticks have been consumed before the break and both
     # `prev` and `curr` are populated.
-    assert prev is not None and curr is not None
+    if prev is None or curr is None:
+        raise RuntimeError(
+            f"cron seeding invariant violated for {expression!r}: the iterator "
+            f"returned a tick >= now within the first two steps"
+        )
     return prev, curr
 
 

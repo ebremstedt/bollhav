@@ -115,14 +115,6 @@ def _assert_supported(model: "Model") -> None:
             "stage() can't operate on a VIEW target — there's no row stream "
             "to land. VIEWs are CREATE OR REPLACE, not chunked writes."
         )
-    if model.state is not None and model.state.dsn_env_var is not None:
-        raise NotImplementedError(
-            f"stage() currently requires state to share a DB with the target "
-            f"(leave State() without dsn_env_var) — the atomic apply moves "
-            f"data and flips the state row in one transaction, which can't "
-            f"span databases. Got state.dsn_env_var="
-            f"{model.state.dsn_env_var!r} on {model.target.full_name!r}."
-        )
 
 
 # ── DDL ─────────────────────────────────────────────────────────────
@@ -450,18 +442,10 @@ def apply_atomically_to_target(
                     table=sql.Identifier(staging_table),
                 )
             )
-        if model.state is not None:
-            conn.execute(
-                sql.SQL(
-                    "UPDATE {schema}.{table} "
-                    "SET status = 'applied', applied_at = now(), run_id = %s "
-                    "WHERE since = %s AND until = %s"
-                ).format(
-                    schema=sql.Identifier(pg_state._state_schema(model)),
-                    table=sql.Identifier(pg_state._state_table(model)),
-                ),
-                [str(run_id), since, until],
-            )
+        # State is flipped to `applied` separately, by the interval
+        # lifecycle's `mark_applied` after this returns — not inside the
+        # data-move transaction. The data write commits here; the state
+        # flip follows (non-atomic, data → state).
     logger.debug(
         "stage: applied %s..%s for %s (%s)",
         since,
@@ -567,9 +551,9 @@ def stage(
                 s.write(chunk)
 
     The model is expected to have `_state_run_id` already stashed (the
-    user's pipeline setup mints one per invocation). On a clean exit
-    the apply sets `model._state_applied_via_staging = (since, until)`
-    so `@state` skips its own (redundant) mark_applied.
+    user's pipeline setup mints one per invocation). On a clean exit the
+    data is committed to the target; the interval lifecycle flips the
+    state row to `applied` afterward (separate, non-atomic step).
 
     On exception inside the with-block the staging table is left in
     place for `gc_orphan_staging_tables()` to clean up next run. The
@@ -606,7 +590,6 @@ def stage(
         raise
 
     apply_atomically_to_target(conn, model, run_id=run_id, since=since, until=until)
-    model._state_applied_via_staging = (since, until)
 
 
 __all__ = [

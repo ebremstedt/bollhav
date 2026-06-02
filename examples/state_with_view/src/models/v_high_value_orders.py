@@ -1,24 +1,14 @@
 """High-value orders — a VIEW on top of `warehouse.orders`.
 
-Views don't have intervals or state. To be claimable as an upstream
-by a downstream model, the view-model opts in to the library with
-`library=True` — same opt-in mechanism as a state-less TABLE.
+Views have no intervals or state, so they don't register in the
+cross-pipeline library (only state-tracked models do). The downstream
+`high_value_sums` declares this view as an `upstream`, but since the
+view isn't in the library that dependency isn't *enforced* — it's
+treated as documentation. The downstream's intervals proceed (pending)
+rather than blocking on the unregistered view.
 
-The downstream `high_value_sums` model declares this view as an
-upstream. When the downstream bootstraps, it looks the view up in
-the library:
-
-  * Library row found → satisfied (presence is enough — views are
-    time-agnostic, they reflect their underlying table at query
-    time).
-  * Library row missing (`library=True` not set on this model, or it
-    has never run) → downstream intervals come up as `blocked` with
-    reason `STATE_001: upstream 'warehouse.v_high_value_orders' not
-    registered`.
-
-A view declared without `library=True` is still a valid bollhav
-model — bollhav will `CREATE OR REPLACE VIEW` it — it just won't
-appear in the library and therefore can't be claimed as an upstream.
+bollhav still `CREATE OR REPLACE VIEW`s this model on each run; it just
+isn't part of the enforced dependency graph.
 """
 
 from bollhav.model import (
@@ -45,6 +35,5 @@ v_high_value_orders = Model(
         dsn_env_var="TARGET_DSN",
     ),
     upstream=["warehouse.orders"],
-    library=True,  # opt in so `high_value_sums` can claim it as upstream
     tagging=Tags(tags={"view"}),
 )

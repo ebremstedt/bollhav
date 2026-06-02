@@ -42,20 +42,20 @@ def test_batching_defaults_to_none_when_unspecified():
     """No batching kwarg = no chunking. model.intervals returns [None]."""
     m = Model(target=Target(name="orders"))
     assert m.batching is None
-    assert m.intervals == [None]
+    assert m.compute_intervals() == (None,)
 
 
 def test_intervals_reload_without_bounds_raises():
     m = make_model()
     m.directives.reload = True
     with pytest.raises(ValueError, match="reload requires bounds.begin"):
-        m.intervals
+        m.compute_intervals()
 
 
 def test_intervals_backfill_without_since_or_bounds_raises():
     m = make_model()
     with pytest.raises(ValueError, match="backfill requires a since value"):
-        m.intervals
+        m.compute_intervals()
 
 
 def test_intervals_backfill_falls_back_to_bounds_for_since_but_requires_until():
@@ -65,12 +65,12 @@ def test_intervals_backfill_falls_back_to_bounds_for_since_but_requires_until():
     via `directives.until` (i.e. `BACKFILL_UNTIL`)."""
     m = make_model(bounds=Bounds(begin=datetime(2026, 1, 1, tzinfo=timezone.utc)))
     with pytest.raises(ValueError, match="backfill requires an explicit until"):
-        _ = m.intervals
+        _ = m.compute_intervals()
 
     # Set until → backfill window resolves cleanly using bounds.begin
     # for the since side and directives.until for the until side.
     m.directives.until = datetime(2026, 1, 3, tzinfo=timezone.utc)
-    intervals = m.intervals
+    intervals = m.compute_intervals()
     assert len(intervals) > 0
     assert intervals[0].since == datetime(2026, 1, 1, tzinfo=timezone.utc)
     assert intervals[-1].until == datetime(2026, 1, 3, tzinfo=timezone.utc)

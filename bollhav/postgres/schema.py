@@ -1,6 +1,6 @@
 """Schema helpers shared between the action system and other modules.
 
-The full PRE_MODEL setup (CREATE SCHEMA / CREATE TABLE / DROP /
+The full MODEL/PRE setup (CREATE SCHEMA / CREATE TABLE / DROP /
 TRUNCATE / CREATE INDEX / ADD UNIQUE) lives as `Action` entries in
 `bollhav.postgres.actions.default_actions()`. Call
 `run_pre_model_actions(conn, model)` to fire them.
@@ -13,7 +13,7 @@ This module exposes:
     the framework's CREATE TABLE action and the staging table DDL.
   * `ensure_schema_and_table` and `ensure_table` — public façades
     over `run_pre_model_actions`. Same effect: run every applicable
-    PRE_MODEL action against this model's target. The two names are
+    MODEL/PRE action against this model's target. The two names are
     synonyms; both exist as friendly aliases for users who want a
     verb-style entrypoint rather than reaching into the action
     runner directly.
@@ -59,7 +59,7 @@ def ensure_schema(conn: psycopg.Connection, schema: str) -> None:
 
 
 def ensure_schema_and_table(conn: psycopg.Connection, model: Model) -> None:
-    """Public façade — run every applicable PRE_MODEL action for the
+    """Public façade — run every applicable MODEL/PRE action for the
     given model. Equivalent to calling `run_pre_model_actions` directly;
     kept as a verb-style entrypoint for callers who don't want to reach
     into the action-runner module."""

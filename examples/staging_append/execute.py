@@ -1,30 +1,27 @@
-"""Per-interval execute function.
+"""Per-interval execute function, wrapped by `@interval_lifecycle`.
 
-`@state` wraps this: gates on the state row (skip if applied),
-runs, then either lets the staged flush flip the state row inside its
-own tx, or — for non-staged models — issues `mark_applied` after a
-successful run.
+The hook gates on the state row (skip if applied), takes the
+per-interval advisory lock, marks the row `running`, runs this body,
+then marks it `applied` on a clean return (or `error` on exception).
 
-The `write()` call is the same shape regardless of staging: bollhav
-dispatches internally on `model.target.staging` (set on the model in
-`src/models/orders.py`).
+The connection is passed in — the loop in `main.py` opens it and threads
+it through as `data_conn`. `write()` is the same shape regardless of
+staging: bollhav dispatches internally on `model.target.staging` (set
+on the model in `src/models/orders.py`).
 """
 
 from __future__ import annotations
 
 import os
 import time
-from datetime import datetime
 
-import psycopg
-
-from bollhav.model import Model, state
+from bollhav.model import Model, interval_lifecycle
 from bollhav.postgres import write
 from mock_read import read
 
 
-@state
-def execute(model: Model, since: datetime, until: datetime) -> None:
+@interval_lifecycle
+def execute_interval(model: Model, interval, data_conn, state_conn=None) -> None:
     # Optional artificial delay — gives the dashboard time to show the
     # `running` spinner before the row flips to `applied`. Default: no
     # sleep. Set SLEEP_PER_INTERVAL=2 to slow each interval by 2s.
@@ -32,6 +29,11 @@ def execute(model: Model, since: datetime, until: datetime) -> None:
     if sleep_for > 0:
         time.sleep(sleep_for)
 
-    df_gen = read(since=since, until=until)
-    with psycopg.connect(os.environ[model.target.dsn_env_var]) as conn:
-        write(conn=conn, model=model, df_gen=df_gen, since=since, until=until)
+    df_gen = read(since=interval.since, until=interval.until)
+    write(
+        conn=data_conn,
+        model=model,
+        df_gen=df_gen,
+        since=interval.since,
+        until=interval.until,
+    )

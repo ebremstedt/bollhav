@@ -1,25 +1,28 @@
 """Entry point.
 
-`@load_models` discovers models in `src/models/` and runs the state
-bootstrap. The view-model auto-registers in the library so the
-downstream `high_value_sums` sees it as a satisfied upstream — no
-`STATE_001: not registered` block, no `STATE_002: no applied row`
-block, just `pending` intervals from the start.
+`@load_models` discovers models in `src/models/`. This main opens the
+connection and threads it through the lifecycle hooks. `@model_lifecycle`
+registers the view-model in the library (so the downstream
+`high_value_sums` sees it as a satisfied upstream — no
+`STATE_001: not registered` or `STATE_002: no applied row` block) and
+bootstraps the state-tracked tables.
 
 The loop iterates models in topological order (no upstream → first):
-  1. `warehouse.orders`            — 3 daily intervals, state+staging
+  1. `warehouse.orders`              — 3 daily intervals, state+staging
   2. `warehouse.v_high_value_orders` — single CREATE OR REPLACE VIEW
-  3. `warehouse.high_value_sums`   — 3 daily intervals, state+staging
+  3. `warehouse.high_value_sums`     — 3 daily intervals, state+staging
 
-For the view, `model.intervals` is `[None]` — the loop runs it once
-with `since=until=None`.
+For the view, `model.intervals` is `(None,)` — the loop runs it once,
+and `@interval_lifecycle` passes through (no state) to the CREATE.
 """
 
 import logging
 import os
 
-from bollhav.model import Model, load_models
-from execute import execute
+import psycopg
+
+from bollhav.model import Model, load_models, model_lifecycle
+from execute import execute_interval
 
 
 def setup_logging(debug: bool) -> None:
@@ -29,25 +32,29 @@ def setup_logging(debug: bool) -> None:
     )
 
 
+@model_lifecycle
+def execute_model(model: Model, data_conn, state_conn=None) -> None:
+    intervals = model.intervals
+    print(f"\n{model.target.full_name}  {len(intervals)} step(s) to process")
+    for interval in intervals:
+        label = (
+            f"{interval.since.date()} → {interval.until.date()}"
+            if interval
+            else "(single shot — view)"
+        )
+        print(f"  {label}", flush=True)
+        execute_interval(model, interval, data_conn, state_conn)
+    print()
+
+
 @load_models
 def main(models: list[Model], debug: bool) -> None:
     setup_logging(debug=debug)
 
     for model in models:
-        intervals = model.intervals
-        print(f"\n{model.target.full_name}  {len(intervals)} step(s) to process")
-        for interval in intervals:
-            since, until = (
-                (interval.since, interval.until) if interval else (None, None)
-            )
-            label = (
-                f"{since.date()} → {until.date()}"
-                if interval
-                else "(single shot — view)"
-            )
-            print(f"  {label}", flush=True)
-            execute(model=model, since=since, until=until)
-        print()
+        dsn = os.environ[model.target.dsn_env_var]
+        with psycopg.connect(dsn, autocommit=True) as conn:
+            execute_model(model, conn)
 
 
 if __name__ == "__main__":

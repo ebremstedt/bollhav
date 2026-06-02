@@ -210,7 +210,7 @@ class TestIntervalsTimezone:
             interval_expression_override="0 * * * *",
             latest=True,
         )
-        intervals = model.intervals
+        intervals = list(model.compute_intervals())
         assert len(intervals) == 1
         assert intervals[0].since == datetime(2024, 6, 15, 15, 0, tzinfo=CET)
         assert intervals[0].until == datetime(2024, 6, 15, 16, 0, tzinfo=CET)
@@ -222,7 +222,7 @@ class TestIntervalsTimezone:
             interval_expression_override="0 * * * *",
             latest=True,
         )
-        intervals = model.intervals
+        intervals = list(model.compute_intervals())
         assert len(intervals) == 1
         assert intervals[0].since == datetime(2024, 6, 15, 13, 0, tzinfo=UTC)
         assert intervals[0].until == datetime(2024, 6, 15, 14, 0, tzinfo=UTC)
@@ -236,7 +236,7 @@ class TestIntervalsTimezone:
             tz_override=UTC,
             latest=True,
         )
-        intervals = model.intervals
+        intervals = list(model.compute_intervals())
         assert len(intervals) == 1
         assert intervals[0].since == datetime(2024, 6, 15, 13, 0, tzinfo=UTC)
         assert intervals[0].until == datetime(2024, 6, 15, 14, 0, tzinfo=UTC)
@@ -250,7 +250,7 @@ class TestIntervalsTimezone:
             tz_override=None,
             latest=True,
         )
-        intervals = model.intervals
+        intervals = list(model.compute_intervals())
         assert len(intervals) == 1
         assert intervals[0].since == datetime(2024, 6, 15, 15, 0, tzinfo=CET)
         assert intervals[0].until == datetime(2024, 6, 15, 16, 0, tzinfo=CET)
@@ -265,7 +265,7 @@ class TestIntervalsLookback:
             interval_expression_override="0 * * * *",
             latest=True,
         )
-        intervals = model.intervals
+        intervals = list(model.compute_intervals())
         assert intervals[0].since == datetime(2024, 6, 15, 10, 0, tzinfo=UTC)
         assert intervals[-1].until == datetime(2024, 6, 15, 14, 0, tzinfo=UTC)
         assert len(intervals) == 4
@@ -278,7 +278,7 @@ class TestIntervalsLookback:
             since=datetime(2024, 6, 15, 12, 0, tzinfo=UTC),
             until=datetime(2024, 6, 15, 14, 0, tzinfo=UTC),
         )
-        intervals = model.intervals
+        intervals = list(model.compute_intervals())
         assert intervals[0].since == datetime(2024, 6, 15, 10, 0, tzinfo=UTC)
         assert intervals[-1].until == datetime(2024, 6, 15, 14, 0, tzinfo=UTC)
         assert len(intervals) == 4
@@ -290,7 +290,7 @@ class TestIntervalsLookback:
             since=datetime(2024, 6, 15, 12, 0, tzinfo=UTC),
             until=datetime(2024, 6, 15, 14, 0, tzinfo=UTC),
         )
-        intervals = model.intervals
+        intervals = list(model.compute_intervals())
         assert intervals[0].since == datetime(2024, 6, 15, 12, 0, tzinfo=UTC)
         assert len(intervals) == 2
 
@@ -308,7 +308,7 @@ class TestIntervalsNoneInputs:
             since=datetime(2024, 6, 15, 12, 0, tzinfo=UTC),
         )
         with pytest.raises(ValueError, match="backfill requires an explicit until"):
-            _ = model.intervals
+            _ = model.compute_intervals()
 
     @travel(datetime(2024, 6, 15, 14, 35, tzinfo=UTC))
     def test_until_set_explicitly_in_backfill_is_honored(self) -> None:
@@ -320,7 +320,7 @@ class TestIntervalsNoneInputs:
             since=datetime(2024, 6, 15, 12, 0, tzinfo=UTC),
             until=datetime(2024, 6, 15, 14, 0, tzinfo=UTC),
         )
-        intervals = model.intervals
+        intervals = list(model.compute_intervals())
         assert intervals[0].since == datetime(2024, 6, 15, 12, 0, tzinfo=UTC)
         assert intervals[-1].until == datetime(2024, 6, 15, 14, 0, tzinfo=UTC)
         assert len(intervals) == 2
@@ -334,7 +334,7 @@ class TestIntervalsNoneInputs:
             interval_expression_override="0 * * * *",
             latest=True,
         )
-        intervals = model.intervals
+        intervals = list(model.compute_intervals())
         assert intervals[-1].until == datetime(2024, 6, 15, 14, 0, tzinfo=UTC)
 
     def test_since_none_without_latest_raises(self) -> None:
@@ -344,7 +344,7 @@ class TestIntervalsNoneInputs:
             until=datetime(2024, 6, 15, 14, 0, tzinfo=UTC),
         )
         with pytest.raises(ValueError, match="backfill requires a since value"):
-            model.intervals
+            model.compute_intervals()
 
     @travel(datetime(2024, 6, 15, 14, 35, tzinfo=UTC))
     def test_both_none_without_latest_raises(self) -> None:
@@ -352,7 +352,7 @@ class TestIntervalsNoneInputs:
             interval_expression="@hourly", interval_expression_override="0 * * * *"
         )
         with pytest.raises(ValueError, match="backfill requires a since value"):
-            model.intervals
+            model.compute_intervals()
 
     @travel(datetime(2024, 6, 15, 14, 35, tzinfo=UTC))
     def test_both_none_with_latest_resolves(self) -> None:
@@ -361,7 +361,7 @@ class TestIntervalsNoneInputs:
             interval_expression_override="0 * * * *",
             latest=True,
         )
-        intervals = model.intervals
+        intervals = list(model.compute_intervals())
         assert len(intervals) == 1
         assert intervals[0].since == datetime(2024, 6, 15, 13, 0, tzinfo=UTC)
         assert intervals[0].until == datetime(2024, 6, 15, 14, 0, tzinfo=UTC)
@@ -373,7 +373,7 @@ class TestIntervalsNoneInputs:
             since=datetime(2024, 6, 15, 12, 0, tzinfo=UTC),
             until=datetime(2024, 6, 15, 14, 0, tzinfo=UTC),
         )
-        intervals = model.intervals
+        intervals = list(model.compute_intervals())
         assert len(intervals) == 2
         assert intervals[0].since == datetime(2024, 6, 15, 12, 0, tzinfo=UTC)
         assert intervals[0].until == datetime(2024, 6, 15, 13, 0, tzinfo=UTC)

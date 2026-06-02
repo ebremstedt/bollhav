@@ -16,9 +16,30 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from bollhav.model.state import StateMode
+
 
 SINCE = datetime(2024, 1, 1, tzinfo=timezone.utc)
 UNTIL = datetime(2024, 1, 2, tzinfo=timezone.utc)
+
+
+def _bootstrap(models, *, state_mode: StateMode = StateMode.DISCOVER) -> None:
+    """Drive `@model_lifecycle`'s setup for each model on a mocked
+    connection: stateful → `_bootstrap_model`; state-less →
+    `_setup_non_state_model`. Backend calls are patched by each test."""
+    from bollhav.model.lifecycle import _bootstrap_model, _setup_non_state_model
+    from bollhav.postgres import state as pg_state
+
+    conn = MagicMock()
+    conn.__enter__ = MagicMock(return_value=conn)
+    conn.__exit__ = MagicMock(return_value=None)
+    for model in models:
+        if model.state is not None:
+            _bootstrap_model(
+                pg_state, model, data_conn=conn, state_conn=conn, state_mode=state_mode
+            )
+        else:
+            _setup_non_state_model(model, data_conn=conn)
 
 
 def _mock_conn(fetchone_value=None, rowcount=0):
@@ -64,10 +85,10 @@ def _model(
 
 class TestEnsureLibrary:
     def test_creates_schema_and_table(self) -> None:
-        from bollhav.postgres.library import ensure_library
+        from bollhav.postgres.library import library_ensure
 
         conn = _mock_conn()
-        ensure_library(conn)
+        library_ensure(conn)
 
         executed = [str(call.args[0]) for call in conn.execute.call_args_list]
         assert any("CREATE SCHEMA IF NOT EXISTS" in q for q in executed)
@@ -86,11 +107,11 @@ class TestRegister:
     state_table)."""
 
     def test_table_writes_state_pointers(self) -> None:
-        from bollhav.postgres.library import register
+        from bollhav.postgres.library import library_register_model
 
         m = _model(full_name="warehouse.orders", upstream=["raw.orders"])
         conn = _mock_conn()
-        register(conn, m)
+        library_register_model(conn, m)
 
         insert_calls = [
             c for c in conn.execute.call_args_list if "INSERT INTO" in str(c.args[0])
@@ -107,11 +128,11 @@ class TestRegister:
         """Views have no state table — register stores NULLs so the
         satisfaction check distinguishes presence-based VIEW upstreams
         from state-tracked TABLE upstreams."""
-        from bollhav.postgres.library import register
+        from bollhav.postgres.library import library_register_model
 
         m = _model(full_name="warehouse.v_orders", is_view=True)
         conn = _mock_conn()
-        register(conn, m)
+        library_register_model(conn, m)
 
         params = next(
             c.args[1]
@@ -127,11 +148,11 @@ class TestRegister:
         state tracking (`library=True`, no state, no staging) also
         writes NULL state pointers — presence in the library is the
         satisfaction proof."""
-        from bollhav.postgres.library import register
+        from bollhav.postgres.library import library_register_model
 
         m = _model(full_name="lookup.countries", has_staging=False)
         conn = _mock_conn()
-        register(conn, m)
+        library_register_model(conn, m)
 
         params = next(
             c.args[1]
@@ -143,11 +164,11 @@ class TestRegister:
         assert params[4] is None
 
     def test_empty_upstream_list(self) -> None:
-        from bollhav.postgres.library import register
+        from bollhav.postgres.library import library_register_model
 
         m = _model(upstream=[])
         conn = _mock_conn()
-        register(conn, m)
+        library_register_model(conn, m)
 
         params = next(
             c.args[1]
@@ -294,11 +315,10 @@ class TestBootstrapBlockedPath:
 
         model = MagicMock()
         model.target.is_view = False
-        model.library = False
         model.target.staging = Staging()
         model.target.full_name = "warehouse.enriched"
         model.upstream = list(upstream)
-        model.intervals = list(contract)
+        model.compute_intervals.return_value = list(contract)
         return model
 
     def _conn_ctx(self):
@@ -307,12 +327,14 @@ class TestBootstrapBlockedPath:
         conn.__exit__ = MagicMock(return_value=None)
         return conn
 
-    def test_unregistered_upstream_blocks_interval(self) -> None:
+    def test_unregistered_upstream_is_documentation_not_blocked(self) -> None:
+        """An upstream that isn't in the library (a view, a state-less
+        table, or a typo) is treated as documentation — the interval
+        stays `pending`, not blocked. Only registered (state-tracked)
+        upstreams are enforced."""
         from unittest.mock import patch
 
         from bollhav.model.intervals import TZInterval
-        from bollhav.model.load_models import _bootstrap_state_for_staged_models
-        from bollhav.model.state import StateMode
 
         m = self._staged_model(
             upstream=["raw.orders"], contract=[TZInterval(SINCE, UNTIL)]
@@ -327,22 +349,18 @@ class TestBootstrapBlockedPath:
             patch("bollhav.postgres.state.prefill") as pf,
             patch("bollhav.postgres.state.read_actionable", return_value=[]),
         ):
-            _bootstrap_state_for_staged_models([m], state_mode=StateMode.DISCOVER)
+            _bootstrap([m])
 
         rows = pf.call_args.kwargs["intervals"]
         assert len(rows) == 1
-        interval, status, reason = rows[0]
-        assert status == "blocked"
-        assert reason.startswith("STATE_001:")
-        assert "raw.orders" in reason
-        assert "not registered" in reason
+        _, status, reason = rows[0]
+        assert status == "pending"
+        assert reason is None
 
     def test_unsatisfied_upstream_blocks_with_window_in_reason(self) -> None:
         from unittest.mock import patch
 
         from bollhav.model.intervals import TZInterval
-        from bollhav.model.load_models import _bootstrap_state_for_staged_models
-        from bollhav.model.state import StateMode
 
         m = self._staged_model(
             upstream=["raw.orders"], contract=[TZInterval(SINCE, UNTIL)]
@@ -361,7 +379,7 @@ class TestBootstrapBlockedPath:
             patch("bollhav.postgres.state.prefill") as pf,
             patch("bollhav.postgres.state.read_actionable", return_value=[]),
         ):
-            _bootstrap_state_for_staged_models([m], state_mode=StateMode.DISCOVER)
+            _bootstrap([m])
 
         _, status, reason = pf.call_args.kwargs["intervals"][0]
         assert status == "blocked"
@@ -374,8 +392,6 @@ class TestBootstrapBlockedPath:
         from unittest.mock import patch
 
         from bollhav.model.intervals import TZInterval
-        from bollhav.model.load_models import _bootstrap_state_for_staged_models
-        from bollhav.model.state import StateMode
 
         m = self._staged_model(
             upstream=["raw.orders"], contract=[TZInterval(SINCE, UNTIL)]
@@ -394,155 +410,11 @@ class TestBootstrapBlockedPath:
             patch("bollhav.postgres.state.prefill") as pf,
             patch("bollhav.postgres.state.read_actionable", return_value=[]),
         ):
-            _bootstrap_state_for_staged_models([m], state_mode=StateMode.DISCOVER)
+            _bootstrap([m])
 
         _, status, reason = pf.call_args.kwargs["intervals"][0]
         assert status == "pending"
         assert reason is None
-
-    def test_in_pipeline_upstream_is_not_checked(self) -> None:
-        """Topological ordering handles in-pipeline upstreams; the
-        bootstrap shouldn't query the library for them."""
-        from unittest.mock import patch
-
-        from bollhav.model.intervals import TZInterval
-        from bollhav.model.load_models import _bootstrap_state_for_staged_models
-        from bollhav.model.state import StateMode
-        from bollhav.model.staging import Staging
-
-        downstream = self._staged_model(
-            upstream=["warehouse.upstream"],
-            contract=[TZInterval(SINCE, UNTIL)],
-        )
-        upstream = MagicMock()
-        upstream.target.is_view = False
-        upstream.library = False
-        upstream.target.staging = Staging()
-        upstream.target.full_name = "warehouse.upstream"
-        upstream.upstream = []
-        upstream.intervals = []
-
-        conn = self._conn_ctx()
-        with (
-            patch("bollhav.postgres.state._connect", return_value=conn),
-            patch("bollhav.postgres.library.ensure_library"),
-            patch("bollhav.postgres.library.register"),
-            patch("bollhav.postgres.library.lookup") as lookup_mock,
-            patch("bollhav.postgres.state.ensure_tables"),
-            patch("bollhav.postgres.state.prefill") as pf,
-            patch("bollhav.postgres.state.read_actionable", return_value=[]),
-        ):
-            _bootstrap_state_for_staged_models(
-                [downstream, upstream], state_mode=StateMode.DISCOVER
-            )
-
-        lookup_mock.assert_not_called()
-        _, status, reason = pf.call_args_list[0].kwargs["intervals"][0]
-        assert status == "pending"
-        assert reason is None
-
-
-# ── library-only registration paths ──────────────────────────────────
-
-
-class TestLibraryOnlyRegistration:
-    """Models that go through the register-only path (views and
-    `library=True` tables without state) skip the state-table ensure
-    + prefill but still upsert a library row."""
-
-    def _conn_ctx(self):
-        conn = MagicMock()
-        conn.__enter__ = MagicMock(return_value=conn)
-        conn.__exit__ = MagicMock(return_value=None)
-        return conn
-
-    def test_view_with_library_true_registers_without_state_machinery(self) -> None:
-        from unittest.mock import patch
-
-        from bollhav.model.load_models import _bootstrap_state_for_staged_models
-        from bollhav.model.state import StateMode
-
-        m = MagicMock()
-        m.target.is_view = True
-        m.library = True
-        m.target.staging = None
-        m.target.full_name = "warehouse.v_orders"
-        m.upstream = []
-
-        conn = self._conn_ctx()
-        with (
-            patch("bollhav.postgres.state._connect", return_value=conn),
-            patch("bollhav.postgres.library.ensure_library") as el,
-            patch("bollhav.postgres.library.register") as reg,
-            patch("bollhav.postgres.state.ensure_tables") as et,
-            patch("bollhav.postgres.state.prefill") as pf,
-        ):
-            _bootstrap_state_for_staged_models([m], state_mode=StateMode.DISCOVER)
-
-        el.assert_called_once()
-        reg.assert_called_once()
-        et.assert_not_called()
-        pf.assert_not_called()
-
-    def test_view_without_library_true_does_not_register(self) -> None:
-        """A VIEW without `library=True` is a perfectly valid bollhav
-        model (the CREATE OR REPLACE VIEW still runs in the user's
-        execute), but it's not claimable as upstream — no library row
-        is upserted."""
-        from unittest.mock import patch
-
-        from bollhav.model.load_models import _bootstrap_state_for_staged_models
-        from bollhav.model.state import StateMode
-
-        m = MagicMock()
-        m.target.is_view = True
-        m.library = False
-        m.target.staging = None
-        m.target.full_name = "warehouse.v_orders"
-        m.upstream = []
-
-        conn = self._conn_ctx()
-        with (
-            patch("bollhav.postgres.state._connect", return_value=conn),
-            patch("bollhav.postgres.library.ensure_library") as el,
-            patch("bollhav.postgres.library.register") as reg,
-            patch("bollhav.postgres.state.ensure_tables") as et,
-            patch("bollhav.postgres.state.prefill") as pf,
-        ):
-            _bootstrap_state_for_staged_models([m], state_mode=StateMode.DISCOVER)
-
-        el.assert_not_called()
-        reg.assert_not_called()
-        et.assert_not_called()
-        pf.assert_not_called()
-
-    def test_library_true_table_registers_without_state_machinery(self) -> None:
-        from unittest.mock import patch
-
-        from bollhav.model.load_models import _bootstrap_state_for_staged_models
-        from bollhav.model.state import StateMode
-
-        m = MagicMock()
-        m.target.is_view = False
-        m.library = True
-        m.target.staging = None
-        m.target.full_name = "lookup.countries"
-        m.upstream = []
-
-        conn = self._conn_ctx()
-        with (
-            patch("bollhav.postgres.state._connect", return_value=conn),
-            patch("bollhav.postgres.library.ensure_library") as el,
-            patch("bollhav.postgres.library.register") as reg,
-            patch("bollhav.postgres.state.ensure_tables") as et,
-            patch("bollhav.postgres.state.prefill") as pf,
-        ):
-            _bootstrap_state_for_staged_models([m], state_mode=StateMode.DISCOVER)
-
-        el.assert_called_once()
-        reg.assert_called_once()
-        et.assert_not_called()
-        pf.assert_not_called()
 
 
 # ── prefill row normalization ────────────────────────────────────────

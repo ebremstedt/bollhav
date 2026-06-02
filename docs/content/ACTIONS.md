@@ -21,8 +21,8 @@ CREATE SCHEMA z_<target_schema>        (when staging is set)
 Plus two **interval-level** actions that only fire when `state=State(...)` is set on the model:
 
 ```
-PRE_INTERVAL  mark_running    state row pending → running       (when model.state is set)
-POST_INTERVAL mark_applied    state row → applied               (when state set and not already
+INTERVAL/PRE   mark_running    state row pending → running      (when model.state is set)
+INTERVAL/POST  mark_applied    state row → applied              (when state set and not already
                                                                  flipped by the staging flush)
 ```
 
@@ -37,28 +37,42 @@ With actions, every framework setup step is one entry in `target.default_actions
 ## The shape of an action
 
 ```python
-from bollhav.model.actions import Action, Phase
+from bollhav.model.actions import Action, Level, Phase, Conn
 
 @dataclass
 class Action:
     name: str                                                # log key + _applied_model_actions key
-    phase: Phase                                             # PRE_MODEL / POST_MODEL / PRE_INTERVAL / POST_INTERVAL
+    level: Level                                             # MODEL | INTERVAL
+    phase: Phase                                             # PRE | POST
     run: Callable[[psycopg.Connection, Model], None]         # the actual work
-    should_run: Callable[[Target], bool] = lambda t: True    # gate
+    should_run: Callable[[Model], bool] = lambda m: True     # gate
+    connection: Conn = Conn.DATA                             # DATA (target) | STATE (state DB)
 ```
 
-The runner calls `should_run(target)` to gate, calls `run(conn, model)` to do the work, then records `target._applied_model_actions[name] = True`. Same dict gates re-runs of the same action within the pipeline.
+The runner calls `should_run(model)` to gate, calls `run(conn, model)` to do the work, then records `target._applied_model_actions[name] = True`. Same dict gates re-runs of the same action within the pipeline.
 
-## Four phases — a 2×2 grid
+## Three axes: level, phase, connection
 
-| Phase | Cardinality | Typical use |
+An action sits on three orthogonal axes:
+
+| Axis | Values | Meaning |
 |---|---|---|
-| `PRE_MODEL` | Once per pipeline run, before user's loop | `CREATE TABLE`, `CREATE INDEX`, staging schema setup |
-| `POST_MODEL` | Once per pipeline run, after user's loop returns cleanly | `ANALYZE the_whole_table`, `GRANT`, drop staging |
-| `PRE_INTERVAL` | Per interval, before each `execute()` | `mark_running` (state row pending → running), per-interval metrics, lock acquire, user logging |
-| `POST_INTERVAL` | Per interval, after each `execute()` returns | `mark_applied` (state row → applied), per-interval cleanup, Prometheus increment, downstream notify |
+| `level` | `MODEL` / `INTERVAL` | once per pipeline run, or once per interval |
+| `phase` | `PRE` / `POST` | on the way in, or on the way out |
+| `connection` | `DATA` / `STATE` | runs against the target DB, or the state DB |
 
-Model-level phases are recorded in `target._applied_model_actions` and short-circuit on intervals 2..N via `target.setup_complete`. Interval phases fire every interval — they're **not** recorded in the model-level dict because they're meant to repeat. Their runners (`run_pre_interval_actions(conn, model, since, until)` and `run_post_interval_actions(conn, model, since, until)`) stash the interval window on the model as `_interval_since` / `_interval_until` so action callables can read it without it being threaded through the `Action.run(conn, model)` signature.
+The four `(level, phase)` combinations:
+
+| Level | Phase | Cardinality | Typical use |
+|---|---|---|---|
+| `MODEL` | `PRE` | Once per run, before user's loop | `CREATE TABLE`, `CREATE INDEX`, staging schema setup |
+| `MODEL` | `POST` | Once per run, after user's loop returns cleanly | `ANALYZE the_whole_table`, `GRANT` |
+| `INTERVAL` | `PRE` | Per interval, before each `execute()` | `mark_running`, per-interval metrics, lock acquire |
+| `INTERVAL` | `POST` | Per interval, after each `execute()` returns | `mark_applied`, per-interval cleanup, notify |
+
+`connection` declares which database the action touches — `DATA` for target DDL, `STATE` for state-table ops (the two may live in different databases). State actions like `mark_running` / `mark_applied` set `connection=Conn.STATE`; everything else defaults to `DATA`. Full `DATA`/`STATE` routing arrives with the two-connection lifecycle — see [Lifecycle redesign](LIFECYCLE_REDESIGN.md).
+
+Model-level actions are recorded in `target._applied_model_actions` and short-circuit on intervals 2..N via `target.setup_complete`. Interval actions fire every interval — they're **not** recorded in the model-level dict because they're meant to repeat. Their runners (`run_pre_interval_actions(conn, model, since, until)` and `run_post_interval_actions(conn, model, since, until)`) stash the interval window on the model as `_interval_since` / `_interval_until` so action callables can read it without it being threaded through the `Action.run(conn, model)` signature.
 
 The `@state` decorator on `execute()` is what wraps the interval runners around the user's function today. State-enabled models get the `mark_running` and `mark_applied` actions automatically — they're in `default_actions()` with `should_run` gated on `model.state is not None`, so they only fire when state is opted in.
 
@@ -73,7 +87,7 @@ orders = Model(
         name="orders",
         ...,
         actions=[
-            Action("emit_metric", Phase.POST_INTERVAL, emit_metric),
+            Action("emit_metric", Level.INTERVAL, Phase.POST, emit_metric),
         ],
     ),
     state=State(),
@@ -101,7 +115,7 @@ Four behaviours fall out:
 | `None` (default) | `[]` (default) | The framework's setup actions only — CREATE SCHEMA, CREATE TABLE, INDEX, UNIQUE, staging schema. Every model that doesn't customise lands here. |
 | `None` | `[my_action]` | The framework's defaults, then your action. Most common extension pattern — add a GRANT or ANALYZE without losing schema/table setup. |
 | `[]` | `[my_action]` | **Only** your action. CREATE TABLE does not run. The model will fail unless your action handles it. Use only when you want to take full control of setup. |
-| `[a for a in default_actions() if a.name != "indexes_created"]` | `[smart_indexes]` | The framework's 9 setup actions plus your smarter index action, replacing the default `indexes_created`. The most common selective-override pattern. |
+| `[a for a in default_actions() if a.name != "indexes_created"]` | `[smart_indexes]` | The framework's setup actions minus the default `indexes_created`, plus your smarter index action. The most common selective-override pattern. |
 
 Setting `actions=[]` (the field's default) is always safe — the framework defaults still cover schema and table creation. Setting `default_actions=[]` is the explicit opt-out and breaks the model unless you supply replacements for at least `schema_created` and `table_created`.
 
@@ -111,7 +125,7 @@ Setting `actions=[]` (the field's default) is always safe — the framework defa
 from bollhav.postgres.actions import default_actions
 
 default_actions()  # returns these, in this order:
-# ── PRE_MODEL ──
+# ── MODEL / PRE  (connection=DATA) ──
 #   schema_created          CREATE SCHEMA IF NOT EXISTS <target_schema>
 #   recreated               DROP TABLE       (when target.recreate_table)
 #   table_created           CREATE TABLE IF NOT EXISTS <target>
@@ -119,12 +133,12 @@ default_actions()  # returns these, in this order:
 #   indexes_created         CREATE INDEX     (when target has a partitioned-by col)
 #   uniques_added           ADD CONSTRAINT   (when target has unique columns)
 #   staging_schema_created  CREATE SCHEMA z_<target_schema> (when staging is set)
-# ── POST_MODEL ──
+# ── MODEL / POST ──
 #   (none by default — the staging table is created/dropped per interval
 #    inside stage(), not via a model-level action)
-# ── PRE_INTERVAL ──
+# ── INTERVAL / PRE  (connection=STATE) ──
 #   mark_running            state row pending → running     (when model.state is set)
-# ── POST_INTERVAL ──
+# ── INTERVAL / POST  (connection=STATE) ──
 #   mark_applied            state row → applied             (when state set + not flushed)
 ```
 
@@ -135,7 +149,7 @@ Each one's `should_run` reads the relevant attribute from Model or Target so the
 Append to `actions`:
 
 ```python
-from bollhav.model.actions import Action, Phase
+from bollhav.model.actions import Action, Level, Phase
 
 def _grant_analytics(conn, model):
     conn.execute(
@@ -147,7 +161,7 @@ orders = Model(
         name="orders",
         ...,
         actions=[
-            Action("grant_analytics", Phase.POST_MODEL, _grant_analytics),
+            Action("grant_analytics", Level.MODEL, Phase.POST, _grant_analytics),
         ],
     ),
 )
@@ -157,12 +171,12 @@ Project-wide bundles work the same way — define a list once and pass it to eve
 
 ```python
 # my_project/actions.py
-from bollhav.model.actions import Action, Phase
+from bollhav.model.actions import Action, Level, Phase
 
 PROJECT_POST = [
-    Action("analyzed", Phase.POST_MODEL,
+    Action("analyzed", Level.MODEL, Phase.POST,
            lambda c, m: c.execute(f"ANALYZE {m.target.full_name}")),
-    Action("granted", Phase.POST_MODEL,
+    Action("granted", Level.MODEL, Phase.POST,
            lambda c, m: c.execute(f"GRANT SELECT ON {m.target.full_name} TO analytics")),
 ]
 ```
@@ -184,8 +198,8 @@ from bollhav.postgres.actions import default_actions
 smart_setup = [
     a for a in default_actions() if a.name != "indexes_created"
 ] + [
-    Action("indexes_created", Phase.PRE_MODEL, _my_smarter_indexes,
-           should_run=lambda t: needs_smart_indexes(t)),
+    Action("indexes_created", Level.MODEL, Phase.PRE, _my_smarter_indexes,
+           should_run=lambda m: needs_smart_indexes(m)),
 ]
 
 orders = Model(
@@ -193,18 +207,18 @@ orders = Model(
 )
 ```
 
-## POST_MODEL failure policy
+## MODEL/POST failure policy
 
-`Target.on_failure` controls what happens when a POST_MODEL action raises:
+`Target.on_failure` controls what happens when a MODEL/POST action raises:
 
 | Setting | Behavior |
 |---|---|
-| `OnFailure.FAIL_FAST` (default) | Re-raise. Halts the rest of this target's POST_MODEL AND the cross-model POST sweep. Operator reruns. |
+| `OnFailure.FAIL_FAST` (default) | Re-raise. Halts the rest of this target's MODEL/POST actions AND the cross-model POST sweep. Operator reruns. |
 | `OnFailure.SKIP` | Log warning, continue to the next action. Lets a flaky action (e.g. Slack notify) not block the pipeline. |
 
 For per-action nuance (retry, fallback, swallow specific exceptions), wrap the failable code in the action's own `run` callable — that's clearer than a richer enum and composes with any Python error handling.
 
-PRE_MODEL actions are always fail-fast — there's no opt-out, because continuing a write whose setup half-failed isn't recoverable.
+MODEL/PRE actions are always fail-fast — there's no opt-out, because continuing a write whose setup half-failed isn't recoverable.
 
 ## Runtime state — `_applied_model_actions`
 
@@ -217,9 +231,9 @@ target._applied_model_actions.get("recreated")        # False if recreate_table=
 
 Fresh dict per `apply_runtime_overrides()` invocation, so flags reset naturally between pipeline runs.
 
-The naming is deliberate: it tracks **model-level** actions (PRE_MODEL + POST_MODEL). Future interval-level state, when those phases ship, will live separately — interval-level actions fire every interval and a per-pipeline dict can't represent that.
+The naming is deliberate: it tracks **model-level** actions (`level=MODEL`, both phases). Interval-level actions fire every interval and a per-pipeline dict can't represent that, so they're not recorded here.
 
-`target.setup_complete` reconciles `_applied_model_actions` against `effective_actions` filtered to `Phase.PRE_MODEL`. Returns True when every applicable PRE_MODEL action is in the dict, so `run_pre_model_actions` short-circuits the empty `BEGIN`/`COMMIT` on intervals after the first.
+`target.setup_complete` reconciles `_applied_model_actions` against `effective_actions` filtered to MODEL/PRE. Returns True when every applicable MODEL/PRE action is in the dict, so `run_pre_model_actions` short-circuits the empty `BEGIN`/`COMMIT` on intervals after the first.
 
 ## Using `_applied_model_actions` in your own actions
 
@@ -228,14 +242,14 @@ The lookup pattern is `target._applied_model_actions.get(action_name)`. Three la
 ```python
 # Layer 1 — the runner gates each action:
 for action in target.effective_actions:
-    if action.phase is not Phase.PRE_MODEL: continue
+    if not (action.level is Level.MODEL and action.phase is Phase.PRE): continue
     if target._applied_model_actions.get(action.name): continue   # ← skip if already done
-    if not action.should_run(target): continue
+    if not action.should_run(model): continue
     action.run(conn, model)
     target._applied_model_actions[action.name] = True              # ← record
 
 # Layer 2 — setup_complete short-circuits the whole pre-phase function
-# (same logic, applied across all applicable PRE_MODEL actions)
+# (same logic, applied across all applicable MODEL/PRE actions)
 
 # Layer 3 — your custom action conditions on what already ran:
 def comment_on_table(conn, model):
@@ -248,7 +262,7 @@ def comment_on_table(conn, model):
 
 ## What is NOT in the action system (yet)
 
-- **Per-interval state lifecycle** — `mark_running` and `mark_applied` ARE actions now (PRE_INTERVAL / POST_INTERVAL). The `@state` decorator still owns the control flow around them (is-applied gate, lock acquire/release, upstream-satisfied check, exception path with `record_failure`), but the lifecycle calls themselves go through the runners.
+- **Per-interval state lifecycle** — `mark_running` and `mark_applied` ARE actions now (INTERVAL/PRE and INTERVAL/POST). The `@state` decorator still owns the control flow around them (is-applied gate, lock acquire/release, upstream-satisfied check, exception path with `record_failure`), but the lifecycle calls themselves go through the runners.
 - **The atomic flush in staged writes** — `INSERT INTO target SELECT * FROM staging` happens per-interval inside `flush_to_target`, not as an action. Per-interval data movement doesn't fit the action pattern.
 - **Connection management** — runners accept an open connection; opening / closing / pooling is the caller's job.
 
@@ -256,4 +270,4 @@ def comment_on_table(conn, model):
 
 - **Single-worker only** for destructive actions. Two pipelines on the same model with `recreate_table=True` each see their own `_applied_model_actions` dict and would both DROP. Use `model_lock` for cross-process safety.
 - **No ordering helpers in the public API yet.** If you need to splice between two framework defaults, do it with a list comprehension. Helpers will be added when there's repeated need.
-- **POST_MODEL actions don't fire if `main()` raises** — by design, so a crashed pipeline doesn't run cleanup that assumes the loop completed. Operator's recourse is to rerun.
+- **MODEL/POST actions don't fire if `main()` raises** — by design, so a crashed pipeline doesn't run cleanup that assumes the loop completed. Operator's recourse is to rerun.

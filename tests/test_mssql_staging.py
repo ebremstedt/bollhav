@@ -236,23 +236,6 @@ class TestStageEndToEnd:
             "INSERT INTO" in q and "SELECT" in q and "FROM" in q for q in executed
         )
 
-    def test_marker_set_after_successful_flush(self) -> None:
-        from unittest.mock import patch
-
-        from bollhav.mssql.write_modes import write
-
-        m = _model()
-        with patch("bollhav.mssql.write_modes.ensure_schema_table_and_indexes"):
-            write(
-                _mock_conn(),
-                m,
-                _gen(pl.DataFrame({"id": [1], "val": ["a"]})),
-                since=SINCE,
-                until=UNTIL,
-            )
-
-        assert m._state_applied_via_staging == (SINCE, UNTIL)
-
     def test_drops_staging_in_flush(self) -> None:
         from unittest.mock import patch
 
@@ -297,25 +280,6 @@ class TestStageEndToEnd:
         ]
         # keep_after_apply=True → no DROP of the staging table
         assert not any("DROP TABLE" in q and "orders_staging_" in q for q in executed)
-
-    def test_exception_in_block_rolls_back_state_applied_marker(self) -> None:
-        """If the staged block raises, model._state_applied_via_staging
-        must NOT be set — the interval has not been applied."""
-        from unittest.mock import patch
-
-        from bollhav.mssql.staging import stage
-
-        m = _model()
-        conn = _mock_conn()
-        with patch("bollhav.mssql.write_modes.ensure_schema_table_and_indexes"):
-            with pytest.raises(RuntimeError, match="upstream blew up"):
-                with stage(conn, m, since=SINCE, until=UNTIL) as s:
-                    s.write(pl.DataFrame({"id": [1], "val": ["a"]}))
-                    raise RuntimeError("upstream blew up")
-
-        assert not hasattr(m, "_state_applied_via_staging") or (
-            m._state_applied_via_staging is None
-        )
 
 
 # ── orphan GC ───────────────────────────────────────────────────────
