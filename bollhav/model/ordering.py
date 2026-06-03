@@ -4,8 +4,6 @@ from collections import deque
 from enum import Enum
 from typing import TYPE_CHECKING
 
-from bollhav.model.model_type import ModelType
-
 if TYPE_CHECKING:
     from bollhav.model.model import Model
 
@@ -17,7 +15,7 @@ class UpstreamMode(Enum):
 
 
 def _is_view(model: Model) -> bool:
-    return getattr(model.target, "model_type", None) == ModelType.VIEW
+    return model.is_view
 
 
 def topological_sort(

@@ -1,58 +1,41 @@
-[← home](index.md)
+[Home](index.md) › [Model](MODEL.md) › **Chunking**
 
 # Chunking
 
-Chunking is optional. Leave `batching=None` on the `Model` and bollhav treats the run as a single unit. Use this for small reference tables, one-shot loads, or anything where the dataset comfortably fits in one pass.
+Two independent knobs split work into manageable pieces. They compose — one slices *time*, the other slices *rows*.
 
-If you decide to chunk, configure a `Batch`:
+| Knob | Field | Slices | Owned by |
+|---|---|---|---|
+| **Interval** | `batching.interval` | time → one `(since, until)` window per tick | the framework (loops `model.intervals`) |
+| **Size** | `batching.size` | rows → frames of N rows within a window | your `read()` function |
+
+The **interval is the unit of recovery** — state tracks `(since, until)`, and a crash reruns that window. **Size is the unit of streaming** — it bounds memory by yielding the window's rows in chunks. They're orthogonal: a daily interval can stream in 5 000-row frames, or a single window can be read whole.
+
+## Interval — slicing time
+
+`batching=Batch(interval=IntervalChunks(expression="@daily"))` produces one window per day across the model's run range (see [Bounds](BOUNDS.md) for backfill, or latest mode). The framework loops these windows; each is one [unit of work](KINDS.md) for an `interval`-kind model.
 
 ```python
-Batch(
-    interval=IntervalChunks(expression="@daily"),  # the (since, until) windows
-    size=5000,                                      # rows per read chunk
-)
+batching=Batch(interval=IntervalChunks(expression="@hourly"))
+# bounds 2024-01-01..2024-01-03 → 48 hourly windows
 ```
 
-Two independent knobs:
+A model with no batching has a single unit (`model.intervals == (None,)`) — that's a `MONOLITHIC` or `VIEW` [kind](KINDS.md), not an interval one.
 
-- **`interval`** — a cron expression whose ticks define the `(since, until)` windows the model iterates. This is the **recovery unit**: with state tracking enabled, each `(since, until)` is recorded as its own row, so a failed run resumes at exactly the window that broke. Works in all run modes (latest, reload, backfill).
-- **`size`** — the number of rows per read chunk, capped at 10000. Within a single interval, the read helpers slice the source into `size`-row frames. This is the **streaming unit** — it keeps memory bounded and gives staging fixed-size sub-batches to land.
+## Size — slicing rows
 
-These compose: "one day's worth of data, streamed in 5k-row batches" is `interval=@daily` + `size=5000`.
-
-## interval vs size — which controls what
-
-| Concern | Knob |
-|---|---|
-| Which slice of source a run processes | `interval` (the `(since, until)` window) |
-| Crash/resume granularity (state, staging) | `interval` |
-| How many rows are read/written at a time | `size` |
-| Memory ceiling per read | `size` |
-
-The framework hands `(since, until)` to your read function and loops over the intervals. **Honoring the bounds is the read function's job** — a time-windowed incremental filters `WHERE ts >= since AND ts < until`; a timeless full-reload (a dimension, a lookup) ignores the bounds, reads everything, and still streams it out in `size`-row chunks. There is no separate "row mode" — chunking by rows without a time axis is just a read function that ignores the interval and a single interval spanning your bounds.
-
-## size is honored by the read helpers
-
-`size` is consumed by the read helpers, which slice the source by it. If you hand-roll your own generator, you decide the chunk size — read `model.batching.size` yourself if you want it to match:
+`batching=Batch(interval=..., size=5000)` is a hint your `read()` honors: produce each window's rows in `size`-row frames. The framework slices time; your read function slices rows.
 
 ```python
-def read(model, since, until):
+def read(model, interval) -> Generator[pl.DataFrame, None, None]:
     size = model.batching.size
-    for frame in source_query(since, until).iter_slices(size):
-        yield frame
+    rows = fetch(interval.since, interval.until)
+    for start in range(0, len(rows), size):
+        yield pl.DataFrame(rows[start : start + size])
 ```
 
-## Constraints
+Each yielded frame is written (or staged) independently, so nothing accumulates in Python. With [Staging](STAGING.md), the frames land in a staging table and apply atomically per interval.
 
-- **Write mode**: `APPEND` or `UPSERT_NO_DELETE` when streaming sub-batches. Truncate/recreate modes assume they see the whole dataset; partial sub-batches don't fit.
-- **`size` ≤ 10000**: above that, per-chunk overhead isn't the bottleneck anymore.
+## Putting it together
 
-## Override the interval expression for one run
-
-To change the interval expression at runtime without editing the model, use the pipe-level override:
-
-```bash
-INTERVAL_EXPRESSION_OVERRIDE="@hourly" python pipeline.py
-```
-
-Tags select and reload models — they don't carry chunking config. See [TAGS.md](TAGS.md) for the prefix vocabulary.
+A 3-day daily model with `size=5000` over 12 000 rows/day runs as **3 windows × (5000 + 5000 + 2000)** — three recovery units, nine write chunks. See [Batch](BATCH.md) for the full field reference.

@@ -12,6 +12,7 @@ from bollhav.model.bounds import Bounds
 from bollhav.model.batch import Batch, _resolve_cron, _chunk_interval
 from bollhav.model.intervals import TZInterval
 from bollhav.model.directives import Directives
+from bollhav.model.kind import Kind
 from bollhav.model.state import State
 from bollhav.model.tags import Tags
 from bollhav.model.upstream import Contract
@@ -27,7 +28,8 @@ class Model:
         source: SourceFile | SourceTable | None = None,
         bounds: Bounds | None = None,
         batching: Batch | None = None,
-        monolithic: bool = False,
+        *,
+        kind: Kind,
         tagging: Tags | None = None,
         state: State | None = None,
         enabled: bool = True,
@@ -40,7 +42,7 @@ class Model:
         self.target = target
         self.bounds = bounds or Bounds()
         self.batching = batching
-        self.monolithic = monolithic
+        self.kind = kind
         self.state = state
         self.enabled = enabled
         self.debug = debug
@@ -57,33 +59,49 @@ class Model:
         # mutation sites in state.py / lifecycle.py / actions.py.
         self._state_run_id: UUID | None = None
 
-        # A model's state-tracking kind (interval / monolithic / view) must
-        # be unambiguous — see `Model.kind`. `monolithic=True` is the
-        # explicit "the whole table is one unit of work" marker, so it can't
-        # also be batched (intervals) or be a view.
-        if self.monolithic and batching is not None:
+        # `kind` is the single source of truth for the unit of work; the
+        # rest of the model must be consistent with it. Validate up front so
+        # a contradiction (e.g. a monolith with batching) fails at definition,
+        # not silently at run time.
+        if kind is Kind.INTERVAL and batching is None:
             raise ValueError(
-                f"model {target.name!r} sets monolithic=True but also has "
-                f"batching — a monolithic model has no interval windows. "
-                f"Drop one."
+                f"model {target.name!r} is kind=INTERVAL but has no batching — "
+                f"an interval model's unit of work is a time window. Add "
+                f"`batching=Batch(...)` (or pick kind=MONOLITHIC for a "
+                f"whole-table load)."
             )
-        if self.monolithic and self.target.is_view:
+        if kind is Kind.MONOLITHIC and batching is not None:
             raise ValueError(
-                f"model {target.name!r} is a VIEW and cannot be monolithic — "
-                f"a view's unit of work is its existence, not a whole-table load."
+                f"model {target.name!r} is kind=MONOLITHIC but has batching — "
+                f"a monolithic model is one whole-table unit, not windowed. "
+                f"Drop `batching` (or pick kind=INTERVAL)."
             )
-        # A state-tracked, non-view table with no batching must say so
-        # explicitly, so it's never an accident (a forgotten `batching`).
-        if (
-            state is not None
-            and not self.target.is_view
-            and batching is None
-            and not self.monolithic
-        ):
+        if kind is Kind.VIEW:
+            if batching is not None:
+                raise ValueError(
+                    f"model {target.name!r} is kind=VIEW but has batching — a "
+                    f"view isn't windowed. Drop `batching`."
+                )
+            if target.staging is not None:
+                raise ValueError(
+                    f"model {target.name!r} is kind=VIEW but has staging — a "
+                    f"view has nothing to stage. Drop `staging`."
+                )
+            if target.recreate_table or target.truncate_table:
+                raise ValueError(
+                    f"model {target.name!r} is kind=VIEW — recreate_table / "
+                    f"truncate_table don't apply to views."
+                )
+
+        # Upstream is only meaningful with state: a contract's satisfaction is
+        # checked by the state machine (`@execute_lifecycle`), which only runs
+        # for state-tracked models. Declaring upstream without state would
+        # silently never enforce it, so make it an error.
+        if self.upstream and state is None:
             raise ValueError(
-                f"state-tracked table {target.name!r} has no batching — declare "
-                f"`monolithic=True` for a single whole-table state row, or add "
-                f"`batching` for per-interval state."
+                f"model {target.name!r} declares upstream but has no state — "
+                f"upstream contracts are only checked for state-tracked models. "
+                f"Add state=State(...), or drop upstream."
             )
 
         self.extra = kwargs
@@ -116,7 +134,7 @@ class Model:
                 else []
             ),
             f"    write_mode:  {self.target.write_mode.value}",
-            f"    model_type:  {self.target.model_type.value}",
+            f"    kind:        {self.kind.value}",
             f"    partitioned: {self.target.partitioned_by}",
             f"    columns ({len(cols)}): {col_summary}",
         ]
@@ -183,34 +201,38 @@ class Model:
             self._state_run_id = uuid4()
         return self._state_run_id
 
+    # ── output shape: does this model produce a table or a view? ──────
+
+    @property
+    def is_table(self) -> bool:
+        """True when this model produces a TABLE — any non-view kind
+        (`INTERVAL` or `MONOLITHIC`). For asset-side decisions that only
+        care about table-vs-view."""
+        return self.kind is not Kind.VIEW
+
     @property
     def is_view(self) -> bool:
-        """True when the target is a VIEW. Its state is a single existence
-        row; an upstream is satisfied when that row says the view exists."""
-        return self.target.is_view
+        """True when this model produces a VIEW. Its state is a single
+        existence row; an upstream is satisfied when that row says the view
+        exists."""
+        return self.kind is Kind.VIEW
+
+    # ── exact kind ────────────────────────────────────────────────────
 
     @property
-    def is_monolithic(self) -> bool:
-        """True when this model was explicitly declared `monolithic=True` —
-        a non-batched table whose unit of work is the whole table. Its
-        state is a single whole-table row; an upstream is satisfied when
-        that row says the table has been loaded. Set explicitly (never
-        inferred) so a forgotten `batching` can't silently make a model
-        monolithic. A view is never monolithic (it's a view)."""
-        return self.monolithic
+    def is_kind_interval(self) -> bool:
+        """True when `kind=Kind.INTERVAL` — batched, one state row per window."""
+        return self.kind is Kind.INTERVAL
 
     @property
-    def kind(self) -> str:
-        """The model's state-tracking kind, serialized for the state /
-        library tables (`'view'` | `'monolithic'` | `'interval'`). Derived
-        from `is_view` / `is_monolithic`; an interval (batched) model is the
-        default. The state backend uses it to decide how many state rows a
-        model has and how an upstream checks its satisfaction."""
-        if self.is_view:
-            return "view"
-        if self.is_monolithic:
-            return "monolithic"
-        return "interval"
+    def is_kind_monolithic(self) -> bool:
+        """True when `kind=Kind.MONOLITHIC` — whole-table load, one state row."""
+        return self.kind is Kind.MONOLITHIC
+
+    @property
+    def is_kind_view(self) -> bool:
+        """True when `kind=Kind.VIEW` — a view, one existence state row."""
+        return self.kind is Kind.VIEW
 
     def __repr__(self) -> str:
         return (

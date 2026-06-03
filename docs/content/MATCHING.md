@@ -1,4 +1,4 @@
-[← home](index.md)
+[Home](index.md) › [Tags](TAGS.md) › **Matching**
 
 # Matching models
 
@@ -10,10 +10,5 @@ from bollhav.model import Model, load_models
 @load_models
 def main(models: list[Model], debug: bool) -> None:
     for model in models:
-        for interval in model.intervals:
-            execute(model, interval, ...)
 ```
 
-For programmatic use (or tests) call `apply_runtime_overrides(...)` directly with explicit kwargs — same effect, no env reading.
-
-If you only need raw matching (no override baking — e.g. for diagnostics or tooling), use `match_models(folder, tags, upstream_mode)` directly.

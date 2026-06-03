@@ -15,8 +15,6 @@ class PotentialTagGroup:
     negate: bool = False
 
 
-# r: or reload:  -> reload. That's the only prefix; "reload" is a full-word
-# alias for "r". Interval/chunk-size are model config, not tag overrides.
 _RELOAD_PREFIX_RE = re.compile(r"(?:r|reload):")
 _RELOAD_PREFIX_TOKEN = r"(?:r|reload):"
 
@@ -159,10 +157,6 @@ def _explain_tag(
     single_tag_in_group: bool,
 ) -> str:
     cands = " or ".join(tag.candidates)
-    # Parens around multi-candidate tags are needed when they coexist
-    # with AND-joined siblings (else "foo or bar and baz" is ambiguous)
-    # OR when negation wraps them ("not (foo or bar)" vs the wrong
-    # "not foo or bar"). Otherwise they're noise.
     if len(tag.candidates) > 1 and (not single_tag_in_group or tag.negate):
         cands = f"({cands})"
     text = f"not {cands}" if tag.negate else cands

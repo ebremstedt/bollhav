@@ -6,14 +6,14 @@ write, so the execute body does nothing. Because it's state-tracked, it
 gets a single existence row that flips to `applied` once the view is in
 place. That row is what a `ViewContract` checks.
 
-`model_type=VIEW` is what marks it a view; `write_mode` is irrelevant for
+`kind=Kind.VIEW` is what marks it a view; `write_mode` is irrelevant for
 views (it's a data-write strategy) and is left at its default.
 """
 
 from bollhav.model import (
     Database,
+    Kind,
     Model,
-    ModelType,
     SourceTable,
     State,
     Tags,
@@ -24,11 +24,11 @@ from bollhav.postgres import PostgresColumn, PostgresType
 
 
 customers = Model(
+    kind=Kind.VIEW,
     target=Target(
         name="customers",
         schema=TargetSchema(name="warehouse"),
         database=Database.POSTGRES,
-        model_type=ModelType.VIEW,
         dsn_env_var="TARGET_DSN",
         columns=[
             PostgresColumn(

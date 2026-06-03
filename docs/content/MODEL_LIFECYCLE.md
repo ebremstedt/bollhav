@@ -1,4 +1,4 @@
-[← home](index.md)
+[Home](index.md) › [Decorators](DECORATORS.md) › **Model lifecycle**
 
 # Model lifecycle
 

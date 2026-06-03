@@ -1,4 +1,4 @@
-[← home](index.md)
+[Home](index.md) › **Env**
 
 # Environment variables
 
@@ -86,12 +86,16 @@ One of `minimal` / `model` / `batch`, default `model`. Controls the verbosity of
 
 User-named. Whatever string you pass to `Target(dsn_env_var="MY_DB")` or `SourceTable(dsn_env_var="MY_DB")` must be set in the environment at runtime with the connection string (e.g. `MY_DB=postgresql://host/db`).
 
-## State-tracking env vars (state branch)
+## STATE_MODE
 
-The following are introduced by the `state` branch and not yet on `main`:
+One of `discover` / `bulldozer`, default `discover`. Controls re-evaluation on rerun. `discover` preserves `applied` rows and re-evaluates the rest against current upstream state; `bulldozer` resets every row to the freshly-computed status (`applied_at` cleared too).
 
-- `STATE_MODE` — `respect` (default) or `disrespect`
-- `DISCOVER` — bool; read intervals from each state-enabled model's state table instead of bounds/backfill
-- `NUKE_STATE` — bool; drop each state-enabled model's state and errors tables before pre-fill (dev/CI use)
+## STATE_DISABLED
+
+Bool, default `false`. When `true`, forces no-state behavior on every matched model — `state` and `target.staging` are cleared, the state bootstrap and banner are skipped, and `write()` uses the direct (non-staged) path.
+
+## PEEK
+
+Bool, default `false`. When `true`, run bootstrap + print the state banner, then exit without invoking your `main()`.
 
 Full reference: [State](STATE.md).

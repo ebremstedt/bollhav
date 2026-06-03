@@ -1,4 +1,4 @@
-[← home](index.md)
+[Home](index.md) › [Decorators](DECORATORS.md) › **Execute lifecycle**
 
 # Execute lifecycle
 
@@ -42,4 +42,4 @@ When `target.stage` (interval-only): create a fresh staging table → execute wr
 ## See also
 
 - [Model lifecycle](MODEL_LIFECYCLE.md) — the per-model setup around the loop.
-- [State](STATE.md) · [Upstream & contracts](UPSTREAM.md) · [Staging](STAGING.md)
+- [State](STATE.md) · [Upstream](UPSTREAM.md) · [Staging](STAGING.md)

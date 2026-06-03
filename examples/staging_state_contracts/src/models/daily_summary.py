@@ -27,6 +27,7 @@ from bollhav.model import (
     Database,
     IntervalChunks,
     IntervalContract,
+    Kind,
     Model,
     MonolithicContract,
     Staging,
@@ -60,6 +61,7 @@ daily_summary = Model(
             ),
         ],
     ),
+    kind=Kind.INTERVAL,
     state=State(),
     batching=Batch(interval=IntervalChunks(expression="@daily")),
     bounds=Bounds(

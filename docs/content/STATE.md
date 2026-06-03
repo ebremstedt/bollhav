@@ -1,4 +1,4 @@
-[← home](index.md)
+[Home](index.md) › [Model](MODEL.md) › **State**
 
 # State
 
@@ -80,7 +80,7 @@ The one exception: if the staging flush already set state to `applied` (data is 
 
 ## Upstreams
 
-A model's `upstream` is a list of **contracts** on other models, each checked before a unit of work runs. An unsatisfied contract → `blocked`. See [Upstream & contracts](UPSTREAM.md) for the full picture.
+A model's `upstream` is a list of **contracts** on other models, each checked before a unit of work runs. An unsatisfied contract → `blocked`. Contracts are only enforced here, in the state machine — so `upstream` requires state (declaring it without `State(...)` raises). See [Upstream](UPSTREAM.md) for the full picture.
 
 ### Library and state colocation
 

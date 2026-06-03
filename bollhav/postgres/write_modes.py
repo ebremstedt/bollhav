@@ -109,7 +109,7 @@ def write(
             write mode is VIEW (views are created by `@model_lifecycle`,
             not written here).
     """
-    if model.target.is_view:
+    if model.is_view:
         raise ValueError(
             f"write() is for data, not views — {model.target.full_name!r} is "
             f"a VIEW. Views are created by @model_lifecycle "

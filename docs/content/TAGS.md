@@ -1,4 +1,4 @@
-[← home](index.md)
+[Home](index.md) › **Tags**
 
 # Tags
 

@@ -1,3 +1,5 @@
+[Home](index.md) › **Progress bar**
+
 # Progress Bar
 
 The progress bar decorator tracks execution of batched models. Set the `PROGRESS_BAR` environment variable to control verbosity.

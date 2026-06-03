@@ -77,11 +77,12 @@ class TestBlockCode:
 
 class TestModelStateField:
     def _kwargs(self):
-        from bollhav.model import Batch, IntervalChunks, Target, TargetSchema
+        from bollhav.model import Batch, IntervalChunks, Kind, Target, TargetSchema
 
         return dict(
             target=Target(name="orders", schema=TargetSchema(name="public")),
             batching=Batch(interval=IntervalChunks(expression="@hourly")),
+            kind=Kind.INTERVAL,
         )
 
     def test_state_defaults_to_none(self) -> None:
@@ -98,12 +99,13 @@ class TestModelStateField:
         assert m.state is s
 
     def test_state_without_batching_raises(self) -> None:
-        from bollhav.model import Model, Target, TargetSchema
+        from bollhav.model import Kind, Model, Target, TargetSchema
 
         with pytest.raises(ValueError, match="has no batching"):
             Model(
                 target=Target(name="orders", schema=TargetSchema(name="public")),
                 state=State(),
+                kind=Kind.INTERVAL,
             )
 
     def test_staging_without_state_is_allowed(self) -> None:
@@ -115,6 +117,7 @@ class TestModelStateField:
         from bollhav.model import (
             Batch,
             IntervalChunks,
+            Kind,
             Model,
             Staging,
             Target,
@@ -128,6 +131,7 @@ class TestModelStateField:
                 staging=Staging(),
             ),
             batching=Batch(interval=IntervalChunks(expression="@hourly")),
+            kind=Kind.INTERVAL,
         )
         assert m.state is None
         assert m.target.staging is not None
@@ -136,6 +140,7 @@ class TestModelStateField:
         from bollhav.model import (
             Batch,
             IntervalChunks,
+            Kind,
             Model,
             Staging,
             Target,
@@ -150,6 +155,7 @@ class TestModelStateField:
             ),
             batching=Batch(interval=IntervalChunks(expression="@hourly")),
             state=State(),
+            kind=Kind.INTERVAL,
         )
         assert m.target.staging is not None
         assert m.state is not None
@@ -461,11 +467,19 @@ class TestModelIntervals:
     subset onto it; the user's loop reads it back."""
 
     def test_assignment_holds(self) -> None:
-        from bollhav.model import Batch, IntervalChunks, Model, Target, TargetSchema
+        from bollhav.model import (
+            Batch,
+            IntervalChunks,
+            Kind,
+            Model,
+            Target,
+            TargetSchema,
+        )
 
         m = Model(
             target=Target(name="orders", schema=TargetSchema(name="public")),
             batching=Batch(interval=IntervalChunks(expression="@daily")),
+            kind=Kind.INTERVAL,
         )
         m.intervals = ("fake1", "fake2")
         assert m.intervals == ("fake1", "fake2")
@@ -477,6 +491,7 @@ class TestModelIntervals:
             Batch,
             Bounds,
             IntervalChunks,
+            Kind,
             Model,
             Target,
             TargetSchema,
@@ -486,6 +501,7 @@ class TestModelIntervals:
             target=Target(name="orders", schema=TargetSchema(name="public")),
             batching=Batch(interval=IntervalChunks(expression="@daily")),
             bounds=Bounds(begin=datetime(2024, 1, 1, tzinfo=timezone.utc)),
+            kind=Kind.INTERVAL,
         )
         m.directives.until = datetime(2024, 1, 3, tzinfo=timezone.utc)
         # Assigning the attribute doesn't perturb the pure computation.

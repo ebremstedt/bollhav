@@ -32,8 +32,8 @@ from bollhav.model import (
     Bounds,
     Database,
     IntervalChunks,
+    Kind,
     Model,
-    ModelType,
     SourceTable,
     Staging,
     State,
@@ -147,6 +147,7 @@ def _orders_model(
         ),
         state=state,
         batching=Batch(interval=IntervalChunks(expression="@daily")),
+        kind=Kind.INTERVAL,
         bounds=Bounds(begin=SINCE, end=bounds_end),
         upstream=upstream or [],
     )
@@ -224,7 +225,7 @@ def _bootstrap(models, *, state_mode: StateMode = StateMode.DISCOVER) -> None:
                 state.ensure_library()
                 state.register_model()
                 state.ensure_tables()
-                if model.is_monolithic or model.is_view:
+                if model.is_kind_monolithic or model.is_view:
                     state.insert_singleton(run_id=model.run_id)
                 else:
                     state.insert_intervals(
@@ -261,7 +262,7 @@ def _run_intervals(model: Model, *, error_on_interval: int | None = None):
         if error_on_interval == idx:
             raise RuntimeError("simulated mid-stream crash")
         with psycopg.connect(_dsn()) as conn:
-            if model.target.is_view:
+            if model.is_view:
                 create_replace_view(conn=conn, model=model)
             else:
                 df_gen = _gen_rows(since, until)
@@ -424,9 +425,9 @@ def test_e2e_view_as_upstream_does_not_block_downstream(schema_name):
         target=Target(
             name="v_high_value",
             schema=TargetSchema(name=schema_name),
-            model_type=ModelType.VIEW,
             dsn_env_var="TARGET_DSN",
         ),
+        kind=Kind.VIEW,
     )
 
     enriched = _orders_model(

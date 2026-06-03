@@ -93,67 +93,72 @@ def model_lifecycle(func: Callable) -> Callable:
             postgres_state = PostgresState(model=model, conn=state_conn)
             locked = postgres_state.acquire_model_lock()
 
+        data = None
         if model.target.database is Database.POSTGRES:
-            try:
-                from bollhav.postgres.data import PostgresData
+            from bollhav.postgres.data import PostgresData
 
-                postgres_data = PostgresData(model=model, conn=data_conn)
-                postgres_data.create_schema()
+            data = PostgresData(model=model, conn=data_conn)
+        elif model.target.database is Database.MSSQL:
+            from bollhav.mssql.data import MssqlData
+
+            data = MssqlData(model=model, conn=data_conn)
+
+        try:
+            if data is not None:
+                data.create_schema()
                 if model.is_view:
                     # A view's asset IS its definition — create it here, in
                     # place of the table DDL. No table/index/staging applies.
-                    postgres_data.create_or_replace_view()
+                    data.create_or_replace_view()
                 else:
                     if model.target.recreate_table:
-                        postgres_data.recreate_table()
-                    postgres_data.create_table()
+                        data.recreate_table()
+                    data.create_table()
                     if model.target.truncate_table:
-                        postgres_data.truncate_table()
+                        data.truncate_table()
                     if model.target.partitioned_by is not None:
-                        postgres_data.create_indexes()
+                        data.create_indexes()
                     if model.target.unique_columns:
-                        postgres_data.add_unique_constraint()
+                        data.add_unique_constraint()
                     if model.target.stage:
-                        postgres_data.create_staging_schema()
-                        postgres_data.gc_orphan_staging_tables()
+                        data.create_staging_schema()
+                        data.gc_orphan_staging_tables()
 
-                if model.stateful:
+            # State coordination is Postgres-only; MSSQL models are never
+            # stateful (rejected at the staging boundary), so this block
+            # never runs for them.
+            if model.stateful and model.state.backend == StateBackend.POSTGRES:
+                from bollhav.postgres.state import PostgresState
+
+                postgres_state = PostgresState(model=model, conn=state_conn)
+                postgres_state.ensure_library()
+                postgres_state.register_model()
+                postgres_state.ensure_tables()
+
+                if model.is_kind_monolithic or model.is_kind_view:
+                    postgres_state.insert_singleton(run_id=model.run_id)
+                else:
+                    postgres_state.insert_intervals(
+                        run_id=model.run_id,
+                        intervals=model.compute_intervals(),
+                    )
+                model.intervals = postgres_state.get_actionable_intervals()
+
+            return func(*args, **kwargs)
+        finally:
+            if (
+                locked
+                and model.stateful
+                and model.state.backend == StateBackend.POSTGRES
+            ):
+                try:
                     from bollhav.postgres.state import PostgresState
 
                     postgres_state = PostgresState(model=model, conn=state_conn)
-                    postgres_state.ensure_library()
-                    postgres_state.register_model()
-                    postgres_state.ensure_tables()
-
-                    if model.is_monolithic or model.is_view:
-                        postgres_state.insert_singleton(run_id=model.run_id)
-                    else:
-                        postgres_state.insert_intervals(
-                            run_id=model.run_id,
-                            intervals=model.compute_intervals(),
-                        )
-                    model.intervals = postgres_state.get_actionable_intervals()
-
-                result = func(*args, **kwargs)
-
-                return result
-            finally:
-                if (
-                    locked
-                    and model.stateful
-                    and model.state.backend == StateBackend.POSTGRES
-                ):
-                    try:
-                        from bollhav.postgres.state import PostgresState
-
-                        postgres_state = PostgresState(model=model, conn=state_conn)
-                        postgres_state.release_lock()
-                    except Exception:
-                        # Released automatically when the session ends too.
-                        pass
-
-        # Non-Postgres target: no Postgres-side setup to do; just run.
-        return func(*args, **kwargs)
+                    postgres_state.release_lock()
+                except Exception:
+                    # Released automatically when the session ends too.
+                    pass
 
     return wrapper
 
@@ -195,19 +200,29 @@ def execute_lifecycle(func: Callable) -> Callable:
         def staged_execute():
             """Run the user's execute bracketed by the staging lifecycle:
             create the table → execute writes rows into it → merge into the
-            target → tear it down. Staging is interval-only."""
+            target → tear it down. Staging is interval-only. The data
+            backend swaps on `model.target.database`; both expose the same
+            staging methods."""
             if interval is None:
                 raise ValueError(
                     f"staging is interval-only, but {model.target.full_name!r} "
                     f"ran with no interval — staging requires a batched model."
                 )
-            from bollhav.postgres.data import PostgresData
+            from bollhav.model.database import Database
 
-            postgres_data = PostgresData(model=model, conn=data_conn)
-            postgres_data.create_staging_table(model.run_id)
+            if model.target.database is Database.MSSQL:
+                from bollhav.mssql.data import MssqlData
+
+                data = MssqlData(model=model, conn=data_conn)
+            else:
+                from bollhav.postgres.data import PostgresData
+
+                data = PostgresData(model=model, conn=data_conn)
+
+            data.create_staging_table(model.run_id)
             result = func(*args, **kwargs)
-            postgres_data.apply_staging_to_target(model.run_id, interval)
-            postgres_data.drop_staging_table(model.run_id)
+            data.apply_staging_to_target(model.run_id, interval)
+            data.drop_staging_table(model.run_id)
             return result
 
         def plain_execute():

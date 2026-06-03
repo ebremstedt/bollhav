@@ -50,6 +50,7 @@ def _model(
     """Build a mock Model. `is_view=True` flips the target to a view
     (no staging, no state); `has_staging=False` produces a plain
     library-only table (no state pointers written by register)."""
+    from bollhav.model.kind import Kind
     from bollhav.model.staging import Staging
     from bollhav.model.state import State
 
@@ -57,7 +58,10 @@ def _model(
     model.target.name = full_name.split(".")[-1]
     model.target.full_name = full_name
     model.target.schema.resolved = full_name.split(".")[0]
-    model.target.is_view = is_view
+    # `register_model` keys off the Model-level `is_view` flag and the
+    # `kind` enum (it writes `'VIEW' if model.is_view else 'TABLE'` into
+    # model_type and `model.kind.value` into kind).
+    model.is_view = is_view
     upstream_list = list(upstream) if upstream is not None else []
     model.upstream = upstream_list
     # `register_model` reads `upstream_names` (the bare-string projection)
@@ -66,15 +70,15 @@ def _model(
     if is_view:
         model.target.staging = None
         model.state = None
-        model.kind = "view"
+        model.kind = Kind.VIEW
     elif not has_staging:
         model.target.staging = None
         model.state = None
-        model.kind = "interval"
+        model.kind = Kind.INTERVAL
     else:
         model.target.staging = Staging()
         model.state = State()
-        model.kind = "interval"
+        model.kind = Kind.INTERVAL
     return model
 
 

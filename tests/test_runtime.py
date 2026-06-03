@@ -4,6 +4,7 @@ from zoneinfo import ZoneInfo
 from bollhav.model.runtime import _apply_to_model
 from bollhav.model.batch import Batch, IntervalChunks
 from bollhav.model.bounds import Bounds
+from bollhav.model.kind import Kind
 from bollhav.model.model import Model
 from bollhav.model.target import Target
 from bollhav.model.target_schema import TargetSchema
@@ -46,6 +47,7 @@ def _model(**batch_kwargs) -> Model:
             name="orders", schema=TargetSchema(name="public", suffix_appendix=None)
         ),
         batching=Batch(interval=IntervalChunks(**iv)),
+        kind=Kind.INTERVAL,
     )
 
 
@@ -135,6 +137,7 @@ class TestBatchingCarryThrough:
                 size=5000,
             ),
             bounds=Bounds(begin=datetime(2024, 1, 1, tzinfo=UTC)),
+            kind=Kind.INTERVAL,
         )
         out = _apply(m)
         assert out.batching.size == 5000
@@ -147,7 +150,10 @@ class TestBatchingCarryThrough:
 
 class TestBatchingNone:
     def test_no_batching_skips_interval_baking(self) -> None:
-        m = Model(target=Target(name="t", schema=TargetSchema(suffix_appendix=None)))
+        m = Model(
+            target=Target(name="t", schema=TargetSchema(suffix_appendix=None)),
+            kind=Kind.MONOLITHIC,
+        )
         out = _apply(m, interval_expression_override="@daily")
         assert out.batching is None
 
@@ -169,6 +175,7 @@ class TestStateAndStagingCarryThrough:
             ),
             batching=Batch(interval=IntervalChunks(expression="@hourly", tz=UTC)),
             state=s,
+            kind=Kind.INTERVAL,
         )
         out = _apply(m)
         assert out.state is s
@@ -192,6 +199,7 @@ class TestStateAndStagingCarryThrough:
             ),
             batching=Batch(interval=IntervalChunks(expression="@hourly", tz=UTC)),
             state=State(),  # staging requires state
+            kind=Kind.INTERVAL,
         )
         out = _apply(m)
         out_staging = out.target.staging

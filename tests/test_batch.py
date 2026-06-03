@@ -12,6 +12,7 @@ from bollhav.model.batch import (
     _chunk_interval,
 )
 from bollhav.model.intervals import TZInterval
+from bollhav.model.kind import Kind
 from bollhav.model.model import Model
 from bollhav.model.target import Target
 
@@ -49,6 +50,7 @@ def _model(
             retries=retries,
         ),
         bounds=bounds,
+        kind=Kind.INTERVAL,
     )
     m.directives.since = since
     m.directives.until = until

@@ -15,6 +15,7 @@ from bollhav.model import (
     Bounds,
     Database,
     IntervalChunks,
+    Kind,
     Model,
     Staging,
     State,
@@ -49,6 +50,7 @@ orders = Model(
             ),
         ],
     ),
+    kind=Kind.INTERVAL,
     state=State(),  # required for staging; tracks one row per interval
     batching=Batch(interval=IntervalChunks(expression="@daily")),
     bounds=Bounds(

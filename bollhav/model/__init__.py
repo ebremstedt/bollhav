@@ -6,7 +6,7 @@ from bollhav.model.intervals import TZInterval
 from bollhav.model.matching import match_models
 from bollhav.model.ordering import UpstreamMode
 from bollhav.model.model import Model
-from bollhav.model.model_type import ModelType
+from bollhav.model.kind import Kind
 from bollhav.model.column_sorting import sort_columns
 from bollhav.model.write_modes import WriteMode
 from bollhav.model.target_schema import TargetSchema
@@ -45,7 +45,7 @@ __all__ = [
     "match_models",
     "UpstreamMode",
     "Model",
-    "ModelType",
+    "Kind",
     "sort_columns",
     "Staging",
     "State",
