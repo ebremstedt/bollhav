@@ -1,19 +1,19 @@
-[← home](index.md)
+[Home](index.md) › [Model](MODEL.md) › [Target](TARGET.md) › **Write modes**
 
 # Choosing a Write Mode
 
-A practical guide to picking the right write mode.
+`write_mode` is a property of [Target](TARGET.md) (`WriteMode`, default `APPEND`). A practical guide to picking the right one: `APPEND`, `UPSERT_NO_DELETE`, or `RECREATE_PARTITION`. Views are not a write mode — a view is `kind=Kind.VIEW` on the [Model](KINDS.md).
 
 ## Pre-load table flags
 
-Two flags on `Target` control what happens to the table **once, before any chunks are written**. They compose with any non-VIEW write mode.
+Two flags on `Target` control what happens to the table **once, before any chunks are written**. They compose with any write mode.
 
 | Flag | Effect |
 |---|---|
 | `recreate_table=True` | `DROP TABLE IF EXISTS` then `CREATE TABLE` before the load. Resets schema. |
 | `truncate_table=True` | `CREATE TABLE IF NOT EXISTS` then `TRUNCATE TABLE` before the load. Keeps schema, wipes rows. |
 
-Both default to `False`. Setting both is an error (recreate already leaves the table empty). Neither flag is valid with `WriteMode.VIEW`.
+Both default to `False`. Setting both is an error (recreate already leaves the table empty).
 
 Because the destructive step runs exactly once before the chunk loop, these flags are safe with chunked (INTERVAL or ROW) batching — earlier chunks are not overwritten by later ones.
 
@@ -114,35 +114,6 @@ Typical recipes:
 
 ---
 
-### VIEW
-
-| Property | |
-|---|---|
-| Idempotent | ✅ |
-| Handles source deletes | ✅ — query is re-evaluated on every read |
-| Handles duplicates | Depends — entirely determined by the source query |
-| Partition-aware | ✅ — depends on the query |
-| Backfill | ✅ No backfill needed — the view always reflects the current state of the underlying data |
-| Data volume | ⚠️ No write cost, but query cost scales with underlying data volume on every read |
-| Persisted | ❌ No data stored — the view definition is saved but data is computed on every read |
-| Schemaless-friendly | ❌ Requires a well-defined source query |
-| Risk of breaking target | Low — only replaces the view definition |
-| Effectiveness | No write cost, but query cost paid on every read |
-
-**Use when:**
-- You are building a **CONSUME layer** — views are ideal for exposing clean, renamed, or reshaped data to end consumers without duplicating storage
-- You want to rename columns or restructure a table for a specific audience without touching the underlying data
-- The result is cheap to compute on demand
-- You need the result to always reflect the latest source state
-
-**Avoid when:**
-- The underlying query is expensive — every consumer pays the compute cost on every read, so if users are waiting on results, materialise into a table instead
-- Downstream tools expect a materialised table
-
-**Requirements:** `model_type` must be `ModelType.VIEW`. `model.source.query` must be set. `recreate_table` and `truncate_table` are not applicable.
-
-
-
 ## Summary
 
 | Mode | Idempotent | SourceTable deletes | Partitioned | Backfill | Volume | Persisted |
@@ -150,7 +121,6 @@ Typical recipes:
 | `APPEND` | ⚠️ operation yes, table state no | ❌ (pair with `truncate_table`) | ❌ | ✅ (duplicates if re-run) | Any | ✅ |
 | `RECREATE_PARTITION` | ✅ | ✅ (in window) | ✅ | ✅ | Any | ✅ |
 | `UPSERT_NO_DELETE` | ⚠️ rows are updated but deletes accumulate | ❌ | ❌ | ⚠️ stale deletes accumulate | Medium | ✅ |
-| `VIEW` | ✅ | ✅ | ✅ | ✅ | N/A | ❌ |
 
 ### Pre-load flags
 

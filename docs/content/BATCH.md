@@ -1,4 +1,4 @@
-[← Model](MODEL.md)
+[Home](index.md) › [Model](MODEL.md) › **Batch**
 
 # Batch
 

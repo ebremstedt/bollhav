@@ -47,7 +47,7 @@ def _model(
     # `is_view` keys the view guard. Pin both — a MagicMock attribute is
     # truthy by default, which would misroute every call.
     model.target.stage = staged
-    model.target.is_view = is_view
+    model.is_view = is_view
     model.target.columns = [
         PostgresColumn(name="id", data_type=PostgresType.BIGINT),
         PostgresColumn(name="amount", data_type=PostgresType.NUMERIC),
@@ -162,7 +162,7 @@ class TestViewMode:
     def test_view_is_rejected(self) -> None:
         """A VIEW has nothing to write — `write()` refuses it. Views are
         created by `@model_lifecycle` (PostgresData.create_or_replace_view),
-        identified via `model.target.is_view`, not a write mode."""
+        identified via `model.is_view`, not a write mode."""
         from bollhav.postgres.write_modes import write
 
         model = _model(is_view=True)

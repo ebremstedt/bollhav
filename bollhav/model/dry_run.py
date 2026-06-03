@@ -138,7 +138,7 @@ def _format_tags(model: Model) -> str:
 
 
 def _format_upstream(model: Model) -> str:
-    return ", ".join(model.upstream) if model.upstream else "(none)"
+    return ", ".join(model.upstream_names) if model.upstream else "(none)"
 
 
 def _format_source(model: Model) -> str:

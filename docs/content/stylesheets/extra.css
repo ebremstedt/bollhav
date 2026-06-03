@@ -1,0 +1,4 @@
+/* Center the top banner (navigation tabs). */
+.md-tabs__list {
+  justify-content: center;
+}

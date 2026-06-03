@@ -1,8 +1,10 @@
-[← Target](TARGET.md)
+[Home](index.md) › [Model](MODEL.md) › [Target](TARGET.md) › **Staging**
 
 # Staging
 
-Per-target opt-in for memory-bounded chunked writes plus atomic per-interval finalization. Set `Target(staging=Staging(...))` and the `write()` dispatcher routes through the staged path: sub-batches land in a staging table; one transaction at the end applies the staged content to the target and (when `state=State(...)` is also set) flips the state row to `applied`.
+Per-target opt-in for memory-bounded chunked writes plus atomic per-interval finalization. Set `Target(staging=Staging(...))` and the staging-table lifecycle (create → write chunks → apply → drop) is owned by [`@execute_lifecycle`](EXECUTE_LIFECYCLE.md) via `PostgresData` / `MssqlData`: sub-batches land in a staging table keyed on `model.run_id`, then one transaction applies the staged content to the target. With state, the apply and the `applied` flip commit together.
+
+A `kind=Kind.VIEW` model can't have staging — a view has nothing to stage, so `Model(...)` rejects `staging` on a VIEW.
 
 Supported on both backends:
 
@@ -18,31 +20,30 @@ Supported on both backends:
 
 ## Per-interval flow
 
-Inside `stage(conn, model, since=..., until=...) as s:`:
+The schema/staging-schema setup is done once per model by [`@model_lifecycle`](MODEL_LIFECYCLE.md) via discrete idempotent `PostgresData` methods (`create_schema`, `create_table`, `create_staging_schema`, …) — not per interval. Inside the loop, [`@execute_lifecycle`](EXECUTE_LIFECYCLE.md) drives each interval's staging table through create → write → apply → drop. Your execute calls `write()`, which lands chunks in the staging table keyed on `model.run_id`; it does **not** create or finalize the table.
 
 ```mermaid
 flowchart TD
-    A[stage context enter] --> B[run schema-level PRE actions:<br>target schema/table, staging schema<br>one-shot, idempotent]
-    B --> C[CREATE a fresh staging table<br>for this interval]
-    C --> F[s.write chunk - dispatches on<br>staging.write_mode]
+    A[execute_lifecycle: interval starts] --> C[create_staging_table<br>fresh table for this run_id]
+    C --> F[execute calls write chunk -<br>dispatches on staging.write_mode]
     F --> G{more chunks?}
     G -- yes --> F
-    G -- no --> H[apply_atomically_to_target<br>in a single transaction]
+    G -- no --> H[apply_staging_to_target<br>in a single transaction]
     H --> I{target.write_mode}
     I -- APPEND --> J[INSERT INTO target<br>SELECT FROM staging]
     I -- UPSERT_NO_DELETE --> K[INSERT ... ON CONFLICT<br>DO UPDATE - Postgres<br>or MERGE - MSSQL]
     I -- RECREATE_PARTITION --> L[DELETE target window<br>+ INSERT FROM staging]
-    J --> D[DROP staging table<br>unless keep_after_apply]
+    J --> D[drop_staging_table<br>unless keep_after_apply]
     K --> D
     L --> D
     D --> M{state set?}
-    M -- yes --> N[UPDATE state row<br>SET status = 'applied']
+    M -- yes --> N[mark state row applied]
     M -- no --> O[skip]
-    N --> P[COMMIT - target rows + drop + state flip<br>atomically visible]
+    N --> P[interval done]
     O --> P
 ```
 
-The staging table is **created fresh each interval and dropped in that interval's apply transaction**, so staging always self-cleans on the write connection. The schema-level PRE actions (target/staging schema) are one-shot — subsequent intervals short-circuit via `target._applied_model_actions` and don't re-issue those CREATEs.
+The staging table is **created fresh each interval and dropped after that interval's apply**, so staging always self-cleans on the write connection. The schema-level setup (target schema/table, staging schema) is a once-per-model step run by `@model_lifecycle` before the loop — subsequent intervals don't re-issue those CREATEs.
 
 ## Per-run flow
 
@@ -86,7 +87,7 @@ Model(
 
 ## `Staging.write_mode` — how chunks land *in* staging
 
-| `staging.write_mode` | What `s.write(chunk)` does | Picks when |
+| `staging.write_mode` | What `write(chunk)` does | Picks when |
 |---|---|---|
 | `APPEND` *(default)* | bulk-insert / COPY the chunk into staging — no dedup, dupes accumulate | rows are append-only, or you don't care about dupes |
 | `UPSERT_NO_DELETE` | MERGE / `ON CONFLICT DO UPDATE` the chunk into staging on `target.unique_columns` — staging stays deduped as data arrives | source has duplicate keys (CDC streams, retried events) and you want them collapsed before the final apply |
@@ -112,13 +113,13 @@ The two write_modes compose orthogonally — four interesting cells:
 | `UPSERT_NO_DELETE` | `UPSERT_NO_DELETE` | dedup early as chunks arrive (staging stays small), MERGE small set at the end |
 | `APPEND` | `RECREATE_PARTITION` | replace a time-window's contents atomically |
 
-See [examples/staging_append/](../examples/staging_append/) and [examples/staging_upsert/](../examples/staging_upsert/) for runnable demos.
+See [examples/staging_state_contracts/](https://github.com/ebremstedt/bollhav/tree/main/examples/staging_state_contracts) (Postgres staging + state + contracts) and [examples/mssql/staging/](https://github.com/ebremstedt/bollhav/tree/main/examples/mssql/staging) (MSSQL staging, no state) for runnable demos.
 
 ## Table lifecycle across intervals
 
-Each interval gets a **fresh staging table**, created on entry to `stage()` and `DROP`ped inside that interval's apply transaction (unless `keep_after_apply=True`). On a 365-interval backfill that's `1 × CREATE SCHEMA + 365 × CREATE + 365 × DROP`. Because the drop rides the apply transaction, staging self-cleans on the write connection — no end-of-run cleanup pass and no separate DSN required.
+Each interval gets a **fresh staging table**: `@execute_lifecycle` calls `create_staging_table(run_id)` at the start of the interval and `drop_staging_table(run_id)` after a successful apply (unless `keep_after_apply=True`). On a 365-interval backfill that's `1 × CREATE SCHEMA + 365 × CREATE + 365 × DROP`. Staging self-cleans on the write connection — no end-of-run cleanup pass and no separate DSN required.
 
-The staging-table CREATE is *not* a one-shot PRE action (it's genuinely new each interval); only the schema-level setup (`staging_schema_created`) is recorded in `target._applied_model_actions` and short-circuited on later intervals.
+The staging schema is created once per model by `@model_lifecycle` (`create_staging_schema`); the per-interval table CREATE is genuinely new each interval, so it isn't short-circuited.
 
 The table name is `<prefix><run_id_short>`, so parallel workers on different runs of the same model don't collide.
 
@@ -179,7 +180,7 @@ Target(staging=MssqlStaging(...))   # same fields as Staging for now
 
 ## Co-location with state
 
-When state is set, the staging schema **must** live in the same database as the state schema (and therefore the target). Atomicity depends on the apply tx and `UPDATE state` committing together; a cross-database transaction is not supported. Setting `State(dsn_env_var=...)` together with staging raises `NotImplementedError` at `stage()` time.
+When state is set, the staging schema **must** live in the same database as the state schema (and therefore the target). Atomicity depends on the apply tx and the state flip; a cross-database transaction is not supported. Setting `State(dsn_env_var=...)` together with staging raises `NotImplementedError`.
 
 Without state, the schema-and-target-must-share-a-DB constraint doesn't apply — but `Staging.schema` still defaults to `z_<target_schema>` for consistency.
 

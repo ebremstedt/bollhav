@@ -1,4 +1,4 @@
-[← home](index.md)
+[Home](index.md) › **Schema vs table suffix**
 
 # Schema suffix vs table suffix
 

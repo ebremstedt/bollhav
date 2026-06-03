@@ -6,16 +6,18 @@ hide:
 
 <h1 style="display:none"></h1>
 
+<p align="center">
+  <img src="bollhav_logo_large.png" alt="bollhav" width="360">
+</p>
+
+<div style="text-align: center" markdown>
+
 ## What is bollhav?
 
 A model definition framework for ingesting and transforming data.
 
 Bollhav does not tell you *how to transform:* <br>
 It gives you the scaffolding around the transform ✨**and then gets out of the way.**✨
-
-## Demo
-
-![demo](batch_recording.gif)
 
 ## Explore the features
 
@@ -26,3 +28,5 @@ See [examples/](https://github.com/ebremstedt/bollhav/tree/main/examples) for se
 ```bash
 pip install bollhav
 ```
+
+</div>

@@ -33,10 +33,9 @@ pattern.
 from __future__ import annotations
 
 import logging
-from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
-from typing import TYPE_CHECKING, Iterator
+from typing import TYPE_CHECKING
 from uuid import UUID
 
 import polars as pl
@@ -93,25 +92,6 @@ def _staging_table(model: "Model", run_id: UUID) -> str:
     """Per-interval staging table name. First 8 hex chars of run_id
     disambiguate within a model."""
     return f"{_staging_table_prefix(model)}{str(run_id)[:8]}"
-
-
-def _assert_supported(model: "Model") -> None:
-    if model.batching is None:
-        raise ValueError(
-            f"stage() requires model.batching to be set on {model.target.full_name!r}"
-        )
-    if model.target.write_mode is WriteMode.VIEW:
-        raise NotImplementedError(
-            "stage() can't operate on a VIEW target — there's no row stream "
-            "to land. VIEWs are CREATE OR ALTER, not chunked writes."
-        )
-    if model.state is not None:
-        raise NotImplementedError(
-            f"stage() does not yet support state coordination on "
-            f"{model.target.full_name!r}. Leave State() unset — staging "
-            f"still gives you chunked atomic apply; intervals rerun on "
-            f"crash because there's no applied-gate."
-        )
 
 
 # ── DDL ─────────────────────────────────────────────────────────────
@@ -449,94 +429,8 @@ def gc_orphan_staging_tables(
     cursor.commit()
 
 
-# ── context manager ─────────────────────────────────────────────────
-
-
-class Stage:
-    """Yielded by `stage()`. `.write(df)` adds a sub-batch to the
-    staging table; context exit applies staging to target atomically."""
-
-    def __init__(
-        self,
-        conn: pyodbc.Connection,
-        model: "Model",
-        *,
-        run_id: UUID,
-        since: datetime,
-        until: datetime,
-    ) -> None:
-        self._conn = conn
-        self._model = model
-        self._run_id = run_id
-        self._since = since
-        self._until = until
-        self._rows_written = 0
-
-    def write(self, df: pl.DataFrame) -> None:
-        write_to_staging(self._conn, self._model, self._run_id, df)
-        self._rows_written += len(df)
-
-    @property
-    def rows_written(self) -> int:
-        return self._rows_written
-
-
-@contextmanager
-def stage(
-    conn: pyodbc.Connection,
-    model: "Model",
-    *,
-    since: datetime,
-    until: datetime,
-) -> Iterator[Stage]:
-    """Stream sub-batches into staging, then atomically apply to target.
-
-    Usage:
-
-        with stage(conn, model, since=since, until=until) as s:
-            for chunk in source:
-                s.write(chunk)
-
-    The model is expected to have `_state_run_id` already stashed (the
-    user's pipeline setup mints one per invocation, regardless of
-    whether state coordination is enabled — the run_id is the staging
-    table disambiguator).
-
-    On exception inside the with-block the staging table is left in
-    place for `gc_orphan_staging_tables()` to clean up on the next
-    run. The interval reruns from the top."""
-    _assert_supported(model)
-
-    run_id = getattr(model, "_state_run_id", None)
-    if run_id is None:
-        raise ValueError(
-            f"stage() requires model._state_run_id to be set — normally "
-            f"the pipeline mints one per invocation. Got None on "
-            f"{model.target.full_name!r}."
-        )
-
-    ensure_staging_schema(conn, model)
-    ensure_staging_table(conn, model, run_id)
-    s = Stage(conn, model, run_id=run_id, since=since, until=until)
-    try:
-        yield s
-    except Exception:
-        logger.debug(
-            "stage: exception in staged block for %s; leaving staging "
-            "table %s.%s for GC",
-            model.target.full_name,
-            _staging_schema(model),
-            _staging_table(model, run_id),
-        )
-        raise
-
-    apply_atomically_to_target(conn, model, run_id=run_id, since=since, until=until)
-
-
 __all__ = [
     "MssqlStaging",
-    "Stage",
-    "stage",
     "ensure_staging_schema",
     "ensure_staging_table",
     "write_to_staging",

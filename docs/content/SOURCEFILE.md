@@ -1,8 +1,10 @@
-[← Model](MODEL.md)
+[Home](index.md) › [Model](MODEL.md) › Source › **SourceFile**
 
 # SourceFile
 
 Where data is read from when the model loads from a file (CSV, etc.) rather than a database. For database sources see [SourceTable](SOURCETABLE.md).
+
+`source` is **optional** — `Model(source=...)` defaults to `None`. A model needs no `source` at all (your `read()` supplies the data); it's there for code that wants the config.
 
 ## path
 

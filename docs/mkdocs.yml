@@ -10,9 +10,10 @@ site_dir: site
 
 theme:
   name: material
+  logo: bollhav_logo_small.png
+  favicon: favicon.png
   features:
     - navigation.tabs
-    - navigation.sections
     - navigation.top
     - navigation.indexes
     - content.code.copy
@@ -55,43 +56,57 @@ markdown_extensions:
   - pymdownx.tabbed:
       alternate_style: true
 
+extra_css:
+  - stylesheets/extra.css
+
 nav:
   - Home: index.md
-  - Model:
-      - Overview: MODEL.md
-      - Target: TARGET.md
-      - TargetSchema: TARGETSCHEMA.md
-      - SourceTable: SOURCETABLE.md
-      - SourceFile: SOURCEFILE.md
-      - Bounds: BOUNDS.md
-      - Batch: BATCH.md
-      - Tagging: TAGGING.md
-  - Env: ENV.md
-  - Decorators:
-      - Overview: DECORATORS.md
-      - "@load_models step by step": LOAD_MODELS.md
-      - Model lifecycle: MODEL_LIFECYCLE.md
-      - Execute lifecycle: EXECUTE_LIFECYCLE.md
   - Concepts:
-      - Kinds: KINDS.md
-      - Modes: MODES.md
-      - Upstream & contracts: UPSTREAM.md
-      - State: STATE.md
-      - Staging: STAGING.md
-      - Library: LIBRARY.md
-      - Chunking: CHUNKING.md
-  - Runtime:
-      - Runtime overrides: RUNTIME_OVERRIDES.md
-      - Schema vs table suffix: SUFFIXES.md
-      - Progress bar: PROGRESS_BAR.md
-  - Tags:
-      - Tags: TAGS.md
-      - Advanced tag prefixes: ADVANCED_TAGS.md
-      - Matching: MATCHING.md
-  - Write modes: WRITEMODES.md
+      - Model:
+          - Overview: MODEL.md
+          - Kind: KINDS.md
+          - Target:
+              - Overview: TARGET.md
+              - TargetSchema: TARGETSCHEMA.md
+              - Staging: STAGING.md
+          - Source:
+              - None: SOURCE_NONE.md
+              - SourceTable: SOURCETABLE.md
+              - SourceFile: SOURCEFILE.md
+          - Bounds: BOUNDS.md
+          - Batch: BATCH.md
+          - State:
+              - Overview: STATE.md
+              - Block codes: BLOCK_CODES.md
+          - Upstream: UPSTREAM.md
+          - Tagging: TAGGING.md
+          - Modes: MODES.md
+          - Chunking: CHUNKING.md
+          - Library: LIBRARY.md
+      - Env: ENV.md
+      - Decorators:
+          - Overview: DECORATORS.md
+          - "@load_models step by step": LOAD_MODELS.md
+          - Model lifecycle: MODEL_LIFECYCLE.md
+          - Execute lifecycle: EXECUTE_LIFECYCLE.md
+          - Runtime overrides: RUNTIME_OVERRIDES.md
+          - Schema vs table suffix: SUFFIXES.md
+          - Progress bar: PROGRESS_BAR.md
+      - Tags:
+          - Tags: TAGS.md
+          - Advanced tag prefixes: ADVANCED_TAGS.md
+          - Matching: MATCHING.md
+      - Write modes: WRITEMODES.md
   - Implementations:
       - Postgres: POSTGRES.md
       - MSSQL: MSSQL.md
-  - Design notes:
-      - Lifecycle redesign: LIFECYCLE_REDESIGN.md
-  - About: ABOUT.md
+  - Articles:
+      - Overview: ARTICLES.md
+      - Virtual environments: VIRTUAL_ENVIRONMENTS.md
+      - State: ARTICLE_STATE.md
+      - Orchestration: ORCHESTRATION.md
+      - Testing locally: LOCAL_TESTING.md
+      - Lineage: LINEAGE.md
+  - About:
+      - About: ABOUT.md
+      - Writing docs: WRITING_DOCS.md

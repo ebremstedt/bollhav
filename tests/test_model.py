@@ -5,14 +5,18 @@ import pytest
 from bollhav.model.batch import Batch
 from bollhav.model.bounds import Bounds
 from bollhav.model.model import Model
-from bollhav.model.model_type import ModelType
+from bollhav.model.kind import Kind
 from bollhav.model.target import Target
 
 
 def make_model(**overrides) -> Model:
-    # Default to an explicit Batch() so model.intervals tests exercise
-    # the time-chunking path (None would short-circuit to [None]).
-    overrides.setdefault("batching", Batch())
+    # Default to kind=INTERVAL with an explicit Batch() so model.intervals
+    # tests exercise the time-chunking path (None would short-circuit to
+    # [None]). INTERVAL requires batching, so default that too — unless a
+    # test overrides kind, in which case respect it.
+    overrides.setdefault("kind", Kind.INTERVAL)
+    if overrides["kind"] is Kind.INTERVAL:
+        overrides.setdefault("batching", Batch())
     return Model(
         target=overrides.pop("target", Target(name="orders")),
         source=overrides.pop("source", None),
@@ -40,8 +44,9 @@ def test_model_exposes_sub_configs():
 
 
 def test_batching_defaults_to_none_when_unspecified():
-    """No batching kwarg = no chunking. model.intervals returns [None]."""
-    m = Model(target=Target(name="orders"))
+    """No batching kwarg = no chunking. model.intervals returns [None].
+    A whole-table load with no batching is kind=MONOLITHIC."""
+    m = Model(target=Target(name="orders"), kind=Kind.MONOLITHIC)
     assert m.batching is None
     assert m.compute_intervals() == (None,)
 
@@ -78,47 +83,89 @@ def test_intervals_backfill_falls_back_to_bounds_for_since_but_requires_until():
 
 
 class TestModelKind:
-    """`Model.kind` ('interval' | 'monolithic' | 'view') drives how many
-    state rows a model has and how an upstream contract checks it. It's
-    derived from is_view / is_monolithic, with interval (batched) the
-    default."""
+    """`Model.kind` (a `Kind` enum: INTERVAL | MONOLITHIC | VIEW) is the
+    single source of truth for a model's unit of work — how many state
+    rows it has and how an upstream contract checks it. It's set
+    explicitly on every Model (no default) and the is_* bools derive
+    from it."""
 
-    def test_batched_model_is_interval(self):
-        m = make_model()  # make_model defaults to Batch()
-        assert m.kind == "interval"
+    def test_interval_model_kind(self):
+        m = make_model()  # make_model defaults to kind=INTERVAL + Batch()
+        assert m.kind is Kind.INTERVAL
+        assert m.kind.value == "interval"
+        assert m.is_kind_interval is True
+        assert m.is_table is True
         assert m.is_view is False
-        assert m.is_monolithic is False
+        assert m.is_kind_monolithic is False
 
-    def test_unbatched_table_is_interval_by_default(self):
-        # No batching and not explicitly monolithic → still 'interval'.
-        m = Model(target=Target(name="orders"))
-        assert m.kind == "interval"
-
-    def test_monolithic_model_is_monolithic(self):
-        m = Model(target=Target(name="app_config"), monolithic=True)
-        assert m.kind == "monolithic"
-        assert m.is_monolithic is True
+    def test_monolithic_model_kind(self):
+        m = Model(target=Target(name="app_config"), kind=Kind.MONOLITHIC)
+        assert m.kind is Kind.MONOLITHIC
+        assert m.kind.value == "monolithic"
+        assert m.is_kind_monolithic is True
+        assert m.is_table is True
         assert m.is_view is False
 
-    def test_view_model_is_view(self):
-        m = Model(target=Target(name="customers", model_type=ModelType.VIEW))
-        assert m.kind == "view"
+    def test_view_model_kind(self):
+        m = Model(target=Target(name="customers"), kind=Kind.VIEW)
+        assert m.kind is Kind.VIEW
+        assert m.kind.value == "view"
         assert m.is_view is True
-        assert m.is_monolithic is False
+        assert m.is_kind_view is True
+        assert m.is_table is False
+        assert m.is_kind_monolithic is False
+
+    def test_kind_is_required(self):
+        # `kind` is keyword-only and required — omitting it is a TypeError.
+        with pytest.raises(TypeError):
+            Model(target=Target(name="orders"))
+
+    def test_interval_without_batching_raises(self):
+        # An interval model's unit of work is a time window, so it must
+        # carry batching — caught at construction.
+        with pytest.raises(ValueError, match="INTERVAL"):
+            Model(target=Target(name="orders"), kind=Kind.INTERVAL)
 
     def test_monolithic_with_batching_raises(self):
         # A monolithic model has no interval windows — the two are
         # mutually exclusive and caught at construction.
-        with pytest.raises(ValueError, match="monolithic"):
+        with pytest.raises(ValueError, match="MONOLITHIC"):
             Model(
                 target=Target(name="app_config"),
-                monolithic=True,
+                kind=Kind.MONOLITHIC,
                 batching=Batch(),
             )
 
-    def test_view_cannot_be_monolithic(self):
+    def test_view_with_batching_raises(self):
         with pytest.raises(ValueError, match="VIEW"):
             Model(
-                target=Target(name="customers", model_type=ModelType.VIEW),
-                monolithic=True,
+                target=Target(name="customers"),
+                kind=Kind.VIEW,
+                batching=Batch(),
             )
+
+
+class TestUpstreamRequiresState:
+    """`upstream` contracts are only enforced by the state machine, so a
+    model declaring upstream must also be state-tracked — else the
+    contract would silently never run."""
+
+    def test_upstream_without_state_raises(self):
+        from bollhav.model.upstream import IntervalContract
+
+        with pytest.raises(ValueError, match="upstream"):
+            make_model(upstream=[IntervalContract("warehouse.orders")])
+
+    def test_bare_string_upstream_without_state_raises(self):
+        with pytest.raises(ValueError, match="upstream"):
+            make_model(upstream=["warehouse.orders"])
+
+    def test_upstream_with_state_is_fine(self):
+        from bollhav.model.state import State
+        from bollhav.model.upstream import ViewContract
+
+        m = make_model(upstream=[ViewContract("warehouse.customers")], state=State())
+        assert m.upstream_names == ["warehouse.customers"]
+
+    def test_no_upstream_no_state_is_fine(self):
+        assert make_model().upstream == []

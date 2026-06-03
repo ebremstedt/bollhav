@@ -85,7 +85,7 @@ def _apply_to_model(
             lookback_override=lookback_override,
             tz_override=tz_override,
         ),
-        monolithic=model.monolithic,
+        kind=model.kind,
         state=model.state,
         enabled=model.enabled,
         debug=False,  # avoid re-printing pretty() on the copy
@@ -122,7 +122,6 @@ def _target_with_suffix(
         database=target.database,
         columns=list(target.columns),
         indexes=list(target.indexes),
-        model_type=target.model_type,
         write_mode=target.write_mode,
         dsn_env_var=target.dsn_env_var,
         column_sorting=target.column_sorting,

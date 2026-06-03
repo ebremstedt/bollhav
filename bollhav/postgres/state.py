@@ -420,7 +420,7 @@ class PostgresState:
     def insert_singleton(self, *, run_id: UUID) -> None:
         """Prefill the single NULL-window row for a monolithic (whole-table)
         or view model — the counterpart to `insert_intervals` for the
-        non-interval kinds. The row carries `kind = model.kind` and a NULL
+        non-interval kinds. The row carries `kind = model.kind.value` and a NULL
         `since`/`until`; the partial unique index keeps it unique.
 
         Same DISCOVER / BULLDOZER semantics as interval prefill: DISCOVER
@@ -465,10 +465,10 @@ class PostgresState:
 
         conn = self._require_conn()
         with conn.transaction():
-            conn.execute(insert, [str(run_id), model.kind])
+            conn.execute(insert, [str(run_id), model.kind.value])
         logger.debug(
             "state: prefilled %s singleton row for %s (mode=%s)",
-            model.kind,
+            model.kind.value,
             model.target.full_name,
             model.state.mode.value,
         )
@@ -1034,7 +1034,7 @@ class PostgresState:
         has_state_table = model.state is not None
         state_schema = self._state_schema() if has_state_table else None
         state_table = self._state_table() if has_state_table else None
-        model_type = "VIEW" if model.target.is_view else "TABLE"
+        model_type = "VIEW" if model.is_view else "TABLE"
         upsert = sql.SQL(
             "INSERT INTO {schema}.{table} "
             "(full_name, upstream, model_type, state_schema, state_table, kind, last_seen) "
@@ -1059,14 +1059,14 @@ class PostgresState:
                     model_type,
                     state_schema,
                     state_table,
-                    model.kind,
+                    model.kind.value,
                 ],
             )
         logger.debug(
             "library: registered %s (model_type=%s, kind=%s, upstream=%s)",
             model.target.full_name,
             model_type,
-            model.kind,
+            model.kind.value,
             model.upstream_names,
         )
 

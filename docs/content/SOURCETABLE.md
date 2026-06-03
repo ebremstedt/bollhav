@@ -1,8 +1,10 @@
-[← Model](MODEL.md)
+[Home](index.md) › [Model](MODEL.md) › Source › **SourceTable**
 
 # SourceTable
 
 Where data is read from when the model uses a table source. For file-backed sources see [SourceFile](SOURCEFILE.md).
+
+`source` is **optional** — `Model(source=...)` defaults to `None`. It's metadata/config for code that wants it; your `read()` function supplies the data, so a model needs no `source` at all. The one exception: a [VIEW](KINDS.md) model needs a `SourceTable` with a `query` (that's the view's definition).
 
 ## name
 

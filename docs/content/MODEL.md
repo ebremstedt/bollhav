@@ -1,17 +1,37 @@
-[← home](index.md)
+[Home](index.md) › **Model**
 
 # Model
 
 A `Model` is a pure data object describing what data looks like and where it goes. It does not contain execution logic — that lives in a separate `execute` function that receives the model as a parameter.
 
+## Kind
+
+Every model declares a required `kind`, the single source of truth for its unit of work. The state layer and upstream contracts key on it.
+
+| `kind` | Meaning |
+|---|---|
+| `Kind.INTERVAL` | Batched table; unit of work is one `(since, until)` window. Requires `batching`. |
+| `Kind.MONOLITHIC` | Whole-table load; one unit. Must not have `batching`. |
+| `Kind.VIEW` | A view; unit of work is its existence. No `batching` / `staging`. |
+
+```python
+from bollhav.model import Kind
+```
+
+See [Kinds](KINDS.md) for the full reference.
+
 The `Model` itself is the top-level container. Its sub-objects each have their own page:
 
+- [Kind](KINDS.md) — the model's unit of work (`INTERVAL` / `MONOLITHIC` / `VIEW`)
 - [Target](TARGET.md) — where data lands (table, schema, columns, write mode)
 - [TargetSchema](TARGETSCHEMA.md) — schema part of Target (with optional rotating suffix)
+- [Staging](STAGING.md) — optional staging table on Target
 - [SourceTable](SOURCETABLE.md) — where data is read from (database)
 - [SourceFile](SOURCEFILE.md) — where data is read from (file)
 - [Bounds](BOUNDS.md) — historical envelope for backfill mode
 - [Batch](BATCH.md) — chunk size, lookback, retries
+- [State](STATE.md) — per-model state tracking
+- [Upstream](UPSTREAM.md) — dependencies on other models, checked by kind
 - [Tagging](TAGGING.md) — controls which auto-derived tags get added to the model
 
 ## Example
@@ -19,12 +39,13 @@ The `Model` itself is the top-level container. Its sub-objects each have their o
 ```python
 from datetime import datetime, timezone
 from bollhav.model import (
-    Model, Target, TargetSchema, SourceTable,
+    Model, Kind, Target, TargetSchema, SourceTable,
     Bounds, Batch, Database, WriteMode,
 )
 from bollhav.postgres import PostgresColumn, PostgresType
 
 model = Model(
+    kind=Kind.INTERVAL,
     target=Target(
         name="orders",
         schema=TargetSchema(name="public"),
@@ -44,6 +65,12 @@ model = Model(
 ```
 
 ## Parameters
+
+### kind
+
+Type: `Kind` · Default: required
+
+The model's unit of work: `Kind.INTERVAL`, `Kind.MONOLITHIC`, or `Kind.VIEW`. See [Kind](#kind) above and [Kinds](KINDS.md).
 
 ### target
 
@@ -95,9 +122,9 @@ Human-readable description.
 
 ### upstream
 
-Type: `list[str]` · Default: `None`
+Type: `list[Contract | str]` · Default: `None`
 
-Names of models that must run before this one. See [Upstream dependencies](#upstream-dependencies) below.
+Models that must run before this one. Each entry is a contract (`IntervalContract` / `MonolithicContract` / `ViewContract`) keyed on the upstream's kind, or a bare name string. **Requires `state=State(...)`** — contracts are only enforced for state-tracked models, so declaring `upstream` without state raises. See [Upstream dependencies](#upstream-dependencies) below and [Upstream](UPSTREAM.md).
 
 ### `**kwargs`
 
@@ -107,6 +134,11 @@ Extra metadata. Callable values are resolved with non-callable kwargs as argumen
 
 | Attribute | Description |
 |---|---|
+| `is_table` | `True` for any non-view kind (`INTERVAL` / `MONOLITHIC`) |
+| `is_view` | `True` when `kind=Kind.VIEW` |
+| `is_kind_interval` | `True` when `kind=Kind.INTERVAL` |
+| `is_kind_monolithic` | `True` when `kind=Kind.MONOLITHIC` |
+| `is_kind_view` | `True` when `kind=Kind.VIEW` |
 | `target.sensitive` | `True` if any column has `sensitive=True` |
 | `target.unique_columns` | Columns with `unique=True` — required for `UPSERT_NO_DELETE` |
 | `target.partitioned_by_index` | `True` if `partitioned_by` is set |
@@ -127,19 +159,19 @@ enriched_orders = Model(
 )
 ```
 
-If a matched model depends on an upstream model that is not in the matched set, matching raises a `ValueError`. This ensures you never accidentally run a model without its dependencies.
+An upstream that isn't in the matched set is **not** an error — it ships in another pipeline or under different `TAGS`, and its satisfaction is checked at runtime against the cross-pipeline state library (see [Upstream](UPSTREAM.md)), not at match time. Matching only **orders** the models it matched.
 
-Circular dependencies are also detected and raise a `ValueError`.
+Circular dependencies among matched models are detected and raise a `ValueError`.
 
 ### Upstream mode
 
-The `upstream_mode` parameter controls how upstream dependencies are enforced. It can be set via the `UPSTREAM` environment variable (read by `@load_models`) or passed directly to `match_models` / `apply_runtime_overrides`.
+`upstream_mode` controls how matched models are **ordered** by their upstreams. It can be set via the `UPSTREAM` environment variable (read by `@load_models`) or passed directly to `match_models` / `apply_runtime_overrides`. It governs ordering only — whether an upstream is *satisfied* is a runtime concern of the [contract](UPSTREAM.md) layer, not of matching.
 
 | Mode | Value | Description |
 |---|---|---|
-| `ENFORCE` | `enforce` | All upstream dependencies must be present and are ordered (default) |
-| `IGNORE_VIEWS` | `ignore_views` | Views skip upstream checks; tables are still enforced |
-| `IGNORE_COMPLETELY` | `ignore_completely` | No ordering or validation, models returned as-is |
+| `ENFORCE` | `enforce` | Topologically order matched models so each runs after its matched upstreams (default). Unmatched upstreams are skipped; circular deps raise. |
+| `IGNORE_VIEWS` | `ignore_views` | Views are not ordered against their upstreams (treated as having none); tables are still ordered |
+| `IGNORE_COMPLETELY` | `ignore_completely` | No ordering, models returned as-is |
 
 ```bash
 export UPSTREAM=ignore_views
@@ -200,7 +232,7 @@ model.pretty()
 
 ## Write modes
 
-Read more [here](MODES.md)
+Read more in [Write modes](WRITEMODES.md). A view is `kind=Kind.VIEW`, not a write mode.
 
 ```python
 from bollhav.model.write_modes import WriteMode
@@ -208,7 +240,6 @@ from bollhav.model.write_modes import WriteMode
 WriteMode.APPEND
 WriteMode.RECREATE_PARTITION     # requires partitioned_by
 WriteMode.UPSERT_NO_DELETE       # requires at least one column with unique=True
-WriteMode.VIEW                   # requires ModelType.VIEW
 ```
 
 For full-reload semantics, combine a write mode with `Target(recreate_table=True)` or `Target(truncate_table=True)` — these run once before the chunked write loop (see [MODES.md](MODES.md#pre-load-flags-recreate_table-and-truncate_table)).

@@ -8,26 +8,25 @@ from bollhav.mssql.schema import (
     ensure_schema_and_table,
     ensure_schema_table_and_indexes,
 )
+from bollhav.mssql.data import MssqlData
 from bollhav.mssql.modes import append, merge, create_replace_view
 from bollhav.mssql.staging import (
     MssqlStaging,
-    Stage,
     write_to_staging,
     drop_staging_table,
     ensure_staging_schema,
     ensure_staging_table,
     apply_atomically_to_target,
     gc_orphan_staging_tables,
-    stage,
 )
 from bollhav.mssql.write_modes import write, write_dataframes
 
 __all__ = [
     "MssqlColumn",
+    "MssqlData",
     "MssqlIndex",
     "MssqlStaging",
     "MssqlType",
-    "Stage",
     "append",
     "write_to_staging",
     "create_replace_view",
@@ -43,7 +42,6 @@ __all__ = [
     "apply_atomically_to_target",
     "gc_orphan_staging_tables",
     "merge",
-    "stage",
     "write",
     "write_dataframes",
 ]

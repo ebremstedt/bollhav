@@ -1,8 +1,10 @@
-[← home](index.md)
+[Home](index.md) › [Model](MODEL.md) › **Upstream**
 
-# Upstream & contracts
+# Upstream
 
 How one model waits for another. A model's `upstream` is a list of **contracts** — each declares a dependency on another model and how that dependency is checked before a unit of work runs.
+
+**Upstream requires [state](STATE.md).** A contract's satisfaction is checked by the state machine (`@execute_lifecycle`), which only runs for state-tracked models. Declaring `upstream` without `state=State(...)` is an error — the contract would otherwise never be enforced.
 
 ## Contract
 

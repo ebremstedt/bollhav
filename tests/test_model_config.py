@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from unittest.mock import MagicMock
 import pytest
-from bollhav.model.model_type import ModelType
+from bollhav.model.kind import Kind
 from bollhav.model.model import Model
 from bollhav.model.target_schema import TargetSchema
 from bollhav.model.target import Target
@@ -34,6 +34,9 @@ def make_db() -> MagicMock:
 
 
 def make_model(**overrides) -> Model:
+    # These config/tag tests build whole-table models with no batching, so
+    # default kind=MONOLITHIC (a kind is now required on every Model).
+    overrides.setdefault("kind", Kind.MONOLITHIC)
     return Model(
         target=overrides.pop("target", Target(name="test_table")),
         source=overrides.pop("source", None),
@@ -44,16 +47,17 @@ def make_model(**overrides) -> Model:
 # --- Target validation ---
 #
 # The old `ModelType.VIEW <-> WriteMode.VIEW` coupling tests were removed:
-# `WriteMode.VIEW` no longer exists. A view is identified solely by
-# `ModelType.VIEW` and has no write mode (it's created by the lifecycle, not
-# written), so there is no longer a write-mode/model-type pairing to validate.
+# `WriteMode.VIEW` no longer exists, and `ModelType` is gone entirely. A view
+# is now identified solely by `Model(kind=Kind.VIEW)`; the Target no longer
+# carries a model_type, so there is no write-mode/model-type pairing to
+# validate.
 
 
-def test_view_model_type_has_no_write_mode_coupling():
-    # A VIEW with the default (APPEND) write mode is accepted — the write mode
-    # is simply irrelevant for a view, so no ValueError is raised.
-    t = Target(name="test_table", model_type=ModelType.VIEW)
-    assert t.is_view is True
+def test_view_kind_has_no_write_mode_coupling():
+    # A VIEW with the default (APPEND) write mode on its target is accepted —
+    # the write mode is simply irrelevant for a view, so no error is raised.
+    m = make_model(target=Target(name="test_table"), kind=Kind.VIEW)
+    assert m.is_view is True
 
 
 def test_database_without_columns_raises():
@@ -145,7 +149,6 @@ def test_defaults():
     assert m.target.schema.resolved == ""
     assert m.target.database is None
     assert m.target.columns == []
-    assert m.target.model_type == ModelType.TABLE
     assert m.target.write_mode == WriteMode.APPEND
     assert m.enabled is True
     assert m.debug is False

@@ -1,4 +1,4 @@
-[← home](index.md)
+[Home](index.md) › [Decorators](DECORATORS.md) › **@load_models step by step**
 
 # What `@load_models` does
 

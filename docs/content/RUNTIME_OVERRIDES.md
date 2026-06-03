@@ -1,4 +1,4 @@
-[← home](index.md)
+[Home](index.md) › **Runtime overrides**
 
 # Runtime overrides
 
@@ -12,16 +12,11 @@ from bollhav.model import Model, load_models
 @load_models
 def main(models: list[Model], debug: bool) -> None:
     for model in models:
-        for interval in model.intervals:
-            execute(model, interval, ...)
-
+        ...
 
 if __name__ == "__main__":
     main()
 ```
-
-For programmatic use (or tests) call `apply_runtime_overrides(...)` directly with explicit kwargs — same effect, no env reading.
-
 ## Env vars
 
 | Variable | Type | Required | Description |

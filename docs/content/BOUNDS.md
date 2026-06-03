@@ -1,8 +1,8 @@
-[← Model](MODEL.md)
+[Home](index.md) › [Model](MODEL.md) › **Bounds**
 
 # Bounds
 
-The historical envelope for backfill mode. Bollhav uses `begin` and `end` to decide what range to walk when `BACKFILL_ENABLED=true`. In `latest` mode these are ignored — latest reads from `now()`.
+The historical scope of the model. Bollhav uses `begin` and `end` to decide what range to walk when `BACKFILL_ENABLED=true`. In `latest` mode these are ignored — latest reads from `now()`.
 
 ## begin
 

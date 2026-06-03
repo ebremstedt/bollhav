@@ -23,7 +23,8 @@ from bollhav.model.source_table import SourceTable  # noqa: E402
 from bollhav.model.target import Target  # noqa: E402
 from bollhav.model.target_schema import TargetSchema  # noqa: E402
 from bollhav.model.write_modes import WriteMode  # noqa: E402
-from bollhav.model.model_type import ModelType  # noqa: E402
+from bollhav.model.kind import Kind  # noqa: E402
+from bollhav.model.batch import Batch  # noqa: E402
 
 
 def _col(
@@ -66,10 +67,11 @@ def _model(
             database=Database.POSTGRES,
             columns=cols,
             write_mode=write_mode,
-            model_type=ModelType.TABLE,
             recreate_table=recreate_table,
             truncate_table=truncate_table,
         ),
+        batching=Batch(),
+        kind=Kind.INTERVAL,
     )
 
 
@@ -263,8 +265,9 @@ class TestUpdateInsert:
                 columns=cols,
                 database=Database.POSTGRES,
                 write_mode=WriteMode.UPSERT_NO_DELETE,
-                model_type=ModelType.TABLE,
             ),
+            batching=Batch(),
+            kind=Kind.INTERVAL,
         )
         df = pl.DataFrame({"id": [1], "val": ["a"]})
         copy_mock = MagicMock()

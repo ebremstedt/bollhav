@@ -3,7 +3,6 @@ from datetime import datetime, timezone
 from typing import Callable
 
 from bollhav.model.database import Database, DatabaseColumn, DatabaseIndex
-from bollhav.model.model_type import ModelType
 from bollhav.model.staging import Staging
 from bollhav.model.write_modes import WriteMode
 from bollhav.model.column_sorting import sort_columns
@@ -20,7 +19,6 @@ class Target:
     database: Database | None = None
     columns: list[DatabaseColumn] = field(default_factory=list)
     indexes: list[DatabaseIndex] = field(default_factory=list)
-    model_type: ModelType = ModelType.TABLE
     write_mode: WriteMode = WriteMode.APPEND
     dsn_env_var: str | None = None
     column_sorting: Callable | None = sort_columns
@@ -63,14 +61,6 @@ class Target:
         return f"{self.catalog}.{base}" if self.catalog else base
 
     @property
-    def is_view(self) -> bool:
-        return self.model_type == ModelType.VIEW
-
-    @property
-    def is_table(self) -> bool:
-        return self.model_type == ModelType.TABLE
-
-    @property
     def partitioned_by(self) -> str | None:
         """Name of the column marked `partition_on=True`, or `None`
         if no column is marked. Derived from `columns`."""
@@ -91,10 +81,6 @@ class Target:
             raise ValueError(
                 "recreate_table and truncate_table cannot both be True — "
                 "recreate already leaves the table empty"
-            )
-        if (self.recreate_table or self.truncate_table) and self.is_view:
-            raise ValueError(
-                "recreate_table/truncate_table are not applicable to a VIEW"
             )
         if self.database is not None and len(self.columns) == 0:
             raise ValueError("columns must be set when database is provided")

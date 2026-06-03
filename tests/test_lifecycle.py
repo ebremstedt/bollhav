@@ -12,10 +12,13 @@ the connection that state work runs against is asserted via the
 construction `conn=` kwarg (not per-method, as in the old API).
 """
 
+import sys
 from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 
 import pytest
+
+sys.modules.setdefault("pyodbc", MagicMock())  # bollhav.mssql.data imports it
 
 from bollhav.model.lifecycle import execute_lifecycle, model_lifecycle
 from bollhav.model.state import ModelLockedError
@@ -207,7 +210,8 @@ class TestModelLifecycle:
         m.state.allow_concurrent_runs = allow_concurrent
         m.stateful = True
         m.is_view = False
-        m.is_monolithic = False
+        m.is_kind_monolithic = False
+        m.is_kind_view = False
         return m
 
     def _stateless_model(self):
@@ -225,7 +229,8 @@ class TestModelLifecycle:
         m.state = None
         m.stateful = False
         m.is_view = False
-        m.is_monolithic = False
+        m.is_kind_monolithic = False
+        m.is_kind_view = False
         return m
 
     def test_state_less_runs_assets_no_bootstrap(self):
@@ -312,3 +317,59 @@ class TestModelLifecycle:
             )
             with pytest.raises(ModelLockedError):
                 execute_model(model, "DATA", "STATE")
+
+
+class TestBackendDispatch:
+    """The lifecycle resolves the data backend from `model.target.database`:
+    Postgres → PostgresData, MSSQL → MssqlData. MSSQL is never stateful, so
+    its asset DDL runs but no state bootstrap."""
+
+    def _mssql_model(self, *, stage=False):
+        from bollhav.model.database import Database
+
+        m = MagicMock()
+        m.target.full_name = "warehouse.events"
+        m.target.database = Database.MSSQL
+        m.target.recreate_table = False
+        m.target.truncate_table = False
+        m.target.partitioned_by = None
+        m.target.unique_columns = []
+        m.target.stage = stage
+        m.upstream = []
+        m.state = None
+        m.stateful = False
+        m.is_view = False
+        m.is_kind_monolithic = False
+        m.is_kind_view = False
+        return m
+
+    def test_mssql_model_routes_assets_through_mssql_data(self):
+        @model_lifecycle
+        def execute_model(model, data_conn, state_conn=None):
+            return None
+
+        with (
+            patch("bollhav.mssql.data.MssqlData") as mssql_cls,
+            patch("bollhav.postgres.data.PostgresData") as pg_cls,
+            patch("bollhav.postgres.state.PostgresState") as state_cls,
+        ):
+            execute_model(self._mssql_model(), "DATA")
+
+        mssql_cls.assert_called_once()  # MSSQL backend resolved
+        mssql_cls.return_value.create_schema.assert_called_once()
+        mssql_cls.return_value.create_table.assert_called_once()
+        pg_cls.assert_not_called()  # not the Postgres backend
+        state_cls.assert_not_called()  # MSSQL is never stateful
+
+    def test_mssql_staged_execute_routes_through_mssql_data(self):
+        @execute_lifecycle
+        def execute_interval(model, interval, data_conn, state_conn=None):
+            return None
+
+        with patch("bollhav.mssql.data.MssqlData") as mssql_cls:
+            execute_interval(self._mssql_model(stage=True), _interval(), "DATA")
+
+        data = mssql_cls.return_value
+        data.create_staging_table.assert_called_once()
+        data.apply_staging_to_target.assert_called_once()
+        data.drop_staging_table.assert_called_once()

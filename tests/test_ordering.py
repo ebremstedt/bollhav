@@ -2,11 +2,11 @@ from unittest.mock import MagicMock
 import pytest
 
 from bollhav.model.ordering import topological_sort, UpstreamMode
-from bollhav.model.model_type import ModelType
+from bollhav.model.kind import Kind
 
 
 def make_model(
-    name: str, upstream: list[str] | None = None, model_type=ModelType.TABLE
+    name: str, upstream: list[str] | None = None, kind=Kind.INTERVAL
 ) -> MagicMock:
     model = MagicMock()
     model.name = name
@@ -17,9 +17,11 @@ def make_model(
     upstream = upstream or []
     model.upstream = upstream
     model.upstream_names = upstream
-    # Views are identified by ModelType.VIEW now (WriteMode.VIEW was removed);
-    # `_is_view` checks `model.target.model_type`.
-    model.target.model_type = model_type
+    # Views are identified by kind now; `_is_view` checks `model.is_view`
+    # (kind-based). Set both `kind` and the derived `is_view` so the mock
+    # matches the real Model's contract.
+    model.kind = kind
+    model.is_view = kind is Kind.VIEW
     return model
 
 
@@ -115,20 +117,20 @@ def test_self_referencing_raises():
 
 def test_view_ignores_upstream():
     make_model("a")
-    v = make_model("v", upstream=["a"], model_type=ModelType.VIEW)
+    v = make_model("v", upstream=["a"], kind=Kind.VIEW)
     result = topological_sort([v], upstream_mode=UpstreamMode.IGNORE_VIEWS)
     assert names(result) == ["v"]
 
 
 def test_view_does_not_require_upstream_in_matched_set():
-    v = make_model("v", upstream=["missing"], model_type=ModelType.VIEW)
+    v = make_model("v", upstream=["missing"], kind=Kind.VIEW)
     result = topological_sort([v], upstream_mode=UpstreamMode.IGNORE_VIEWS)
     assert names(result) == ["v"]
 
 
 def test_view_not_ordered_after_upstream():
     a = make_model("a")
-    v = make_model("v", upstream=["a"], model_type=ModelType.VIEW)
+    v = make_model("v", upstream=["a"], kind=Kind.VIEW)
     result = topological_sort([v, a], upstream_mode=UpstreamMode.IGNORE_VIEWS)
     assert names(result) == ["a", "v"]
 
@@ -138,7 +140,7 @@ def test_view_not_ordered_after_upstream():
 
 def test_enforce_mode_orders_views():
     a = make_model("a")
-    v = make_model("v", upstream=["a"], model_type=ModelType.VIEW)
+    v = make_model("v", upstream=["a"], kind=Kind.VIEW)
     result = topological_sort([v, a], upstream_mode=UpstreamMode.ENFORCE)
     assert names(result) == ["a", "v"]
 
