@@ -1,22 +1,20 @@
-"""Schema helpers shared between the action system and other modules.
+"""Schema helpers.
 
-The full MODEL/PRE setup (CREATE SCHEMA / CREATE TABLE / DROP /
-TRUNCATE / CREATE INDEX / ADD UNIQUE) lives as `Action` entries in
-`bollhav.postgres.actions.default_actions()`. Call
-`run_pre_model_actions(conn, model)` to fire them.
+The full target setup (CREATE SCHEMA / TABLE / INDEX / ADD UNIQUE /
+staging schema) lives on `PostgresData.ensure_assets()` — idempotent and
+non-destructive. (Destructive recreate/truncate are a once-per-run
+lifecycle concern, not part of `ensure_assets`.)
 
 This module exposes:
   * `ensure_schema` — idempotent CREATE SCHEMA used by the state-
-    table bootstrap (which has to create `z_<schema>` ahead of any
-    actions, since the actions need it).
-  * `_col_ddl` — renders one column-definition line, used by both
-    the framework's CREATE TABLE action and the staging table DDL.
+    table bootstrap (which has to create `z_<schema>` ahead of the
+    target assets).
+  * `_col_ddl` — renders one column-definition line, used by the
+    staging table DDL.
   * `ensure_schema_and_table` and `ensure_table` — public façades
-    over `run_pre_model_actions`. Same effect: run every applicable
-    MODEL/PRE action against this model's target. The two names are
-    synonyms; both exist as friendly aliases for users who want a
-    verb-style entrypoint rather than reaching into the action
-    runner directly.
+    over `PostgresData.ensure_assets()`. The two names are synonyms,
+    kept as verb-style entrypoints for callers who don't want to
+    construct `PostgresData` directly.
 """
 
 from __future__ import annotations
@@ -59,20 +57,17 @@ def ensure_schema(conn: psycopg.Connection, schema: str) -> None:
 
 
 def ensure_schema_and_table(conn: psycopg.Connection, model: Model) -> None:
-    """Public façade — run every applicable MODEL/PRE action for the
-    given model. Equivalent to calling `run_pre_model_actions` directly;
-    kept as a verb-style entrypoint for callers who don't want to reach
-    into the action-runner module."""
-    from bollhav.postgres.actions import run_pre_model_actions
+    """Public façade — idempotently ensure the model's target assets
+    (schema, table, indexes, unique constraint, staging schema). A
+    verb-style entrypoint over `PostgresData.ensure_assets()`."""
+    from bollhav.postgres.data import PostgresData
 
-    run_pre_model_actions(conn, model)
+    PostgresData(model=model, conn=conn).ensure_assets()
 
 
 def ensure_table(conn: psycopg.Connection, model: Model) -> None:
-    """Synonym for `ensure_schema_and_table`. Both run the same PRE
-    action set; the split between them stopped being meaningful once
-    schema-creation became part of the action list rather than a
-    separate ensure step."""
-    from bollhav.postgres.actions import run_pre_model_actions
+    """Synonym for `ensure_schema_and_table` — both ensure the same
+    target assets via `PostgresData.ensure_assets()`."""
+    from bollhav.postgres.data import PostgresData
 
-    run_pre_model_actions(conn, model)
+    PostgresData(model=model, conn=conn).ensure_assets()

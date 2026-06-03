@@ -6,7 +6,6 @@ from bollhav.postgres.modes import (
     upsert_no_delete,
     create_replace_view,
 )
-from bollhav.postgres.staging import Stage, stage, gc_orphan_staging_tables
 from bollhav.postgres.write_modes import write, write_dataframes
 
 __all__ = [
@@ -21,7 +20,4 @@ __all__ = [
     "create_replace_view",
     "write",
     "write_dataframes",
-    "Stage",
-    "stage",
-    "gc_orphan_staging_tables",
 ]

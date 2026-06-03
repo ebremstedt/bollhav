@@ -1,17 +1,13 @@
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Callable
+from typing import Callable
 
-from bollhav.model.actions import Level, OnFailure, Phase
 from bollhav.model.database import Database, DatabaseColumn, DatabaseIndex
 from bollhav.model.model_type import ModelType
 from bollhav.model.staging import Staging
 from bollhav.model.write_modes import WriteMode
 from bollhav.model.column_sorting import sort_columns
 from bollhav.model.target_schema import TargetSchema
-
-if TYPE_CHECKING:
-    from bollhav.model.actions import Action
 
 
 @dataclass
@@ -29,41 +25,19 @@ class Target:
     dsn_env_var: str | None = None
     column_sorting: Callable | None = sort_columns
     extra: dict | None = None
-    # ⚠ Destructive PRE actions. Each runs ONCE on the first write of a
-    # pipeline run; the runner records that in `_applied_model_actions`. NOT SAFE for
-    # parallel runs of the same model — see ACTIONS.md.
+    # ⚠ Destructive, once-per-run setup. The `@model_lifecycle` hook runs
+    # these once before the interval loop (recreate = DROP, truncate =
+    # empty) — never per write/interval. NOT SAFE for parallel runs of the
+    # same model. Non-destructive asset setup is `PostgresData.ensure_assets`.
     recreate_table: bool = False
     truncate_table: bool = False
     staging: Staging | None = None
 
-    # Two lists. Execution order is `default_actions ++ actions` per
-    # phase: framework defaults run first, then user-added ones.
-    #
-    # `default_actions` — framework-provided actions (CREATE SCHEMA /
-    # TABLE / INDEX / UNIQUE / staging setup, etc.). `None` means
-    # "resolve lazily from the backend's `default_actions()` factory"
-    # so this Target stays backend-agnostic. Set to `[]` to opt out
-    # of every framework default. Set to a custom list (e.g.
-    # `[a for a in default_actions() if a.name != "truncated"]`) to
-    # opt out selectively.
-    #
-    # `actions` — user-added actions. Always run after defaults.
-    default_actions: "list[Action] | None" = None
-    actions: "list[Action]" = field(default_factory=list)
-
-    # POST-action failure policy. PRE is always fail-fast.
-    on_failure: OnFailure = OnFailure.FAIL_FAST
-
     sensitive: bool = field(init=False, default=False)
-    staging_activated: bool = field(init=False, default=False)
+    stage: bool = field(init=False, default=False)
     unique_columns: list = field(init=False, default_factory=list)
     primary_key_columns: list = field(init=False, default_factory=list)
     partitioned_by_index: bool = field(init=False, default=False)
-
-    # ⚠ MUTATED AT RUNTIME — the runner records "this action fired
-    # this pipeline run" by setting `_applied_model_actions[action.name] = True`.
-    # Do not pre-populate; the runner owns this dict.
-    _applied_model_actions: dict[str, bool] = field(init=False, default_factory=dict)
 
     @property
     def name_resolved(self) -> str:
@@ -106,46 +80,6 @@ class Target:
         return None
 
     @property
-    def effective_actions(self) -> "list[Action]":
-        """The full list of actions the runner will execute, in
-        execution order: framework defaults first, then user-added.
-
-        `default_actions=None` means "framework defaults haven't been
-        resolved yet" — returns just `actions`. The runner calls
-        `resolve_default_actions()` on first use so this property
-        starts returning the merged list."""
-        if self.default_actions is None:
-            return list(self.actions)
-        return [*self.default_actions, *self.actions]
-
-    @property
-    def setup_complete(self) -> bool:
-        """True iff every applicable PRE action has already fired
-        this pipeline run.
-
-        Walks `effective_actions`, filters to MODEL/PRE, and checks
-        whether each action that *would apply* (i.e. `should_run`
-        returns True) is recorded in `_applied_model_actions`. An action whose
-        `should_run` is False is treated as "nothing to do," not
-        "not done."
-
-        Lets `run_pre_model_actions` short-circuit the empty BEGIN/COMMIT
-        roundtrip on intervals after the first."""
-        if self.default_actions is None:
-            return False  # not yet resolved; runner will populate
-        for action in self.effective_actions:
-            if not (action.level is Level.MODEL and action.phase is Phase.PRE):
-                continue
-            # Runner records every processed MODEL/PRE action in
-            # `_applied_model_actions` — True if it ran, False if
-            # `should_run` skipped it. Either way the key being
-            # present means "the runner already made the call about
-            # this action this pipeline run."
-            if action.name not in self._applied_model_actions:
-                return False
-        return True
-
-    @property
     def merge_key_columns(self) -> list:
         """Columns to use as the upsert/merge join key. Prefers `primary_key=True`
         columns (a PK is the canonical row identity); falls back to `unique=True`
@@ -153,20 +87,14 @@ class Target:
         return self.primary_key_columns or self.unique_columns
 
     def __post_init__(self) -> None:
-        if self.model_type == ModelType.VIEW and self.write_mode != WriteMode.VIEW:
-            raise ValueError("ModelType.VIEW must use WriteMode.VIEW")
-        if self.model_type == ModelType.TABLE and self.write_mode == WriteMode.VIEW:
-            raise ValueError("ModelType.TABLE cannot use WriteMode.VIEW")
         if self.recreate_table and self.truncate_table:
             raise ValueError(
                 "recreate_table and truncate_table cannot both be True — "
                 "recreate already leaves the table empty"
             )
-        if (
-            self.recreate_table or self.truncate_table
-        ) and self.write_mode == WriteMode.VIEW:
+        if (self.recreate_table or self.truncate_table) and self.is_view:
             raise ValueError(
-                "recreate_table/truncate_table are not applicable to WriteMode.VIEW"
+                "recreate_table/truncate_table are not applicable to a VIEW"
             )
         if self.database is not None and len(self.columns) == 0:
             raise ValueError("columns must be set when database is provided")
@@ -185,7 +113,7 @@ class Target:
             if self.columns
             else False
         )
-        self.staging_activated = self.staging is not None
+        self.stage = self.staging is not None
         self.unique_columns = (
             [c for c in self.columns if getattr(c, "unique", False)]
             if self.columns

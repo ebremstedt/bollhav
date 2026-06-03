@@ -18,7 +18,10 @@ import psycopg
 from psycopg import sql
 
 if TYPE_CHECKING:
+    import polars as pl
+
     from bollhav.model.database import DatabaseColumn
+    from bollhav.model.intervals import TZInterval
     from bollhav.model.model import Model
 
 logger = logging.getLogger(__name__)
@@ -69,16 +72,18 @@ class PostgresData:
         )
         return f"{prefix}{model.target.schema.resolved}"
 
-    def _staging_table_name(self, run_id: UUID) -> str:
-        """Per-interval staging table name. `Staging.table_prefix`
-        overrides the default `<target_name>_staging_`; the first 8 hex
-        chars of `run_id` disambiguate within a model."""
+    def _staging_table_prefix(self) -> str:
+        """Staging-table name prefix. `Staging.table_prefix` overrides
+        the default `<target_name>_staging_`."""
         staging = self.model.target.staging
         if staging is not None and staging.table_prefix:
-            prefix = staging.table_prefix
-        else:
-            prefix = f"{self.model.target.name}_staging_"
-        return f"{prefix}{str(run_id)[:8]}"
+            return staging.table_prefix
+        return f"{self.model.target.name}_staging_"
+
+    def _staging_table_name(self, run_id: UUID) -> str:
+        """Per-interval staging table name. The first 8 hex chars of
+        `run_id` disambiguate within a model."""
+        return f"{self._staging_table_prefix()}{str(run_id)[:8]}"
 
     def _staging_logged(self) -> bool:
         """Resolve the Postgres `logged` knob. Only `PostgresStaging`
@@ -90,12 +95,41 @@ class PostgresData:
         staging = self.model.target.staging
         return isinstance(staging, PostgresStaging) and staging.logged
 
+    def ensure_assets(self) -> None:
+        """Idempotent, NON-destructive setup of the target's assets:
+        schema, table, indexes, unique constraint, and (when staging) the
+        staging schema. Safe to call repeatedly — every step is guarded
+        (`CREATE ... IF NOT EXISTS` / `ADD CONSTRAINT ... EXCEPTION WHEN
+        duplicate`), so write paths call it per-write to self-heal a
+        missing asset.
+
+        Deliberately excludes `recreate_table` / `truncate_table`: those
+        are destructive, once-per-run setup the lifecycle hook performs
+        before the interval loop — never per write/interval."""
+        target = self.model.target
+        self.create_schema()
+        self.create_table()
+        if target.partitioned_by is not None:
+            self.create_indexes()
+        if target.unique_columns:
+            self.add_unique_constraint()
+        if target.stage:
+            self.create_staging_schema()
+
     def create_schema(self) -> None:
         self.conn.execute(
             sql.SQL("CREATE SCHEMA IF NOT EXISTS {}").format(
                 sql.Identifier(self.model.target.schema.resolved)
             )
         )
+
+    def create_or_replace_view(self) -> None:
+        """`CREATE OR REPLACE VIEW` from the model's `SourceTable.query` —
+        the target-side asset for a VIEW model. The lifecycle hook calls
+        this instead of the table DDL when `model.is_view`."""
+        from bollhav.postgres.modes import create_replace_view
+
+        create_replace_view(conn=self.conn, model=self.model)
 
     def recreate_table(self) -> None:
         target = self.model.target
@@ -205,6 +239,105 @@ class PostgresData:
                 col_defs=col_defs,
             )
         )
+
+    def gc_orphan_staging_tables(self, *, keep_run_id: UUID | None = None) -> None:
+        """Drop staging tables left behind by crashed runs. Best-effort:
+        any error is swallowed and logged so this never blocks the run.
+
+        Matches `<prefix>%` in the staging schema (prefix from
+        `Staging.table_prefix` or the default). If `keep_run_id` is given,
+        that run's staging table is preserved.
+
+        No-op when `Staging.keep_after_apply=True` — the operator has
+        declared they want kept tables to live; auto-GC would defeat that,
+        so manual cleanup is on them."""
+        staging = self.model.target.staging
+        if staging is not None and staging.keep_after_apply:
+            logger.debug(
+                "stage: GC skipped for %s — Staging.keep_after_apply=True",
+                self.model.target.full_name,
+            )
+            return
+
+        try:
+            schema = self._staging_schema_name()
+            prefix = self._staging_table_prefix()
+            keep = (
+                f"{prefix}{str(keep_run_id)[:8]}" if keep_run_id is not None else None
+            )
+
+            rows = self.conn.execute(
+                "SELECT tablename FROM pg_tables "
+                "WHERE schemaname = %s AND tablename LIKE %s",
+                [schema, f"{prefix}%"],
+            ).fetchall()
+
+            with self.conn.transaction():
+                for (tablename,) in rows:
+                    if keep is not None and tablename == keep:
+                        continue
+                    self.conn.execute(
+                        sql.SQL("DROP TABLE IF EXISTS {schema}.{table}").format(
+                            schema=sql.Identifier(schema),
+                            table=sql.Identifier(tablename),
+                        )
+                    )
+                    logger.debug(
+                        "stage: gc'd orphan staging table %s.%s", schema, tablename
+                    )
+        except Exception as exc:  # best-effort; never blocks the run
+            logger.debug(
+                "staging: orphan GC skipped for %s — %s",
+                self.model.target.full_name,
+                exc,
+            )
+
+    # ── staging lifecycle ─────────────────────────────────────────────
+    #
+    # The per-interval staging flow as discrete steps the lifecycle hook
+    # drives in order: create the table (`create_staging_table`), write
+    # rows into it, merge it into the target, then tear it down. The heavy
+    # write-mode SQL lives in `bollhav.postgres.staging`; these are the
+    # model-scoped entry points onto it.
+
+    def write_to_staging(self, run_id: UUID, df: "pl.DataFrame") -> None:
+        """COPY / upsert one sub-batch into this run's staging table, per
+        `Staging.write_mode`. Called by the user's execute to land rows
+        before the merge."""
+        from bollhav.postgres.staging import write_to_staging as _write_to_staging
+
+        _write_to_staging(self.conn, self.model, run_id, df)
+
+    def apply_staging_to_target(self, run_id: UUID, interval: "TZInterval") -> None:
+        """Merge this run's staging table into the target using
+        `target.write_mode` (APPEND / UPSERT_NO_DELETE / RECREATE_PARTITION),
+        atomically. Does NOT drop the staging table — `drop_staging_table`
+        does, so the merge and the teardown stay distinct steps."""
+        from bollhav.postgres.staging import apply_atomically_to_target
+
+        apply_atomically_to_target(
+            self.conn,
+            self.model,
+            run_id=run_id,
+            since=interval.since,
+            until=interval.until,
+            drop_after_apply=False,
+        )
+
+    def drop_staging_table(self, run_id: UUID) -> None:
+        """Tear down this run's staging table after a successful merge.
+        No-op when `Staging.keep_after_apply` (the operator wants kept
+        tables to live; manual cleanup is on them)."""
+        staging = self.model.target.staging
+        if staging is not None and staging.keep_after_apply:
+            logger.debug(
+                "stage: teardown skipped for %s — Staging.keep_after_apply=True",
+                self.model.target.full_name,
+            )
+            return
+        from bollhav.postgres.staging import drop_staging_table as _drop_staging_table
+
+        _drop_staging_table(self.conn, self.model, run_id)
 
 
 __all__ = ["PostgresData"]

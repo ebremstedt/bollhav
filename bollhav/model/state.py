@@ -7,9 +7,9 @@ per-interval lock, and flips pending → applied after a successful run.
 See `bollhav/model/lifecycle.py`.
 
 This module holds the user-facing config (`State`, `StateMode`,
-`BlockCode`) and the small helpers the hooks share (`_run_id_for`,
-`ModelLockedError`). The Postgres implementation of the transitions
-lives in `bollhav/postgres/state.py`.
+`BlockCode`) and `ModelLockedError`. The run_id shared across a run's
+state transitions is `Model.run_id` (lazily minted). The Postgres
+implementation of the transitions lives in `bollhav/postgres/state.py`.
 
 Scope is intentionally narrow in this first cut:
   * one state table per model (no separate errors table yet)
@@ -24,11 +24,6 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from enum import Enum
-from typing import TYPE_CHECKING
-from uuid import UUID, uuid4
-
-if TYPE_CHECKING:
-    from bollhav.model.model import Model
 
 logger = logging.getLogger(__name__)
 
@@ -108,17 +103,6 @@ class BlockCode(Enum):
 def format_block_reason(code: BlockCode, message: str) -> str:
     """`STATE_001: upstream 'warehouse.orders' not registered`"""
     return f"{code.value}: {message}"
-
-
-def _run_id_for(model: "Model") -> UUID:
-    """Return the run_id for this pipeline invocation. The lifecycle
-    hooks stash it on the model so the bootstrap and each interval's
-    transitions share one id; minted lazily if unset."""
-    run_id = getattr(model, "_state_run_id", None)
-    if run_id is None:
-        run_id = uuid4()
-        model._state_run_id = run_id
-    return run_id
 
 
 class ModelLockedError(RuntimeError):
