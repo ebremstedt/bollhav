@@ -71,8 +71,12 @@ nav:
   - Decorators:
       - Overview: DECORATORS.md
       - "@load_models step by step": LOAD_MODELS.md
+      - Model lifecycle: MODEL_LIFECYCLE.md
+      - Execute lifecycle: EXECUTE_LIFECYCLE.md
   - Concepts:
+      - Kinds: KINDS.md
       - Modes: MODES.md
+      - Upstream & contracts: UPSTREAM.md
       - State: STATE.md
       - Staging: STAGING.md
       - Library: LIBRARY.md

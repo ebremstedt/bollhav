@@ -2,7 +2,7 @@
 
 # State
 
-Per-model interval state. Opt in by setting `state=State(...)` on a model; bollhav records every interval's lifecycle in a per-model state table, and re-runs become resumable.
+Per-model progress, tracked in a per-model state table. Opt in with `state=State(...)`; bollhav records each unit of work's lifecycle and re-runs become resumable. A unit is one window for an `interval` model, or the single whole-table / view existence row for a `monolithic` / `view` model — so every [kind](UPSTREAM.md) carries state, not just intervals.
 
 ## Status values
 
@@ -78,59 +78,9 @@ The errors table keeps full history across runs — joinable with the state tabl
 
 The one exception: if the staging flush already set state to `applied` (data is in target) and post-stage user code raises, we log the error but **do not** downgrade state to `error`. The write succeeded; the post-write code didn't.
 
-## Upstreams: views and library-only tables
+## Upstreams
 
-A downstream model with `state=State(...)` declares its upstreams by full name. Bollhav's library tracks every registered model and answers the satisfaction question per upstream:
-
-| Upstream kind | How it registers | What "satisfied" means |
-|---|---|---|
-| **TABLE with `state=State(...)`** | Automatic, on every run | An `applied` row in the upstream's state table matches or fully encapsulates the downstream's `(since, until)` window |
-| **VIEW with `library=True`** | Opt-in via `Model(..., library=True)`. A view declared without it is still a valid bollhav model (gets `CREATE OR REPLACE VIEW`d each run) but isn't claimable as upstream. | The library row exists. Views are time-agnostic — once they're declared, every interval of the downstream is satisfied by their presence |
-| **TABLE with `library=True`** | Opt-in via `Model(..., library=True)`. Useful for static lookup tables or externally-loaded tables that don't track state themselves but need to be claimable as upstream | The library row exists. Same presence-based rule as views |
-
-### View example
-
-```python
-from bollhav.model import Model, Target, TargetSchema, ModelType, WriteMode
-
-# Opt in with `library=True` so downstreams can claim this view.
-v_orders_summary = Model(
-    target=Target(
-        name="v_orders_summary",
-        schema=TargetSchema(name="warehouse"),
-        model_type=ModelType.VIEW,
-        write_mode=WriteMode.VIEW,
-        dsn_env_var="TARGET_DSN",
-    ),
-    library=True,
-)
-
-# Downstream depends on the view; every interval is satisfied
-# once the view-model has run once and registered.
-enriched = Model(
-    target=Target(name="enriched", ...),
-    upstream=["warehouse.v_orders_summary"],
-    state=State(),
-    batching=Batch(...),
-)
-```
-
-### `library=True` example
-
-```python
-# Static lookup table — written outside bollhav, has no state,
-# but downstreams need to claim it as an upstream.
-countries = Model(
-    target=Target(
-        name="countries",
-        schema=TargetSchema(name="lookup"),
-        dsn_env_var="TARGET_DSN",
-    ),
-    library=True,   # ← register-only opt-in
-)
-```
-
-Once `countries` has appeared in any pipeline run, downstreams referencing `lookup.countries` are satisfied by its mere presence — they don't wait for an applied row that will never come.
+A model's `upstream` is a list of **contracts** on other models, each checked before a unit of work runs. An unsatisfied contract → `blocked`. See [Upstream & contracts](UPSTREAM.md) for the full picture.
 
 ### Library and state colocation
 
