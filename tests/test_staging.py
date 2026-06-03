@@ -1,13 +1,21 @@
-"""Tests for bollhav.postgres.staging — stage and atomic flush.
+"""Tests for bollhav.postgres.staging — the staging primitives.
 
-Postgres connection is mocked. Covers:
-  * `stage()` happy path (DDL → COPY → flush tx)
-  * exception path (no flush)
-  * preconditions (write mode, state, batching, run_id)
-  * apply is decoupled from the state flip (no UPDATE in flush)
-  * orphan staging-table GC
+Postgres connection is mocked. The old `stage()` context manager is
+gone; the staging table's *lifecycle* now lives in `@execute_lifecycle`
+(create -> write -> apply -> drop) and is driven through `PostgresData`.
+This module holds the primitives those steps delegate to:
 
-Real-DB exercise lives in the runnable example."""
+  * `write_to_staging(conn, model, run_id, df)` — COPY / upsert one chunk
+  * `apply_atomically_to_target(conn, model, run_id=, since=, until=)` —
+    merge staging -> target in one tx (drops staging unless kept)
+  * `drop_staging_table(conn, model, run_id)` — tear the table down
+  * naming helpers `_staging_schema` / `_staging_table_prefix` /
+    `_staging_table`
+  * orphan GC, which now lives on
+    `PostgresData.gc_orphan_staging_tables`
+
+Real-DB exercise lives in the runnable example.
+"""
 
 from __future__ import annotations
 
@@ -27,8 +35,6 @@ RUN_ID = UUID("00000000-0000-0000-0000-00000000beef")
 def _model(*, write_mode=None, staging_cfg=None):
     from bollhav.model.staging import Staging
     from bollhav.model.state import State
-
-    # (removed) Mutations replaced by Actions system
     from bollhav.model.write_modes import WriteMode
     from bollhav.postgres.columns import PostgresColumn, PostgresType
 
@@ -45,26 +51,14 @@ def _model(*, write_mode=None, staging_cfg=None):
         PostgresColumn(name="id", data_type=PostgresType.BIGINT),
         PostgresColumn(name="amount", data_type=PostgresType.NUMERIC),
     ]
-    # Action runtime state — `_applied` empty so PRE actions fire,
-    # `actions=None` so the runner resolves defaults, `setup_complete`
-    # explicitly False so the runner doesn't short-circuit.
-    from bollhav.postgres.actions import default_actions as _da
-
-    model.target._applied_model_actions = {}
-    model.target.actions = []
-    model.target.default_actions = _da()
-    # `effective_actions` is a property on real Target; MagicMock
-    # doesn't compute it, so pin it to defaults+user explicitly.
-    model.target.effective_actions = list(model.target.default_actions)
-    model.target.setup_complete = False
-    # Directive flags pinned so should_run gates evaluate predictably.
-    # A MagicMock attribute is truthy by default, which would make
-    # every PRE action's should_run() pass and break tests.
+    # Directive flags pinned so derived gates evaluate predictably — a
+    # MagicMock attribute is truthy by default, which would misfire.
     model.target.recreate_table = False
     model.target.truncate_table = False
     model.target.partitioned_by = None
     model.target.unique_columns = []
     model._state_run_id = RUN_ID
+    model.run_id = RUN_ID
     return model
 
 
@@ -84,144 +78,31 @@ def _mock_conn():
     return conn
 
 
-# ── preconditions ────────────────────────────────────────────────────
+def _rendered(conn) -> list[str]:
+    """Render every psycopg Composed object on the conn into actual SQL
+    text via `as_string(None)`. `str()` on a Composed gives its Python
+    repr, not the SQL, so substring matches against quoted identifiers
+    fail. `as_string` does the real rendering."""
+    from psycopg.sql import Composable
+
+    out = []
+    for call in conn.execute.call_args_list:
+        q = call.args[0]
+        out.append(q.as_string(None) if isinstance(q, Composable) else str(q))
+    return out
 
 
-class TestPreconditions:
-    def test_rejects_view_write_mode(self) -> None:
-        from bollhav.model.write_modes import WriteMode
-        from bollhav.postgres.staging import stage
+# ── create staging table ─────────────────────────────────────────────
 
-        model = _model()
-        model.target.write_mode = WriteMode.VIEW
-        with pytest.raises(NotImplementedError, match="VIEW"):
-            with stage(_mock_conn(), model, since=SINCE, until=UNTIL):
-                pass
 
-    def test_pre_actions_are_one_shot(self) -> None:
-        """`run_pre_model_actions` runs the full PRE action list on the
-        first call, records each in `target._applied_model_actions`, and is a
-        complete no-op on every subsequent call within the same
-        pipeline run because `setup_complete` short-circuits."""
-        from bollhav.postgres.actions import default_actions, run_pre_model_actions
-        from bollhav.model.actions import Level, Phase
-
-        model = _model()
-        model.target._applied_model_actions = {}
-        model.target.actions = []
-        model.target.default_actions = default_actions()
-        model.target.effective_actions = list(model.target.default_actions)
-
-        # MagicMock doesn't compute properties, so emulate
-        # `setup_complete` against the live `_applied` dict.
-        def _live_setup_complete() -> bool:
-            for a in model.target.effective_actions:
-                if not (a.level is Level.MODEL and a.phase is Phase.PRE):
-                    continue
-                if not a.should_run(model.target):
-                    continue
-                if not model.target._applied_model_actions.get(a.name):
-                    return False
-            return True
-
-        type(model.target).setup_complete = property(
-            lambda _self: _live_setup_complete()
-        )
+class TestCreateStagingTable:
+    def test_creates_staging_table(self) -> None:
+        """`PostgresData.create_staging_table` issues one CREATE for the
+        per-interval staging table (UNLOGGED by default)."""
+        from bollhav.postgres.data import PostgresData
 
         conn = _mock_conn()
-
-        run_pre_model_actions(conn, model)
-        assert model.target._applied_model_actions.get("staging_schema_created") is True
-        first_call_count = conn.execute.call_count
-        assert first_call_count >= 1
-
-        run_pre_model_actions(conn, model)
-        run_pre_model_actions(conn, model)
-        # Two more calls, zero new DDL — setup_complete short-circuits.
-        assert conn.execute.call_count == first_call_count
-
-    def test_accepts_missing_state(self) -> None:
-        """Staging without state is a supported configuration —
-        memory bounding + atomic per-interval finalization remain
-        useful even without resumability. The flush still issues
-        the atomic INSERT, but the state UPDATE doesn't run (no
-        state row to flip). The staging table is still dropped on
-        flush — staging self-cleans regardless of state."""
-        from bollhav.postgres.staging import stage
-
-        model = _model()
-        model.state = None
-        conn = _mock_conn()
-        with stage(conn, model, since=SINCE, until=UNTIL):
-            pass
-
-        executed = [str(c.args[0]) for c in conn.execute.call_args_list]
-        assert any("INSERT INTO" in q for q in executed), (
-            "flush should still issue the atomic move into target"
-        )
-        assert not any("UPDATE" in q and "applied" in q for q in executed), (
-            "without state there is no state row to flip — UPDATE must not run"
-        )
-
-    def test_without_state_still_drops_staging(self) -> None:
-        """Even without state, flush still drops the staging table —
-        staging self-cleans. Confirms the no-state branch and the
-        per-interval drop compose correctly."""
-        from bollhav.model.staging import Staging
-        from bollhav.postgres.staging import stage
-
-        model = _model(staging_cfg=Staging())
-        model.state = None
-        conn = _mock_conn()
-        with stage(conn, model, since=SINCE, until=UNTIL):
-            pass
-
-        executed = [str(c.args[0]) for c in conn.execute.call_args_list]
-        assert any("INSERT INTO" in q for q in executed)
-        assert any("DROP TABLE" in q for q in executed)
-        assert not any("UPDATE" in q and "applied" in q for q in executed)
-
-    def test_rejects_missing_batching(self) -> None:
-        from bollhav.postgres.staging import stage
-
-        model = _model()
-        model.batching = None
-        with pytest.raises(ValueError, match="model.batching to be set"):
-            with stage(_mock_conn(), model, since=SINCE, until=UNTIL):
-                pass
-
-    def test_rejects_missing_run_id(self) -> None:
-        from bollhav.postgres.staging import stage
-
-        model = _model()
-        model._state_run_id = None
-        with pytest.raises(ValueError, match="_state_run_id"):
-            with stage(_mock_conn(), model, since=SINCE, until=UNTIL):
-                pass
-
-    def test_rejects_cross_db_state(self) -> None:
-        """Staging needs the state row flip and the data move to share
-        a transaction — that requires state and target in the same DB."""
-        from bollhav.model.state import State
-        from bollhav.postgres.staging import stage
-
-        model = _model()
-        model.state = State(dsn_env_var="STATE_DSN")
-        with pytest.raises(NotImplementedError, match="share a DB"):
-            with stage(_mock_conn(), model, since=SINCE, until=UNTIL):
-                pass
-
-
-# ── happy path ───────────────────────────────────────────────────────
-
-
-class TestHappyPath:
-    def test_creates_staging_table_on_entry(self) -> None:
-        from bollhav.postgres.staging import stage
-
-        conn = _mock_conn()
-        with stage(conn, _model(), since=SINCE, until=UNTIL):
-            pass
+        PostgresData(_model(), conn).create_staging_table(RUN_ID)
 
         ddl_calls = [
             call
@@ -230,41 +111,52 @@ class TestHappyPath:
         ]
         assert len(ddl_calls) == 1
 
+
+# ── write to staging ─────────────────────────────────────────────────
+
+
+class TestWriteToStaging:
     def test_write_copies_each_chunk(self) -> None:
-        from bollhav.postgres.staging import stage
-
-        conn = _mock_conn()
-        with stage(conn, _model(), since=SINCE, until=UNTIL) as s:
-            s.write(pl.DataFrame({"id": [1, 2], "amount": [1.0, 2.0]}))
-            s.write(pl.DataFrame({"id": [3], "amount": [3.0]}))
-
-        assert s.rows_written == 3
-        assert conn.cursor.return_value.copy.call_count == 2
-
-    def test_empty_chunk_is_skipped(self) -> None:
-        from bollhav.postgres.staging import stage
-
-        conn = _mock_conn()
-        with stage(conn, _model(), since=SINCE, until=UNTIL) as s:
-            s.write(pl.DataFrame({"id": [], "amount": []}))
-
-        assert s.rows_written == 0
-        assert conn.cursor.return_value.copy.call_count == 0
-
-    def test_flush_runs_insert_and_drop(self) -> None:
-        """Flush issues INSERT and DROP (fresh table per interval). The
-        state flip is no longer coupled to the apply — `@interval_lifecycle`
-        marks applied separately on the state connection."""
-        from bollhav.postgres.staging import stage
+        from bollhav.postgres.staging import write_to_staging
 
         conn = _mock_conn()
         model = _model()
-        with stage(conn, model, since=SINCE, until=UNTIL) as s:
-            s.write(pl.DataFrame({"id": [1], "amount": [1.0]}))
+        write_to_staging(
+            conn, model, RUN_ID, pl.DataFrame({"id": [1, 2], "amount": [1.0, 2.0]})
+        )
+        write_to_staging(
+            conn, model, RUN_ID, pl.DataFrame({"id": [3], "amount": [3.0]})
+        )
+
+        assert conn.cursor.return_value.copy.call_count == 2
+
+    def test_empty_chunk_is_skipped(self) -> None:
+        from bollhav.postgres.staging import write_to_staging
+
+        conn = _mock_conn()
+        write_to_staging(conn, _model(), RUN_ID, pl.DataFrame({"id": [], "amount": []}))
+
+        assert conn.cursor.return_value.copy.call_count == 0
+
+
+# ── apply staging -> target ──────────────────────────────────────────
+
+
+class TestApply:
+    def test_apply_runs_insert_and_drop(self) -> None:
+        """Apply issues INSERT and (by default) DROP the staging table.
+        The state flip is decoupled — `@execute_lifecycle` marks applied
+        separately on the state connection, not in the data-move tx."""
+        from bollhav.postgres.staging import apply_atomically_to_target
+
+        conn = _mock_conn()
+        apply_atomically_to_target(
+            conn, _model(), run_id=RUN_ID, since=SINCE, until=UNTIL
+        )
 
         executed = [str(call.args[0]) for call in conn.execute.call_args_list]
         insert_select = [q for q in executed if "INSERT INTO" in q and "SELECT" in q]
-        drop = [q for q in executed if "DROP TABLE" in q and "staging" in q]
+        drop = [q for q in executed if "DROP TABLE" in q]
         update_state = [
             q for q in executed if "UPDATE" in q and "status = 'applied'" in q
         ]
@@ -272,26 +164,27 @@ class TestHappyPath:
         assert len(drop) == 1
         assert update_state == []  # apply no longer flips state
 
+    def test_drop_after_apply_false_keeps_staging(self) -> None:
+        """The lifecycle hook calls apply with `drop_after_apply=False`
+        so the merge and the teardown stay distinct phases."""
+        from bollhav.postgres.staging import apply_atomically_to_target
 
-# ── exception path ───────────────────────────────────────────────────
-
-
-class TestExceptionPath:
-    def test_exception_skips_flush_and_marker(self) -> None:
-        from bollhav.postgres.staging import stage
-
-        model = _model()
         conn = _mock_conn()
-        with pytest.raises(RuntimeError, match="boom"):
-            with stage(conn, model, since=SINCE, until=UNTIL):
-                raise RuntimeError("boom")
+        apply_atomically_to_target(
+            conn,
+            _model(),
+            run_id=RUN_ID,
+            since=SINCE,
+            until=UNTIL,
+            drop_after_apply=False,
+        )
 
         executed = [str(call.args[0]) for call in conn.execute.call_args_list]
-        flush_queries = [q for q in executed if "INSERT INTO" in q and "SELECT" in q]
-        assert flush_queries == []
+        assert any("INSERT INTO" in q for q in executed)
+        assert not any("DROP TABLE" in q for q in executed)
 
 
-# ── naming + GC ──────────────────────────────────────────────────────
+# ── naming ───────────────────────────────────────────────────────────
 
 
 class TestNaming:
@@ -306,9 +199,12 @@ class TestNaming:
         assert _staging_schema(_model()) == "z_public"
 
 
+# ── orphan GC ────────────────────────────────────────────────────────
+
+
 class TestGc:
     def test_drops_orphans_keeps_current(self) -> None:
-        from bollhav.postgres.staging import gc_orphan_staging_tables
+        from bollhav.postgres.data import PostgresData
 
         model = _model()
         current = f"orders_staging_{str(RUN_ID)[:8]}"
@@ -320,7 +216,7 @@ class TestGc:
         conn = _mock_conn()
         conn.execute.return_value.fetchall.return_value = rows
 
-        gc_orphan_staging_tables(conn, model, keep_run_id=RUN_ID)
+        PostgresData(model, conn).gc_orphan_staging_tables(keep_run_id=RUN_ID)
 
         dropped = [
             str(call.args[0])
@@ -331,12 +227,12 @@ class TestGc:
 
     def test_skipped_when_keep_after_apply(self) -> None:
         from bollhav.model.staging import Staging
-        from bollhav.postgres.staging import gc_orphan_staging_tables
+        from bollhav.postgres.data import PostgresData
 
         model = _model(staging_cfg=Staging(keep_after_apply=True))
         conn = _mock_conn()
 
-        gc_orphan_staging_tables(conn, model, keep_run_id=RUN_ID)
+        PostgresData(model, conn).gc_orphan_staging_tables(keep_run_id=RUN_ID)
 
         # Never even queried pg_tables — no GC at all.
         conn.execute.assert_not_called()
@@ -360,16 +256,12 @@ class TestStagingSchemaOverride:
 
     def test_override_propagates_to_ddl(self) -> None:
         from bollhav.model.staging import Staging
-        from bollhav.postgres.staging import stage
+        from bollhav.postgres.data import PostgresData
 
         model = _model(staging_cfg=Staging(schema="ops"))
         conn = _mock_conn()
-        with stage(conn, model, since=SINCE, until=UNTIL) as s:
-            s.write(pl.DataFrame({"id": [1], "amount": [1.0]}))
+        PostgresData(model, conn).create_staging_table(RUN_ID)
 
-        # Filter for the staging CREATE TABLE — the action set also
-        # creates the target table (`public.orders`), which mentions
-        # neither `ops` nor `z_public`.
         ddl = next(
             str(call.args[0])
             for call in conn.execute.call_args_list
@@ -395,15 +287,11 @@ class TestStagingTablePrefixOverride:
 
 class TestLoggedField:
     def test_default_is_unlogged(self) -> None:
-        from bollhav.postgres.staging import stage
+        from bollhav.postgres.data import PostgresData
 
         conn = _mock_conn()
-        with stage(conn, _model(), since=SINCE, until=UNTIL):
-            pass
+        PostgresData(_model(), conn).create_staging_table(RUN_ID)
 
-        # `stage()` runs the full PRE action set, which includes
-        # CREATE TABLE for the target AND CREATE UNLOGGED TABLE for
-        # the staging table. Filter to the staging one.
         ddl = next(
             str(call.args[0])
             for call in conn.execute.call_args_list
@@ -412,15 +300,15 @@ class TestLoggedField:
         assert "UNLOGGED TABLE" in ddl
 
     def test_logged_true_omits_unlogged(self) -> None:
-        from bollhav.postgres.staging import PostgresStaging, stage
+        from bollhav.postgres.data import PostgresData
+        from bollhav.postgres.staging import PostgresStaging
 
         model = _model(staging_cfg=PostgresStaging(logged=True))
         conn = _mock_conn()
-        with stage(conn, model, since=SINCE, until=UNTIL):
-            pass
+        PostgresData(model, conn).create_staging_table(RUN_ID)
 
-        # Logged=True: filter for the staging table CREATE, which now
-        # says "CREATE TABLE IF NOT EXISTS z_public.orders_staging_..."
+        # Logged=True: the staging CREATE says "CREATE TABLE IF NOT
+        # EXISTS z_public.orders_staging_..." with no UNLOGGED.
         ddls = [
             str(call.args[0])
             for call in conn.execute.call_args_list
@@ -431,17 +319,17 @@ class TestLoggedField:
         assert all("UNLOGGED" not in d for d in ddls)
 
 
-class TestKeepAfterFlush:
-    """Staging makes a fresh table per interval and drops it on flush;
+class TestKeepAfterApply:
+    """Apply makes a fresh table per interval and drops it on flush;
     `keep_after_apply` skips that drop."""
 
-    def test_default_drops_staging_on_flush(self) -> None:
-        from bollhav.postgres.staging import stage
+    def test_default_drops_staging_on_apply(self) -> None:
+        from bollhav.postgres.staging import apply_atomically_to_target
 
         conn = _mock_conn()
-        model = _model()
-        with stage(conn, model, since=SINCE, until=UNTIL) as s:
-            s.write(pl.DataFrame({"id": [1], "amount": [1.0]}))
+        apply_atomically_to_target(
+            conn, _model(), run_id=RUN_ID, since=SINCE, until=UNTIL
+        )
 
         executed = [str(call.args[0]) for call in conn.execute.call_args_list]
         drops = [q for q in executed if "DROP TABLE" in q]
@@ -449,18 +337,30 @@ class TestKeepAfterFlush:
 
     def test_keep_after_apply_skips_drop(self) -> None:
         from bollhav.model.staging import Staging
-        from bollhav.postgres.staging import stage
+        from bollhav.postgres.staging import apply_atomically_to_target
 
         model = _model(staging_cfg=Staging(keep_after_apply=True))
         conn = _mock_conn()
-        with stage(conn, model, since=SINCE, until=UNTIL) as s:
-            s.write(pl.DataFrame({"id": [1], "amount": [1.0]}))
+        apply_atomically_to_target(conn, model, run_id=RUN_ID, since=SINCE, until=UNTIL)
 
         executed = [str(call.args[0]) for call in conn.execute.call_args_list]
         drops = [q for q in executed if "DROP TABLE" in q]
         assert drops == []
-        # apply no longer flips state — that's `@interval_lifecycle`'s job now
+        # apply no longer flips state — that's the lifecycle's job now
         assert not any("status = 'applied'" in q for q in executed)
+
+    def test_drop_staging_table_no_op_when_kept(self) -> None:
+        """`PostgresData.drop_staging_table` is a no-op under
+        `keep_after_apply` — the teardown step respects the keep flag."""
+        from bollhav.model.staging import Staging
+        from bollhav.postgres.data import PostgresData
+
+        model = _model(staging_cfg=Staging(keep_after_apply=True))
+        conn = _mock_conn()
+        PostgresData(model, conn).drop_staging_table(RUN_ID)
+
+        executed = [str(call.args[0]) for call in conn.execute.call_args_list]
+        assert not any("DROP TABLE" in q for q in executed)
 
     def test_lifecycle_across_two_intervals(self) -> None:
         """Each interval CREATEs a fresh staging table and DROPs it on
@@ -468,42 +368,40 @@ class TestKeepAfterFlush:
         and two DROPs, and no TRUNCATE."""
         from datetime import timedelta
 
-        from bollhav.postgres.staging import stage
+        from bollhav.postgres.data import PostgresData
+        from bollhav.postgres.staging import (
+            apply_atomically_to_target,
+            write_to_staging,
+        )
 
         conn = _mock_conn()
         model = _model()
-        with stage(conn, model, since=SINCE, until=UNTIL) as s:
-            s.write(pl.DataFrame({"id": [1], "amount": [1.0]}))
-        with stage(conn, model, since=UNTIL, until=UNTIL + timedelta(days=1)) as s:
-            s.write(pl.DataFrame({"id": [2], "amount": [2.0]}))
+        data = PostgresData(model, conn)
+
+        data.create_staging_table(RUN_ID)
+        write_to_staging(
+            conn, model, RUN_ID, pl.DataFrame({"id": [1], "amount": [1.0]})
+        )
+        apply_atomically_to_target(conn, model, run_id=RUN_ID, since=SINCE, until=UNTIL)
+
+        data.create_staging_table(RUN_ID)
+        write_to_staging(
+            conn, model, RUN_ID, pl.DataFrame({"id": [2], "amount": [2.0]})
+        )
+        apply_atomically_to_target(
+            conn, model, run_id=RUN_ID, since=UNTIL, until=UNTIL + timedelta(days=1)
+        )
 
         executed = [str(call.args[0]) for call in conn.execute.call_args_list]
-        # `UNLOGGED TABLE` only appears for the staging CREATE (the target
-        # CREATE on interval 1 is a plain TABLE).
         creates = [q for q in executed if "UNLOGGED TABLE" in q]
         truncates = [q for q in executed if "TRUNCATE TABLE" in q]
         drops = [q for q in executed if "DROP TABLE" in q]
         assert len(creates) == 2  # fresh staging table each interval
         assert len(truncates) == 0  # no reuse → no truncate
         assert len(drops) == 2  # dropped on each flush
-        assert model.target._applied_model_actions.get("staging_schema_created") is True
 
 
 # ── write_mode combinations ──────────────────────────────────────────
-
-
-def _rendered(conn) -> list[str]:
-    """Render every psycopg Composed object on the conn into actual
-    SQL text via `as_string(None)`. `str()` on a Composed gives its
-    Python repr, not the SQL, so substring matches against quoted
-    identifiers fail. `as_string` does the real rendering."""
-    from psycopg.sql import Composable
-
-    out = []
-    for call in conn.execute.call_args_list:
-        q = call.args[0]
-        out.append(q.as_string(None) if isinstance(q, Composable) else str(q))
-    return out
 
 
 def _model_with_unique():
@@ -529,12 +427,16 @@ class TestStagingWriteModeAppend:
     """staging.write_mode=APPEND (default) — chunks COPY into staging."""
 
     def test_each_chunk_copies_no_on_conflict_into_staging(self) -> None:
-        from bollhav.postgres.staging import stage
+        from bollhav.postgres.staging import write_to_staging
 
         conn = _mock_conn()
-        with stage(conn, _model(), since=SINCE, until=UNTIL) as s:
-            s.write(pl.DataFrame({"id": [1], "amount": [1.0]}))
-            s.write(pl.DataFrame({"id": [2], "amount": [2.0]}))
+        model = _model()
+        write_to_staging(
+            conn, model, RUN_ID, pl.DataFrame({"id": [1], "amount": [1.0]})
+        )
+        write_to_staging(
+            conn, model, RUN_ID, pl.DataFrame({"id": [2], "amount": [2.0]})
+        )
 
         executed = _rendered(conn)
         # No ON CONFLICT INTO staging — APPEND just COPYs.
@@ -553,15 +455,16 @@ class TestStagingWriteModeUpsert:
     def test_each_chunk_upserts_into_staging(self) -> None:
         from bollhav.model.staging import Staging
         from bollhav.model.write_modes import WriteMode
-        from bollhav.postgres.staging import stage
+        from bollhav.postgres.staging import write_to_staging
 
         conn = _mock_conn()
         m = _model_with_unique()
         m.target.write_mode = WriteMode.UPSERT_NO_DELETE
         m.target.staging = Staging(write_mode=WriteMode.UPSERT_NO_DELETE)
-        with stage(conn, m, since=SINCE, until=UNTIL) as s:
-            s.write(pl.DataFrame({"id": [1], "amount": [1.0]}))
-            s.write(pl.DataFrame({"id": [1], "amount": [2.0]}))  # duplicate key
+        write_to_staging(conn, m, RUN_ID, pl.DataFrame({"id": [1], "amount": [1.0]}))
+        write_to_staging(
+            conn, m, RUN_ID, pl.DataFrame({"id": [1], "amount": [2.0]})
+        )  # dup key
 
         executed = _rendered(conn)
         staging_upserts = [
@@ -576,11 +479,12 @@ class TestApplyTargetAppend:
     """target.write_mode=APPEND — apply does INSERT FROM staging."""
 
     def test_apply_issues_insert_select(self) -> None:
-        from bollhav.postgres.staging import stage
+        from bollhav.postgres.staging import apply_atomically_to_target
 
         conn = _mock_conn()
-        with stage(conn, _model(), since=SINCE, until=UNTIL) as s:
-            s.write(pl.DataFrame({"id": [1], "amount": [1.0]}))
+        apply_atomically_to_target(
+            conn, _model(), run_id=RUN_ID, since=SINCE, until=UNTIL
+        )
 
         executed = _rendered(conn)
         applies = [
@@ -599,13 +503,12 @@ class TestApplyTargetUpsert:
 
     def test_apply_issues_insert_with_on_conflict(self) -> None:
         from bollhav.model.write_modes import WriteMode
-        from bollhav.postgres.staging import stage
+        from bollhav.postgres.staging import apply_atomically_to_target
 
         conn = _mock_conn()
         m = _model_with_unique()
         m.target.write_mode = WriteMode.UPSERT_NO_DELETE
-        with stage(conn, m, since=SINCE, until=UNTIL) as s:
-            s.write(pl.DataFrame({"id": [1], "amount": [1.0]}))
+        apply_atomically_to_target(conn, m, run_id=RUN_ID, since=SINCE, until=UNTIL)
 
         executed = _rendered(conn)
         target_upserts = [
@@ -625,7 +528,7 @@ class TestApplyTargetRecreatePartition:
     def test_apply_issues_delete_window_then_insert(self) -> None:
         from bollhav.model.write_modes import WriteMode
         from bollhav.postgres.columns import PostgresColumn, PostgresType
-        from bollhav.postgres.staging import stage
+        from bollhav.postgres.staging import apply_atomically_to_target
 
         conn = _mock_conn()
         m = _model()
@@ -635,8 +538,7 @@ class TestApplyTargetRecreatePartition:
         ]
         m.target.write_mode = WriteMode.RECREATE_PARTITION
         m.target.partitioned_by = "ts"
-        with stage(conn, m, since=SINCE, until=UNTIL) as s:
-            s.write(pl.DataFrame({"ts": [SINCE], "amount": [1.0]}))
+        apply_atomically_to_target(conn, m, run_id=RUN_ID, since=SINCE, until=UNTIL)
 
         executed = _rendered(conn)
         target_deletes = [

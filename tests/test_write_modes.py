@@ -1,9 +1,14 @@
 """Tests for bollhav.postgres.write_modes.write — the top-level
-dispatcher that picks between direct and staged write paths.
+dispatcher that picks between the direct and staged write paths.
 
 Postgres connection is mocked; the two real branches we care about are:
-  * `model.target.staging is None` → routes to `write_dataframes` (per-chunk tx)
-  * `model.target.staging is set`  → routes to `_write_staged` → `stage()`
+  * `model.target.stage is False` → routes to `write_dataframes` (per-chunk tx)
+  * `model.target.stage is True`  → routes to `_write_staged`, which COPYs
+    each chunk into the per-interval staging table
+
+The staging table's *lifecycle* (create -> apply -> drop) is no longer
+done inside `write()`; it lives in `@execute_lifecycle`. `_write_staged`
+just lands the rows.
 """
 
 from __future__ import annotations
@@ -21,13 +26,13 @@ UNTIL = datetime(2024, 1, 2, tzinfo=timezone.utc)
 RUN_ID = UUID("00000000-0000-0000-0000-00000000beef")
 
 
-def _model(*, staged=False, with_state=False, write_mode=None, staging_cfg=None):
+def _model(
+    *, staged=False, with_state=False, write_mode=None, staging_cfg=None, is_view=False
+):
     from bollhav.model.staging import Staging
     from bollhav.model.state import State
     from bollhav.model.write_modes import WriteMode
     from bollhav.postgres.columns import PostgresColumn, PostgresType
-
-    # (removed) Mutations replaced by Actions system
 
     model = MagicMock()
     model.state = State() if (staged or with_state) else None
@@ -38,22 +43,21 @@ def _model(*, staged=False, with_state=False, write_mode=None, staging_cfg=None)
     model.target.schema.resolved = "public"
     model.target.write_mode = write_mode or WriteMode.APPEND
     model.target.staging = staging_cfg or (Staging() if staged else None)
+    # `stage` is the dispatch switch (Target derives it from `staging`).
+    # `is_view` keys the view guard. Pin both — a MagicMock attribute is
+    # truthy by default, which would misroute every call.
+    model.target.stage = staged
+    model.target.is_view = is_view
     model.target.columns = [
         PostgresColumn(name="id", data_type=PostgresType.BIGINT),
         PostgresColumn(name="amount", data_type=PostgresType.NUMERIC),
     ]
-    from bollhav.postgres.actions import default_actions as _da
-
-    model.target._applied_model_actions = {}
-    model.target.actions = []
-    model.target.default_actions = _da()
-    model.target.effective_actions = list(model.target.default_actions)
-    model.target.setup_complete = False
     model.target.recreate_table = False
     model.target.truncate_table = False
     model.target.partitioned_by = None
     model.target.unique_columns = []
     model._state_run_id = RUN_ID
+    model.run_id = RUN_ID
     return model
 
 
@@ -124,30 +128,14 @@ class TestDispatchToStaged:
         ws.assert_called_once()
         wd.assert_not_called()
 
-    def test_staged_requires_since(self) -> None:
-        from bollhav.postgres.write_modes import write
-
-        model = _model(staged=True)
-        df_gen = _gen(pl.DataFrame({"id": [1], "amount": [1.0]}))
-
-        with pytest.raises(ValueError, match="since and until are required"):
-            write(_mock_conn(), model, df_gen, since=None, until=UNTIL)
-
-    def test_staged_requires_until(self) -> None:
-        from bollhav.postgres.write_modes import write
-
-        model = _model(staged=True)
-        df_gen = _gen(pl.DataFrame({"id": [1], "amount": [1.0]}))
-
-        with pytest.raises(ValueError, match="since and until are required"):
-            write(_mock_conn(), model, df_gen, since=SINCE, until=None)
-
 
 class TestStagedPathEndToEnd:
-    """Drive `write()` with staged=True against the real (mocked) stage()
-    machinery and assert the expected SQL got issued."""
+    """Drive `write()` with staged=True against the real (mocked)
+    `_write_staged` machinery and assert the rows were COPYd into the
+    staging table. The table lifecycle (create / apply / drop) is owned
+    by `@execute_lifecycle`, not `write()`, so it's out of scope here."""
 
-    def test_streams_through_staging_and_flushes(self) -> None:
+    def test_streams_each_chunk_into_staging(self) -> None:
         from bollhav.postgres.write_modes import write
 
         model = _model(staged=True)
@@ -157,42 +145,30 @@ class TestStagedPathEndToEnd:
         )
         conn = _mock_conn()
 
-        with patch("bollhav.postgres.write_modes.run_pre_model_actions"):
-            write(conn, model, df_gen, since=SINCE, until=UNTIL)
+        write(conn, model, df_gen, since=SINCE, until=UNTIL)
 
-        executed = [str(call.args[0]) for call in conn.execute.call_args_list]
-        # Staging table created.
-        assert any("CREATE UNLOGGED TABLE" in q for q in executed)
-        # Two COPY contexts on the cursor (one per chunk).
+        # Two COPY contexts on the cursor — one per chunk. `_write_staged`
+        # only lands rows; no CREATE / INSERT-into-target / DROP here.
         assert conn.cursor.return_value.copy.call_count == 2
-        # Flush: INSERT + DROP (fresh table per interval). The state flip
-        # is decoupled — `@interval_lifecycle` does it on the state conn.
-        assert any("INSERT INTO" in q and "SELECT" in q for q in executed)
-        assert any("DROP TABLE" in q and "staging" in q for q in executed)
-        assert not any("status = 'applied'" in q for q in executed)
+        executed = [str(call.args[0]) for call in conn.execute.call_args_list]
+        assert not any("INSERT INTO" in q and "SELECT" in q for q in executed)
+        assert not any("DROP TABLE" in q for q in executed)
 
 
-# ── VIEW + unhandled modes (regression coverage on the dispatcher) ──
+# ── view + missing-df guards (regression coverage on the dispatcher) ──
 
 
 class TestViewMode:
-    def test_view_does_not_take_df_gen(self) -> None:
-        from bollhav.model.write_modes import WriteMode
+    def test_view_is_rejected(self) -> None:
+        """A VIEW has nothing to write — `write()` refuses it. Views are
+        created by `@model_lifecycle` (PostgresData.create_or_replace_view),
+        identified via `model.target.is_view`, not a write mode."""
         from bollhav.postgres.write_modes import write
 
-        model = _model(write_mode=WriteMode.VIEW)
+        model = _model(is_view=True)
         df_gen = _gen(pl.DataFrame({"id": [1], "amount": [1.0]}))
-        with pytest.raises(ValueError, match="VIEW does not need a dataframe"):
+        with pytest.raises(ValueError, match="views"):
             write(_mock_conn(), model, df_gen)
-
-    def test_view_routes_to_create_replace_view(self) -> None:
-        from bollhav.model.write_modes import WriteMode
-        from bollhav.postgres.write_modes import write
-
-        model = _model(write_mode=WriteMode.VIEW)
-        with patch("bollhav.postgres.write_modes.create_replace_view") as crv:
-            write(_mock_conn(), model, df_gen=None)
-        crv.assert_called_once()
 
 
 class TestDfGenMissing:
