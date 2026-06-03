@@ -3,7 +3,6 @@ from bollhav.model import (
     SourceTable,
     Target,
     TargetSchema,
-    WriteMode,
     ModelType,
     Tags,
 )
@@ -18,7 +17,6 @@ high_value_orders = Model(
         name="high_value_orders",
         schema=TargetSchema(name="warehouse_views"),
         model_type=ModelType.VIEW,
-        write_mode=WriteMode.VIEW,
     ),
     tagging=Tags(tags={"views"}),
     upstream=["warehouse_clean.orders"],
@@ -36,7 +34,6 @@ active_customers = Model(
         name="active_customers",
         schema=TargetSchema(name="warehouse_views"),
         model_type=ModelType.VIEW,
-        write_mode=WriteMode.VIEW,
     ),
     tagging=Tags(tags={"views"}),
     upstream=["warehouse_clean.customer_master_data", "warehouse_clean.orders"],

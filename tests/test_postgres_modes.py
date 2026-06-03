@@ -10,7 +10,7 @@ sys.modules["icron"] = MagicMock()
 sys.modules["cron"] = cron_mock
 
 from bollhav.model.database import Database  # noqa: E402
-from bollhav.postgres.actions import run_pre_model_actions  # noqa: E402
+from bollhav.postgres.data import PostgresData  # noqa: E402
 from bollhav.postgres.schema import _col_ddl, ensure_schema  # noqa: E402
 from bollhav.postgres.modes import (  # noqa: E402
     append,
@@ -66,9 +66,7 @@ def _model(
             database=Database.POSTGRES,
             columns=cols,
             write_mode=write_mode,
-            model_type=ModelType.TABLE
-            if write_mode != WriteMode.VIEW
-            else ModelType.VIEW,
+            model_type=ModelType.TABLE,
             recreate_table=recreate_table,
             truncate_table=truncate_table,
         ),
@@ -124,18 +122,23 @@ class TestEnsureSchema:
         conn.execute.assert_called_once()
 
 
-class TestEnsureTable:
+class TestEnsureAssets:
+    """`run_pre_model_actions` is gone — target asset DDL now runs as the
+    discrete steps `PostgresData.ensure_assets()` drives (the lifecycle
+    hook calls the same methods). These assert the same DDL the old
+    pre-model action runner produced: schema + table, plus index / unique
+    constraint when the columns call for them."""
+
     def test_executes(self) -> None:
         conn = _conn()
-        run_pre_model_actions(conn=conn, model=_model())
+        PostgresData(model=_model(), conn=conn).ensure_assets()
         conn.execute.assert_called()
 
     def test_creates_index_when_partitioned(self) -> None:
         conn = _conn()
         model = _model(columns=[_col("id"), _col("ts", partition_on=True)])
-        run_pre_model_actions(conn=conn, model=model)
-        # CREATE SCHEMA + CREATE TABLE + CREATE INDEX — the action
-        # runner fires schema_created, table_created, indexes_created.
+        PostgresData(model=model, conn=conn).ensure_assets()
+        # CREATE SCHEMA + CREATE TABLE + CREATE INDEX.
         assert conn.execute.call_count == 3
 
     def test_creates_composite_unique_constraint(self) -> None:
@@ -143,8 +146,8 @@ class TestEnsureTable:
         model = _model(
             columns=[_col("a", unique=True), _col("b", unique=True), _col("val")]
         )
-        run_pre_model_actions(conn=conn, model=model)
-        # CREATE SCHEMA + CREATE TABLE + ALTER TABLE ADD UNIQUE
+        PostgresData(model=model, conn=conn).ensure_assets()
+        # CREATE SCHEMA + CREATE TABLE + ALTER TABLE ADD UNIQUE.
         assert conn.execute.call_count == 3
 
 
@@ -208,22 +211,39 @@ class TestOverwriteInsert:
             )
 
 
-class TestEnsureTableRecreate:
+class TestRecreateTable:
     def test_drops_before_create_when_recreate_table(self) -> None:
+        # The lifecycle runs `recreate_table()` (the destructive DROP)
+        # before `create_table()` for a `recreate_table=True` model.
         conn = _conn()
-        run_pre_model_actions(conn=conn, model=_model(recreate_table=True))
+        pg = PostgresData(model=_model(recreate_table=True), conn=conn)
+        pg.recreate_table()
+        pg.create_table()
         statements = [str(call.args[0]) for call in conn.execute.call_args_list]
         assert any("DROP TABLE" in s for s in statements), statements
         assert any("CREATE TABLE" in s for s in statements), statements
+        # DROP precedes CREATE.
+        drop_idx = next(i for i, s in enumerate(statements) if "DROP TABLE" in s)
+        create_idx = next(i for i, s in enumerate(statements) if "CREATE TABLE" in s)
+        assert drop_idx < create_idx, statements
 
 
-class TestEnsureTableTruncate:
+class TestTruncateTable:
     def test_truncates_after_create_when_truncate_table(self) -> None:
+        # The lifecycle runs `create_table()` then `truncate_table()` for a
+        # `truncate_table=True` model.
         conn = _conn()
-        run_pre_model_actions(conn=conn, model=_model(truncate_table=True))
+        pg = PostgresData(model=_model(truncate_table=True), conn=conn)
+        pg.create_table()
+        pg.truncate_table()
         statements = [str(call.args[0]) for call in conn.execute.call_args_list]
         assert any("CREATE TABLE" in s for s in statements), statements
         assert any("TRUNCATE TABLE" in s for s in statements), statements
+        create_idx = next(i for i, s in enumerate(statements) if "CREATE TABLE" in s)
+        truncate_idx = next(
+            i for i, s in enumerate(statements) if "TRUNCATE TABLE" in s
+        )
+        assert create_idx < truncate_idx, statements
 
 
 class TestUpdateInsert:

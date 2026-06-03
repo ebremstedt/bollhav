@@ -118,7 +118,7 @@ See [examples/staging_append/](../examples/staging_append/) and [examples/stagin
 
 Each interval gets a **fresh staging table**, created on entry to `stage()` and `DROP`ped inside that interval's apply transaction (unless `keep_after_apply=True`). On a 365-interval backfill that's `1 × CREATE SCHEMA + 365 × CREATE + 365 × DROP`. Because the drop rides the apply transaction, staging self-cleans on the write connection — no end-of-run cleanup pass and no separate DSN required.
 
-The staging-table CREATE is *not* a one-shot PRE action (it's genuinely new each interval); only the schema-level setup (`staging_schema_created`) is recorded in `target._applied_model_actions` and short-circuited on later intervals. See [Actions](ACTIONS.md).
+The staging-table CREATE is *not* a one-shot PRE action (it's genuinely new each interval); only the schema-level setup (`staging_schema_created`) is recorded in `target._applied_model_actions` and short-circuited on later intervals.
 
 The table name is `<prefix><run_id_short>`, so parallel workers on different runs of the same model don't collide.
 

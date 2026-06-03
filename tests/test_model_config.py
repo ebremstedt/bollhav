@@ -42,18 +42,18 @@ def make_model(**overrides) -> Model:
 
 
 # --- Target validation ---
+#
+# The old `ModelType.VIEW <-> WriteMode.VIEW` coupling tests were removed:
+# `WriteMode.VIEW` no longer exists. A view is identified solely by
+# `ModelType.VIEW` and has no write mode (it's created by the lifecycle, not
+# written), so there is no longer a write-mode/model-type pairing to validate.
 
 
-def test_view_model_type_requires_view_write_mode():
-    with pytest.raises(ValueError, match="ModelType.VIEW must use WriteMode.VIEW"):
-        Target(
-            name="test_table", model_type=ModelType.VIEW, write_mode=WriteMode.APPEND
-        )
-
-
-def test_table_model_type_cannot_use_view_write_mode():
-    with pytest.raises(ValueError, match="ModelType.TABLE cannot use WriteMode.VIEW"):
-        Target(name="test_table", model_type=ModelType.TABLE, write_mode=WriteMode.VIEW)
+def test_view_model_type_has_no_write_mode_coupling():
+    # A VIEW with the default (APPEND) write mode is accepted — the write mode
+    # is simply irrelevant for a view, so no ValueError is raised.
+    t = Target(name="test_table", model_type=ModelType.VIEW)
+    assert t.is_view is True
 
 
 def test_database_without_columns_raises():

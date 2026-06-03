@@ -48,6 +48,8 @@ from bollhav.postgres import (
     create_replace_view,
     write,
 )
+from bollhav.postgres.data import PostgresData
+from bollhav.postgres.state import PostgresState
 
 
 DEFAULT_DSN = "postgresql://postgres:postgres@localhost:5432/postgres"
@@ -185,29 +187,62 @@ def _gen_rows(
 def _bootstrap(models, *, state_mode: StateMode = StateMode.DISCOVER) -> None:
     """Run the `@model_lifecycle` setup for each model directly, on a
     single autocommit connection — what the user's `execute_model` would
-    trigger. Stateful models go through `_bootstrap_model` (state table +
-    prefill + interval filtering); the rest through `_setup_non_state_model`
-    (staging GC + library registration)."""
-    from bollhav.model.lifecycle import _bootstrap_model, _setup_non_state_model
-    from bollhav.postgres import state as pg_state
+    trigger via the lifecycle hook.
 
+    This mirrors the Postgres-target branch of `@model_lifecycle`: asset
+    DDL via `PostgresData` (schema, view-or-table, indexes, unique
+    constraint, staging schema + orphan GC), then — for stateful models —
+    the state bootstrap via `PostgresState` (ensure_library /
+    register_model / ensure_tables, seed the interval or singleton rows,
+    and filter `model.intervals` down to the actionable subset)."""
     with psycopg.connect(_dsn(), autocommit=True) as conn:
         for model in models:
+            # `model.state.mode` drives DISCOVER vs BULLDOZER prefill.
             if model.state is not None:
-                _bootstrap_model(
-                    pg_state,
-                    model,
-                    data_conn=conn,
-                    state_conn=conn,
-                    state_mode=state_mode,
-                )
+                model.state.mode = state_mode
+
+            data = PostgresData(model=model, conn=conn)
+            data.create_schema()
+            if model.is_view:
+                data.create_or_replace_view()
             else:
-                _setup_non_state_model(model, data_conn=conn)
+                if model.target.recreate_table:
+                    data.recreate_table()
+                data.create_table()
+                if model.target.truncate_table:
+                    data.truncate_table()
+                if model.target.partitioned_by is not None:
+                    data.create_indexes()
+                if model.target.unique_columns:
+                    data.add_unique_constraint()
+                if model.target.stage:
+                    data.create_staging_schema()
+                    data.gc_orphan_staging_tables()
+
+            if model.stateful:
+                state = PostgresState(model=model, conn=conn)
+                state.ensure_library()
+                state.register_model()
+                state.ensure_tables()
+                if model.is_monolithic or model.is_view:
+                    state.insert_singleton(run_id=model.run_id)
+                else:
+                    state.insert_intervals(
+                        run_id=model.run_id,
+                        intervals=model.compute_intervals(),
+                    )
+                model.intervals = state.get_actionable_intervals()
 
 
 def _run_intervals(model: Model, *, error_on_interval: int | None = None):
     """Drive a model's intervals through the staged write path, the way a
-    user's `@model_lifecycle`-wrapped loop would after the bootstrap."""
+    user's `@model_lifecycle`-wrapped loop would after the bootstrap.
+
+    Mirrors `@execute_lifecycle`'s staged-execute flow per interval:
+    `PostgresData.create_staging_table` → `write` (lands chunks into
+    staging) → `apply_staging_to_target` → `drop_staging_table`, then the
+    decoupled state flip via `PostgresState.mark_applied` on the same
+    connection."""
     # Mint the contract before bootstrap so we know the full interval set.
     contract = list(model.compute_intervals())
     _bootstrap([model])
@@ -230,19 +265,33 @@ def _run_intervals(model: Model, *, error_on_interval: int | None = None):
                 create_replace_view(conn=conn, model=model)
             else:
                 df_gen = _gen_rows(since, until)
-                write(conn=conn, model=model, df_gen=df_gen, since=since, until=until)
-                # State flip is now a separate step (staging no longer flips
-                # it). Mark applied on the SAME connection — what
-                # @interval_lifecycle does — no new connection opened.
-                if model.state is not None:
-                    from bollhav.postgres import state as pg_state
-
-                    pg_state.mark_applied(
-                        model,
-                        run_id=model._state_run_id,
+                if model.target.stage:
+                    data = PostgresData(model=model, conn=conn)
+                    data.create_staging_table(model.run_id)
+                    write(
+                        conn=conn,
+                        model=model,
+                        df_gen=df_gen,
                         since=since,
                         until=until,
+                    )
+                    data.apply_staging_to_target(model.run_id, interval)
+                    data.drop_staging_table(model.run_id)
+                else:
+                    write(
                         conn=conn,
+                        model=model,
+                        df_gen=df_gen,
+                        since=since,
+                        until=until,
+                    )
+                # State flip is now a separate step (staging no longer flips
+                # it). Mark applied on the SAME connection — what
+                # @execute_lifecycle does — no new connection opened.
+                if model.state is not None:
+                    PostgresState(model=model, conn=conn).mark_applied(
+                        run_id=model.run_id,
+                        interval=interval,
                     )
 
 
@@ -297,26 +346,6 @@ def test_e2e_state_lifecycle(schema_name):
     assert len(rows) == 3
     assert all(status == "applied" for status, _, _ in rows)
     assert _row_count(schema_name, "orders") == 15  # 3 intervals × 5 rows
-
-
-# ── 2. mutations one-shot: setup runs once per pipeline run ──────────
-
-
-def test_e2e_actions_one_shot_setup(schema_name, caplog):
-    """Across 3 intervals: target table is CREATEd once; subsequent
-    intervals short-circuit at `target.setup_complete`. The action
-    debug logs should appear exactly once per applicable PRE action."""
-    caplog.set_level(logging.DEBUG, logger="bollhav.postgres.actions")
-    m = _orders_model(schema_name, state=State(), staging=Staging())
-    _run_intervals(m)
-
-    flags = [r.message for r in caplog.records if "action:" in r.message]
-    # Exactly one log per applicable model-level PRE action across the run.
-    assert sum(f.endswith(".table_created done") for f in flags) == 1
-    assert sum(f.endswith(".schema_created done") for f in flags) == 1
-    assert sum(f.endswith(".staging_schema_created done") for f in flags) == 1
-    # The staging table is created per-interval inside stage(), not via a
-    # model-level PRE action — so there is no `staging_table_created` flag.
 
 
 # ── 3. staging: fresh table per interval, dropped on flush ───────────
@@ -396,7 +425,6 @@ def test_e2e_view_as_upstream_does_not_block_downstream(schema_name):
             name="v_high_value",
             schema=TargetSchema(name=schema_name),
             model_type=ModelType.VIEW,
-            write_mode=WriteMode.VIEW,
             dsn_env_var="TARGET_DSN",
         ),
     )
@@ -460,8 +488,6 @@ def test_e2e_library_migration_is_additive(schema_name):
     """Seed an old-shape `model_library` (no model_type column,
     state_schema/table NOT NULL). Bootstrap should ALTER it in place
     — no DROP — and the existing row should survive."""
-    from bollhav.postgres.library import library_ensure
-
     _drop_library()
     with psycopg.connect(_dsn(), autocommit=True) as c:
         c.execute("CREATE SCHEMA z_bollhav")
@@ -480,8 +506,12 @@ def test_e2e_library_migration_is_additive(schema_name):
             "VALUES ('legacy.model', '{}', 'z_legacy', 'model_state')"
         )
 
+    # `ensure_library` is now a `PostgresState` method; the library DDL /
+    # additive migration doesn't depend on the model, so any state-tracked
+    # model serves to drive it.
+    m = _orders_model(schema_name, state=State(), staging=Staging())
     with psycopg.connect(_dsn()) as c:
-        library_ensure(c)
+        PostgresState(model=m, conn=c).ensure_library()
         c.commit()
 
     # New column present
@@ -541,8 +571,8 @@ def test_e2e_state_rerun_is_noop_for_applied_intervals(schema_name):
 
 DEBUG_LOGGERS = (
     "bollhav.postgres.staging",
-    "bollhav.postgres.actions",
-    "bollhav.model.state",
+    "bollhav.postgres.state",
+    "bollhav.model.lifecycle",
 )
 
 
@@ -675,6 +705,10 @@ def _drive_through_intervals(
             chunk_size=chunk_size,
         )
         with psycopg.connect(_dsn()) as conn:
+            # Staged-execute flow: fresh staging table → land chunks →
+            # atomic apply → drop, then the decoupled state flip.
+            data = PostgresData(model=model, conn=conn)
+            data.create_staging_table(model.run_id)
             write(
                 conn=conn,
                 model=model,
@@ -682,17 +716,14 @@ def _drive_through_intervals(
                 since=interval.since,
                 until=interval.until,
             )
+            data.apply_staging_to_target(model.run_id, interval)
+            data.drop_staging_table(model.run_id)
             # Staging no longer flips state — mark applied on the same
-            # connection, the way @interval_lifecycle does.
+            # connection, the way @execute_lifecycle does.
             if model.state is not None:
-                from bollhav.postgres import state as pg_state
-
-                pg_state.mark_applied(
-                    model,
-                    run_id=model._state_run_id,
-                    since=interval.since,
-                    until=interval.until,
-                    conn=conn,
+                PostgresState(model=model, conn=conn).mark_applied(
+                    run_id=model.run_id,
+                    interval=interval,
                 )
 
 

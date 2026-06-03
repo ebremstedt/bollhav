@@ -5,6 +5,7 @@ import pytest
 from bollhav.model.batch import Batch
 from bollhav.model.bounds import Bounds
 from bollhav.model.model import Model
+from bollhav.model.model_type import ModelType
 from bollhav.model.target import Target
 
 
@@ -74,3 +75,50 @@ def test_intervals_backfill_falls_back_to_bounds_for_since_but_requires_until():
     assert len(intervals) > 0
     assert intervals[0].since == datetime(2026, 1, 1, tzinfo=timezone.utc)
     assert intervals[-1].until == datetime(2026, 1, 3, tzinfo=timezone.utc)
+
+
+class TestModelKind:
+    """`Model.kind` ('interval' | 'monolithic' | 'view') drives how many
+    state rows a model has and how an upstream contract checks it. It's
+    derived from is_view / is_monolithic, with interval (batched) the
+    default."""
+
+    def test_batched_model_is_interval(self):
+        m = make_model()  # make_model defaults to Batch()
+        assert m.kind == "interval"
+        assert m.is_view is False
+        assert m.is_monolithic is False
+
+    def test_unbatched_table_is_interval_by_default(self):
+        # No batching and not explicitly monolithic → still 'interval'.
+        m = Model(target=Target(name="orders"))
+        assert m.kind == "interval"
+
+    def test_monolithic_model_is_monolithic(self):
+        m = Model(target=Target(name="app_config"), monolithic=True)
+        assert m.kind == "monolithic"
+        assert m.is_monolithic is True
+        assert m.is_view is False
+
+    def test_view_model_is_view(self):
+        m = Model(target=Target(name="customers", model_type=ModelType.VIEW))
+        assert m.kind == "view"
+        assert m.is_view is True
+        assert m.is_monolithic is False
+
+    def test_monolithic_with_batching_raises(self):
+        # A monolithic model has no interval windows — the two are
+        # mutually exclusive and caught at construction.
+        with pytest.raises(ValueError, match="monolithic"):
+            Model(
+                target=Target(name="app_config"),
+                monolithic=True,
+                batching=Batch(),
+            )
+
+    def test_view_cannot_be_monolithic(self):
+        with pytest.raises(ValueError, match="VIEW"):
+            Model(
+                target=Target(name="customers", model_type=ModelType.VIEW),
+                monolithic=True,
+            )

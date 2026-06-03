@@ -100,7 +100,7 @@ class TestModelStateField:
     def test_state_without_batching_raises(self) -> None:
         from bollhav.model import Model, Target, TargetSchema
 
-        with pytest.raises(ValueError, match="state tracking on model"):
+        with pytest.raises(ValueError, match="has no batching"):
             Model(
                 target=Target(name="orders", schema=TargetSchema(name="public")),
                 state=State(),
@@ -173,37 +173,37 @@ def _pg_model(*, state_cfg=None, target_dsn="TARGET_DSN"):
 
 class TestStateSchemaName:
     def test_default_is_z_prefixed(self) -> None:
-        from bollhav.postgres.state import _state_schema
+        from bollhav.postgres.state import PostgresState
 
-        assert _state_schema(_pg_model()) == "z_public"
+        assert PostgresState(_pg_model())._state_schema() == "z_public"
 
     def test_schema_prefix_override(self) -> None:
         from bollhav.model.state import State
-        from bollhav.postgres.state import _state_schema
+        from bollhav.postgres.state import PostgresState
 
         m = _pg_model(state_cfg=State(schema_prefix="ops_"))
-        assert _state_schema(m) == "ops_public"
+        assert PostgresState(m)._state_schema() == "ops_public"
 
     def test_schema_prefix_empty_drops_prefix(self) -> None:
         from bollhav.model.state import State
-        from bollhav.postgres.state import _state_schema
+        from bollhav.postgres.state import PostgresState
 
         m = _pg_model(state_cfg=State(schema_prefix=""))
-        assert _state_schema(m) == "public"
+        assert PostgresState(m)._state_schema() == "public"
 
 
 class TestStateTableName:
     def test_default_suffix_is_state(self) -> None:
-        from bollhav.postgres.state import _state_table
+        from bollhav.postgres.state import PostgresState
 
-        assert _state_table(_pg_model()) == "orders_state"
+        assert PostgresState(_pg_model())._state_table() == "orders_state"
 
     def test_table_suffix_override(self) -> None:
         from bollhav.model.state import State
-        from bollhav.postgres.state import _state_table
+        from bollhav.postgres.state import PostgresState
 
         m = _pg_model(state_cfg=State(table_suffix="_history"))
-        assert _state_table(m) == "orders_history"
+        assert PostgresState(m)._state_table() == "orders_history"
 
 
 class TestRecordFailure:
@@ -221,21 +221,19 @@ class TestRecordFailure:
         return conn
 
     def test_full_name_is_inserted_into_errors_row(self) -> None:
-        from bollhav.postgres.state import record_failure
+        from bollhav.model.intervals import TZInterval
+        from bollhav.postgres.state import PostgresState
 
         m = _pg_model()
         m.target.full_name = "warehouse.orders"
         conn = self._conn()
 
-        record_failure(
-            m,
+        PostgresState(m, conn).record_failure(
             run_id=RUN_ID,
-            since=SINCE,
-            until=UNTIL,
+            interval=TZInterval(SINCE, UNTIL),
             error_type="RuntimeError",
             error_message="boom",
             traceback_text="Traceback...",
-            conn=conn,
         )
 
         insert = next(
@@ -255,40 +253,36 @@ class TestRecordFailure:
         assert params[6] == "Traceback..."
 
     def test_update_state_true_flips_status_to_error(self) -> None:
-        from bollhav.postgres.state import record_failure
+        from bollhav.model.intervals import TZInterval
+        from bollhav.postgres.state import PostgresState
 
         m = _pg_model()
         conn = self._conn()
-        record_failure(
-            m,
+        PostgresState(m, conn).record_failure(
             run_id=RUN_ID,
-            since=SINCE,
-            until=UNTIL,
+            interval=TZInterval(SINCE, UNTIL),
             error_type="X",
             error_message="m",
             traceback_text=None,
             update_state=True,
-            conn=conn,
         )
 
         executed = [str(c.args[0]) for c in conn.execute.call_args_list]
         assert any("UPDATE" in q and "status = 'error'" in q for q in executed)
 
     def test_update_state_false_logs_only(self) -> None:
-        from bollhav.postgres.state import record_failure
+        from bollhav.model.intervals import TZInterval
+        from bollhav.postgres.state import PostgresState
 
         m = _pg_model()
         conn = self._conn()
-        record_failure(
-            m,
+        PostgresState(m, conn).record_failure(
             run_id=RUN_ID,
-            since=SINCE,
-            until=UNTIL,
+            interval=TZInterval(SINCE, UNTIL),
             error_type="X",
             error_message="m",
             traceback_text=None,
             update_state=False,
-            conn=conn,
         )
 
         executed = [str(c.args[0]) for c in conn.execute.call_args_list]
@@ -311,10 +305,10 @@ class TestReadStatusSummary:
         return conn
 
     def test_empty_state_returns_zeros(self) -> None:
-        from bollhav.postgres.state import read_status_summary
+        from bollhav.postgres.state import PostgresState
 
         m = _pg_model()
-        s = read_status_summary(m, conn=self._conn([]))
+        s = PostgresState(m, self._conn([])).read_status_summary()
         assert s["counts"] == {
             "pending": 0,
             "running": 0,
@@ -325,7 +319,7 @@ class TestReadStatusSummary:
         assert s["blocked_groups"] == {}
 
     def test_counts_split_by_status(self) -> None:
-        from bollhav.postgres.state import read_status_summary
+        from bollhav.postgres.state import PostgresState
 
         rows = [
             ("pending", None),
@@ -337,7 +331,7 @@ class TestReadStatusSummary:
             ("error", None),
         ]
         m = _pg_model()
-        s = read_status_summary(m, conn=self._conn(rows))
+        s = PostgresState(m, self._conn(rows)).read_status_summary()
         assert s["counts"] == {
             "pending": 2,
             "running": 1,
@@ -348,7 +342,7 @@ class TestReadStatusSummary:
 
     def test_blocked_groups_split_by_code_and_upstream(self) -> None:
         """Same code with different upstreams → separate groups."""
-        from bollhav.postgres.state import read_status_summary
+        from bollhav.postgres.state import PostgresState
 
         rows = [
             ("blocked", "STATE_001: upstream 'a.b' not registered"),
@@ -357,19 +351,20 @@ class TestReadStatusSummary:
             ("blocked", "STATE_002: upstream 'a.b' has no applied row covering …"),
         ]
         m = _pg_model()
-        s = read_status_summary(m, conn=self._conn(rows))
-        # (code, upstream) → count
+        s = PostgresState(m, self._conn(rows)).read_status_summary()
+        # (code, upstream, kind) → count — these reasons carry no `(kind)`
+        # descriptor, so kind is None.
         assert s["blocked_groups"] == {
-            ("STATE_001", "a.b"): 2,
-            ("STATE_001", "c.d"): 1,
-            ("STATE_002", "a.b"): 1,
+            ("STATE_001", "a.b", None): 2,
+            ("STATE_001", "c.d", None): 1,
+            ("STATE_002", "a.b", None): 1,
         }
 
     def test_state_002_with_many_windows_collapses_to_one_group(self) -> None:
         """STATE_002's message includes a time window — many windows
         for the same (code, upstream) should still be ONE row in the
         banner. Verifies the group key ignores the window."""
-        from bollhav.postgres.state import read_status_summary
+        from bollhav.postgres.state import PostgresState
 
         rows = [
             (
@@ -389,21 +384,21 @@ class TestReadStatusSummary:
             ),
         ]
         m = _pg_model()
-        s = read_status_summary(m, conn=self._conn(rows))
-        assert s["blocked_groups"] == {("STATE_002", "a.b"): 3}
+        s = PostgresState(m, self._conn(rows)).read_status_summary()
+        assert s["blocked_groups"] == {("STATE_002", "a.b", None): 3}
 
     def test_blocked_reason_without_upstream_in_message(self) -> None:
         """Falls back to None for upstream when message lacks the
         `upstream 'X'` shape — banner will render '(upstream unknown)'."""
-        from bollhav.postgres.state import read_status_summary
+        from bollhav.postgres.state import PostgresState
 
         rows = [("blocked", "STATE_999: something custom")]
         m = _pg_model()
-        s = read_status_summary(m, conn=self._conn(rows))
-        assert s["blocked_groups"] == {("STATE_999", None): 1}
+        s = PostgresState(m, self._conn(rows)).read_status_summary()
+        assert s["blocked_groups"] == {("STATE_999", None, None): 1}
 
     def test_blocked_without_reason_is_ignored_in_groups(self) -> None:
-        from bollhav.postgres.state import read_status_summary
+        from bollhav.postgres.state import PostgresState
 
         rows = [
             ("blocked", None),
@@ -411,9 +406,9 @@ class TestReadStatusSummary:
             ("blocked", "STATE_001: upstream 'a.b' not registered"),
         ]
         m = _pg_model()
-        s = read_status_summary(m, conn=self._conn(rows))
+        s = PostgresState(m, self._conn(rows)).read_status_summary()
         assert s["counts"]["blocked"] == 3
-        assert s["blocked_groups"] == {("STATE_001", "a.b"): 1}
+        assert s["blocked_groups"] == {("STATE_001", "a.b", None): 1}
 
 
 # ── @load_models bootstrap: contract → state → filter ───────────────

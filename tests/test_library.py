@@ -1,12 +1,18 @@
-"""Tests for the cross-pipeline model library — `bollhav.postgres.library`.
+"""Tests for the cross-pipeline model library.
 
-Postgres connection is mocked. Covers:
-  * `ensure_library` issues the schema + table DDL
-  * `register` upserts the right tuple — TABLE writes state pointers,
-    VIEW and library-only TABLE write NULL state pointers
-  * `lookup` returns the registered row (or None) as a LibraryEntry
-  * `is_satisfied` — state-tracked tables check the applied row;
+After the refactor the library lives INSIDE `bollhav.postgres.state` —
+there is no separate `bollhav.postgres.library` module. The free
+functions became methods/staticmethods on `PostgresState`:
+
+  * `ensure_library`        — issues the schema + table DDL
+  * `register_model`        — upserts the row (state-tracked TABLE writes
+    state pointers; VIEW / library-only TABLE write NULL state pointers)
+  * `lookup_model` (static) — returns the registered row as a LibraryEntry
+  * `is_satisfied` (static) — state-tracked tables check the applied row;
     VIEW / library-only entries are satisfied by mere presence
+
+`LibraryEntry` now carries a `kind` field (`interval` | `monolithic` |
+`view`). Postgres connection is mocked throughout.
 """
 
 from __future__ import annotations
@@ -16,33 +22,15 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from bollhav.model.state import StateMode
+from bollhav.model.intervals import TZInterval
 
 
 SINCE = datetime(2024, 1, 1, tzinfo=timezone.utc)
 UNTIL = datetime(2024, 1, 2, tzinfo=timezone.utc)
+INTERVAL = TZInterval(SINCE, UNTIL)
 
 
-def _bootstrap(models, *, state_mode: StateMode = StateMode.DISCOVER) -> None:
-    """Drive `@model_lifecycle`'s setup for each model on a mocked
-    connection: stateful → `_bootstrap_model`; state-less →
-    `_setup_non_state_model`. Backend calls are patched by each test."""
-    from bollhav.model.lifecycle import _bootstrap_model, _setup_non_state_model
-    from bollhav.postgres import state as pg_state
-
-    conn = MagicMock()
-    conn.__enter__ = MagicMock(return_value=conn)
-    conn.__exit__ = MagicMock(return_value=None)
-    for model in models:
-        if model.state is not None:
-            _bootstrap_model(
-                pg_state, model, data_conn=conn, state_conn=conn, state_mode=state_mode
-            )
-        else:
-            _setup_non_state_model(model, data_conn=conn)
-
-
-def _mock_conn(fetchone_value=None, rowcount=0):
+def _mock_conn(fetchone_value=None):
     conn = MagicMock()
     conn.transaction.return_value.__enter__ = MagicMock(return_value=None)
     conn.transaction.return_value.__exit__ = MagicMock(return_value=None)
@@ -70,13 +58,23 @@ def _model(
     model.target.full_name = full_name
     model.target.schema.resolved = full_name.split(".")[0]
     model.target.is_view = is_view
-    if is_view or not has_staging:
+    upstream_list = list(upstream) if upstream is not None else []
+    model.upstream = upstream_list
+    # `register_model` reads `upstream_names` (the bare-string projection)
+    # and `kind` off the model; pin them on the mock.
+    model.upstream_names = upstream_list
+    if is_view:
         model.target.staging = None
         model.state = None
+        model.kind = "view"
+    elif not has_staging:
+        model.target.staging = None
+        model.state = None
+        model.kind = "interval"
     else:
         model.target.staging = Staging()
         model.state = State()
-    model.upstream = upstream if upstream is not None else []
+        model.kind = "interval"
     return model
 
 
@@ -85,10 +83,10 @@ def _model(
 
 class TestEnsureLibrary:
     def test_creates_schema_and_table(self) -> None:
-        from bollhav.postgres.library import library_ensure
+        from bollhav.postgres.state import PostgresState
 
         conn = _mock_conn()
-        library_ensure(conn)
+        PostgresState(_model(), conn).ensure_library()
 
         executed = [str(call.args[0]) for call in conn.execute.call_args_list]
         assert any("CREATE SCHEMA IF NOT EXISTS" in q for q in executed)
@@ -102,16 +100,16 @@ class TestEnsureLibrary:
 
 
 class TestRegister:
-    """`register` upserts a row keyed by full_name. Params are
+    """`register_model` upserts a row keyed by full_name. Params are
     positional: (full_name, upstream[], model_type, state_schema,
-    state_table)."""
+    state_table, kind)."""
 
     def test_table_writes_state_pointers(self) -> None:
-        from bollhav.postgres.library import library_register_model
+        from bollhav.postgres.state import PostgresState
 
         m = _model(full_name="warehouse.orders", upstream=["raw.orders"])
         conn = _mock_conn()
-        library_register_model(conn, m)
+        PostgresState(m, conn).register_model()
 
         insert_calls = [
             c for c in conn.execute.call_args_list if "INSERT INTO" in str(c.args[0])
@@ -123,16 +121,17 @@ class TestRegister:
         assert params[2] == "TABLE"
         assert params[3] == "z_warehouse"
         assert params[4] == "orders_state"
+        assert params[5] == "interval"
 
     def test_view_writes_null_state_pointers(self) -> None:
         """Views have no state table — register stores NULLs so the
         satisfaction check distinguishes presence-based VIEW upstreams
         from state-tracked TABLE upstreams."""
-        from bollhav.postgres.library import library_register_model
+        from bollhav.postgres.state import PostgresState
 
         m = _model(full_name="warehouse.v_orders", is_view=True)
         conn = _mock_conn()
-        library_register_model(conn, m)
+        PostgresState(m, conn).register_model()
 
         params = next(
             c.args[1]
@@ -148,11 +147,11 @@ class TestRegister:
         state tracking (`library=True`, no state, no staging) also
         writes NULL state pointers — presence in the library is the
         satisfaction proof."""
-        from bollhav.postgres.library import library_register_model
+        from bollhav.postgres.state import PostgresState
 
         m = _model(full_name="lookup.countries", has_staging=False)
         conn = _mock_conn()
-        library_register_model(conn, m)
+        PostgresState(m, conn).register_model()
 
         params = next(
             c.args[1]
@@ -164,11 +163,11 @@ class TestRegister:
         assert params[4] is None
 
     def test_empty_upstream_list(self) -> None:
-        from bollhav.postgres.library import library_register_model
+        from bollhav.postgres.state import PostgresState
 
         m = _model(upstream=[])
         conn = _mock_conn()
-        library_register_model(conn, m)
+        PostgresState(m, conn).register_model()
 
         params = next(
             c.args[1]
@@ -180,45 +179,48 @@ class TestRegister:
 
 class TestLookup:
     def test_returns_none_when_not_registered(self) -> None:
-        from bollhav.postgres.library import lookup
+        from bollhav.postgres.state import PostgresState
 
         conn = _mock_conn(fetchone_value=None)
-        assert lookup(conn, "missing.model") is None
+        assert PostgresState.lookup_model(conn, "missing.model") is None
 
     def test_returns_entry_for_state_tracked_table(self) -> None:
-        from bollhav.postgres.library import LibraryEntry, lookup
+        from bollhav.postgres.state import LibraryEntry, PostgresState
 
         conn = _mock_conn(
-            fetchone_value=(["a.b"], "TABLE", "z_warehouse", "orders_state")
+            fetchone_value=(["a.b"], "TABLE", "z_warehouse", "orders_state", "interval")
         )
-        result = lookup(conn, "warehouse.orders")
+        result = PostgresState.lookup_model(conn, "warehouse.orders")
         assert isinstance(result, LibraryEntry)
         assert result.upstream == ["a.b"]
         assert result.model_type == "TABLE"
         assert result.state_schema == "z_warehouse"
         assert result.state_table == "orders_state"
+        assert result.kind == "interval"
 
     def test_returns_entry_for_view_with_null_state_pointers(self) -> None:
-        from bollhav.postgres.library import lookup
+        from bollhav.postgres.state import PostgresState
 
-        conn = _mock_conn(fetchone_value=([], "VIEW", None, None))
-        result = lookup(conn, "warehouse.v_orders")
+        conn = _mock_conn(fetchone_value=([], "VIEW", None, None, "view"))
+        result = PostgresState.lookup_model(conn, "warehouse.v_orders")
         assert result.model_type == "VIEW"
         assert result.state_schema is None
         assert result.state_table is None
+        assert result.kind == "view"
 
 
 # ── is_satisfied ─────────────────────────────────────────────────────
 
 
-def _entry(*, model_type="TABLE", state_schema=None, state_table=None):
-    from bollhav.postgres.library import LibraryEntry
+def _entry(*, model_type="TABLE", state_schema=None, state_table=None, kind="interval"):
+    from bollhav.postgres.state import LibraryEntry
 
     return LibraryEntry(
         upstream=[],
         model_type=model_type,
         state_schema=state_schema,
         state_table=state_table,
+        kind=kind,
     )
 
 
@@ -226,11 +228,11 @@ class TestIsSatisfied:
     def test_view_entry_satisfied_by_presence(self) -> None:
         """VIEW entries store NULL state pointers — they're satisfied
         by mere presence in the library, no SQL query needed."""
-        from bollhav.postgres.library import is_satisfied
+        from bollhav.postgres.state import PostgresState
 
         conn = _mock_conn()
-        entry = _entry(model_type="VIEW")
-        assert is_satisfied(conn, entry=entry, since=SINCE, until=UNTIL)
+        entry = _entry(model_type="VIEW", kind="view")
+        assert PostgresState.is_satisfied(conn, entry=entry, interval=INTERVAL)
         # No SQL was issued — short-circuit at the entry level.
         assert conn.execute.call_count == 0
 
@@ -238,42 +240,44 @@ class TestIsSatisfied:
         """A TABLE registered without state pointers (library-only
         opt-in) is also satisfied by presence — same NULL-state-cols
         rule as views, irrespective of `model_type`."""
-        from bollhav.postgres.library import is_satisfied
+        from bollhav.postgres.state import PostgresState
 
         conn = _mock_conn()
         entry = _entry(model_type="TABLE", state_schema=None, state_table=None)
-        assert is_satisfied(conn, entry=entry, since=SINCE, until=UNTIL)
+        assert PostgresState.is_satisfied(conn, entry=entry, interval=INTERVAL)
         assert conn.execute.call_count == 0
 
     def test_state_tracked_table_exact_match_satisfies(self) -> None:
-        from bollhav.postgres.library import is_satisfied
+        from bollhav.postgres.state import PostgresState
 
         conn = _mock_conn(fetchone_value=(1,))
         entry = _entry(state_schema="z_raw", state_table="orders_state")
-        assert is_satisfied(conn, entry=entry, since=SINCE, until=UNTIL)
+        assert PostgresState.is_satisfied(conn, entry=entry, interval=INTERVAL)
 
     def test_state_tracked_table_no_applied_row_not_satisfied(self) -> None:
-        from bollhav.postgres.library import is_satisfied
+        from bollhav.postgres.state import PostgresState
 
-        conn = _mock_conn(fetchone_value=None)
+        # pg_tables existence check returns a row; the applied-row query
+        # returns None → not satisfied.
+        conn = MagicMock()
+        results = [MagicMock(), MagicMock()]
+        results[0].fetchone.return_value = (1,)  # pg_tables → exists
+        results[1].fetchone.return_value = None  # applied-row query → none
+        conn.execute.side_effect = results
+
         entry = _entry(state_schema="z_raw", state_table="orders_state")
-        assert not is_satisfied(conn, entry=entry, since=SINCE, until=UNTIL)
+        assert not PostgresState.is_satisfied(conn, entry=entry, interval=INTERVAL)
 
     def test_missing_state_table_returns_false_not_error(self) -> None:
         """Library row outliving its state table (cleanup, restored
         backup, etc.) shouldn't crash. pg_tables existence check
         returns no row → False, downstream blocks rather than errors."""
-        from bollhav.postgres.library import is_satisfied
+        from bollhav.postgres.state import PostgresState
 
-        conn = MagicMock()
-        conn.transaction.return_value.__enter__ = MagicMock(return_value=None)
-        conn.transaction.return_value.__exit__ = MagicMock(return_value=None)
-        exists_result = MagicMock()
-        exists_result.fetchone.return_value = None
-        conn.execute.return_value = exists_result
+        conn = _mock_conn(fetchone_value=None)
 
         entry = _entry(state_schema="z_raw", state_table="orders_state")
-        assert not is_satisfied(conn, entry=entry, since=SINCE, until=UNTIL)
+        assert not PostgresState.is_satisfied(conn, entry=entry, interval=INTERVAL)
         assert conn.execute.call_count == 1
         assert "pg_tables" in str(conn.execute.call_args_list[0].args[0])
 
@@ -281,11 +285,11 @@ class TestIsSatisfied:
         """Sanity-check: `since <= my_since AND until >= my_until`
         is what makes a daily-upstream applied row cover an hourly
         downstream interval."""
-        from bollhav.postgres.library import is_satisfied
+        from bollhav.postgres.state import PostgresState
 
         conn = _mock_conn(fetchone_value=(1,))
         entry = _entry(state_schema="z_raw", state_table="orders_state")
-        is_satisfied(conn, entry=entry, since=SINCE, until=UNTIL)
+        PostgresState.is_satisfied(conn, entry=entry, interval=INTERVAL)
 
         select_q = next(
             str(c.args[0])
@@ -302,155 +306,110 @@ class TestIsSatisfied:
         assert params == [SINCE, UNTIL]
 
 
-# ── bootstrap blocked path ───────────────────────────────────────────
+# ── live upstream check (runtime block path) ─────────────────────────
+#
+# The old bootstrap-blocked-path tests (`_connect` / `prefill` /
+# `read_actionable` / `bollhav.postgres.library.*`) are gone: blocking
+# now happens at run time in `@execute_lifecycle`, which calls
+# `PostgresState.is_upstream_satisfied_live` and writes the verdict's
+# `UpstreamCheck.reason` onto the state row. These tests preserve the
+# original intent (unregistered upstream = documentation, not blocked;
+# unsatisfied registered upstream = STATE_002 blocked; satisfied =
+# clear) against that new API. The block window is no longer repeated in
+# the reason text — it lives on the row's `since`/`until` — so the old
+# "window in reason" assertions were dropped.
 
 
-class TestBootstrapBlockedPath:
-    """The library + state operate together during the bootstrap.
-    These tests verify the 'when an out-of-pipeline upstream isn't
-    satisfied, the interval gets marked blocked' logic."""
+class TestUpstreamSatisfiedLive:
+    def _state(self, model, conn):
+        from bollhav.postgres.state import PostgresState
 
-    def _staged_model(self, *, upstream, contract):
-        from bollhav.model.staging import Staging
+        return PostgresState(model=model, conn=conn)
 
-        model = MagicMock()
-        model.target.is_view = False
-        model.target.staging = Staging()
-        model.target.full_name = "warehouse.enriched"
-        model.upstream = list(upstream)
-        model.compute_intervals.return_value = list(contract)
-        return model
-
-    def _conn_ctx(self):
-        conn = MagicMock()
-        conn.__enter__ = MagicMock(return_value=conn)
-        conn.__exit__ = MagicMock(return_value=None)
-        return conn
-
-    def test_unregistered_upstream_is_documentation_not_blocked(self) -> None:
-        """An upstream that isn't in the library (a view, a state-less
-        table, or a typo) is treated as documentation — the interval
-        stays `pending`, not blocked. Only registered (state-tracked)
-        upstreams are enforced."""
+    def test_unregistered_bare_upstream_is_documentation_not_blocked(self) -> None:
         from unittest.mock import patch
 
-        from bollhav.model.intervals import TZInterval
+        from bollhav.postgres.state import PostgresState
 
-        m = self._staged_model(
-            upstream=["raw.orders"], contract=[TZInterval(SINCE, UNTIL)]
-        )
-        conn = self._conn_ctx()
-        with (
-            patch("bollhav.postgres.state._connect", return_value=conn),
-            patch("bollhav.postgres.library.ensure_library"),
-            patch("bollhav.postgres.library.register"),
-            patch("bollhav.postgres.library.lookup", return_value=None),
-            patch("bollhav.postgres.state.ensure_tables"),
-            patch("bollhav.postgres.state.prefill") as pf,
-            patch("bollhav.postgres.state.read_actionable", return_value=[]),
-        ):
-            _bootstrap([m])
+        m = _model(upstream=["raw.orders"])
+        conn = _mock_conn()
+        with patch.object(PostgresState, "lookup_model", return_value=None):
+            check = self._state(m, conn).is_upstream_satisfied_live(INTERVAL)
 
-        rows = pf.call_args.kwargs["intervals"]
-        assert len(rows) == 1
-        _, status, reason = rows[0]
-        assert status == "pending"
-        assert reason is None
+        assert check.satisfied
+        assert check.reason is None
 
-    def test_unsatisfied_upstream_blocks_with_window_in_reason(self) -> None:
+    def test_unsatisfied_upstream_blocks_with_state_002(self) -> None:
         from unittest.mock import patch
 
-        from bollhav.model.intervals import TZInterval
+        from bollhav.postgres.state import PostgresState
 
-        m = self._staged_model(
-            upstream=["raw.orders"], contract=[TZInterval(SINCE, UNTIL)]
-        )
-        conn = self._conn_ctx()
+        m = _model(upstream=["raw.orders"])
+        conn = _mock_conn()
+        entry = _entry(state_schema="z_raw", state_table="orders_state")
         with (
-            patch("bollhav.postgres.state._connect", return_value=conn),
-            patch("bollhav.postgres.library.ensure_library"),
-            patch("bollhav.postgres.library.register"),
-            patch(
-                "bollhav.postgres.library.lookup",
-                return_value=_entry(state_schema="z_raw", state_table="orders_state"),
-            ),
-            patch("bollhav.postgres.library.is_satisfied", return_value=False),
-            patch("bollhav.postgres.state.ensure_tables"),
-            patch("bollhav.postgres.state.prefill") as pf,
-            patch("bollhav.postgres.state.read_actionable", return_value=[]),
+            patch.object(PostgresState, "lookup_model", return_value=entry),
+            patch.object(PostgresState, "is_satisfied", return_value=False),
         ):
-            _bootstrap([m])
+            check = self._state(m, conn).is_upstream_satisfied_live(INTERVAL)
 
-        _, status, reason = pf.call_args.kwargs["intervals"][0]
-        assert status == "blocked"
+        assert not check.satisfied
+        reason = check.reason
+        assert reason is not None
         assert reason.startswith("STATE_002:")
         assert "raw.orders" in reason
-        assert SINCE.isoformat() in reason
-        assert UNTIL.isoformat() in reason
 
-    def test_satisfied_upstream_keeps_pending(self) -> None:
+    def test_satisfied_upstream_is_clear(self) -> None:
         from unittest.mock import patch
 
-        from bollhav.model.intervals import TZInterval
+        from bollhav.postgres.state import PostgresState
 
-        m = self._staged_model(
-            upstream=["raw.orders"], contract=[TZInterval(SINCE, UNTIL)]
-        )
-        conn = self._conn_ctx()
+        m = _model(upstream=["raw.orders"])
+        conn = _mock_conn()
+        entry = _entry(state_schema="z_raw", state_table="orders_state")
         with (
-            patch("bollhav.postgres.state._connect", return_value=conn),
-            patch("bollhav.postgres.library.ensure_library"),
-            patch("bollhav.postgres.library.register"),
-            patch(
-                "bollhav.postgres.library.lookup",
-                return_value=_entry(state_schema="z_raw", state_table="orders_state"),
-            ),
-            patch("bollhav.postgres.library.is_satisfied", return_value=True),
-            patch("bollhav.postgres.state.ensure_tables"),
-            patch("bollhav.postgres.state.prefill") as pf,
-            patch("bollhav.postgres.state.read_actionable", return_value=[]),
+            patch.object(PostgresState, "lookup_model", return_value=entry),
+            patch.object(PostgresState, "is_satisfied", return_value=True),
         ):
-            _bootstrap([m])
+            check = self._state(m, conn).is_upstream_satisfied_live(INTERVAL)
 
-        _, status, reason = pf.call_args.kwargs["intervals"][0]
-        assert status == "pending"
-        assert reason is None
+        assert check.satisfied
+        assert check.reason is None
 
 
 # ── prefill row normalization ────────────────────────────────────────
 
 
 class TestPrefillRowNormalization:
+    """`_normalize_prefill_row` moved onto `PostgresState` as a
+    staticmethod — same accept-bare-or-3-tuple contract."""
+
     def test_bare_TZInterval_is_pending(self) -> None:
-        from bollhav.model.intervals import TZInterval
-        from bollhav.postgres.state import _normalize_prefill_row
+        from bollhav.postgres.state import PostgresState
 
         iv = TZInterval(SINCE, UNTIL)
-        assert _normalize_prefill_row(iv) == (iv, "pending", None)
+        assert PostgresState._normalize_prefill_row(iv) == (iv, "pending", None)
 
     def test_pending_tuple_clears_reason(self) -> None:
-        from bollhav.model.intervals import TZInterval
-        from bollhav.postgres.state import _normalize_prefill_row
+        from bollhav.postgres.state import PostgresState
 
         iv = TZInterval(SINCE, UNTIL)
-        assert _normalize_prefill_row((iv, "pending", "ignored")) == (
+        assert PostgresState._normalize_prefill_row((iv, "pending", "ignored")) == (
             iv,
             "pending",
             None,
         )
 
     def test_blocked_requires_reason(self) -> None:
-        from bollhav.model.intervals import TZInterval
-        from bollhav.postgres.state import _normalize_prefill_row
+        from bollhav.postgres.state import PostgresState
 
         iv = TZInterval(SINCE, UNTIL)
         with pytest.raises(ValueError, match="blocked rows require"):
-            _normalize_prefill_row((iv, "blocked", None))
+            PostgresState._normalize_prefill_row((iv, "blocked", None))
 
     def test_unknown_status_raises(self) -> None:
-        from bollhav.model.intervals import TZInterval
-        from bollhav.postgres.state import _normalize_prefill_row
+        from bollhav.postgres.state import PostgresState
 
         iv = TZInterval(SINCE, UNTIL)
         with pytest.raises(ValueError, match="must be 'pending' or 'blocked'"):
-            _normalize_prefill_row((iv, "weird", None))
+            PostgresState._normalize_prefill_row((iv, "weird", None))
