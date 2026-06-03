@@ -1,11 +1,11 @@
-"""Postgres staging: stream sub-batches into a per-interval staging
-table, then atomically apply the staged content to the target.
+"""Postgres staging: land sub-batches in a per-interval staging table,
+then atomically apply the staged content to the target.
 
 Use case: an interval produces more rows than fit in memory (or one
 transaction), but state granularity stays at `(since, until)`.
-Sub-batches COPY (or upsert) into staging; the context exit applies
-staging → target and flips the state row in a single tx, so a crash
-mid-stream cannot leave a half-applied interval marked applied.
+Sub-batches COPY (or upsert) into staging; one transaction then applies
+staging → target so a crash mid-stream cannot leave a half-applied
+interval marked applied.
 
 Scope:
   * Target write modes: APPEND, UPSERT_NO_DELETE, RECREATE_PARTITION
@@ -14,28 +14,27 @@ Scope:
   * State always co-locates with target — cross-DB state would break
     the atomic apply.
 
-API:
-    with stage(conn, model, since=since, until=until) as s:
-        for chunk in source:
-            s.write(chunk)
-    # context exit: apply_atomically_to_target(...)
-    #   INSERT/UPSERT/(DELETE+INSERT) staging -> target
-    #   DROP staging (unless keep_after_apply)
-    #   UPDATE state SET applied
-    # all in one transaction.
+This module holds the staging primitives:
+  * `write_to_staging` — COPY / upsert one chunk into the staging table.
+  * `apply_atomically_to_target` — merge staging → target in one tx.
+  * `drop_staging_table` — tear the staging table down.
 
-Crash mid-stream: staging table is left in place, state row stays
-pending. The next invocation's `gc_orphan_staging_tables(conn, model)`
-GCs it by name pattern.
+The staging table's *lifecycle* is owned by the framework, not here:
+`@execute_lifecycle` creates the table, then merges and drops it around
+the user's execute, and `write()` lands the rows in between — all via
+`PostgresData`, which delegates to these primitives. Both sides key the
+table on `model.run_id`.
+
+Crash mid-stream: the staging table is left in place, state row stays
+pending. `PostgresData.gc_orphan_staging_tables` reaps it next run.
 """
 
 from __future__ import annotations
 
 import logging
-from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
-from typing import TYPE_CHECKING, Iterator
+from typing import TYPE_CHECKING
 from uuid import UUID
 
 import polars as pl
@@ -87,7 +86,7 @@ def _staging_schema(model: "Model") -> str:
     is `z_<target_schema>` (co-located with state, both bollhav-owned)."""
     if model.target.staging is not None and model.target.staging.schema:
         return model.target.staging.schema
-    return pg_state._state_schema(model)
+    return pg_state.PostgresState(model)._state_schema()
 
 
 def _staging_table_prefix(model: "Model") -> str:
@@ -105,54 +104,7 @@ def _staging_table(model: "Model", run_id: UUID) -> str:
     return f"{_staging_table_prefix(model)}{str(run_id)[:8]}"
 
 
-def _assert_supported(model: "Model") -> None:
-    if model.batching is None:
-        raise ValueError(
-            f"stage() requires model.batching to be set on {model.target.full_name!r}"
-        )
-    if model.target.write_mode is WriteMode.VIEW:
-        raise NotImplementedError(
-            "stage() can't operate on a VIEW target — there's no row stream "
-            "to land. VIEWs are CREATE OR REPLACE, not chunked writes."
-        )
-
-
 # ── DDL ─────────────────────────────────────────────────────────────
-
-
-def ensure_staging_table_per_interval(
-    conn: psycopg.Connection, model: "Model", run_id: UUID
-) -> None:
-    """Create the per-interval staging table.
-
-    Each interval gets its own freshly-CREATEd table; the prior
-    interval's `flush` dropped it (unless `keep_after_apply`). This is
-    NOT a PRE action because actions are one-shot per pipeline run while
-    the CREATE is per-interval — the action runner would skip
-    subsequent intervals."""
-    from bollhav.postgres.columns import PostgresColumn
-    from bollhav.postgres.schema import _col_ddl
-
-    schema = _staging_schema(model)
-    table = _staging_table(model, run_id)
-
-    table_keyword = "TABLE" if _logged(model) else "UNLOGGED TABLE"
-
-    col_defs = sql.SQL(",\n").join(
-        sql.SQL(_col_ddl(col))
-        for col in model.target.columns
-        if isinstance(col, PostgresColumn)
-    )
-    conn.execute(
-        sql.SQL(
-            f"CREATE {table_keyword} IF NOT EXISTS "
-            "{schema}.{table} (\n{col_defs}\n)"
-        ).format(
-            schema=sql.Identifier(schema),
-            table=sql.Identifier(table),
-            col_defs=col_defs,
-        )
-    )
 
 
 def drop_staging_table(conn: psycopg.Connection, model: "Model", run_id: UUID) -> None:
@@ -392,6 +344,7 @@ def apply_atomically_to_target(
     run_id: UUID,
     since: datetime,
     until: datetime,
+    drop_after_apply: bool | None = None,
 ) -> None:
     """Apply the staged content to the target using whatever operation
     `target.write_mode` describes — all in one transaction.
@@ -404,6 +357,11 @@ def apply_atomically_to_target(
     remains intact (GC'd on next run) and the interval reruns from the
     top — no half-applied rows, no out-of-sync state row.
 
+    By default the staging table is dropped here (unless
+    `Staging.keep_after_apply`). Pass `drop_after_apply=False` to keep the
+    teardown a separate step — the lifecycle hook does this so the merge
+    and the drop are distinct phases (it drops via PostgresData after).
+
     Without state (`model.state is None`) the apply still gives you
     memory-bounded chunked writes and atomic-per-interval finalization
     — just nothing to flip. Re-runs re-process the interval because
@@ -413,8 +371,11 @@ def apply_atomically_to_target(
     target_schema = model.target.schema.resolved
     target_table = model.target.name_resolved
 
-    keep = model.target.staging is not None and model.target.staging.keep_after_apply
-    drop_after_apply = not keep
+    if drop_after_apply is None:
+        keep = (
+            model.target.staging is not None and model.target.staging.keep_after_apply
+        )
+        drop_after_apply = not keep
 
     table_names = dict(
         staging_schema=staging_schema,
@@ -458,147 +419,13 @@ def apply_atomically_to_target(
 # ── orphan GC ───────────────────────────────────────────────────────
 
 
-def gc_orphan_staging_tables(
-    conn: psycopg.Connection, model: "Model", *, keep_run_id: UUID | None = None
-) -> None:
-    """Drop staging tables left behind by crashed runs.
-
-    Matches `<prefix>%` in the staging schema (prefix from
-    `Staging.table_prefix` or default). If `keep_run_id` is provided,
-    the current run's staging table is preserved.
-
-    No-op when `Staging.keep_after_apply=True` — the operator has
-    declared they want kept tables to live; auto-GC would defeat that.
-    Manual cleanup is on them.
-
-    Connection management is the caller's responsibility — pass in an
-    open psycopg connection (your own; no DSN required)."""
-    if model.target.staging is not None and model.target.staging.keep_after_apply:
-        logger.debug(
-            "stage: GC skipped for %s — Staging.keep_after_apply=True",
-            model.target.full_name,
-        )
-        return
-
-    schema = _staging_schema(model)
-    prefix = _staging_table_prefix(model)
-    keep = f"{prefix}{str(keep_run_id)[:8]}" if keep_run_id is not None else None
-
-    rows = conn.execute(
-        "SELECT tablename FROM pg_tables WHERE schemaname = %s AND tablename LIKE %s",
-        [schema, f"{prefix}%"],
-    ).fetchall()
-
-    with conn.transaction():
-        for (tablename,) in rows:
-            if keep is not None and tablename == keep:
-                continue
-            conn.execute(
-                sql.SQL("DROP TABLE IF EXISTS {schema}.{table}").format(
-                    schema=sql.Identifier(schema),
-                    table=sql.Identifier(tablename),
-                )
-            )
-            logger.debug("stage: gc'd orphan staging table %s.%s", schema, tablename)
-
-
-# ── context manager ─────────────────────────────────────────────────
-
-
-class Stage:
-    """Yielded by `stage()`. `.write(df)` appends a sub-batch to the
-    staging table; context exit flushes."""
-
-    def __init__(
-        self,
-        conn: psycopg.Connection,
-        model: "Model",
-        *,
-        run_id: UUID,
-        since: datetime,
-        until: datetime,
-    ) -> None:
-        self._conn = conn
-        self._model = model
-        self._run_id = run_id
-        self._since = since
-        self._until = until
-        self._rows_written = 0
-
-    def write(self, df: pl.DataFrame) -> None:
-        write_to_staging(self._conn, self._model, self._run_id, df)
-        self._rows_written += len(df)
-
-    @property
-    def rows_written(self) -> int:
-        return self._rows_written
-
-
-@contextmanager
-def stage(
-    conn: psycopg.Connection,
-    model: "Model",
-    *,
-    since: datetime,
-    until: datetime,
-) -> Iterator[Stage]:
-    """Stream sub-batches into staging, then atomically apply to target.
-
-    Usage inside an `@state`-wrapped execute:
-
-        with stage(conn, model, since=since, until=until) as s:
-            for chunk in source:
-                s.write(chunk)
-
-    The model is expected to have `_state_run_id` already stashed (the
-    user's pipeline setup mints one per invocation). On a clean exit the
-    data is committed to the target; the interval lifecycle flips the
-    state row to `applied` afterward (separate, non-atomic step).
-
-    On exception inside the with-block the staging table is left in
-    place for `gc_orphan_staging_tables()` to clean up next run. The
-    state row stays pending; the interval reruns."""
-    _assert_supported(model)
-
-    run_id = getattr(model, "_state_run_id", None)
-    if run_id is None:
-        raise ValueError(
-            f"stage() requires model._state_run_id to be set — normally "
-            f"the pipeline mints one per invocation. Got None on "
-            f"{model.target.full_name!r}."
-        )
-
-    from bollhav.postgres.actions import run_pre_model_actions
-
-    # Fresh table per interval. The schema-level PRE actions (target
-    # schema, staging schema) are one-shot and idempotent; the staging
-    # table itself is created here because its CREATE is per-interval
-    # (the prior interval's flush dropped it).
-    run_pre_model_actions(conn, model)
-    ensure_staging_table_per_interval(conn, model, run_id)
-    s = Stage(conn, model, run_id=run_id, since=since, until=until)
-    try:
-        yield s
-    except Exception:
-        logger.debug(
-            "stage: exception in staged block for %s; leaving staging "
-            "table %s.%s for GC, state row stays pending",
-            model.target.full_name,
-            _staging_schema(model),
-            _staging_table(model, run_id),
-        )
-        raise
-
-    apply_atomically_to_target(conn, model, run_id=run_id, since=since, until=until)
+# Orphan staging-table GC lives on `PostgresData.gc_orphan_staging_tables`
+# (target-side asset DDL, model-scoped) — the lifecycle hook calls it there.
 
 
 __all__ = [
     "PostgresStaging",
-    "Stage",
-    "stage",
-    "ensure_staging_table_per_interval",
     "write_to_staging",
     "apply_atomically_to_target",
     "drop_staging_table",
-    "gc_orphan_staging_tables",
 ]

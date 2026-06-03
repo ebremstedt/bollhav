@@ -1,4 +1,4 @@
-"""Lifecycle hooks: `@model_lifecycle` and `@interval_lifecycle`.
+"""Lifecycle hooks: `@model_lifecycle` and `@execute_lifecycle`.
 
 These wrap the user's execute functions and bracket them with the
 framework's setup/teardown + state machinery. Connections are passed as
@@ -10,9 +10,13 @@ them through:
         for interval in model.intervals:
             execute_interval(model, interval, data_conn, state_conn)
 
-    @interval_lifecycle
+    @execute_lifecycle
     def execute_interval(model, interval, data_conn, state_conn=None):
         ...                       # read / transform / write(conn=data_conn, ...)
+
+`interval` is a window for a batched model, or `None` for a monolithic
+(whole-table) / view model — `model.intervals` yields a single `None` in
+that case, so the same loop runs the unit of work once.
 
 `data_conn` is required; `state_conn` is optional and defaults to
 `data_conn` (co-located state). State work runs only when `model.state`
@@ -37,48 +41,7 @@ import traceback as _tb
 from functools import wraps
 from typing import Callable
 
-from bollhav.model.state import ModelLockedError, _run_id_for
-
 logger = logging.getLogger(__name__)
-
-
-def _state_backend(model):
-    """Resolve the state-backend module for `model` from its
-    `State.backend` enum — so dispatch is driven by the model, not
-    hardcoded. Lazy import to avoid an import cycle (the backend module
-    imports from `bollhav.model`). Only call when `model.state` is set."""
-    from bollhav.model.state import StateBackend
-
-    if model.state.backend is StateBackend.POSTGRES:
-        from bollhav.postgres import state as pg_state
-
-        return pg_state
-    raise NotImplementedError(
-        f"state backend {model.state.backend!r} (on "
-        f"{model.target.full_name!r}) is not implemented — Postgres is the "
-        f"only `State.backend` supported. Add a backend module and extend "
-        f"`_state_backend` to wire it up."
-    )
-
-
-def _data_backend(model):
-    """Resolve the data-side backend module (target asset DDL + the
-    MODEL-action runners) from `model.target.database` — model-driven and
-    lazily imported, mirroring `_state_backend`. An unset `database`
-    (e.g. a VIEW that didn't declare one) uses the Postgres default,
-    the only backend the lifecycle hooks implement today."""
-    from bollhav.model.database import Database
-
-    db = model.target.database
-    if db is None or db is Database.POSTGRES:
-        from bollhav.postgres import actions as pg_actions
-
-        return pg_actions
-    raise NotImplementedError(
-        f"data backend {db!r} on {model.target.full_name!r} is not "
-        f"implemented by the lifecycle hooks — Postgres is the only target "
-        f"database supported today."
-    )
 
 
 def _conns(arguments: dict):
@@ -120,145 +83,101 @@ def model_lifecycle(func: Callable) -> Callable:
                 "model's run)."
             )
 
-        from model.database import Database
-        from model.state import StateBackend
-
-        def postgres_state_is_model_locked(model=model) -> bool:
-            from bollhav.postgres import state as postgres_state
-        
-            if not model.state.allow_concurrent_runs:
-                if not postgres_state.try_acquire_lock(state_conn, model):
-                    raise ModelLockedError(
-                        f"another pipeline holds the lock on "
-                        f"{model.target.full_name!r} — concurrent runs of "
-                        f"the same model are not allowed"
-                    )
-                return True
-
-            return False
-
+        from bollhav.model.database import Database
+        from bollhav.model.state import StateBackend
 
         locked = False
-        if model.state_activated and model.state.backend == StateBackend.POSTGRES:
-            locked = postgres_state_is_model_locked(model=model)
+        if model.stateful and model.state.backend == StateBackend.POSTGRES:
+            from bollhav.postgres.state import PostgresState
+
+            postgres_state = PostgresState(model=model, conn=state_conn)
+            locked = postgres_state.acquire_model_lock()
 
         if model.target.database is Database.POSTGRES:
-
-        try:
-            if model.target.database is Database.POSTGRES:
+            try:
                 from bollhav.postgres.data import PostgresData
+
                 postgres_data = PostgresData(model=model, conn=data_conn)
-                postgres_data.run_pre_model_actions()
+                postgres_data.create_schema()
+                if model.is_view:
+                    # A view's asset IS its definition — create it here, in
+                    # place of the table DDL. No table/index/staging applies.
+                    postgres_data.create_or_replace_view()
+                else:
+                    if model.target.recreate_table:
+                        postgres_data.recreate_table()
+                    postgres_data.create_table()
+                    if model.target.truncate_table:
+                        postgres_data.truncate_table()
+                    if model.target.partitioned_by is not None:
+                        postgres_data.create_indexes()
+                    if model.target.unique_columns:
+                        postgres_data.add_unique_constraint()
+                    if model.target.stage:
+                        postgres_data.create_staging_schema()
+                        postgres_data.gc_orphan_staging_tables()
 
-                if model.target.staging_activated:
-                    from bollhav.postgres.staging import gc_orphan_staging_tables
-                    try:
-                        gc_orphan_staging_tables(data_conn, model)
-                    except Exception as exc:  # best-effort; never blocks the run
-                        logger.debug("staging: orphan GC skipped for %s — %s", model.target.full_name, exc)
-
-                if model.state_activated:
-                    from bollhav.postgres.library import PostgresLibrary
-                    postgres_library = PostgresLibrary(conn=state_conn)
-                    postgres_library.ensure()
-                    postgres_library.register_model(model=model)
-
+                if model.stateful:
                     from bollhav.postgres.state import PostgresState
+
                     postgres_state = PostgresState(model=model, conn=state_conn)
+                    postgres_state.ensure_library()
+                    postgres_state.register_model()
                     postgres_state.ensure_tables()
-                    postgres_state.insert_intervals(
-                        run_id=_run_id_for(model),
-                        intervals=model.compute_intervals(),
-                    )
+
+                    if model.is_monolithic or model.is_view:
+                        postgres_state.insert_singleton(run_id=model.run_id)
+                    else:
+                        postgres_state.insert_intervals(
+                            run_id=model.run_id,
+                            intervals=model.compute_intervals(),
+                        )
                     model.intervals = postgres_state.get_actionable_intervals()
 
                 result = func(*args, **kwargs)
-                postgres_data.run_post_model_actions()
+
                 return result
-        finally:
-            if locked and pg is not None:
-                try:
-                    pg.release_lock(state_conn, model)
-                except Exception:
-                    # Released automatically when the session ends too.
-                    pass
+            finally:
+                if (
+                    locked
+                    and model.stateful
+                    and model.state.backend == StateBackend.POSTGRES
+                ):
+                    try:
+                        from bollhav.postgres.state import PostgresState
+
+                        postgres_state = PostgresState(model=model, conn=state_conn)
+                        postgres_state.release_lock()
+                    except Exception:
+                        # Released automatically when the session ends too.
+                        pass
+
+        # Non-Postgres target: no Postgres-side setup to do; just run.
+        return func(*args, **kwargs)
 
     return wrapper
 
 
-# def _setup_non_state_model(model, *, data_conn) -> None:
-#     """Model setup for a model WITHOUT state tracking.
+def execute_lifecycle(func: Callable) -> Callable:
+    """Bracket one call to the user's execute.
 
-#     The only thing to do is GC orphan staging tables from crashed runs
-#     (staging tables live with the target data, so on `data_conn`).
+    Two independent switches decide what wraps the execute:
+    `model.stateful` (does it track state?) and `model.target.stage`
+    (does it write through a staging table?). Their four combinations:
 
-#     No library registration — only state-tracked models register. A
-#     state-less model (including a VIEW) doesn't enforce or get enforced:
-#     its own `upstream` entries are documentation, and when a state model
-#     references it as an upstream the live check finds no library entry
-#     and treats it as documentation (satisfied), rather than blocking."""
-#     from bollhav.postgres import staging as pg_staging
+        stateful | stage | what runs
+        ---------+-------+--------------------------------------------
+           no    |  no   | the execute, directly
+           no    |  yes  | staged execute (create → write → merge →
+                 |       | teardown); no state machine
+           yes   |  no   | state machine around the direct execute
+           yes   |  yes  | state machine around the staged execute
 
-#     if model.target.staging is not None:
-#         _run_id_for(model)  # stash run_id for staging table naming
-#         try:
-#             pg_staging.gc_orphan_staging_tables(data_conn, model)
-#         except Exception as exc:  # best-effort; never blocks the run
-#             logger.debug(
-#                 "staging: orphan GC skipped for %s — %s",
-#                 model.target.full_name,
-#                 exc,
-#             )
-
-
-# def _bootstrap_model(pg, model, *, data_conn, state_conn, state_mode) -> None:
-#     """State setup for one model, all on `state_conn` (staging GC on
-#     `data_conn`): ensure the state table, register in the library,
-#     prefill the contract intervals, and filter `model.intervals` down to
-#     the actionable (non-applied) ones the user's loop will process.
-
-#     `state_mode` controls how prefill treats existing rows (DISCOVER
-#     preserves applied; BULLDOZER resets) — resolved by the caller, not
-#     read from env here, so this stays a pure function of its args."""
-#     from bollhav.model.load_models import _resolve_interval_status
-#     from bollhav.postgres import library as pg_library
-#     from bollhav.postgres import staging as pg_staging
-
-#     run_id = _run_id_for(model)
-
-#     if model.target.staging is not None:
-#         try:
-#             pg_staging.gc_orphan_staging_tables(data_conn, model)
-#         except Exception as exc:  # best-effort; never blocks the run
-#             logger.debug("staging: orphan GC skipped for %s — %s", model.target.full_name, exc)
-
-#     pg.ensure_tables(model, conn=state_conn)
-#     pg_library.ensure_library(state_conn)
-#     pg_library.register(state_conn, model)
-
-#     contract = list(model.compute_intervals())
-#     upstreams = list(model.upstream)
-#     rows = []
-#     for interval in contract:
-#         status, reason = _resolve_interval_status(
-#             state_conn, interval=interval, upstream_names=upstreams
-#         )
-#         rows.append((interval, status, reason))
-#     pg.prefill(
-#         model,
-#         run_id=run_id,
-#         intervals=rows,
-#         state_mode=state_mode,
-#         conn=state_conn,
-#     )
-#     model.intervals = tuple(pg.read_actionable(model, conn=state_conn))
-
-
-def interval_lifecycle(func: Callable) -> Callable:
-    """Bracket one interval: gate on applied, take the per-interval
-    advisory lock, mark running, run the user's work, then mark applied
-    (or record failure). All state writes go on `state_conn`. A
-    state-less model (or a call without an `interval`) is a pass-through.
+    "State machine" = gate on applied → take the interval lock → check
+    upstreams → mark running → run → mark applied (or record failure) →
+    release the lock. "Staged" brackets the execute with the staging
+    lifecycle (interval-only). Staging runs even without state — the two
+    switches are orthogonal.
     """
     sig = inspect.signature(func)
 
@@ -268,82 +187,94 @@ def interval_lifecycle(func: Callable) -> Callable:
         bound.apply_defaults()
         model = bound.arguments.get("model")
         interval = bound.arguments.get("interval")
-        _, state_conn = _conns(bound.arguments)
+        data_conn, state_conn = _conns(bound.arguments)
 
-        if model is None or not model.state_activated or interval is None:
+        if model is None:
+            raise ValueError("execute cannot be called if Model is none")
+
+        def staged_execute():
+            """Run the user's execute bracketed by the staging lifecycle:
+            create the table → execute writes rows into it → merge into the
+            target → tear it down. Staging is interval-only."""
+            if interval is None:
+                raise ValueError(
+                    f"staging is interval-only, but {model.target.full_name!r} "
+                    f"ran with no interval — staging requires a batched model."
+                )
+            from bollhav.postgres.data import PostgresData
+
+            postgres_data = PostgresData(model=model, conn=data_conn)
+            postgres_data.create_staging_table(model.run_id)
+            result = func(*args, **kwargs)
+            postgres_data.apply_staging_to_target(model.run_id, interval)
+            postgres_data.drop_staging_table(model.run_id)
+            return result
+
+        def plain_execute():
             return func(*args, **kwargs)
 
-        pg = _state_backend(model)
-        since, until = interval.since, interval.until
-        run_id = _run_id_for(model)
+        def run_with_state(execute):
+            from bollhav.postgres.state import PostgresState
 
-        if pg.is_applied(model, since=since, until=until, conn=state_conn):
-            logger.debug(
-                "state: gate skipped applied %s..%s for %s",
-                since,
-                until,
-                model.target.full_name,
-            )
-            return None
+            postgres_state = PostgresState(model=model, conn=state_conn)
 
-        if not pg.try_acquire_interval_lock(state_conn, model, since, until):
-            logger.debug(
-                "state: interval lock held by another worker, skipping "
-                "%s..%s on %s",
-                since,
-                until,
-                model.target.full_name,
-            )
-            return None
-        try:
-            if model.upstream:
-                ok, reason = pg.is_upstream_satisfied_live(
-                    state_conn, model, since, until
-                )
-                if not ok:
-                    pg.mark_blocked(
-                        model,
-                        run_id=run_id,
-                        since=since,
-                        until=until,
-                        reason=reason or "",
-                        conn=state_conn,
+            if postgres_state.is_applied(interval):
+                message = "state: gate skipped applied %s for %s"
+                logger.debug(message, interval, model.target.full_name)
+                return None
+
+            if not postgres_state.try_acquire_interval_lock(interval):
+                message = "state: lock held by another worker, skipping %s on %s"
+                logger.debug(message, interval, model.target.full_name)
+                return None
+
+            try:
+                if model.upstream:
+                    check = postgres_state.is_upstream_satisfied_live(interval)
+                    if not check.satisfied:
+                        postgres_state.mark_blocked(
+                            run_id=model.run_id,
+                            interval=interval,
+                            reason=check.reason or "",
+                        )
+                        return None
+
+                postgres_state.mark_running(run_id=model.run_id, interval=interval)
+
+                try:
+                    result = execute()
+                except Exception as exc:
+                    postgres_state.record_failure(
+                        run_id=model.run_id,
+                        interval=interval,
+                        error_type=type(exc).__name__,
+                        error_message=str(exc),
+                        traceback_text=_tb.format_exc(),
+                        update_state=True,
                     )
-                    return None
+                    raise
 
-            pg.mark_running(
-                model, run_id=run_id, since=since, until=until, conn=state_conn
-            )
+                postgres_state.mark_applied(run_id=model.run_id, interval=interval)
+                return result
+            finally:
+                try:
+                    postgres_state.release_interval_lock(interval)
+                except Exception:
+                    pass
 
-            try:
-                result = func(*args, **kwargs)
-            except Exception as exc:
-                pg.record_failure(
-                    model,
-                    run_id=run_id,
-                    since=since,
-                    until=until,
-                    error_type=type(exc).__name__,
-                    error_message=str(exc),
-                    traceback_text=_tb.format_exc(),
-                    update_state=True,
-                    conn=state_conn,
-                )
-                raise
+        if not model.stateful and not model.target.stage:
+            return func(*args, **kwargs)
 
-            # Data is committed; flip the state row → applied (separate,
-            # non-atomic step on the state connection).
-            pg.mark_applied(
-                model, run_id=run_id, since=since, until=until, conn=state_conn
-            )
-            return result
-        finally:
-            try:
-                pg.release_interval_lock(state_conn, model, since, until)
-            except Exception:
-                pass
+        if not model.stateful and model.target.stage:
+            return staged_execute()
+
+        if model.stateful and not model.target.stage:
+            return run_with_state(plain_execute)
+
+        if model.stateful and model.target.stage:
+            return run_with_state(staged_execute)
 
     return wrapper
 
 
-__all__ = ["model_lifecycle", "interval_lifecycle"]
+__all__ = ["model_lifecycle", "execute_lifecycle"]

@@ -4,7 +4,7 @@ from collections import deque
 from enum import Enum
 from typing import TYPE_CHECKING
 
-from bollhav.model.write_modes import WriteMode
+from bollhav.model.model_type import ModelType
 
 if TYPE_CHECKING:
     from bollhav.model.model import Model
@@ -17,7 +17,7 @@ class UpstreamMode(Enum):
 
 
 def _is_view(model: Model) -> bool:
-    return getattr(model.target, "write_mode", None) == WriteMode.VIEW
+    return getattr(model.target, "model_type", None) == ModelType.VIEW
 
 
 def topological_sort(
@@ -33,20 +33,22 @@ def topological_sort(
     def _upstream(model: Model) -> list[str]:
         if upstream_mode == UpstreamMode.IGNORE_VIEWS and _is_view(model):
             return []
-        return getattr(model, "upstream", []) or []
+        # `upstream` may hold Contract objects or bare strings — order by
+        # the upstream *names* either way.
+        return model.upstream_names
 
-    for model in results:
-        missing = [dep for dep in _upstream(model) if dep not in matched_names]
-        if missing:
-            raise ValueError(
-                f"Model {model.target.full_name!r} depends on unmatched upstream model(s): {missing}"
-            )
-
+    # Only order against upstreams that are also matched in THIS run.
+    # An upstream that isn't matched here (it ships in another pipeline /
+    # under different TAGS) is NOT an error — its satisfaction is resolved
+    # at runtime against the cross-pipeline state library
+    # (`PostgresState.is_upstream_satisfied_live`), not at match time.
     in_degree: dict[str, int] = {name: 0 for name in by_name}
     dependents: dict[str, list[str]] = {name: [] for name in by_name}
 
     for model in results:
         for dep in _upstream(model):
+            if dep not in matched_names:
+                continue
             in_degree[model.target.full_name] += 1
             dependents[dep].append(model.target.full_name)
 

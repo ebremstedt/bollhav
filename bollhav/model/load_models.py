@@ -277,22 +277,17 @@ def _resolve_interval_status(
     Returns `(status, blocked_reason)` — reason is None for pending,
     otherwise a `S###: explanation` string keyed by `BlockCode`."""
     from bollhav.model.state import BlockCode, format_block_reason
-    from bollhav.postgres import library as pg_library
+    from bollhav.postgres.state import PostgresState
 
     for upstream_name in upstream_names:
-        entry = pg_library.lookup(conn, upstream_name)
+        entry = PostgresState.lookup_model(conn, upstream_name)
         if entry is None:
             # Not in the library → not an enforced dependency. Only
             # state-tracked models register, so an unregistered name
             # (a view, a state-less table, or a typo) is treated as
             # documentation and does not block.
             continue
-        if not pg_library.is_satisfied(
-            conn,
-            entry=entry,
-            since=interval.since,
-            until=interval.until,
-        ):
+        if not PostgresState.is_satisfied(conn, entry=entry, interval=interval):
             return (
                 "blocked",
                 format_block_reason(
