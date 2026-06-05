@@ -2,17 +2,83 @@
 
 # Lineage
 
-!!! note "Forward-looking"
-    Lineage isn't a built-in command yet. This sketches how it falls out of the [model library](LIBRARY.md) almost for free, and what shape it would take.
+Where a model's data comes from. Each model declares its inputs, so you can inspect one model's lineage in code (no database), or read the whole cross-pipeline graph from the [library](LIBRARY.md).
 
-bollhav already persists the dependency graph. The library records every model and its upstreams as a side effect of running, so a lineage graph is **derivable from one query** — no SQL to parse, no separate manifest to maintain.
+A model's inputs come in two flavours, both feeding the graph:
+
+- [**Upstream**](UPSTREAM.md) — managed, state-tracked models. Internal edges (model → model).
+- [**Sources**](SOURCES.md) — external, unmanaged inputs (raw tables, APIs, files). Boundary nodes where data enters the system.
+
+A model that declares neither has unknown provenance (`model.inputs_known is False`) — exactly the gap a lineage audit wants to flag.
+
+## Inspect one model's lineage in code
+
+A `Model` can describe its **own** declared inputs without any database — useful for a quick look, a CI check, or feeding a diagram. Each input is typed: an upstream by its [contract](UPSTREAM.md) kind (`interval` / `view` / `monolithic`), a [source](SOURCES.md) by its `SourceKind` (`database` / `api` / `file` / …).
+
+`model.lineage_tree()` returns a little ASCII tree:
+
+```python
+print(model.lineage_tree())
+```
+```text
+warehouse.daily_summary (interval)
+├─ upstream
+│  ├─ warehouse.orders (interval)
+│  ├─ warehouse.events (interval)
+│  ├─ warehouse.customers (view)
+│  └─ warehouse.app_config (monolithic)
+└─ sources
+   ├─ raw.landing_orders (database)
+   ├─ vendor.api_orders (api)
+   └─ dropzone/customers.csv (file)
+```
+
+`model.lineage_json()` returns the same thing as JSON (handy for tooling / a manifest):
+
+```python
+print(model.lineage_json())
+```
+```json
+{
+  "model": "warehouse.daily_summary",
+  "kind": "interval",
+  "upstream": [
+    {"name": "warehouse.orders", "kind": "interval"},
+    {"name": "warehouse.customers", "kind": "view"}
+  ],
+  "sources": [
+    {"name": "raw.landing_orders", "kind": "database"},
+    {"name": "vendor.api_orders", "kind": "api"}
+  ],
+  "inputs_known": true
+}
+```
+
+Supporting accessors:
+
+| Member | Returns |
+|---|---|
+| `model.lineage()` | the structured dict (basis for both renderers) |
+| `model.lineage_json(indent=2)` | `lineage()` serialized to JSON |
+| `model.lineage_tree()` | the ASCII tree string |
+| `model.upstream_specs` | `[{"name", "kind"}]` — kind is `None` for a bare-string upstream |
+| `model.source_specs` | `[{"name", "kind"}]` — bare-string sources default to `database` |
+| `model.declared_inputs` / `model.inputs_known` | all input names / whether any are declared |
+
+A model with no upstreams and no sources renders `(no declared inputs — provenance unknown)`.
+
+This is the **single-model, in-code** view. The **cross-pipeline graph** below is read from the library instead.
 
 ## It's already in the library
 
-`z_bollhav.model_library` stores, per model: `full_name`, `upstream`, `kind`, `model_type`, `state_schema`, `state_table`, `last_seen`. [`register_model`](LIBRARY.md) writes this on every run. So:
+!!! note "Forward-looking"
+    The cross-pipeline graph below isn't a built-in command yet — it sketches how it falls out of the [library](LIBRARY.md) almost for free. (The per-model `lineage_*()` methods above *are* built in.)
+
+
+`z_bollhav.library` stores, per model: `full_name`, `upstream`, `kind`, `model_type`, `state_schema`, `state_table`, `last_seen`. [`register_model`](LIBRARY.md) writes this on every run. So:
 
 ```sql
-SELECT full_name, upstream, kind FROM z_bollhav.model_library ORDER BY full_name;
+SELECT full_name, upstream, kind FROM z_bollhav.library ORDER BY full_name;
 ```
 
 Each row is a **node** (`full_name`, typed by `kind`); each name in its `upstream` is an **edge**. That's the whole graph — the lineage is the library, read sideways.
@@ -46,7 +112,7 @@ The graph is a one-query transform away — resolve `upstream` names to edges an
 
 ```python
 rows = conn.execute(
-    "SELECT full_name, upstream, kind FROM z_bollhav.model_library"
+    "SELECT full_name, upstream, kind FROM z_bollhav.library"
 ).fetchall()
 edges = [(up, name) for name, upstream, kind in rows for up in upstream]
 # -> feed `edges` to mermaid / graphviz, colour nodes by `kind`,
@@ -60,9 +126,11 @@ graph LR
   app_config[app_config · monolith] --> daily_summary
 ```
 
-A **model-level, cross-pipeline, state-aware** lineage graph straight from `model_library` — distinctive precisely where dbt is weak, lighter where dbt is strong.
+A **model-level, cross-pipeline, state-aware** lineage graph straight from `library` — distinctive precisely where dbt is weak, lighter where dbt is strong.
 
 ## See also
 
 - [Library](LIBRARY.md) — the registry the graph is read from.
-- [Upstream](UPSTREAM.md) · [State](STATE.md) · [Orchestration](ORCHESTRATION.md)
+- [Upstream](UPSTREAM.md) — managed edges and `ref()`.
+- [Sources](SOURCES.md) — external boundary nodes and `source_ref()`.
+- [State](STATE.md) · [Orchestration](ORCHESTRATION.md)

@@ -79,6 +79,7 @@ nav:
               - Overview: STATE.md
               - Block codes: BLOCK_CODES.md
           - Upstream: UPSTREAM.md
+          - Sources: SOURCES.md
           - Tagging: TAGGING.md
           - Modes: MODES.md
           - Chunking: CHUNKING.md

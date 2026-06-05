@@ -184,12 +184,6 @@ class TestStateSchemaName:
         assert PostgresState(_pg_model())._state_schema() == STATE_SCHEMA
         assert STATE_SCHEMA == "z_bollhav_state"
 
-    def test_error_schema_is_fixed_central(self) -> None:
-        from bollhav.postgres.state import ERROR_SCHEMA, PostgresState
-
-        assert PostgresState(_pg_model())._errors_schema() == ERROR_SCHEMA
-        assert ERROR_SCHEMA == "z_bollhav_error"
-
     def test_schema_prefix_no_longer_affects_state_schema(self) -> None:
         from bollhav.model.state import State
         from bollhav.postgres.state import STATE_SCHEMA, PostgresState
@@ -206,14 +200,6 @@ class TestStateTableName:
         assert PostgresState(_pg_model())._state_table() == state_table_name(
             "public.orders"
         )
-
-    def test_error_table_matches_state_table_name(self) -> None:
-        # Same deterministic name in both schemas — schema, not suffix,
-        # distinguishes state from errors.
-        from bollhav.postgres.state import PostgresState
-
-        s = PostgresState(_pg_model())
-        assert s._errors_table() == s._state_table()
 
     def test_table_suffix_is_ignored(self) -> None:
         from bollhav.model.state import State

@@ -59,8 +59,9 @@ class State:
     `schema_prefix` — prefix for the per-model **staging** schema
         (`<prefix><target_schema>`, default `z_`). No longer affects the
         *state* table location: state and error tables now live in the fixed
-        central schemas `z_bollhav_state` / `z_bollhav_error`, named
-        deterministically by `state_table_name(full_name)`.
+        central schema `z_bollhav_state`, named deterministically by
+        `state_table_name(full_name)`. (Errors go to the shared
+        `z_bollhav.errors` table.)
     `table_suffix` — deprecated and ignored. State tables are now named by a
         deterministic hash of the model's full name, not a suffix on the
         target name. Kept only so existing configs don't break.

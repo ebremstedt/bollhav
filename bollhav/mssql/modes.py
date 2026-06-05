@@ -4,7 +4,7 @@ import polars as pl
 from typing import cast, LiteralString
 from bollhav.model.model import Model
 from bollhav.mssql.columns import MssqlColumn, MssqlType
-from bollhav.mssql.schema import _b, _col_type
+from bollhav.mssql.schema import _bracket_quote, _col_type
 
 logger = logging.getLogger(__name__)
 
@@ -17,7 +17,7 @@ def _bulk_insert(
     columns: list[MssqlColumn] | None = None,
     fast: bool = True,
 ) -> None:
-    cols = ", ".join(_b(c) for c in col_names)
+    cols = ", ".join(_bracket_quote(c) for c in col_names)
     placeholders = ", ".join(["?"] * len(col_names))
     cursor.fast_executemany = fast
     if fast and columns:
@@ -137,12 +137,13 @@ def _merge_via_temp(
     # don't collide on the temp name.
     temp = f"#tmp_merge_{abs(hash(target_table)) % 10_000_000:07d}"
 
-    col_defs = ", ".join(f"{_b(c.name)} {_col_type(c)}" for c in mssql_cols)
+    col_defs = ", ".join(f"{_bracket_quote(c.name)} {_col_type(c)}" for c in mssql_cols)
     on_clause = " AND ".join(
-        f"target.{_b(c)} = source.{_b(c)}" for c in unique_col_names
+        f"target.{_bracket_quote(c)} = source.{_bracket_quote(c)}"
+        for c in unique_col_names
     )
-    insert_cols = ", ".join(_b(c) for c in all_col_names)
-    insert_vals = ", ".join(f"source.{_b(c)}" for c in all_col_names)
+    insert_cols = ", ".join(_bracket_quote(c) for c in all_col_names)
+    insert_vals = ", ".join(f"source.{_bracket_quote(c)}" for c in all_col_names)
 
     cursor.execute(f"IF OBJECT_ID('tempdb..{temp}') IS NOT NULL DROP TABLE {temp}")
     cursor.execute(f"CREATE TABLE {temp} ({col_defs})")
@@ -152,7 +153,8 @@ def _merge_via_temp(
 
     if non_unique_col_names:
         update_set = ", ".join(
-            f"target.{_b(c)} = source.{_b(c)}" for c in non_unique_col_names
+            f"target.{_bracket_quote(c)} = source.{_bracket_quote(c)}"
+            for c in non_unique_col_names
         )
         matched_clause = f"WHEN MATCHED THEN UPDATE SET {update_set}"
     else:
@@ -176,7 +178,7 @@ def merge(
 
     Thin wrapper over `_merge_via_temp` that opens a cursor, runs the
     merge against the target table, and commits."""
-    target_table = f"{_b(model.target.schema.resolved)}.{_b(model.target.name)}"
+    target_table = f"{_bracket_quote(model.target.schema.resolved)}.{_bracket_quote(model.target.name)}"
     cursor = conn.cursor()
     _merge_via_temp(cursor, target_table, model, df, fast_executemany=fast_executemany)
     cursor.commit()
@@ -197,7 +199,7 @@ def append(
     mssql_cols = [c for c in model.target.columns if isinstance(c, MssqlColumn)]
     _bulk_insert(
         cursor,
-        f"{_b(schema)}.{_b(table)}",
+        f"{_bracket_quote(schema)}.{_bracket_quote(table)}",
         all_col_names,
         df,
         columns=mssql_cols,
@@ -221,5 +223,7 @@ def create_replace_view(conn: pyodbc.Connection, model: Model) -> None:
     query = cast(LiteralString, model.source.query)
 
     cursor = conn.cursor()
-    cursor.execute(f"CREATE OR ALTER VIEW {_b(schema)}.{_b(view)} AS {query}")
+    cursor.execute(
+        f"CREATE OR ALTER VIEW {_bracket_quote(schema)}.{_bracket_quote(view)} AS {query}"
+    )
     cursor.commit()

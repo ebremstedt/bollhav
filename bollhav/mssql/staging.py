@@ -12,8 +12,9 @@ Scope:
   * Target write modes: APPEND, UPSERT_NO_DELETE, RECREATE_PARTITION
   * Staging write modes: APPEND, UPSERT_NO_DELETE (chosen by
     `Staging.write_mode`)
-  * `model.state is None` only — state coordination is a future
-    addition; until then, set State() only on direct-write models.
+  * Works with or without state. A state-tracked MSSQL model keeps its
+    state in Postgres (the state machine runs on a separate connection), so
+    staging composes with state the same way it does for Postgres targets.
 
 API:
     with stage(conn, model, since=since, until=until) as s:
@@ -45,15 +46,12 @@ from bollhav.model.staging import Staging
 from bollhav.model.write_modes import WriteMode
 from bollhav.mssql.columns import MssqlColumn
 from bollhav.mssql.modes import _bulk_insert
-from bollhav.mssql.schema import _b, _col_ddl
+from bollhav.mssql.schema import _bracket_quote, _col_ddl
 
 if TYPE_CHECKING:
     from bollhav.model.model import Model
 
 logger = logging.getLogger(__name__)
-
-
-# ── MSSQL-specific staging config ────────────────────────────────────
 
 
 @dataclass
@@ -131,7 +129,7 @@ def ensure_staging_table(conn: pyodbc.Connection, model: "Model", run_id: UUID) 
         f"IF NOT EXISTS ("
         f"    SELECT 1 FROM INFORMATION_SCHEMA.TABLES"
         f"    WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?"
-        f") CREATE TABLE {_b(schema)}.{_b(table)} (\n{col_defs}\n)",
+        f") CREATE TABLE {_bracket_quote(schema)}.{_bracket_quote(table)} (\n{col_defs}\n)",
         schema,
         table,
     )
@@ -144,7 +142,7 @@ def drop_staging_table(conn: pyodbc.Connection, model: "Model", run_id: UUID) ->
     table = _staging_table(model, run_id)
     cursor = conn.cursor()
     cursor.execute(
-        f"IF OBJECT_ID(?, 'U') IS NOT NULL DROP TABLE {_b(schema)}.{_b(table)}",
+        f"IF OBJECT_ID(?, 'U') IS NOT NULL DROP TABLE {_bracket_quote(schema)}.{_bracket_quote(table)}",
         f"{schema}.{table}",
     )
     cursor.commit()
@@ -169,7 +167,7 @@ def _append_to_staging(
     mssql_cols = [c for c in model.target.columns if isinstance(c, MssqlColumn)]
     _bulk_insert(
         cursor,
-        f"{_b(_staging_schema(model))}.{_b(_staging_table(model, run_id))}",
+        f"{_bracket_quote(_staging_schema(model))}.{_bracket_quote(_staging_table(model, run_id))}",
         [c.name for c in mssql_cols],
         df,
         columns=mssql_cols,
@@ -189,7 +187,7 @@ def _merge_into_staging(
     delegates to `_merge_via_temp`, which uses a per-call `#tmp` table."""
     from bollhav.mssql.modes import _merge_via_temp
 
-    staging_table = f"{_b(_staging_schema(model))}.{_b(_staging_table(model, run_id))}"
+    staging_table = f"{_bracket_quote(_staging_schema(model))}.{_bracket_quote(_staging_table(model, run_id))}"
     _merge_via_temp(cursor, staging_table, model, df, fast_executemany=True)
 
 
@@ -233,10 +231,10 @@ def _apply_append(
 ) -> None:
     """target.write_mode = APPEND — INSERT INTO target SELECT FROM staging."""
     mssql_cols = [c for c in model.target.columns if isinstance(c, MssqlColumn)]
-    col_list = ", ".join(_b(c.name) for c in mssql_cols)
+    col_list = ", ".join(_bracket_quote(c.name) for c in mssql_cols)
     cursor.execute(
-        f"INSERT INTO {_b(target_schema)}.{_b(target_table)} ({col_list}) "
-        f"SELECT {col_list} FROM {_b(staging_schema)}.{_b(staging_table)}"
+        f"INSERT INTO {_bracket_quote(target_schema)}.{_bracket_quote(target_table)} ({col_list}) "
+        f"SELECT {col_list} FROM {_bracket_quote(staging_schema)}.{_bracket_quote(staging_table)}"
     )
 
 
@@ -258,22 +256,24 @@ def _apply_upsert(
     non_unique_col_names = [c for c in all_col_names if c not in unique_col_names]
 
     on_clause = " AND ".join(
-        f"target.{_b(c)} = source.{_b(c)}" for c in unique_col_names
+        f"target.{_bracket_quote(c)} = source.{_bracket_quote(c)}"
+        for c in unique_col_names
     )
-    insert_cols = ", ".join(_b(c) for c in all_col_names)
-    insert_vals = ", ".join(f"source.{_b(c)}" for c in all_col_names)
+    insert_cols = ", ".join(_bracket_quote(c) for c in all_col_names)
+    insert_vals = ", ".join(f"source.{_bracket_quote(c)}" for c in all_col_names)
 
     if non_unique_col_names:
         update_set = ", ".join(
-            f"target.{_b(c)} = source.{_b(c)}" for c in non_unique_col_names
+            f"target.{_bracket_quote(c)} = source.{_bracket_quote(c)}"
+            for c in non_unique_col_names
         )
         matched_clause = f"WHEN MATCHED THEN UPDATE SET {update_set}"
     else:
         matched_clause = ""
 
     cursor.execute(
-        f"MERGE INTO {_b(target_schema)}.{_b(target_table)} AS target "
-        f"USING {_b(staging_schema)}.{_b(staging_table)} AS source ON {on_clause} "
+        f"MERGE INTO {_bracket_quote(target_schema)}.{_bracket_quote(target_table)} AS target "
+        f"USING {_bracket_quote(staging_schema)}.{_bracket_quote(staging_table)} AS source ON {on_clause} "
         f"{matched_clause} "
         f"WHEN NOT MATCHED THEN INSERT ({insert_cols}) VALUES ({insert_vals});"
     )
@@ -300,17 +300,17 @@ def _apply_recreate_partition(
         raise ValueError("RECREATE_PARTITION requires target.partitioned_by to be set")
 
     mssql_cols = [c for c in model.target.columns if isinstance(c, MssqlColumn)]
-    col_list = ", ".join(_b(c.name) for c in mssql_cols)
+    col_list = ", ".join(_bracket_quote(c.name) for c in mssql_cols)
 
     cursor.execute(
-        f"DELETE FROM {_b(target_schema)}.{_b(target_table)} "
-        f"WHERE {_b(partition_col_name)} >= ? AND {_b(partition_col_name)} < ?",
+        f"DELETE FROM {_bracket_quote(target_schema)}.{_bracket_quote(target_table)} "
+        f"WHERE {_bracket_quote(partition_col_name)} >= ? AND {_bracket_quote(partition_col_name)} < ?",
         since,
         until,
     )
     cursor.execute(
-        f"INSERT INTO {_b(target_schema)}.{_b(target_table)} ({col_list}) "
-        f"SELECT {col_list} FROM {_b(staging_schema)}.{_b(staging_table)}"
+        f"INSERT INTO {_bracket_quote(target_schema)}.{_bracket_quote(target_table)} ({col_list}) "
+        f"SELECT {col_list} FROM {_bracket_quote(staging_schema)}.{_bracket_quote(staging_table)}"
     )
 
 
@@ -362,10 +362,10 @@ def apply_atomically_to_target(
                 _apply_recreate_partition(
                     cursor, model, **table_names, since=since, until=until
                 )
-            case _ as wm:  # pragma: no cover — guarded by _assert_supported
-                raise NotImplementedError(f"unsupported target.write_mode {wm!r}")
         if drop_after_apply:
-            cursor.execute(f"DROP TABLE {_b(staging_schema)}.{_b(staging_table)}")
+            cursor.execute(
+                f"DROP TABLE {_bracket_quote(staging_schema)}.{_bracket_quote(staging_table)}"
+            )
         cursor.commit()
     except Exception:
         cursor.rollback()
@@ -376,26 +376,12 @@ def apply_atomically_to_target(
     )
 
 
-# ── orphan GC ───────────────────────────────────────────────────────
-
-
-def gc_orphan_staging_tables(
+def cleanup_orphaned_staging_tables(
     conn: pyodbc.Connection,
     model: "Model",
     *,
     keep_run_id: UUID | None = None,
 ) -> None:
-    """Drop staging tables left behind by crashed runs.
-
-    Matches `<prefix>%` in the staging schema. If `keep_run_id` is
-    provided, the current run's staging table is preserved.
-
-    No-op when `Staging.keep_after_apply=True` — the operator has
-    declared they want kept tables to live; auto-GC would defeat that.
-    Manual cleanup is on them.
-
-    Connection management is the caller's responsibility — pass in an
-    open `pyodbc.Connection`."""
     if model.target.staging is not None and model.target.staging.keep_after_apply:
         logger.debug(
             "GC skipped for %s — Staging.keep_after_apply=True",
@@ -419,7 +405,9 @@ def gc_orphan_staging_tables(
     for (tablename,) in rows:
         if keep is not None and tablename == keep:
             continue
-        cursor.execute(f"DROP TABLE {_b(schema)}.{_b(tablename)}")
+        cursor.execute(
+            f"DROP TABLE {_bracket_quote(schema)}.{_bracket_quote(tablename)}"
+        )
         logger.debug("gc'd orphan staging table %s.%s", schema, tablename)
     cursor.commit()
 
@@ -431,5 +419,5 @@ __all__ = [
     "write_to_staging",
     "apply_atomically_to_target",
     "drop_staging_table",
-    "gc_orphan_staging_tables",
+    "cleanup_orphaned_staging_tables",
 ]

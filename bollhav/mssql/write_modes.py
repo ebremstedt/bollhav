@@ -72,8 +72,10 @@ def write(
     created there too (`MssqlData.create_or_replace_view`), so a view's
     execute body has nothing to write.
 
-    The staged path requires `model.state is None` (MSSQL has no state
-    coordination — `MssqlData` rejects a stateful model).
+    The staged path works with or without state — a state-tracked MSSQL
+    model keeps its state in Postgres (the state machine runs on a separate
+    connection), so staging composes with state here just like it does for
+    Postgres targets.
     """
     if model.is_view:
         raise ValueError(

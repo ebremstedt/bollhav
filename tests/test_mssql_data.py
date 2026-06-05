@@ -88,14 +88,46 @@ def _sql(cursor) -> str:
 
 
 class TestStateGuard:
-    def test_state_on_mssql_model_is_rejected(self):
+    def test_state_on_mssql_model_is_allowed(self):
+        # MSSQL data + Postgres state is supported: MssqlData is data-side
+        # only and doesn't care about state (it runs in Postgres elsewhere).
         conn, _ = _conn()
-        with pytest.raises(NotImplementedError, match="MSSQL has no state"):
-            MssqlData(_model(state=State()), conn)
+        assert MssqlData(_model(state=State()), conn).model.state is not None
 
     def test_stateless_model_constructs_fine(self):
         conn, _ = _conn()
         assert MssqlData(_model(), conn).model.target.name == "events"
+
+
+class TestMssqlPostgresStateWiring:
+    """MSSQL data + Postgres state: state lives in Postgres on a separate
+    connection. The lifecycle's `_conns` rejects a state-tracked MSSQL model
+    that wasn't given a distinct state_conn (which would otherwise try to run
+    Postgres state SQL on the MSSQL connection)."""
+
+    def test_missing_state_conn_raises(self):
+        from bollhav.model.lifecycle import _conns
+
+        conn, _ = _conn()
+        m = _model(state=State())
+        with pytest.raises(ValueError, match="separate Postgres"):
+            _conns({"data_conn": conn, "model": m})
+
+    def test_separate_state_conn_is_used(self):
+        from bollhav.model.lifecycle import _conns
+
+        data_conn, _ = _conn()
+        state_conn = MagicMock()
+        m = _model(state=State())
+        dc, sc = _conns({"data_conn": data_conn, "state_conn": state_conn, "model": m})
+        assert dc is data_conn and sc is state_conn
+
+    def test_stateless_mssql_needs_no_state_conn(self):
+        from bollhav.model.lifecycle import _conns
+
+        conn, _ = _conn()
+        dc, sc = _conns({"data_conn": conn, "model": _model()})
+        assert dc is conn and sc is conn
 
 
 class TestAssetDDL:

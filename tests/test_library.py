@@ -97,7 +97,7 @@ class TestEnsureLibrary:
         assert any(
             "CREATE TABLE IF NOT EXISTS" in q and "z_bollhav" in q for q in executed
         )
-        assert any("model_library" in q for q in executed)
+        assert any("'library'" in q for q in executed)
 
 
 # ── register / lookup ────────────────────────────────────────────────
@@ -197,7 +197,14 @@ class TestLookup:
         from bollhav.postgres.state import LibraryEntry, PostgresState
 
         conn = _mock_conn(
-            fetchone_value=(["a.b"], "TABLE", "z_warehouse", "orders_state", "interval")
+            fetchone_value=(
+                ["a.b"],
+                "TABLE",
+                "z_warehouse",
+                "orders_state",
+                "interval",
+                [{"name": "raw.landing", "kind": "database"}],
+            )
         )
         result = PostgresState.lookup_model(conn, "warehouse.orders")
         assert isinstance(result, LibraryEntry)
@@ -206,15 +213,17 @@ class TestLookup:
         assert result.state_schema == "z_warehouse"
         assert result.state_table == "orders_state"
         assert result.kind == "interval"
+        assert result.sources == [{"name": "raw.landing", "kind": "database"}]
 
     def test_returns_entry_for_view_with_null_state_pointers(self) -> None:
         from bollhav.postgres.state import PostgresState
 
-        conn = _mock_conn(fetchone_value=([], "VIEW", None, None, "view"))
+        conn = _mock_conn(fetchone_value=([], "VIEW", None, None, "view", []))
         result = PostgresState.lookup_model(conn, "warehouse.v_orders")
         assert result.model_type == "VIEW"
         assert result.state_schema is None
         assert result.state_table is None
+        assert result.sources == []
         assert result.kind == "view"
 
 
