@@ -116,5 +116,4 @@ def _write_staged(
     for df in df_gen:
         if len(df) == 0:
             continue
-        logger.debug("Staging %d rows for %s", len(df), model.target.full_name)
         data.write_to_staging(model.run_id, df)
