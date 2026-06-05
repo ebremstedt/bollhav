@@ -1,6 +1,6 @@
 # bollhav
 
-Model definition framework that standardizes data-pipeline code.
+Model definition framework that standardizes data-pipeline code
 
 This library
 - is permissive by design
