@@ -767,14 +767,14 @@ def test_e2e_staging_append_target_append(schema_name, caplog):
         write_logs = [
             r.message
             for r in caplog.records
-            if "stage: wrote" in r.message and "(APPEND)" in r.message
+            if "wrote" in r.message and "(APPEND)" in r.message
         ]
         assert len(write_logs) >= 3  # at least one chunk per interval
         # Apply logs show APPEND target mode.
         apply_logs = [
             r.message
             for r in caplog.records
-            if "stage: moved data" in r.message and "(APPEND)" in r.message
+            if "moved data" in r.message and "(APPEND)" in r.message
         ]
         assert len(apply_logs) == 3
     finally:
@@ -829,7 +829,7 @@ def test_e2e_staging_append_target_upsert(schema_name, caplog):
         apply_logs = [
             r.message
             for r in caplog.records
-            if "stage: moved data" in r.message and "UPSERT_NO_DELETE" in r.message
+            if "moved data" in r.message and "UPSERT_NO_DELETE" in r.message
         ]
         assert len(apply_logs) == 3
     finally:
@@ -889,14 +889,14 @@ def test_e2e_staging_upsert_target_upsert(schema_name, caplog):
         write_logs = [
             r.message
             for r in caplog.records
-            if "stage: wrote" in r.message and "(UPSERT_NO_DELETE)" in r.message
+            if "wrote" in r.message and "(UPSERT_NO_DELETE)" in r.message
         ]
         assert len(write_logs) >= 3  # at least one chunk per interval
         # And apply-side logs show UPSERT mode too.
         apply_logs = [
             r.message
             for r in caplog.records
-            if "stage: moved data" in r.message and "UPSERT_NO_DELETE" in r.message
+            if "moved data" in r.message and "UPSERT_NO_DELETE" in r.message
         ]
         assert len(apply_logs) == 3
     finally:
@@ -983,7 +983,7 @@ def test_e2e_staging_append_target_recreate_partition(schema_name, caplog):
         apply_logs = [
             r.message
             for r in caplog.records
-            if "stage: moved data" in r.message and "RECREATE_PARTITION" in r.message
+            if "moved data" in r.message and "RECREATE_PARTITION" in r.message
         ]
         assert len(apply_logs) == 3
     finally:

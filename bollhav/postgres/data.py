@@ -239,7 +239,7 @@ class PostgresData:
                 col_defs=col_defs,
             )
         )
-        logger.debug("stage: created staging table %s.%s", schema, table)
+        logger.debug("created staging table %s.%s", schema, table)
 
     def gc_orphan_staging_tables(self, *, keep_run_id: UUID | None = None) -> None:
         """Drop staging tables left behind by crashed runs. Best-effort:
@@ -255,7 +255,7 @@ class PostgresData:
         staging = self.model.target.staging
         if staging is not None and staging.keep_after_apply:
             logger.debug(
-                "stage: GC skipped for %s — Staging.keep_after_apply=True",
+                "GC skipped for %s — Staging.keep_after_apply=True",
                 self.model.target.full_name,
             )
             return
@@ -283,9 +283,7 @@ class PostgresData:
                             table=sql.Identifier(tablename),
                         )
                     )
-                    logger.debug(
-                        "stage: gc'd orphan staging table %s.%s", schema, tablename
-                    )
+                    logger.debug("gc'd orphan staging table %s.%s", schema, tablename)
         except Exception as exc:  # best-effort; never blocks the run
             logger.debug(
                 "staging: orphan GC skipped for %s — %s",
@@ -332,7 +330,7 @@ class PostgresData:
         staging = self.model.target.staging
         if staging is not None and staging.keep_after_apply:
             logger.debug(
-                "stage: teardown skipped for %s — Staging.keep_after_apply=True",
+                "teardown skipped for %s — Staging.keep_after_apply=True",
                 self.model.target.full_name,
             )
             return

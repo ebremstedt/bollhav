@@ -189,7 +189,7 @@ class MssqlData:
         staging = self.model.target.staging
         if staging is not None and staging.keep_after_apply:
             logger.debug(
-                "stage: teardown skipped for %s — Staging.keep_after_apply=True",
+                "teardown skipped for %s — Staging.keep_after_apply=True",
                 self.model.target.full_name,
             )
             return

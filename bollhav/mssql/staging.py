@@ -136,7 +136,7 @@ def ensure_staging_table(conn: pyodbc.Connection, model: "Model", run_id: UUID) 
         table,
     )
     cursor.commit()
-    logger.debug("stage: created staging table %s.%s", schema, table)
+    logger.debug("created staging table %s.%s", schema, table)
 
 
 def drop_staging_table(conn: pyodbc.Connection, model: "Model", run_id: UUID) -> None:
@@ -213,7 +213,7 @@ def write_to_staging(
             raise NotImplementedError(f"unsupported staging.write_mode {wm!r}")
     cursor.commit()
     logger.debug(
-        "stage: wrote %d rows to staging table (%s)",
+        "wrote %d rows to staging table (%s)",
         len(df),
         _staging_write_mode(model).value,
     )
@@ -371,7 +371,7 @@ def apply_atomically_to_target(
         cursor.rollback()
         raise
     logger.debug(
-        "stage: moved data from staging to target (%s)",
+        "moved data from staging to target (%s)",
         model.target.write_mode.value,
     )
 
@@ -398,7 +398,7 @@ def gc_orphan_staging_tables(
     open `pyodbc.Connection`."""
     if model.target.staging is not None and model.target.staging.keep_after_apply:
         logger.debug(
-            "stage: GC skipped for %s — Staging.keep_after_apply=True",
+            "GC skipped for %s — Staging.keep_after_apply=True",
             model.target.full_name,
         )
         return
@@ -420,7 +420,7 @@ def gc_orphan_staging_tables(
         if keep is not None and tablename == keep:
             continue
         cursor.execute(f"DROP TABLE {_b(schema)}.{_b(tablename)}")
-        logger.debug("stage: gc'd orphan staging table %s.%s", schema, tablename)
+        logger.debug("gc'd orphan staging table %s.%s", schema, tablename)
     cursor.commit()
 
 
