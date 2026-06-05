@@ -109,7 +109,11 @@ class TestRegister:
     state_table, kind)."""
 
     def test_table_writes_state_pointers(self) -> None:
-        from bollhav.postgres.state import PostgresState
+        from bollhav.postgres.state import (
+            STATE_SCHEMA,
+            PostgresState,
+            state_table_name,
+        )
 
         m = _model(full_name="warehouse.orders", upstream=["raw.orders"])
         conn = _mock_conn()
@@ -123,8 +127,9 @@ class TestRegister:
         assert params[0] == "warehouse.orders"
         assert params[1] == ["raw.orders"]
         assert params[2] == "TABLE"
-        assert params[3] == "z_warehouse"
-        assert params[4] == "orders_state"
+        # state pointers now point at the central schema + deterministic name
+        assert params[3] == STATE_SCHEMA
+        assert params[4] == state_table_name("warehouse.orders")
         assert params[5] == "interval"
 
     def test_view_writes_null_state_pointers(self) -> None:

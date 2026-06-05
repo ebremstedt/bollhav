@@ -43,7 +43,6 @@ from psycopg import sql
 
 from bollhav.model.staging import Staging
 from bollhav.model.write_modes import WriteMode
-from bollhav.postgres import state as pg_state
 
 if TYPE_CHECKING:
     from bollhav.model.model import Model
@@ -82,11 +81,18 @@ def _logged(model: "Model") -> bool:
 
 
 def _staging_schema(model: "Model") -> str:
-    """Resolve the staging schema. `Staging.schema` overrides; default
-    is `z_<target_schema>` (co-located with state, both bollhav-owned)."""
+    """Resolve the staging schema. `Staging.schema` overrides; default is
+    `z_<target_schema>` — co-located with the target data (per-model), NOT
+    the central `z_bollhav_state` (state/error tables live there now).
+    `State.schema_prefix` still tunes the `z_` prefix."""
     if model.target.staging is not None and model.target.staging.schema:
         return model.target.staging.schema
-    return pg_state.PostgresState(model)._state_schema()
+    prefix = (
+        model.state.schema_prefix
+        if model.state is not None and model.state.schema_prefix is not None
+        else "z_"
+    )
+    return f"{prefix}{model.target.schema.resolved}"
 
 
 def _staging_table_prefix(model: "Model") -> str:

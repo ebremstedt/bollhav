@@ -7,9 +7,12 @@ registration (state-tracked models only), enforced upstreams vs
 unregistered-upstream-as-documentation, auto orphan staging GC at
 bootstrap, and additive library schema migration.
 
-Each test uses a unique `warehouse_e2e_<n>` schema so multiple tests
-can run in parallel safely. The state schema (`z_warehouse_e2e_<n>`)
-and the library schema (`z_bollhav`) are cleaned before each test.
+Each test uses a deterministic schema derived from its node id (unique
+per test, stable across runs — no random suffix) so multiple tests can
+run in parallel safely. The per-test target + staging schemas are dropped
+CASCADE; this test's tables in the central state/error schemas
+(`z_bollhav_state` / `z_bollhav_error`) and the library schema
+(`z_bollhav`) are cleaned around each test.
 
 Skip when `E2E_DSN` is unset and the local default isn't reachable.
 """
@@ -18,7 +21,7 @@ from __future__ import annotations
 
 import logging
 import os
-import uuid
+import re
 from contextlib import contextmanager
 from datetime import datetime, timezone, timedelta
 from typing import Generator
@@ -49,7 +52,7 @@ from bollhav.postgres import (
     write,
 )
 from bollhav.postgres.data import PostgresData
-from bollhav.postgres.state import PostgresState
+from bollhav.postgres.state import STATE_SCHEMA, PostgresState, state_table_name
 
 
 DEFAULT_DSN = "postgresql://postgres:postgres@localhost:5432/postgres"
@@ -86,8 +89,16 @@ def _set_dsn_env():
 
 @pytest.fixture
 def schema_name(request):
-    """A unique target schema per test, dropped before and after."""
-    name = "warehouse_e2e_" + uuid.uuid4().hex[:8]
+    """A deterministic target schema per test, derived from the test's
+    node id (no random suffix) and dropped before and after.
+
+    Each test still gets a unique schema (node names are unique, including
+    parametrized variants), so parallel runs don't collide — but the name
+    is stable across runs, so there's nothing random in the table names.
+    Cleanup also removes this schema's tables from the central
+    `z_bollhav_state` / `z_bollhav_error` so a rerun can't inherit stale
+    `applied` rows."""
+    name = re.sub(r"[^a-z0-9]+", "_", request.node.name.lower()).strip("_")[:54]
     _drop_schemas(name)
     yield name
     _drop_schemas(name)
@@ -95,8 +106,38 @@ def schema_name(request):
 
 def _drop_schemas(target_schema: str) -> None:
     with psycopg.connect(_dsn(), autocommit=True) as conn:
-        conn.execute(f"DROP SCHEMA IF EXISTS {target_schema} CASCADE")
-        conn.execute(f"DROP SCHEMA IF EXISTS z_{target_schema} CASCADE")
+        conn.execute(f'DROP SCHEMA IF EXISTS "{target_schema}" CASCADE')
+        conn.execute(f'DROP SCHEMA IF EXISTS "z_{target_schema}" CASCADE')
+        _drop_central_state_tables(conn, target_schema)
+
+
+def _drop_central_state_tables(conn, target_schema: str) -> None:
+    """Drop this schema's tables from the central state/error schemas.
+
+    State and error tables for every model now live in the shared
+    `z_bollhav_state` / `z_bollhav_error`, named by a hash — so they aren't
+    swept by the per-schema `DROP SCHEMA CASCADE` above. Each state table
+    self-identifies via its `model_name` column; match `target_schema.%` and
+    drop the same-named table in both schemas. Only this test's tables are
+    touched, so it's safe under parallel runs."""
+    from bollhav.postgres.state import ERROR_SCHEMA, STATE_SCHEMA
+
+    have_state = conn.execute(
+        "SELECT 1 FROM information_schema.schemata WHERE schema_name = %s",
+        [STATE_SCHEMA],
+    ).fetchone()
+    if not have_state:
+        return
+    tables = conn.execute(
+        "SELECT tablename FROM pg_tables WHERE schemaname = %s", [STATE_SCHEMA]
+    ).fetchall()
+    for (table,) in tables:
+        owner = conn.execute(
+            f'SELECT model_name FROM "{STATE_SCHEMA}"."{table}" LIMIT 1'
+        ).fetchone()
+        if owner and owner[0] and str(owner[0]).startswith(f"{target_schema}."):
+            conn.execute(f'DROP TABLE IF EXISTS "{STATE_SCHEMA}"."{table}"')
+            conn.execute(f'DROP TABLE IF EXISTS "{ERROR_SCHEMA}"."{table}"')
 
 
 def _drop_library() -> None:
@@ -342,8 +383,7 @@ def test_e2e_state_lifecycle(schema_name):
     m = _orders_model(schema_name, state=State(), staging=Staging())
     _run_intervals(m)
 
-    state_schema = f"z_{schema_name}"
-    rows = _state_rows(state_schema, "orders_state")
+    rows = _state_rows(STATE_SCHEMA, state_table_name(f"{schema_name}.orders"))
     assert len(rows) == 3
     assert all(status == "applied" for status, _, _ in rows)
     assert _row_count(schema_name, "orders") == 15  # 3 intervals × 5 rows
@@ -399,8 +439,8 @@ def test_e2e_library_state_tracked_table_registers(schema_name):
     assert len(matches) == 1
     _, model_type, st_sch, st_tbl = matches[0]
     assert model_type == "TABLE"
-    assert st_sch == f"z_{schema_name}"
-    assert st_tbl == "orders_state"
+    assert st_sch == STATE_SCHEMA
+    assert st_tbl == state_table_name(f"{schema_name}.orders")
 
 
 # ── 8. view-as-upstream: unregistered upstream is documentation ──────
@@ -445,8 +485,9 @@ def test_e2e_view_as_upstream_does_not_block_downstream(schema_name):
     _run_intervals(view)
     _run_intervals(enriched)
 
-    state_schema = f"z_{schema_name}"
-    enriched_rows = _state_rows(state_schema, "enriched_state")
+    enriched_rows = _state_rows(
+        STATE_SCHEMA, state_table_name(f"{schema_name}.enriched")
+    )
     assert len(enriched_rows) == 3
     assert all(status == "applied" for status, _, _ in enriched_rows)
 
@@ -760,7 +801,9 @@ def test_e2e_staging_append_target_append(schema_name, caplog):
         # All 72 rows landed.
         assert _row_count(schema_name, "orders") == 72
         # State table has 3 applied rows.
-        state_rows = _state_rows(f"z_{schema_name}", "orders_state")
+        state_rows = _state_rows(
+            STATE_SCHEMA, state_table_name(f"{schema_name}.orders")
+        )
         assert len(state_rows) == 3
         assert all(status == "applied" for status, _, _ in state_rows)
         # Debug logs show write_to_staging in APPEND mode (3 intervals × N chunks).

@@ -1,11 +1,21 @@
 """Postgres backend for bollhav state tracking.
 
-Each state-enabled model gets one table in the target DB:
+Every state-enabled model's state and error tables live in two fixed,
+central schemas:
 
-    z_<target_schema>.<target_name>_state
+    z_bollhav_state.<deterministic_name>
+    z_bollhav_error.<deterministic_name>
 
-The `z_` prefix keeps bollhav-owned tables out of the user's schemas
-and sorts them to the bottom of a DB editor's schema list.
+The table name is a pure function of the model's `full_name`
+(`state_table_name`): a de-vowelled catalog/schema context, the readable
+table name, and a blake2b hash that guarantees global uniqueness and a
+≤63-char fit. Because it's deterministic, any process recomputes a model's
+(or an upstream's) table name on the fly — no lookup needed. The state
+table also carries a `model_name` column so the table self-identifies and a
+hash collision (≈1e-12) surfaces as a loud error instead of silent shared
+state. The cross-pipeline `model_library` (in `z_bollhav`) remains the
+authority for *validation* (is an upstream a real, registered model?) and
+the dependency graph.
 
 The caller owns the connection: a `PostgresState` is constructed with the
 model and the state connection (opened in `main()` and threaded through
@@ -14,6 +24,7 @@ the lifecycle hooks). `PostgresState` does not open its own connections.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import re
 from typing import TYPE_CHECKING, NamedTuple
@@ -30,6 +41,57 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+# ── fixed schemas + deterministic table naming ───────────────────────
+#
+# State and error tables live in two central schemas, named by a pure
+# function of the model's `full_name`. The same table name is used in both
+# schemas (the schema says which kind it is, so no `_state` / `_errors`
+# suffix is needed).
+
+STATE_SCHEMA = "z_bollhav_state"
+ERROR_SCHEMA = "z_bollhav_error"
+
+_VOWELS = frozenset("aeiou")
+_SLUG_CAP = 44  # max slug chars; + "_" + 16-hex digest = ≤ 61 (under 63)
+_CONTEXT_CAP = 16  # max chars for the de-vowelled catalog/schema context
+_HEX_LEN = 16  # 64-bit digest → ~1e-12 collision risk at 10k models
+
+
+def _devowel(s: str) -> str:
+    return "".join(c for c in s if c.lower() not in _VOWELS)
+
+
+def _name_digest(full_name: str) -> str:
+    """16-hex (64-bit) blake2b digest of the model's full name — the
+    uniqueness tail of every state/error table name and the stem of their
+    index names. Deterministic (blake2b, not the salted built-in hash)."""
+    return hashlib.blake2b(
+        full_name.encode("utf-8"), digest_size=_HEX_LEN // 2
+    ).hexdigest()
+
+
+def state_table_name(full_name: str) -> str:
+    """Deterministic, collision-safe, ≤63-char table name for a model's
+    state/error table, used in both `z_bollhav_state` and `z_bollhav_error`.
+
+    Catalog/schema are de-vowelled (compressed, cosmetic) and the table name
+    is kept readable; the budget favours the table so it survives. Identity
+    rides in the digest, which is hashed over the FULL, unmodified name — so
+    truncating the readable slug can never cause a collision.
+
+        intelligence_raw_dan.vPatInfo
+            -> ntllgnc_rw_dn_vpatinfo_de90fb57d928ba26
+    """
+    digest = _name_digest(full_name)
+    parts = full_name.lower().replace("-", "_").split(".")
+    table = parts[-1]
+    context = "_".join(_devowel(p) for p in parts[:-1])[:_CONTEXT_CAP]
+    table_budget = _SLUG_CAP - len(context) - 1 if context else _SLUG_CAP
+    table = table[:table_budget]
+    slug = f"{context}_{table}" if context else table
+    return f"{slug}_{digest}"
+
+
 # ── DDL ──────────────────────────────────────────────────────────────
 
 
@@ -42,6 +104,7 @@ logger = logging.getLogger(__name__)
 _STATE_DDL = """
 CREATE TABLE IF NOT EXISTS {schema}.{table} (
     id              BIGSERIAL PRIMARY KEY,
+    model_name      TEXT NOT NULL,
     run_id          UUID NOT NULL,
     since           TIMESTAMPTZ,
     until           TIMESTAMPTZ,
@@ -163,114 +226,145 @@ class PostgresState:
         return self.conn
 
     def _state_schema(self) -> str:
-        """State schema name. `State.schema_prefix` overrides the default
-        `"z_"` prefix on the target's schema name."""
-        model = self.model
-        prefix = (
-            model.state.schema_prefix
-            if model.state is not None and model.state.schema_prefix is not None
-            else "z_"
-        )
-        return f"{prefix}{model.target.schema.resolved}"
+        """Fixed central state schema (`z_bollhav_state`). State tables for
+        every model live here, named deterministically by `state_table_name`."""
+        return STATE_SCHEMA
+
+    def _errors_schema(self) -> str:
+        """Fixed central error schema (`z_bollhav_error`)."""
+        return ERROR_SCHEMA
 
     def _state_table(self) -> str:
-        """State table name. `State.table_suffix` overrides the default
-        `"_state"` suffix on the target's table name."""
-        model = self.model
-        suffix = (
-            model.state.table_suffix
-            if model.state is not None and model.state.table_suffix is not None
-            else "_state"
-        )
-        return f"{model.target.name}{suffix}"
+        """Deterministic state-table name (`state_table_name(full_name)`).
+        Computed from the model's full name, so any process recomputes it
+        without a lookup."""
+        return state_table_name(self.model.target.full_name)
 
     def _errors_table(self) -> str:
-        """Errors table name. Lives in the same state schema as the state
-        table; suffix derived from the model's name (just like the state
-        table's `_state` suffix, but `_errors`)."""
-        return f"{self.model.target.name}_errors"
+        """Error-table name — the same deterministic name as the state table,
+        living in `z_bollhav_error` (the schema, not a suffix, distinguishes
+        the two)."""
+        return state_table_name(self.model.target.full_name)
 
     # ── DDL ──────────────────────────────────────────────────────────
 
     def ensure_tables(self) -> None:
-        """Create the state schema, state table, AND errors table if
-        absent. Idempotent. Both tables live in the same state schema —
-        join them on (since, until) for per-interval inspection or on
-        run_id for per-invocation lookups."""
-        schema = self._state_schema()
+        """Create the two central schemas (`z_bollhav_state`,
+        `z_bollhav_error`), the model's state + error tables, and their
+        indexes if absent. Idempotent. The state and error tables share the
+        same deterministic name in their respective schemas. Index names are
+        keyed off the name digest (short, unique) rather than the table name,
+        which can be up to 61 chars and would push an index name past 63.
+
+        After creating, asserts the state table isn't already owned by a
+        different model (a hash collision) via its `model_name` column."""
+        state_schema = self._state_schema()
+        errors_schema = self._errors_schema()
         state_table = self._state_table()
-        state_index = f"{state_table}_status_idx"
-        state_singleton_index = f"{state_table}_singleton_idx"
         errors_table = self._errors_table()
-        errors_iv_index = f"{errors_table}_interval_idx"
-        errors_time_index = f"{errors_table}_created_at_idx"
+        digest = _name_digest(self.model.target.full_name)
+        state_index = f"{digest}_status_idx"
+        state_singleton_index = f"{digest}_singleton_idx"
+        errors_iv_index = f"{digest}_interval_idx"
+        errors_time_index = f"{digest}_created_at_idx"
 
         conn = self._require_conn()
         with conn.transaction():
-            conn.execute(
-                sql.SQL("CREATE SCHEMA IF NOT EXISTS {schema}").format(
-                    schema=sql.Identifier(schema),
+            for schema in (state_schema, errors_schema):
+                conn.execute(
+                    sql.SQL("CREATE SCHEMA IF NOT EXISTS {schema}").format(
+                        schema=sql.Identifier(schema),
+                    )
                 )
-            )
             conn.execute(
                 sql.SQL(_STATE_DDL).format(
-                    schema=sql.Identifier(schema),
+                    schema=sql.Identifier(state_schema),
                     table=sql.Identifier(state_table),
                 )
             )
             conn.execute(
                 sql.SQL(_ERRORS_DDL).format(
-                    schema=sql.Identifier(schema),
+                    schema=sql.Identifier(errors_schema),
                     table=sql.Identifier(errors_table),
                 )
             )
             # Bring older tables up to the current shape (nullable window +
-            # `kind`) before building the partial singleton index, which
-            # needs those columns to exist.
-            self._migrate_state_additively(schema, state_table, errors_table)
+            # `kind` + `model_name`) before building the partial singleton
+            # index, which needs those columns to exist.
+            self._migrate_state_additively(
+                state_schema, errors_schema, state_table, errors_table
+            )
             conn.execute(
                 sql.SQL(_STATE_INDEX_DDL).format(
                     index=sql.Identifier(state_index),
-                    schema=sql.Identifier(schema),
+                    schema=sql.Identifier(state_schema),
                     table=sql.Identifier(state_table),
                 )
             )
             conn.execute(
                 sql.SQL(_STATE_SINGLETON_INDEX_DDL).format(
                     index=sql.Identifier(state_singleton_index),
-                    schema=sql.Identifier(schema),
+                    schema=sql.Identifier(state_schema),
                     table=sql.Identifier(state_table),
                 )
             )
             conn.execute(
                 sql.SQL(_ERRORS_INTERVAL_INDEX_DDL).format(
                     index=sql.Identifier(errors_iv_index),
-                    schema=sql.Identifier(schema),
+                    schema=sql.Identifier(errors_schema),
                     table=sql.Identifier(errors_table),
                 )
             )
             conn.execute(
                 sql.SQL(_ERRORS_TIME_INDEX_DDL).format(
                     index=sql.Identifier(errors_time_index),
-                    schema=sql.Identifier(schema),
+                    schema=sql.Identifier(errors_schema),
                     table=sql.Identifier(errors_table),
                 )
             )
+            self._assert_no_hash_collision(state_schema, state_table)
         logger.debug(
-            "state: ensured tables for %s (%s.%s + %s)",
+            "state: ensured tables for %s (%s.%s + %s.%s)",
             self.model.target.full_name,
-            schema,
+            state_schema,
             state_table,
+            errors_schema,
             errors_table,
         )
 
+    def _assert_no_hash_collision(self, schema: str, state_table: str) -> None:
+        """Guard the ~1e-12 case where two different models hash to the same
+        state table. The table self-identifies via `model_name`; if it
+        already holds rows for a *different* model, raise loudly instead of
+        silently sharing state."""
+        conn = self._require_conn()
+        row = conn.execute(
+            sql.SQL(
+                "SELECT model_name FROM {schema}.{table} WHERE model_name <> %s LIMIT 1"
+            ).format(
+                schema=sql.Identifier(schema),
+                table=sql.Identifier(state_table),
+            ),
+            [self.model.target.full_name],
+        ).fetchone()
+        if row is not None:
+            raise ValueError(
+                f"state hash collision: {schema}.{state_table} already holds "
+                f"state for {row[0]!r}, not {self.model.target.full_name!r}. "
+                f"Rename one model or widen the digest in state_table_name."
+            )
+
     def _migrate_state_additively(
-        self, schema: str, state_table: str, errors_table: str
+        self,
+        state_schema: str,
+        errors_schema: str,
+        state_table: str,
+        errors_table: str,
     ) -> None:
         """Bring older state/errors tables up to the current shape without
         breaking concurrent old-image writers. Runs inside the caller's
         transaction. Additive only (per the shared-table rule): add the
-        state table's `kind` column with a safe default, and relax
+        state table's `kind` and `model_name` columns, and relax
         `since`/`until` to nullable on both tables so monolithic / view rows
         carry a NULL window. Each step checks information_schema first, so
         it's idempotent."""
@@ -280,7 +374,7 @@ class PostgresState:
             "SELECT 1 FROM information_schema.columns "
             "WHERE table_schema = %s AND table_name = %s "
             "  AND column_name = 'kind' LIMIT 1",
-            [schema, state_table],
+            [state_schema, state_table],
         ).fetchone()
         if not has_kind:
             conn.execute(
@@ -288,18 +382,33 @@ class PostgresState:
                     "ALTER TABLE {schema}.{table} "
                     "ADD COLUMN kind TEXT NOT NULL DEFAULT 'interval'"
                 ).format(
-                    schema=sql.Identifier(schema),
+                    schema=sql.Identifier(state_schema),
                     table=sql.Identifier(state_table),
                 )
             )
             logger.info(
                 "state: migrated %s.%s — added kind column (default "
                 "'interval' so older images keep writing interval rows)",
-                schema,
+                state_schema,
                 state_table,
             )
 
-        for table in (state_table, errors_table):
+        # `model_name` was added so the table self-identifies. On a
+        # pre-existing table we add it nullable (existing rows have no value);
+        # fresh tables get it NOT NULL from the DDL.
+        conn.execute(
+            sql.SQL(
+                "ALTER TABLE {schema}.{table} ADD COLUMN IF NOT EXISTS model_name TEXT"
+            ).format(
+                schema=sql.Identifier(state_schema),
+                table=sql.Identifier(state_table),
+            )
+        )
+
+        for schema, table in (
+            (state_schema, state_table),
+            (errors_schema, errors_table),
+        ):
             for col in ("since", "until"):
                 is_nullable = conn.execute(
                     "SELECT is_nullable FROM information_schema.columns "
@@ -384,8 +493,8 @@ class PostgresState:
 
         insert = sql.SQL(
             "INSERT INTO {schema}.{table} "
-            "(run_id, since, until, status, blocked_reason) "
-            "VALUES (%s, %s, %s, %s, %s) {on_conflict}"
+            "(model_name, run_id, since, until, status, blocked_reason) "
+            "VALUES (%s, %s, %s, %s, %s, %s) {on_conflict}"
         ).format(
             schema=sql.Identifier(schema),
             table=sql.Identifier(table),
@@ -398,6 +507,7 @@ class PostgresState:
                 conn.execute(
                     insert,
                     [
+                        model.target.full_name,
                         str(run_id),
                         interval.since,
                         interval.until,
@@ -455,8 +565,8 @@ class PostgresState:
 
         insert = sql.SQL(
             "INSERT INTO {schema}.{table} "
-            "(run_id, since, until, status, blocked_reason, kind) "
-            "VALUES (%s, NULL, NULL, 'pending', NULL, %s) {on_conflict}"
+            "(model_name, run_id, since, until, status, blocked_reason, kind) "
+            "VALUES (%s, %s, NULL, NULL, 'pending', NULL, %s) {on_conflict}"
         ).format(
             schema=sql.Identifier(schema),
             table=sql.Identifier(table),
@@ -465,7 +575,9 @@ class PostgresState:
 
         conn = self._require_conn()
         with conn.transaction():
-            conn.execute(insert, [str(run_id), model.kind.value])
+            conn.execute(
+                insert, [model.target.full_name, str(run_id), model.kind.value]
+            )
         logger.debug(
             "state: prefilled %s singleton row for %s (mode=%s)",
             model.kind.value,
@@ -648,7 +760,8 @@ class PostgresState:
         after the merge raised. We still log the error for debugging, but
         the state stays `applied` — we shouldn't downgrade a successful
         write."""
-        schema = self._state_schema()
+        state_schema = self._state_schema()
+        errors_schema = self._errors_schema()
         errors_table = self._errors_table()
         state_table = self._state_table()
         since = interval.since if interval is not None else None
@@ -659,14 +772,14 @@ class PostgresState:
             "(full_name, run_id, since, until, error_type, error_message, traceback) "
             "VALUES (%s, %s, %s, %s, %s, %s, %s)"
         ).format(
-            schema=sql.Identifier(schema),
+            schema=sql.Identifier(errors_schema),
             table=sql.Identifier(errors_table),
         )
         match, match_params = self._window_match(interval)
         update_state_sql = sql.SQL(
             "UPDATE {schema}.{table} SET status = 'error', run_id = %s WHERE {match}"
         ).format(
-            schema=sql.Identifier(schema),
+            schema=sql.Identifier(state_schema),
             table=sql.Identifier(state_table),
             match=match,
         )
@@ -1170,4 +1283,7 @@ __all__ = [
     "LibraryEntry",
     "LIBRARY_SCHEMA",
     "LIBRARY_TABLE",
+    "STATE_SCHEMA",
+    "ERROR_SCHEMA",
+    "state_table_name",
 ]

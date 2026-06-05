@@ -178,38 +178,59 @@ def _pg_model(*, state_cfg=None, target_dsn="TARGET_DSN"):
 
 
 class TestStateSchemaName:
-    def test_default_is_z_prefixed(self) -> None:
-        from bollhav.postgres.state import PostgresState
+    def test_state_schema_is_fixed_central(self) -> None:
+        from bollhav.postgres.state import STATE_SCHEMA, PostgresState
 
-        assert PostgresState(_pg_model())._state_schema() == "z_public"
+        assert PostgresState(_pg_model())._state_schema() == STATE_SCHEMA
+        assert STATE_SCHEMA == "z_bollhav_state"
 
-    def test_schema_prefix_override(self) -> None:
+    def test_error_schema_is_fixed_central(self) -> None:
+        from bollhav.postgres.state import ERROR_SCHEMA, PostgresState
+
+        assert PostgresState(_pg_model())._errors_schema() == ERROR_SCHEMA
+        assert ERROR_SCHEMA == "z_bollhav_error"
+
+    def test_schema_prefix_no_longer_affects_state_schema(self) -> None:
         from bollhav.model.state import State
-        from bollhav.postgres.state import PostgresState
+        from bollhav.postgres.state import STATE_SCHEMA, PostgresState
 
+        # schema_prefix now only affects the staging schema; state is fixed.
         m = _pg_model(state_cfg=State(schema_prefix="ops_"))
-        assert PostgresState(m)._state_schema() == "ops_public"
-
-    def test_schema_prefix_empty_drops_prefix(self) -> None:
-        from bollhav.model.state import State
-        from bollhav.postgres.state import PostgresState
-
-        m = _pg_model(state_cfg=State(schema_prefix=""))
-        assert PostgresState(m)._state_schema() == "public"
+        assert PostgresState(m)._state_schema() == STATE_SCHEMA
 
 
 class TestStateTableName:
-    def test_default_suffix_is_state(self) -> None:
+    def test_state_table_is_deterministic_hash(self) -> None:
+        from bollhav.postgres.state import PostgresState, state_table_name
+
+        assert PostgresState(_pg_model())._state_table() == state_table_name(
+            "public.orders"
+        )
+
+    def test_error_table_matches_state_table_name(self) -> None:
+        # Same deterministic name in both schemas — schema, not suffix,
+        # distinguishes state from errors.
         from bollhav.postgres.state import PostgresState
 
-        assert PostgresState(_pg_model())._state_table() == "orders_state"
+        s = PostgresState(_pg_model())
+        assert s._errors_table() == s._state_table()
 
-    def test_table_suffix_override(self) -> None:
+    def test_table_suffix_is_ignored(self) -> None:
         from bollhav.model.state import State
-        from bollhav.postgres.state import PostgresState
+        from bollhav.postgres.state import PostgresState, state_table_name
 
         m = _pg_model(state_cfg=State(table_suffix="_history"))
-        assert PostgresState(m)._state_table() == "orders_history"
+        assert PostgresState(m)._state_table() == state_table_name("public.orders")
+
+    def test_name_fits_postgres_limit_and_carries_table(self) -> None:
+        from bollhav.postgres.state import state_table_name
+
+        name = state_table_name(
+            "Intelligence.intelligence_raw_dan.some_very_long_clinical_view_name"
+        )
+        assert len(name) <= 63
+        # de-vowelled context, readable table fragment, hash tail
+        assert name.startswith("ntllgnc_")
 
 
 class TestRecordFailure:

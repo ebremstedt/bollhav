@@ -56,15 +56,14 @@ class State:
 
     `backend` — which database stores the state (a `StateBackend`).
         Defaults to Postgres, the only implementation today.
-    `schema_prefix` — override the default `"z_"` prefix applied to the
-        state schema. The default `z_` keeps bollhav-owned tables out
-        of the user's target schema and sorts them to the bottom of a
-        DB editor's schema list. Set `""` to drop the prefix entirely
-        (state schema then equals target's schema name).
-    `table_suffix` — override the default `"_state"` suffix appended
-        to the target name to derive the state table name. Example: a
-        target `orders` with default suffix produces `orders_state`;
-        with `table_suffix="_history"` you get `orders_history`.
+    `schema_prefix` — prefix for the per-model **staging** schema
+        (`<prefix><target_schema>`, default `z_`). No longer affects the
+        *state* table location: state and error tables now live in the fixed
+        central schemas `z_bollhav_state` / `z_bollhav_error`, named
+        deterministically by `state_table_name(full_name)`.
+    `table_suffix` — deprecated and ignored. State tables are now named by a
+        deterministic hash of the model's full name, not a suffix on the
+        target name. Kept only so existing configs don't break.
     `allow_concurrent_runs` — Default True: the per-interval lock
         `@interval_lifecycle` takes is enough for typical workloads (it
         lets two workers race the same model on different intervals).
