@@ -41,6 +41,8 @@ import traceback as _tb
 from functools import wraps
 from typing import Callable
 
+from bollhav.model.progress_bar import PROGRESS
+
 logger = logging.getLogger(__name__)
 
 
@@ -144,8 +146,10 @@ def model_lifecycle(func: Callable) -> Callable:
                     )
                 model.intervals = postgres_state.get_actionable_intervals()
 
+            PROGRESS.begin_model_for(model, total=len(model.intervals))
             return func(*args, **kwargs)
         finally:
+            PROGRESS.finish_model()
             if (
                 locked
                 and model.stateful
@@ -277,16 +281,16 @@ def execute_lifecycle(func: Callable) -> Callable:
                 except Exception:
                     pass
 
-        if not model.stateful and not model.target.stage:
-            return func(*args, **kwargs)
+        with PROGRESS.interval():
+            if not model.stateful and not model.target.stage:
+                return func(*args, **kwargs)
 
-        if not model.stateful and model.target.stage:
-            return staged_execute()
+            if not model.stateful and model.target.stage:
+                return staged_execute()
 
-        if model.stateful and not model.target.stage:
-            return run_with_state(plain_execute)
+            if model.stateful and not model.target.stage:
+                return run_with_state(plain_execute)
 
-        if model.stateful and model.target.stage:
             return run_with_state(staged_execute)
 
     return wrapper
