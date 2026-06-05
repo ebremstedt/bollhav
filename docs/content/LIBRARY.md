@@ -2,7 +2,7 @@
 
 # Model library
 
-Cross-pipeline registry of every bollhav model the state DB has ever seen. Lives in `z_bollhav.model_library`. Multiple pipelines run from possibly-different bollhav images can all write to it concurrently; downstream models in pipeline A can claim upstreams that ship in pipeline B.
+Cross-pipeline registry of every bollhav model the state DB has ever seen. Lives in `z_bollhav.library`. Multiple pipelines run from possibly-different bollhav images can all write to it concurrently; downstream models in pipeline A can claim upstreams that ship in pipeline B.
 
 ## What's in a row
 
@@ -74,7 +74,7 @@ Model(target=Target(name="countries", ...), library=True)
 
 ## Co-location with state
 
-The library lives in `z_bollhav.model_library` **in the state DB**. For library-only models (no `state=State(...)`), `_connect(model)` falls back to `target.dsn_env_var` — fine for single-instance setups where state and target share one Postgres database. For split state/target setups, the model's target DSN needs to point at the state instance, or the library row can't be written from where the bootstrap connects.
+The library lives in `z_bollhav.library` **in the state DB**. For library-only models (no `state=State(...)`), `_connect(model)` falls back to `target.dsn_env_var` — fine for single-instance setups where state and target share one Postgres database. For split state/target setups, the model's target DSN needs to point at the state instance, or the library row can't be written from where the bootstrap connects.
 
 ## Related
 

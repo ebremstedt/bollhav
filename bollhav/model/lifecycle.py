@@ -52,7 +52,9 @@ def _conns(arguments: dict):
     `data_conn` is required and must not be None — open it in `main()`
     and thread it through. `state_conn` is optional and defaults to
     `data_conn` (co-located state); pass a separate one only for the
-    cross-DB case."""
+    cross-DB case — most notably **MSSQL data + Postgres state**, where the
+    two connections are different drivers and a separate `state_conn` is
+    mandatory."""
     data_conn = arguments.get("data_conn")
     if data_conn is None:
         raise ValueError(
@@ -61,6 +63,22 @@ def _conns(arguments: dict):
             "function."
         )
     state_conn = arguments.get("state_conn") or data_conn
+
+    # State always runs in Postgres. If the data backend is MSSQL and the
+    # model is state-tracked, the state machine can't run on the MSSQL
+    # data_conn — a separate Postgres state_conn is required. Catch the
+    # missing one here with a clear message instead of a driver error later.
+    model = arguments.get("model")
+    if model is not None and getattr(model, "stateful", False):
+        from bollhav.model.database import Database
+
+        if model.target.database is Database.MSSQL and state_conn is data_conn:
+            raise ValueError(
+                f"{model.target.full_name!r} is an MSSQL model with state, so "
+                f"state lives in Postgres — pass a separate Postgres "
+                f"`state_conn=` (psycopg) alongside the MSSQL `data_conn=` "
+                f"(pyodbc). State coordination can't run on the MSSQL connection."
+            )
     return data_conn, state_conn
 
 

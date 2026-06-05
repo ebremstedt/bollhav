@@ -7,7 +7,7 @@ from bollhav.mssql.indexes import MssqlIndex
 logger = logging.getLogger(__name__)
 
 
-def _b(name: str) -> str:
+def _bracket_quote(name: str) -> str:
     """Bracket-quote an MSSQL identifier."""
     return "[" + name.replace("]", "]]") + "]"
 
@@ -31,19 +31,21 @@ def _col_ddl(col: MssqlColumn) -> str:
     # PRIMARY KEY is added separately by ensure_primary_key so existing tables
     # also get the constraint and the constraint name is deterministic.
     null = " NOT NULL" if not col.nullable else ""
-    return f"    {_b(col.name)} {_col_type(col)}{null}"
+    return f"    {_bracket_quote(col.name)} {_col_type(col)}{null}"
 
 
 def _index_ddl(schema: str, table: str, idx: MssqlIndex) -> str:
     unique = "UNIQUE " if idx.unique else ""
-    cols = ", ".join(_b(c) for c in idx.columns)
+    cols = ", ".join(_bracket_quote(c) for c in idx.columns)
     include = (
-        f" INCLUDE ({', '.join(_b(c) for c in idx.included)})" if idx.included else ""
+        f" INCLUDE ({', '.join(_bracket_quote(c) for c in idx.included)})"
+        if idx.included
+        else ""
     )
     where = f" WHERE {idx.filter}" if idx.filter else ""
     return (
-        f"CREATE {unique}NONCLUSTERED INDEX {_b(idx.name)} "
-        f"ON {_b(schema)}.{_b(table)} ({cols}){include}{where}"
+        f"CREATE {unique}NONCLUSTERED INDEX {_bracket_quote(idx.name)} "
+        f"ON {_bracket_quote(schema)}.{_bracket_quote(table)} ({cols}){include}{where}"
     )
 
 
@@ -72,7 +74,7 @@ def ensure_table(conn: pyodbc.Connection, model: Model) -> None:
     if model.target.recreate_table:
         logger.debug("Dropping table (recreate_table=True): %s.%s", schema, table)
         cursor.execute(
-            f"IF OBJECT_ID(?, 'U') IS NOT NULL DROP TABLE {_b(schema)}.{_b(table)}",
+            f"IF OBJECT_ID(?, 'U') IS NOT NULL DROP TABLE {_bracket_quote(schema)}.{_bracket_quote(table)}",
             f"{schema}.{table}",
         )
 
@@ -80,14 +82,16 @@ def ensure_table(conn: pyodbc.Connection, model: Model) -> None:
         f"IF NOT EXISTS ("
         f"    SELECT 1 FROM INFORMATION_SCHEMA.TABLES"
         f"    WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?"
-        f") CREATE TABLE {_b(schema)}.{_b(table)} (\n{col_defs}\n)",
+        f") CREATE TABLE {_bracket_quote(schema)}.{_bracket_quote(table)} (\n{col_defs}\n)",
         schema,
         table,
     )
 
     if model.target.truncate_table:
         logger.debug("Truncating table (truncate_table=True): %s.%s", schema, table)
-        cursor.execute(f"TRUNCATE TABLE {_b(schema)}.{_b(table)}")
+        cursor.execute(
+            f"TRUNCATE TABLE {_bracket_quote(schema)}.{_bracket_quote(table)}"
+        )
 
     # Skip UQ for columns already covered by the PK — PRIMARY KEY enforces
     # uniqueness, so a parallel UQ on the same columns is redundant.
@@ -95,13 +99,13 @@ def ensure_table(conn: pyodbc.Connection, model: Model) -> None:
     unique_cols = [c for c in mssql_cols if c.unique and c.name not in pk_col_set]
     if unique_cols:
         constraint_name = f"{table}_uq"
-        cols = ", ".join(_b(c.name) for c in unique_cols)
+        cols = ", ".join(_bracket_quote(c.name) for c in unique_cols)
         cursor.execute(
             f"IF NOT EXISTS ("
             f"    SELECT 1 FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS"
             f"    WHERE CONSTRAINT_NAME = ? AND TABLE_SCHEMA = ? AND TABLE_NAME = ?"
-            f") ALTER TABLE {_b(schema)}.{_b(table)}"
-            f"    ADD CONSTRAINT {_b(constraint_name)} UNIQUE ({cols})",
+            f") ALTER TABLE {_bracket_quote(schema)}.{_bracket_quote(table)}"
+            f"    ADD CONSTRAINT {_bracket_quote(constraint_name)} UNIQUE ({cols})",
             constraint_name,
             schema,
             table,
@@ -127,8 +131,8 @@ def ensure_primary_key(conn: pyodbc.Connection, model: Model) -> None:
         return
 
     constraint_name = f"{table}_pk"
-    cols = ", ".join(_b(c.name) for c in pk_cols)
-    obj = f"{_b(schema)}.{_b(table)}"
+    cols = ", ".join(_bracket_quote(c.name) for c in pk_cols)
+    obj = f"{_bracket_quote(schema)}.{_bracket_quote(table)}"
     logger.debug("Ensuring primary key on: %s.%s (%s)", schema, table, cols)
 
     cursor = conn.cursor()
@@ -138,7 +142,7 @@ def ensure_primary_key(conn: pyodbc.Connection, model: Model) -> None:
         f"    WHERE parent_object_id = OBJECT_ID(?)"
         f"      AND type = 'PK'"
         f") ALTER TABLE {obj}"
-        f"    ADD CONSTRAINT {_b(constraint_name)} PRIMARY KEY CLUSTERED ({cols})",
+        f"    ADD CONSTRAINT {_bracket_quote(constraint_name)} PRIMARY KEY CLUSTERED ({cols})",
         f"{schema}.{table}",
     )
     cursor.commit()

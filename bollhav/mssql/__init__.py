@@ -17,7 +17,7 @@ from bollhav.mssql.staging import (
     ensure_staging_schema,
     ensure_staging_table,
     apply_atomically_to_target,
-    gc_orphan_staging_tables,
+    cleanup_orphaned_staging_tables,
 )
 from bollhav.mssql.write_modes import write, write_dataframes
 
@@ -40,7 +40,7 @@ __all__ = [
     "ensure_staging_table",
     "ensure_table",
     "apply_atomically_to_target",
-    "gc_orphan_staging_tables",
+    "cleanup_orphaned_staging_tables",
     "merge",
     "write",
     "write_dataframes",

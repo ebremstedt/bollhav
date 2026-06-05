@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 from datetime import datetime, timezone, tzinfo
 from uuid import UUID, uuid4
@@ -15,7 +16,7 @@ from bollhav.model.directives import Directives
 from bollhav.model.kind import Kind
 from bollhav.model.state import State
 from bollhav.model.tags import Tags
-from bollhav.model.upstream import Contract
+from bollhav.model.upstream import Contract, Source, SourceKind
 from roskarl import IntervalExpression, IntervalExpressionExtended
 
 logger = logging.getLogger(__name__)
@@ -36,6 +37,7 @@ class Model:
         debug: bool = False,
         description: str | None = None,
         upstream: list[Contract | str] | None = None,
+        sources: list[Source | str] | None = None,
         **kwargs,
     ):
         self.source = source
@@ -48,6 +50,7 @@ class Model:
         self.debug = debug
         self.description = description
         self.upstream: list[Contract | str] = upstream or []
+        self.sources: list[Source | str] = sources or []
         self.directives = Directives()
         self.tags: set[str] = (tagging or Tags()).assemble(
             self.target.name, self.target.schema.name, self.target.catalog
@@ -59,58 +62,70 @@ class Model:
         # mutation sites in state.py / lifecycle.py / actions.py.
         self._state_run_id: UUID | None = None
 
-        # `kind` is the single source of truth for the unit of work; the
-        # rest of the model must be consistent with it. Validate up front so
-        # a contradiction (e.g. a monolith with batching) fails at definition,
-        # not silently at run time.
-        if kind is Kind.INTERVAL and batching is None:
-            raise ValueError(
-                f"model {target.name!r} is kind=INTERVAL but has no batching — "
-                f"an interval model's unit of work is a time window. Add "
-                f"`batching=Batch(...)` (or pick kind=MONOLITHIC for a "
-                f"whole-table load)."
-            )
-        if kind is Kind.MONOLITHIC and batching is not None:
-            raise ValueError(
-                f"model {target.name!r} is kind=MONOLITHIC but has batching — "
-                f"a monolithic model is one whole-table unit, not windowed. "
-                f"Drop `batching` (or pick kind=INTERVAL)."
-            )
-        if kind is Kind.VIEW:
-            if batching is not None:
-                raise ValueError(
-                    f"model {target.name!r} is kind=VIEW but has batching — a "
-                    f"view isn't windowed. Drop `batching`."
-                )
-            if target.staging is not None:
-                raise ValueError(
-                    f"model {target.name!r} is kind=VIEW but has staging — a "
-                    f"view has nothing to stage. Drop `staging`."
-                )
-            if target.recreate_table or target.truncate_table:
-                raise ValueError(
-                    f"model {target.name!r} is kind=VIEW — recreate_table / "
-                    f"truncate_table don't apply to views."
-                )
-
-        # Upstream is only meaningful with state: a contract's satisfaction is
-        # checked by the state machine (`@execute_lifecycle`), which only runs
-        # for state-tracked models. Declaring upstream without state would
-        # silently never enforce it, so make it an error.
-        if self.upstream and state is None:
-            raise ValueError(
-                f"model {target.name!r} declares upstream but has no state — "
-                f"upstream contracts are only checked for state-tracked models. "
-                f"Add state=State(...), or drop upstream."
-            )
-
         self.extra = kwargs
+
+        # Validate the model is internally consistent at definition time, so a
+        # contradiction fails here rather than silently at run time.
+        self._validate_kind_consistency()
+        self._validate_upstream_requires_state()
 
         logger.debug(
             "Initialized model %r (enabled=%s)", self.target.full_name, self.enabled
         )
         if self.debug:
             self.pretty()
+
+    # ── construction-time validation ──────────────────────────────────
+
+    def _validate_kind_consistency(self) -> None:
+        """`kind` is the single source of truth for the unit of work, so
+        batching and the view-only knobs must agree with it:
+
+          * INTERVAL needs batching (its unit is a time window).
+          * MONOLITHIC must not have batching (one whole-table unit).
+          * VIEW has no batching, staging, or recreate/truncate.
+        """
+        name = self.target.name
+        if self.kind is Kind.INTERVAL and self.batching is None:
+            raise ValueError(
+                f"model {name!r} is kind=INTERVAL but has no batching — an "
+                f"interval model's unit of work is a time window. Add "
+                f"`batching=Batch(...)` (or pick kind=MONOLITHIC for a "
+                f"whole-table load)."
+            )
+        if self.kind is Kind.MONOLITHIC and self.batching is not None:
+            raise ValueError(
+                f"model {name!r} is kind=MONOLITHIC but has batching — a "
+                f"monolithic model is one whole-table unit, not windowed. "
+                f"Drop `batching` (or pick kind=INTERVAL)."
+            )
+        if self.kind is Kind.VIEW:
+            if self.batching is not None:
+                raise ValueError(
+                    f"model {name!r} is kind=VIEW but has batching — a view "
+                    f"isn't windowed. Drop `batching`."
+                )
+            if self.target.staging is not None:
+                raise ValueError(
+                    f"model {name!r} is kind=VIEW but has staging — a view has "
+                    f"nothing to stage. Drop `staging`."
+                )
+            if self.target.recreate_table or self.target.truncate_table:
+                raise ValueError(
+                    f"model {name!r} is kind=VIEW — recreate_table / "
+                    f"truncate_table don't apply to views."
+                )
+
+    def _validate_upstream_requires_state(self) -> None:
+        """Upstream contracts are only enforced for state-tracked models (the
+        state machine checks them), so declaring `upstream` without `state`
+        would silently never enforce it — make that a definition-time error."""
+        if self.upstream and self.state is None:
+            raise ValueError(
+                f"model {self.target.name!r} declares upstream but has no "
+                f"state — upstream contracts are only checked for state-tracked "
+                f"models. Add state=State(...), or drop upstream."
+            )
 
     def pretty(self) -> None:
         cols = self.target.columns
@@ -183,6 +198,197 @@ class Model:
         each was declared as a bare string or a `Contract`. Used wherever
         only the identity matters (library registration, banner, repr)."""
         return [u.name if isinstance(u, Contract) else u for u in self.upstream]
+
+    @property
+    def source_names(self) -> list[str]:
+        """The names of this model's declared external `sources`, whether
+        each was declared as a bare string or a `Source`. External inputs
+        bollhav reads but does not manage; resolved by `source_ref()`."""
+        return [s.name if isinstance(s, Source) else s for s in self.sources]
+
+    @property
+    def source_specs(self) -> list[dict]:
+        """Typed external sources as `[{"name", "kind"}]` — what the library
+        stores for typed lineage. A bare-string source defaults to kind
+        `database`. (Upstream edges don't need this: an upstream's type is the
+        upstream model's own `kind`, joinable from its library row.)"""
+        out: list[dict] = []
+        for s in self.sources:
+            if isinstance(s, Source):
+                out.append({"name": s.name, "kind": s.kind.value})
+            else:
+                out.append({"name": s, "kind": SourceKind.DATABASE.value})
+        return out
+
+    @property
+    def declared_inputs(self) -> list[str]:
+        """Every declared input — managed `upstream`s + external `sources` —
+        by name. The model's known provenance. Empty means the model declares
+        nothing, so where its data comes from is untracked (`inputs_known` is
+        False) — it reads from hardcoded SQL or a Python read with no
+        declarations."""
+        return self.upstream_names + self.source_names
+
+    @property
+    def inputs_known(self) -> bool:
+        """False when the model declares no upstreams and no sources — its
+        data provenance is unknown for lineage. Use it to audit which models
+        have untracked inputs."""
+        return bool(self.declared_inputs)
+
+    @property
+    def upstream_specs(self) -> list[dict]:
+        """Typed managed upstreams as `[{"name", "kind"}]`. `kind` is the
+        contract kind (`interval` / `view` / `monolithic`), or `None` for a
+        bare-string upstream that didn't declare one. Symmetric with
+        `source_specs`; together they're the model's typed lineage inputs."""
+        out: list[dict] = []
+        for u in self.upstream:
+            if isinstance(u, Contract):
+                out.append({"name": u.name, "kind": u.kind})
+            else:
+                out.append({"name": u, "kind": None})
+        return out
+
+    def lineage(self) -> dict:
+        """This model's inputs as a structured dict — the basis for both
+        `lineage_json()` and `lineage_tree()`. Upstreams are managed models
+        (typed by contract kind); sources are external inputs (typed by
+        `SourceKind`). `inputs_known` is False when neither is declared."""
+        return {
+            "model": self.target.full_name,
+            "kind": self.kind.value,
+            "upstream": self.upstream_specs,
+            "sources": self.source_specs,
+            "inputs_known": self.inputs_known,
+        }
+
+    def lineage_json(self, *, indent: int | None = 2) -> str:
+        """`lineage()` serialized to JSON."""
+        return json.dumps(self.lineage(), indent=indent)
+
+    def lineage_tree(self) -> str:
+        """A little ASCII tree of this model's inputs, each labelled with its
+        contract kind (upstream) or source kind. Print it:
+
+            print(model.lineage_tree())
+
+            warehouse.daily_summary (interval)
+            ├─ upstream
+            │  ├─ warehouse.orders (interval)
+            │  └─ warehouse.customers (view)
+            └─ sources
+               ├─ raw.landing_orders (database)
+               └─ vendor.orders (api)
+        """
+        lin = self.lineage()
+        lines = [f"{lin['model']} ({lin['kind']})"]
+
+        groups: list[tuple[str, list[dict]]] = []
+        if lin["upstream"]:
+            groups.append(("upstream", lin["upstream"]))
+        if lin["sources"]:
+            groups.append(("sources", lin["sources"]))
+
+        if not groups:
+            lines.append("└─ (no declared inputs — provenance unknown)")
+            return "\n".join(lines)
+
+        for gi, (label, items) in enumerate(groups):
+            last_group = gi == len(groups) - 1
+            lines.append(f"{'└─' if last_group else '├─'} {label}")
+            child_prefix = "   " if last_group else "│  "
+            for ii, item in enumerate(items):
+                connector = "└─" if ii == len(items) - 1 else "├─"
+                kind = item["kind"] or "unspecified"
+                lines.append(f"{child_prefix}{connector} {item['name']} ({kind})")
+        return "\n".join(lines)
+
+    def ref(self, name: str) -> str:
+        """Resolve a declared **managed upstream** to its quoted,
+        schema-suffix-aware table identifier, for embedding in a read query:
+
+            f"SELECT * FROM {model.ref('warehouse.orders')} WHERE ..."
+            -> SELECT * FROM "warehouse"."orders" WHERE ...
+
+        `name` must be one of this model's declared `upstream` entries (bare
+        string or `Contract`) — referencing an undeclared upstream raises, so
+        the SQL and the dependency graph can't drift. The upstream's schema
+        gets the same suffix this run applied to the model's own target, so
+        the query is portable across dev / prod / PR environments.
+
+        Use `source()` for external (unmanaged) tables — those resolve
+        literally, without the suffix."""
+        if name not in set(self.upstream_names):
+            declared = sorted(self.upstream_names)
+            raise ValueError(
+                f"{name!r} is not a declared upstream of "
+                f"{self.target.full_name!r} — add it to upstream=[...] before "
+                f"referencing it with ref() (declared: {declared or 'none'})"
+            )
+        return self._resolve_relation(name, apply_suffix=True)
+
+    def source_ref(self, name: str) -> str:
+        """Resolve a declared **external source** to its quoted, LITERAL
+        table identifier (no schema suffix), for embedding in a read query:
+
+            f"SELECT * FROM {model.source_ref('raw.landing_orders')} WHERE ..."
+            -> SELECT * FROM "raw"."landing_orders" WHERE ...
+
+        Named `source_ref` (not `source`) because `model.source` is already
+        the model's own read-source definition (`SourceTable`/`SourceFile`).
+
+        `name` must be one of this model's declared `sources` entries (bare
+        string or `Source`). External tables bollhav doesn't manage live at
+        the same fixed location in every environment, so the suffix is NOT
+        applied. They are never gated; declaring them just records the
+        lineage boundary where data enters the system.
+
+        (You can always hardcode an external table directly in the SQL
+        instead — `source_ref()` is the opt-in for lineage + resolution.)"""
+        match: Source | str | None = None
+        for s in self.sources:
+            if (s.name if isinstance(s, Source) else s) == name:
+                match = s
+                break
+        if match is None:
+            declared = sorted(self.source_names)
+            raise ValueError(
+                f"{name!r} is not a declared source of "
+                f"{self.target.full_name!r} — add it to sources=[...] before "
+                f"referencing it with source_ref() (declared: {declared or 'none'})"
+            )
+        if isinstance(match, Source) and not match.sql_addressable:
+            raise ValueError(
+                f"source {name!r} is kind={match.kind.value} — not SQL-addressable, "
+                f"so it can't go in a FROM. Read it in your read function instead; "
+                f"source_ref() is only for DATABASE/VIEW sources."
+            )
+        return self._resolve_relation(name, apply_suffix=False)
+
+    def _resolve_relation(self, name: str, *, apply_suffix: bool) -> str:
+        """Split a dotted `[catalog.]schema.table` name, optionally apply
+        this model's active schema suffix (managed refs only), and quote per
+        `target.database` (Postgres `"x"."y"`, MSSQL `[x].[y]`)."""
+        from bollhav.model.database import Database
+        from bollhav.model.target_schema import TargetSchema
+
+        parts = name.split(".")
+        table = parts[-1]
+        schema = parts[-2] if len(parts) >= 2 else None
+        catalog = parts[-3] if len(parts) >= 3 else None
+
+        if schema is not None and apply_suffix:
+            schema = TargetSchema(
+                name=schema,
+                suffix=self.target.schema.suffix,
+                suffix_appendix=self.target.schema.suffix_appendix,
+            ).resolved
+
+        idents = [p for p in (catalog, schema, table) if p]
+        if self.target.database is Database.MSSQL:
+            return ".".join(f"[{p}]" for p in idents)
+        return ".".join('"' + p.replace('"', '""') + '"' for p in idents)
 
     @property
     def stateful(self) -> bool:
@@ -306,22 +512,29 @@ class Model:
         return TZInterval(prev, curr)
 
     def _apply_lookback(self, cron_expression: str, since: datetime) -> datetime:
-        if self.batching is None:
-            raise ValueError(
-                f"_apply_lookback called on model {self.target.full_name!r} "
-                f"with no batching configured — lookback is an interval feature"
-            )
-        if self.batching.interval.lookback is None:
-            raise ValueError(
-                f"_apply_lookback called on model {self.target.full_name!r} "
-                f"with batching.interval.lookback unset — set a non-negative "
-                f"int to enable lookback"
-            )
+        lookback = self._lookback_or_raise()
         it = croniter(cron_expression, since)
         tick1 = it.get_next(datetime)
         tick2 = it.get_next(datetime)
         tick_size = tick2 - tick1
-        return since - (tick_size * self.batching.interval.lookback)
+        return since - (tick_size * lookback)
+
+    def _lookback_or_raise(self) -> int:
+        """Return the configured lookback (the number of cron ticks to shift
+        an interval's `since` back), or raise. Lookback is an interval
+        feature, so it requires batching with an explicit non-negative
+        `interval.lookback`."""
+        if self.batching is None:
+            raise ValueError(
+                f"lookback is an interval feature, but model "
+                f"{self.target.full_name!r} has no batching configured"
+            )
+        if self.batching.interval.lookback is None:
+            raise ValueError(
+                f"model {self.target.full_name!r} has batching.interval.lookback "
+                f"unset — set a non-negative int to enable lookback"
+            )
+        return self.batching.interval.lookback
 
     def compute_intervals(self) -> tuple[TZInterval, ...] | tuple[None]:
         """Resolve and chunk a time interval into TZIntervals.

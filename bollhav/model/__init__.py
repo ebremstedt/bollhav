@@ -29,6 +29,8 @@ from bollhav.model.upstream import (
     IntervalContract,
     ViewContract,
     MonolithicContract,
+    Source,
+    SourceKind,
     UpstreamCheck,
 )
 from bollhav.model.progress_bar import progress_bar, ProgressLevel, name_width_for
@@ -66,6 +68,8 @@ __all__ = [
     "IntervalContract",
     "ViewContract",
     "MonolithicContract",
+    "Source",
+    "SourceKind",
     "UpstreamCheck",
     "progress_bar",
     "ProgressLevel",

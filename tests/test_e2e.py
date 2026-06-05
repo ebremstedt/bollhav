@@ -10,9 +10,9 @@ bootstrap, and additive library schema migration.
 Each test uses a deterministic schema derived from its node id (unique
 per test, stable across runs — no random suffix) so multiple tests can
 run in parallel safely. The per-test target + staging schemas are dropped
-CASCADE; this test's tables in the central state/error schemas
-(`z_bollhav_state` / `z_bollhav_error`) and the library schema
-(`z_bollhav`) are cleaned around each test.
+CASCADE; this test's state tables in `z_bollhav_state` and its rows in the
+shared `z_bollhav.errors` / library (`z_bollhav`) are cleaned around each
+test.
 
 Skip when `E2E_DSN` is unset and the local default isn't reachable.
 """
@@ -35,8 +35,11 @@ from bollhav.model import (
     Bounds,
     Database,
     IntervalChunks,
+    IntervalContract,
     Kind,
     Model,
+    Source,
+    SourceKind,
     SourceTable,
     Staging,
     State,
@@ -95,9 +98,9 @@ def schema_name(request):
     Each test still gets a unique schema (node names are unique, including
     parametrized variants), so parallel runs don't collide — but the name
     is stable across runs, so there's nothing random in the table names.
-    Cleanup also removes this schema's tables from the central
-    `z_bollhav_state` / `z_bollhav_error` so a rerun can't inherit stale
-    `applied` rows."""
+    Cleanup also removes this schema's state tables from `z_bollhav_state`
+    and its rows from the shared `z_bollhav.errors`, so a rerun can't inherit
+    stale `applied` rows."""
     name = re.sub(r"[^a-z0-9]+", "_", request.node.name.lower()).strip("_")[:54]
     _drop_schemas(name)
     yield name
@@ -112,32 +115,42 @@ def _drop_schemas(target_schema: str) -> None:
 
 
 def _drop_central_state_tables(conn, target_schema: str) -> None:
-    """Drop this schema's tables from the central state/error schemas.
+    """Drop this schema's per-model state tables from `z_bollhav_state`, and
+    delete its rows from the shared `z_bollhav.errors`.
 
-    State and error tables for every model now live in the shared
-    `z_bollhav_state` / `z_bollhav_error`, named by a hash — so they aren't
-    swept by the per-schema `DROP SCHEMA CASCADE` above. Each state table
-    self-identifies via its `model_name` column; match `target_schema.%` and
-    drop the same-named table in both schemas. Only this test's tables are
-    touched, so it's safe under parallel runs."""
-    from bollhav.postgres.state import ERROR_SCHEMA, STATE_SCHEMA
+    State tables for every model live in the shared `z_bollhav_state`, named
+    by a hash — so they aren't swept by the per-schema `DROP SCHEMA CASCADE`
+    above. Each self-identifies via its `model_name` column; match
+    `target_schema.%` and drop it. Errors are one shared table keyed by
+    `full_name`, so we just delete this schema's rows. Only this test's data
+    is touched, so it's safe under parallel runs."""
+    from bollhav.postgres.state import ERRORS_TABLE, LIBRARY_SCHEMA, STATE_SCHEMA
 
     have_state = conn.execute(
         "SELECT 1 FROM information_schema.schemata WHERE schema_name = %s",
         [STATE_SCHEMA],
     ).fetchone()
-    if not have_state:
-        return
-    tables = conn.execute(
-        "SELECT tablename FROM pg_tables WHERE schemaname = %s", [STATE_SCHEMA]
-    ).fetchall()
-    for (table,) in tables:
-        owner = conn.execute(
-            f'SELECT model_name FROM "{STATE_SCHEMA}"."{table}" LIMIT 1'
-        ).fetchone()
-        if owner and owner[0] and str(owner[0]).startswith(f"{target_schema}."):
-            conn.execute(f'DROP TABLE IF EXISTS "{STATE_SCHEMA}"."{table}"')
-            conn.execute(f'DROP TABLE IF EXISTS "{ERROR_SCHEMA}"."{table}"')
+    if have_state:
+        tables = conn.execute(
+            "SELECT tablename FROM pg_tables WHERE schemaname = %s", [STATE_SCHEMA]
+        ).fetchall()
+        for (table,) in tables:
+            owner = conn.execute(
+                f'SELECT model_name FROM "{STATE_SCHEMA}"."{table}" LIMIT 1'
+            ).fetchone()
+            if owner and owner[0] and str(owner[0]).startswith(f"{target_schema}."):
+                conn.execute(f'DROP TABLE IF EXISTS "{STATE_SCHEMA}"."{table}"')
+
+    have_errors = conn.execute(
+        "SELECT 1 FROM information_schema.tables "
+        "WHERE table_schema = %s AND table_name = %s",
+        [LIBRARY_SCHEMA, ERRORS_TABLE],
+    ).fetchone()
+    if have_errors:
+        conn.execute(
+            f'DELETE FROM "{LIBRARY_SCHEMA}"."{ERRORS_TABLE}" WHERE full_name LIKE %s',
+            [f"{target_schema}.%"],
+        )
 
 
 def _drop_library() -> None:
@@ -175,6 +188,7 @@ def _orders_model(
     staging: Staging | None = None,
     bounds_end: datetime = UNTIL,
     upstream: list[str] | None = None,
+    sources: list | None = None,
 ) -> Model:
     m = Model(
         target=Target(
@@ -191,6 +205,7 @@ def _orders_model(
         kind=Kind.INTERVAL,
         bounds=Bounds(begin=SINCE, end=bounds_end),
         upstream=upstream or [],
+        sources=sources or [],
     )
     # `@load_models` normally sets backfill directives from env vars
     # before invoking the bootstrap. E2E tests call the bootstrap
@@ -368,7 +383,7 @@ def _library_rows() -> list[tuple]:
     with _conn() as c:
         rows = c.execute(
             "SELECT full_name, model_type, state_schema, state_table "
-            "FROM z_bollhav.model_library "
+            "FROM z_bollhav.library "
             "ORDER BY full_name"
         ).fetchall()
     return rows
@@ -527,14 +542,14 @@ def test_e2e_orphan_staging_gc_at_bootstrap(schema_name):
 
 
 def test_e2e_library_migration_is_additive(schema_name):
-    """Seed an old-shape `model_library` (no model_type column,
+    """Seed an old-shape `library` (no model_type column,
     state_schema/table NOT NULL). Bootstrap should ALTER it in place
     — no DROP — and the existing row should survive."""
     _drop_library()
     with psycopg.connect(_dsn(), autocommit=True) as c:
         c.execute("CREATE SCHEMA z_bollhav")
         c.execute(
-            "CREATE TABLE z_bollhav.model_library ("
+            "CREATE TABLE z_bollhav.library ("
             "  full_name TEXT PRIMARY KEY,"
             "  upstream TEXT[] NOT NULL,"
             "  state_schema TEXT NOT NULL,"
@@ -543,7 +558,7 @@ def test_e2e_library_migration_is_additive(schema_name):
             ")"
         )
         c.execute(
-            "INSERT INTO z_bollhav.model_library "
+            "INSERT INTO z_bollhav.library "
             "(full_name, upstream, state_schema, state_table) "
             "VALUES ('legacy.model', '{}', 'z_legacy', 'model_state')"
         )
@@ -562,7 +577,7 @@ def test_e2e_library_migration_is_additive(schema_name):
             r[0]
             for r in c.execute(
                 "SELECT column_name FROM information_schema.columns "
-                "WHERE table_schema='z_bollhav' AND table_name='model_library'"
+                "WHERE table_schema='z_bollhav' AND table_name='library'"
             ).fetchall()
         ]
     assert "model_type" in cols
@@ -571,7 +586,7 @@ def test_e2e_library_migration_is_additive(schema_name):
         nullable = dict(
             c.execute(
                 "SELECT column_name, is_nullable FROM information_schema.columns "
-                "WHERE table_schema='z_bollhav' AND table_name='model_library' "
+                "WHERE table_schema='z_bollhav' AND table_name='library' "
                 "  AND column_name IN ('state_schema','state_table')"
             ).fetchall()
         )
@@ -1031,3 +1046,155 @@ def test_e2e_staging_append_target_recreate_partition(schema_name, caplog):
         assert len(apply_logs) == 3
     finally:
         _drop_schemas(source_schema)
+
+
+# ── 13. registry read API (lineage) ──────────────────────────────────
+
+
+def _registry_models(schema_name):
+    """A producer `orders` and a downstream `summary` that declares an
+    upstream contract on it plus two external sources."""
+    orders = _orders_model(schema_name, name="orders", state=State(), staging=Staging())
+    summary = _orders_model(
+        schema_name,
+        name="summary",
+        state=State(),
+        staging=Staging(),
+        upstream=[IntervalContract(f"{schema_name}.orders")],
+        sources=[
+            Source("raw.landing", kind=SourceKind.DATABASE),
+            Source("vendor.api_orders", kind=SourceKind.API),
+        ],
+    )
+    return orders, summary
+
+
+def test_e2e_registry_get_lineage_matches_model_lineage(schema_name):
+    from bollhav.postgres import registry
+
+    orders, summary = _registry_models(schema_name)
+    _bootstrap([orders, summary])
+
+    summary_fqn = f"{schema_name}.summary"
+    with _conn() as c:
+        lineage = registry.get_lineage(c, summary_fqn)
+
+    # The DB-read lineage matches the in-code Model.lineage() shape exactly:
+    # upstream typed by the upstream's registered kind (= the contract kind
+    # here), sources typed by SourceKind.
+    assert lineage == summary.lineage()
+    assert lineage["upstream"] == [
+        {"name": f"{schema_name}.orders", "kind": "interval"}
+    ]
+    assert {"name": "vendor.api_orders", "kind": "api"} in lineage["sources"]
+    assert lineage["inputs_known"] is True
+
+
+def test_e2e_registry_list_and_downstreams_and_graph(schema_name):
+    from bollhav.postgres import registry
+
+    orders, summary = _registry_models(schema_name)
+    _bootstrap([orders, summary])
+    orders_fqn = f"{schema_name}.orders"
+    summary_fqn = f"{schema_name}.summary"
+
+    with _conn() as c:
+        names = {m["full_name"] for m in registry.list_models(c)}
+        downstreams = registry.get_downstreams(c, orders_fqn)
+        graph = registry.get_graph(c)
+
+    assert {orders_fqn, summary_fqn} <= names
+    # who depends on orders → summary
+    assert summary_fqn in downstreams
+    # graph has both model nodes + the external source boundary nodes
+    node_names = {n["name"] for n in graph["nodes"]}
+    assert {orders_fqn, summary_fqn, "raw.landing", "vendor.api_orders"} <= node_names
+    assert {
+        "name": "vendor.api_orders",
+        "type": "external",
+        "kind": "api",
+    } in graph["nodes"]
+    # edges: upstream (orders→summary) and source (raw.landing→summary)
+    assert {"from": orders_fqn, "to": summary_fqn, "relation": "upstream"} in graph[
+        "edges"
+    ]
+    assert {
+        "from": "raw.landing",
+        "to": summary_fqn,
+        "relation": "source",
+        "kind": "database",
+    } in graph["edges"]
+
+
+def test_e2e_registry_get_upstream_tree_nests(schema_name):
+    from bollhav.postgres import registry
+
+    # orders -> summary -> rollup : a 3-deep chain.
+    orders = _orders_model(schema_name, name="orders", state=State(), staging=Staging())
+    summary = _orders_model(
+        schema_name,
+        name="summary",
+        state=State(),
+        staging=Staging(),
+        upstream=[IntervalContract(f"{schema_name}.orders")],
+        sources=[Source("raw.landing", kind=SourceKind.API)],
+    )
+    rollup = _orders_model(
+        schema_name,
+        name="rollup",
+        state=State(),
+        staging=Staging(),
+        upstream=[IntervalContract(f"{schema_name}.summary")],
+    )
+    _bootstrap([orders, summary, rollup])
+
+    with _conn() as c:
+        tree = registry.get_upstream_tree(c, f"{schema_name}.rollup")
+
+    assert tree["model"] == f"{schema_name}.rollup"
+    child = tree["upstream"][0]
+    assert child["model"] == f"{schema_name}.summary"
+    assert child["sources"] == [{"name": "raw.landing", "kind": "api"}]
+    grandchild = child["upstream"][0]
+    assert grandchild["model"] == f"{schema_name}.orders"
+
+
+def test_e2e_registry_get_recent_state(schema_name):
+    from bollhav.postgres import registry
+
+    m = _orders_model(schema_name, name="orders", state=State(), staging=Staging())
+    _run_intervals(m)  # bootstrap + run all intervals -> applied state rows
+
+    with _conn() as c:
+        rows = registry.get_recent_state(c, f"{schema_name}.orders")
+
+    assert len(rows) >= 1
+    assert all(r["status"] == "applied" for r in rows)
+    assert rows[0]["applied_at"]  # ISO string
+    assert rows[0]["run_id"]
+
+
+def test_e2e_registry_get_errors(schema_name):
+    from bollhav.postgres import registry
+
+    m = _orders_model(schema_name, name="orders", state=State(), staging=Staging())
+    _bootstrap([m])
+    fqn = f"{schema_name}.orders"
+    # Log a failure the way @execute_lifecycle would, into z_bollhav.errors.
+    with psycopg.connect(_dsn(), autocommit=True) as conn:
+        PostgresState(model=m, conn=conn).record_failure(
+            run_id=m.run_id,
+            interval=None,
+            error_type="RuntimeError",
+            error_message="boom",
+            traceback_text="Traceback ...",
+            update_state=False,
+        )
+
+    with _conn() as c:
+        errs = registry.get_errors(c, fqn)
+
+    assert len(errs) >= 1
+    assert errs[0]["full_name"] == fqn
+    assert errs[0]["error_type"] == "RuntimeError"
+    assert errs[0]["created_at"]  # ISO string

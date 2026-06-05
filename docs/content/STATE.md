@@ -84,7 +84,7 @@ A model's `upstream` is a list of **contracts** on other models, each checked be
 
 ### Library and state colocation
 
-The library lives in `z_bollhav.model_library` in the **state DB**. View and `library=True` models without their own state-DSN fall back to `target.dsn_env_var` — which is fine for single-DB setups (the common case where state and target share one Postgres database). If you split state to a separate database, library-only models also need their target DSN to point at that same instance, since they have no `state.dsn_env_var` to redirect them.
+The library lives in `z_bollhav.library` in the **state DB**. View and `library=True` models without their own state-DSN fall back to `target.dsn_env_var` — which is fine for single-DB setups (the common case where state and target share one Postgres database). If you split state to a separate database, library-only models also need their target DSN to point at that same instance, since they have no `state.dsn_env_var` to redirect them.
 
 ## Disabling state entirely: `STATE_DISABLED`
 

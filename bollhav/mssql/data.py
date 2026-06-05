@@ -1,20 +1,9 @@
-"""Target-side (data) MSSQL backend for one model.
-
+"""
 `MssqlData` is the MSSQL counterpart to `PostgresData`: it runs the
 target-DB asset DDL and drives the per-interval staging lifecycle for a
 model. Each method is one discrete operation; the lifecycle hook decides
 which to call and in what order — the same hook that drives
 `PostgresData`, so the two backends share one orchestration.
-
-MSSQL has no state coordination (`bollhav.mssql.staging._assert_supported`
-rejects `State()`), so only the stateless paths of the lifecycle ever
-reach this class: asset DDL + staged/direct writes, never the state
-machine.
-
-Most methods are thin wrappers over the already-tested free functions in
-`bollhav.mssql.schema` and `bollhav.mssql.staging`; the discrete
-table-shape steps (create / recreate / truncate / unique) are issued
-here so they compose the same way the Postgres ones do.
 """
 
 from __future__ import annotations
@@ -27,7 +16,7 @@ import pyodbc
 
 from bollhav.mssql.columns import MssqlColumn
 from bollhav.mssql.schema import (
-    _b,
+    _bracket_quote,
     _col_ddl,
     ensure_indexes,
     ensure_primary_key,
@@ -38,7 +27,7 @@ from bollhav.mssql.staging import (
     drop_staging_table,
     ensure_staging_schema,
     ensure_staging_table,
-    gc_orphan_staging_tables,
+    cleanup_orphaned_staging_tables,
     write_to_staging,
 )
 
@@ -52,21 +41,9 @@ logger = logging.getLogger(__name__)
 
 
 class MssqlData:
-    """Target-side asset DDL + staging lifecycle for one MSSQL model.
-
-    Construct with the model and the caller-owned data connection
-    (a `pyodbc.Connection`, opened in `main()` and threaded through the
-    lifecycle hooks). Each method runs one discrete piece of setup; the
-    lifecycle hook calls the ones it needs, in order."""
+    """Target-side asset DDL + staging lifecycle for MSSQL models"""
 
     def __init__(self, model: "Model", conn: pyodbc.Connection) -> None:
-        if model.state is not None:
-            raise NotImplementedError(
-                f"MSSQL has no state coordination — remove State() from "
-                f"{model.target.full_name!r}. Staging still works without it: "
-                f"chunked atomic apply, intervals just rerun on crash (there's "
-                f"no applied-gate)."
-            )
         self.model = model
         self.conn = conn
 
@@ -88,7 +65,7 @@ class MssqlData:
         schema, table = target.schema.resolved, target.name_resolved
         cursor = self.conn.cursor()
         cursor.execute(
-            f"IF OBJECT_ID(?, 'U') IS NOT NULL DROP TABLE {_b(schema)}.{_b(table)}",
+            f"IF OBJECT_ID(?, 'U') IS NOT NULL DROP TABLE {_bracket_quote(schema)}.{_bracket_quote(table)}",
             f"{schema}.{table}",
         )
         cursor.commit()
@@ -107,7 +84,7 @@ class MssqlData:
             f"IF NOT EXISTS ("
             f"    SELECT 1 FROM INFORMATION_SCHEMA.TABLES"
             f"    WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?"
-            f") CREATE TABLE {_b(schema)}.{_b(table)} (\n{col_defs}\n)",
+            f") CREATE TABLE {_bracket_quote(schema)}.{_bracket_quote(table)} (\n{col_defs}\n)",
             schema,
             table,
         )
@@ -119,7 +96,9 @@ class MssqlData:
         target = self.model.target
         schema, table = target.schema.resolved, target.name_resolved
         cursor = self.conn.cursor()
-        cursor.execute(f"TRUNCATE TABLE {_b(schema)}.{_b(table)}")
+        cursor.execute(
+            f"TRUNCATE TABLE {_bracket_quote(schema)}.{_bracket_quote(table)}"
+        )
         cursor.commit()
 
     def create_indexes(self) -> None:
@@ -134,14 +113,14 @@ class MssqlData:
             return
         schema, table = target.schema.resolved, target.name_resolved
         constraint_name = f"{table}_uq"
-        cols = ", ".join(_b(c.name) for c in target.unique_columns)
+        cols = ", ".join(_bracket_quote(c.name) for c in target.unique_columns)
         cursor = self.conn.cursor()
         cursor.execute(
             f"IF NOT EXISTS ("
             f"    SELECT 1 FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS"
             f"    WHERE CONSTRAINT_NAME = ? AND TABLE_SCHEMA = ? AND TABLE_NAME = ?"
-            f") ALTER TABLE {_b(schema)}.{_b(table)}"
-            f"    ADD CONSTRAINT {_b(constraint_name)} UNIQUE ({cols})",
+            f") ALTER TABLE {_bracket_quote(schema)}.{_bracket_quote(table)}"
+            f"    ADD CONSTRAINT {_bracket_quote(constraint_name)} UNIQUE ({cols})",
             constraint_name,
             schema,
             table,
@@ -149,17 +128,12 @@ class MssqlData:
         cursor.commit()
 
     # ── staging lifecycle ─────────────────────────────────────────────
-    #
-    # The per-interval staging flow as discrete steps the lifecycle hook
-    # drives in order: create the table, write rows into it, apply it to
-    # the target, then tear it down. The heavy write-mode SQL lives in
-    # `bollhav.mssql.staging`; these are the model-scoped entry points.
 
     def create_staging_schema(self) -> None:
         ensure_staging_schema(self.conn, self.model)
 
     def gc_orphan_staging_tables(self, *, keep_run_id: UUID | None = None) -> None:
-        gc_orphan_staging_tables(self.conn, self.model, keep_run_id=keep_run_id)
+        cleanup_orphaned_staging_tables(self.conn, self.model, keep_run_id=keep_run_id)
 
     def create_staging_table(self, run_id: UUID) -> None:
         ensure_staging_table(self.conn, self.model, run_id)
@@ -168,11 +142,6 @@ class MssqlData:
         write_to_staging(self.conn, self.model, run_id, df)
 
     def apply_staging_to_target(self, run_id: UUID, interval: "TZInterval") -> None:
-        """Apply this run's staging table to the target via
-        `target.write_mode`, atomically. The MSSQL apply also drops the
-        staging table in the same transaction (unless `keep_after_apply`),
-        so the lifecycle's follow-up `drop_staging_table` is a safe
-        no-op."""
         apply_atomically_to_target(
             self.conn,
             self.model,
@@ -182,12 +151,10 @@ class MssqlData:
         )
 
     def drop_staging_table(self, run_id: UUID) -> None:
-        """Tear down this run's staging table. No-op when
-        `Staging.keep_after_apply` (the operator wants kept tables to
-        live; manual cleanup is on them), and already a no-op when the
-        atomic apply dropped it."""
-        staging = self.model.target.staging
-        if staging is not None and staging.keep_after_apply:
+        if (
+            self.model.target.staging is not None
+            and self.model.target.staging.keep_after_apply
+        ):
             logger.debug(
                 "teardown skipped for %s — Staging.keep_after_apply=True",
                 self.model.target.full_name,

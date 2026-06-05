@@ -13,8 +13,8 @@ This page explains each code: what triggers it, what to do about it.
 ## STATE_001 — upstream not registered
 
 **Trigger.** A staged, state-enabled model's `upstream` declares a model
-that has never been seen by `@load_models`. The model library
-(`z_bollhav.model_library`) has no row for it, so bollhav can't reason
+that has never been seen by `@load_models`. The library
+(`z_bollhav.library`) has no row for it, so bollhav can't reason
 about whether the upstream has produced data for the requested
 `(since, until)` window.
 
