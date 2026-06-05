@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 
 _CRON_ALIASES = INTERVAL_EXPRESSION_SHORTCUTS
 
-MAX_BATCH_SIZE = 10000
+MAX_BATCH_SIZE = 100000
 
 
 def validate_batch_size(batch_size: int, source: str) -> None:
@@ -103,7 +103,7 @@ class Batch:
     iterates. Always present.
 
     `size` is the number of rows per read chunk, capped at
-    `MAX_BATCH_SIZE` (10000). The framework hands `(since, until)` to the
+    `MAX_BATCH_SIZE` (100000). The framework hands `(since, until)` to the
     user's read function; the row-level sub-batching within an interval
     is honored by the read helpers, which slice the source by `size`.
 
@@ -111,7 +111,7 @@ class Batch:
     """
 
     interval: IntervalChunks = field(default_factory=IntervalChunks)
-    size: int = 10000
+    size: int = 20000
     retries: int | None = None
 
     def __post_init__(self) -> None:

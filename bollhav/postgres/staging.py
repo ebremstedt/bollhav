@@ -220,10 +220,8 @@ def write_to_staging(
         case _ as wm:  # pragma: no cover — guarded by Staging.__post_init__
             raise NotImplementedError(f"unsupported staging.write_mode {wm!r}")
     logger.debug(
-        "stage: wrote %d rows to %s.%s (%s)",
+        "stage: wrote %d rows to staging table (%s)",
         len(df),
-        _staging_schema(model),
-        _staging_table(model, run_id),
         _staging_write_mode(model).value,
     )
 
@@ -408,10 +406,7 @@ def apply_atomically_to_target(
         # data-move transaction. The data write commits here; the state
         # flip follows (non-atomic, data → state).
     logger.debug(
-        "stage: applied %s..%s for %s (%s)",
-        since,
-        until,
-        model.target.full_name,
+        "stage: moved data from staging to target (%s)",
         model.target.write_mode.value,
     )
 

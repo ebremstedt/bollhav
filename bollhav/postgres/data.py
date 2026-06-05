@@ -239,6 +239,7 @@ class PostgresData:
                 col_defs=col_defs,
             )
         )
+        logger.debug("stage: created staging table %s.%s", schema, table)
 
     def gc_orphan_staging_tables(self, *, keep_run_id: UUID | None = None) -> None:
         """Drop staging tables left behind by crashed runs. Best-effort:

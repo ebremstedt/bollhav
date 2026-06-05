@@ -136,6 +136,7 @@ def ensure_staging_table(conn: pyodbc.Connection, model: "Model", run_id: UUID) 
         table,
     )
     cursor.commit()
+    logger.debug("stage: created staging table %s.%s", schema, table)
 
 
 def drop_staging_table(conn: pyodbc.Connection, model: "Model", run_id: UUID) -> None:
@@ -212,10 +213,8 @@ def write_to_staging(
             raise NotImplementedError(f"unsupported staging.write_mode {wm!r}")
     cursor.commit()
     logger.debug(
-        "stage: wrote %d rows to %s.%s (%s)",
+        "stage: wrote %d rows to staging table (%s)",
         len(df),
-        _staging_schema(model),
-        _staging_table(model, run_id),
         _staging_write_mode(model).value,
     )
 
@@ -372,11 +371,7 @@ def apply_atomically_to_target(
         cursor.rollback()
         raise
     logger.debug(
-        "stage: applied %s (%s -> %s.%s via %s)",
-        model.target.full_name,
-        f"{staging_schema}.{staging_table}",
-        target_schema,
-        target_table,
+        "stage: moved data from staging to target (%s)",
         model.target.write_mode.value,
     )
 
