@@ -17,7 +17,7 @@ from roskarl import (
 from bollhav.model.runtime import apply_runtime_overrides
 from bollhav.model.model import Model
 from bollhav.model.ordering import UpstreamMode
-from bollhav.model.progress_bar import get_progress_level
+from bollhav.model.progress_bar import get_progress_level, PROGRESS, ProgressLevel
 from bollhav.model.state import StateMode
 
 import logging
@@ -166,12 +166,22 @@ def load_models(
                 print_summary(models, cfg)
                 return
 
+            # Enable the progress bar for the run. A live (spinner) bar and
+            # the interval-level DEBUG logs can't share the cursor, so under
+            # DEBUG the batch level downgrades to model (newline-only rows
+            # that interleave cleanly with log lines).
+            level = get_progress_level()
+            if cfg.debug and level == ProgressLevel.EXECUTE:
+                level = ProgressLevel.MODEL
+            PROGRESS.init(models, level)
+
             # @load_models is discovery only: read env, apply overrides,
             # match models, hand them to the user. State bootstrap (state
             # tables, library registration, prefill, interval filtering)
             # and the POST-model sweep now live in `@model_lifecycle`,
             # which runs with the connection the user opens in `main()`.
             func(models=models, debug=cfg.debug)
+            PROGRESS.finish()
 
         return wrapper
 
