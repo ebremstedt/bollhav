@@ -774,7 +774,7 @@ def test_e2e_staging_append_target_append(schema_name, caplog):
         apply_logs = [
             r.message
             for r in caplog.records
-            if "stage: applied" in r.message and "(APPEND)" in r.message
+            if "stage: moved data" in r.message and "(APPEND)" in r.message
         ]
         assert len(apply_logs) == 3
     finally:
@@ -829,7 +829,7 @@ def test_e2e_staging_append_target_upsert(schema_name, caplog):
         apply_logs = [
             r.message
             for r in caplog.records
-            if "stage: applied" in r.message and "UPSERT_NO_DELETE" in r.message
+            if "stage: moved data" in r.message and "UPSERT_NO_DELETE" in r.message
         ]
         assert len(apply_logs) == 3
     finally:
@@ -896,7 +896,7 @@ def test_e2e_staging_upsert_target_upsert(schema_name, caplog):
         apply_logs = [
             r.message
             for r in caplog.records
-            if "stage: applied" in r.message and "UPSERT_NO_DELETE" in r.message
+            if "stage: moved data" in r.message and "UPSERT_NO_DELETE" in r.message
         ]
         assert len(apply_logs) == 3
     finally:
@@ -983,7 +983,7 @@ def test_e2e_staging_append_target_recreate_partition(schema_name, caplog):
         apply_logs = [
             r.message
             for r in caplog.records
-            if "stage: applied" in r.message and "RECREATE_PARTITION" in r.message
+            if "stage: moved data" in r.message and "RECREATE_PARTITION" in r.message
         ]
         assert len(apply_logs) == 3
     finally:
