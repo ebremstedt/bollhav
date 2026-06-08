@@ -8,7 +8,6 @@ from bollhav.model.matching import match_models
 from bollhav.model.model import Model
 from bollhav.model.ordering import UpstreamMode
 from bollhav.model.target import Target
-from bollhav.model.target_schema import TargetSchema
 
 
 def apply_runtime_overrides(
@@ -30,7 +29,7 @@ def apply_runtime_overrides(
     with all pipe- and tag-driven settings baked in.
 
     Each returned model has:
-        * `target.schema.suffix` set to `schema_suffix`.
+        * `target.schema_suffix` set to `schema_suffix`.
         * `target.suffix` set to `table_suffix`.
         * `batching.interval.expression` overridden by
           `interval_expression_override` (pipe) when set.
@@ -76,7 +75,6 @@ def _apply_to_model(
 ) -> Model:
     new_model = Model(
         target=_target_with_suffix(model.target, schema_suffix, table_suffix),
-        source=model.source,
         bounds=model.bounds,
         batching=_batching_with_overrides(
             model.batching,
@@ -113,11 +111,9 @@ def _target_with_suffix(
         name=target.name,
         suffix=table_suffix or target.suffix,
         suffix_appendix=target.suffix_appendix,
-        schema=TargetSchema(
-            name=target.schema.name,
-            suffix=schema_suffix,
-            suffix_appendix=target.schema.suffix_appendix,
-        ),
+        schema=target.schema,
+        schema_suffix=schema_suffix,
+        schema_suffix_appendix=target.schema_suffix_appendix,
         catalog=target.catalog,
         database=target.database,
         columns=list(target.columns),

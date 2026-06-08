@@ -44,7 +44,7 @@ def _model(*, write_mode=None, staging_cfg=None):
     model.target.name = "orders"
     model.target.name_resolved = "orders"
     model.target.full_name = "public.orders"
-    model.target.schema.resolved = "public"
+    model.target.schema_resolved = "public"
     model.target.write_mode = write_mode or WriteMode.APPEND
     model.target.staging = staging_cfg if staging_cfg is not None else Staging()
     model.target.columns = [

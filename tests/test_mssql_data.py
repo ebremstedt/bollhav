@@ -27,7 +27,6 @@ from bollhav.model.intervals import TZInterval
 from bollhav.model.staging import Staging
 from bollhav.model.state import State
 from bollhav.model.target import Target
-from bollhav.model.target_schema import TargetSchema
 from bollhav.model.write_modes import WriteMode
 from bollhav.mssql.columns import MssqlColumn, MssqlType
 from bollhav.mssql.data import MssqlData
@@ -59,7 +58,8 @@ def _model(
     return Model(
         target=Target(
             name="events",
-            schema=TargetSchema(name="warehouse"),
+            schema="warehouse",
+            catalog="cat",
             database=Database.MSSQL,
             write_mode=write_mode,
             dsn_env_var="MSSQL_DSN",

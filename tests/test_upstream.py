@@ -19,34 +19,36 @@ from bollhav.model.upstream import (
 
 class TestContractKind:
     def test_interval_contract_kind(self):
-        assert IntervalContract("warehouse.orders").kind == "interval"
+        assert IntervalContract().kind == "interval"
 
     def test_view_contract_kind(self):
-        assert ViewContract("warehouse.customers").kind == "view"
+        assert ViewContract().kind == "view"
 
     def test_monolithic_contract_kind(self):
-        assert MonolithicContract("warehouse.app_config").kind == "monolithic"
+        assert MonolithicContract().kind == "monolithic"
 
     def test_base_contract_kind_is_abstract(self):
-        # The base class carries the name but has no satisfaction semantics.
+        # The base class is pure gating policy with no satisfaction semantics.
         with pytest.raises(NotImplementedError):
-            _ = Contract("warehouse.orders").kind
+            _ = Contract().kind
 
-    def test_carries_the_name(self):
-        assert IntervalContract("warehouse.orders").name == "warehouse.orders"
+    def test_carries_no_name(self):
+        # A Contract is gating policy only — the Source it sits on owns the
+        # upstream's identity, so the contract takes no constructor args.
+        assert not hasattr(IntervalContract(), "name")
 
     def test_is_frozen(self):
-        c = ViewContract("warehouse.customers")
+        c = ViewContract()
         with pytest.raises(Exception):
-            c.name = "other"  # frozen dataclass
+            c.x = "other"  # frozen dataclass
 
     def test_kind_matches_model_vocabulary(self):
         # The contract kinds are exactly the strings Model.kind / the state
         # backend key on.
         kinds = {
-            IntervalContract("a").kind,
-            ViewContract("b").kind,
-            MonolithicContract("c").kind,
+            IntervalContract().kind,
+            ViewContract().kind,
+            MonolithicContract().kind,
         }
         assert kinds == {"interval", "view", "monolithic"}
 

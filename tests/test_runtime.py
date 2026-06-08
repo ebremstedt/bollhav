@@ -7,7 +7,6 @@ from bollhav.model.bounds import Bounds
 from bollhav.model.kind import Kind
 from bollhav.model.model import Model
 from bollhav.model.target import Target
-from bollhav.model.target_schema import TargetSchema
 
 
 CET = ZoneInfo("Europe/Stockholm")
@@ -43,9 +42,7 @@ def _model(**batch_kwargs) -> Model:
     iv = {"expression": "@hourly", "tz": UTC}
     iv.update(batch_kwargs)
     return Model(
-        target=Target(
-            name="orders", schema=TargetSchema(name="public", suffix_appendix=None)
-        ),
+        target=Target(name="orders", schema="public", schema_suffix_appendix=None),
         batching=Batch(interval=IntervalChunks(**iv)),
         kind=Kind.INTERVAL,
     )
@@ -55,8 +52,8 @@ class TestApplyDoesNotMutate:
     def test_original_untouched(self) -> None:
         m = _model()
         _apply(m, schema_suffix="stg")
-        assert m.target.schema.suffix == ""
-        assert m.target.schema.name == "public"
+        assert m.target.schema_suffix == ""
+        assert m.target.schema == "public"
 
     def test_returns_new_model(self) -> None:
         m = _model()
@@ -67,10 +64,10 @@ class TestApplyDoesNotMutate:
 class TestSchemaSuffix:
     def test_schema_suffix_baked_in(self) -> None:
         m = _apply(_model(), schema_suffix="pr123")
-        assert m.target.schema.suffix == "pr123"
+        assert m.target.schema_suffix == "pr123"
         # schema.name stays as the base; .resolved is the suffixed form.
-        assert m.target.schema.name == "public"
-        assert m.target.schema.resolved == "public_pr123"
+        assert m.target.schema == "public"
+        assert m.target.schema_resolved == "public_pr123"
 
 
 class TestPipeOverrides:
@@ -129,9 +126,7 @@ class TestDirectives:
 class TestBatchingCarryThrough:
     def test_size_carried_through(self) -> None:
         m = Model(
-            target=Target(
-                name="events", schema=TargetSchema(name="raw", suffix_appendix=None)
-            ),
+            target=Target(name="events", schema="raw", schema_suffix_appendix=None),
             batching=Batch(
                 interval=IntervalChunks(expression="@hourly", tz=UTC),
                 size=5000,
@@ -151,7 +146,7 @@ class TestBatchingCarryThrough:
 class TestBatchingNone:
     def test_no_batching_skips_interval_baking(self) -> None:
         m = Model(
-            target=Target(name="t", schema=TargetSchema(suffix_appendix=None)),
+            target=Target(name="t", schema="", schema_suffix_appendix=None),
             kind=Kind.MONOLITHIC,
         )
         out = _apply(m, interval_expression_override="@daily")
@@ -170,9 +165,7 @@ class TestStateAndStagingCarryThrough:
 
         s = State()
         m = Model(
-            target=Target(
-                name="orders", schema=TargetSchema(name="public", suffix_appendix=None)
-            ),
+            target=Target(name="orders", schema="public", schema_suffix_appendix=None),
             batching=Batch(interval=IntervalChunks(expression="@hourly", tz=UTC)),
             state=s,
             kind=Kind.INTERVAL,
@@ -194,7 +187,8 @@ class TestStateAndStagingCarryThrough:
         m = Model(
             target=Target(
                 name="orders",
-                schema=TargetSchema(name="public", suffix_appendix=None),
+                schema="public",
+                schema_suffix_appendix=None,
                 staging=staging_cfg,
             ),
             batching=Batch(interval=IntervalChunks(expression="@hourly", tz=UTC)),

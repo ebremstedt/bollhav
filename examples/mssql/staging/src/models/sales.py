@@ -31,7 +31,6 @@ from bollhav.model import (
     Model,
     Tags,
     Target,
-    TargetSchema,
     WriteMode,
 )
 from bollhav.mssql import MssqlColumn, MssqlType
@@ -41,7 +40,8 @@ from bollhav.mssql.staging import MssqlStaging
 sales = Model(
     target=Target(
         name="sales",
-        schema=TargetSchema(name="warehouse"),
+        schema="warehouse",
+        catalog="demo",
         database=Database.MSSQL,
         write_mode=WriteMode.UPSERT_NO_DELETE,  # apply = MERGE on the PK
         dsn_env_var="BOLLHAV_MSSQL_DSN",

@@ -77,10 +77,10 @@ class TestBlockCode:
 
 class TestModelStateField:
     def _kwargs(self):
-        from bollhav.model import Batch, IntervalChunks, Kind, Target, TargetSchema
+        from bollhav.model import Batch, IntervalChunks, Kind, Target
 
         return dict(
-            target=Target(name="orders", schema=TargetSchema(name="public")),
+            target=Target(name="orders", schema="public"),
             batching=Batch(interval=IntervalChunks(expression="@hourly")),
             kind=Kind.INTERVAL,
         )
@@ -99,11 +99,11 @@ class TestModelStateField:
         assert m.state is s
 
     def test_state_without_batching_raises(self) -> None:
-        from bollhav.model import Kind, Model, Target, TargetSchema
+        from bollhav.model import Kind, Model, Target
 
         with pytest.raises(ValueError, match="has no batching"):
             Model(
-                target=Target(name="orders", schema=TargetSchema(name="public")),
+                target=Target(name="orders", schema="public"),
                 state=State(),
                 kind=Kind.INTERVAL,
             )
@@ -121,13 +121,12 @@ class TestModelStateField:
             Model,
             Staging,
             Target,
-            TargetSchema,
         )
 
         m = Model(
             target=Target(
                 name="orders",
-                schema=TargetSchema(name="public"),
+                schema="public",
                 staging=Staging(),
             ),
             batching=Batch(interval=IntervalChunks(expression="@hourly")),
@@ -144,13 +143,12 @@ class TestModelStateField:
             Model,
             Staging,
             Target,
-            TargetSchema,
         )
 
         m = Model(
             target=Target(
                 name="orders",
-                schema=TargetSchema(name="public"),
+                schema="public",
                 staging=Staging(),
             ),
             batching=Batch(interval=IntervalChunks(expression="@hourly")),
@@ -172,25 +170,27 @@ def _pg_model(*, state_cfg=None, target_dsn="TARGET_DSN"):
     model.state = state_cfg if state_cfg is not None else State()
     model.target.name = "orders"
     model.target.full_name = "public.orders"
-    model.target.schema.resolved = "public"
+    model.target.schema_resolved = "public"
+    model.target.schema_suffix = ""
+    model.target.schema_suffix_appendix = None
     model.target.dsn_env_var = target_dsn
     return model
 
 
 class TestStateSchemaName:
     def test_state_schema_is_fixed_central(self) -> None:
-        from bollhav.postgres.state import STATE_SCHEMA, PostgresState
+        from bollhav.postgres.state import LIBRARY_SCHEMA, PostgresState
 
-        assert PostgresState(_pg_model())._state_schema() == STATE_SCHEMA
-        assert STATE_SCHEMA == "z_bollhav_state"
+        assert PostgresState(_pg_model())._state_schema() == LIBRARY_SCHEMA
+        assert LIBRARY_SCHEMA == "z_bollhav"
 
     def test_schema_prefix_no_longer_affects_state_schema(self) -> None:
         from bollhav.model.state import State
-        from bollhav.postgres.state import STATE_SCHEMA, PostgresState
+        from bollhav.postgres.state import LIBRARY_SCHEMA, PostgresState
 
         # schema_prefix now only affects the staging schema; state is fixed.
         m = _pg_model(state_cfg=State(schema_prefix="ops_"))
-        assert PostgresState(m)._state_schema() == STATE_SCHEMA
+        assert PostgresState(m)._state_schema() == LIBRARY_SCHEMA
 
 
 class TestStateTableName:
@@ -480,11 +480,10 @@ class TestModelIntervals:
             Kind,
             Model,
             Target,
-            TargetSchema,
         )
 
         m = Model(
-            target=Target(name="orders", schema=TargetSchema(name="public")),
+            target=Target(name="orders", schema="public"),
             batching=Batch(interval=IntervalChunks(expression="@daily")),
             kind=Kind.INTERVAL,
         )
@@ -501,11 +500,10 @@ class TestModelIntervals:
             Kind,
             Model,
             Target,
-            TargetSchema,
         )
 
         m = Model(
-            target=Target(name="orders", schema=TargetSchema(name="public")),
+            target=Target(name="orders", schema="public"),
             batching=Batch(interval=IntervalChunks(expression="@daily")),
             bounds=Bounds(begin=datetime(2024, 1, 1, tzinfo=timezone.utc)),
             kind=Kind.INTERVAL,

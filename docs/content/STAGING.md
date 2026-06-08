@@ -74,7 +74,7 @@ from bollhav.model import Model, Target, Staging, State, WriteMode
 Model(
     target=Target(
         name="orders",
-        schema=TargetSchema(name="warehouse"),
+        schema="warehouse",
         dsn_env_var="TARGET_DSN",
         write_mode=WriteMode.APPEND,    # how staging lands in target
         staging=Staging(),              # ← opt-in

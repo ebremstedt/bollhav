@@ -70,7 +70,7 @@ def _print_models_concise(models: list[Model]) -> None:
     models (views) get no trailing column."""
     by_schema: dict[str, list[Model]] = {}
     for model in models:
-        by_schema.setdefault(model.target.schema.resolved, []).append(model)
+        by_schema.setdefault(model.target.schema_resolved, []).append(model)
 
     schemas = sorted(by_schema)
     for i, schema in enumerate(schemas):
@@ -104,7 +104,7 @@ def _print_model_extra(model: Model) -> None:
     print(f"▸ {model.target.full_name}")
     if model.target.catalog:
         print(f"    catalog      : {model.target.catalog}")
-    print(f"    schema       : {model.target.schema.resolved}")
+    print(f"    schema       : {model.target.schema_resolved}")
     print(f"    write mode   : {model.target.write_mode.value}")
 
     if model.batching is not None:
@@ -119,7 +119,7 @@ def _print_model_extra(model: Model) -> None:
     print(f"    bounds       : {_format_bounds(model)}")
     print(f"    tags         : {_format_tags(model)}")
     print(f"    upstream     : {_format_upstream(model)}")
-    print(f"    source       : {_format_source(model)}")
+    print(f"    sources      : {_format_sources(model)}")
     if model.description:
         print(f"    description  : {model.description}")
 
@@ -138,19 +138,14 @@ def _format_tags(model: Model) -> str:
 
 
 def _format_upstream(model: Model) -> str:
-    return ", ".join(model.upstream_names) if model.upstream else "(none)"
+    return ", ".join(model.upstream_names) or "(none)"
 
 
-def _format_source(model: Model) -> str:
-    src = model.source
-    if src is None:
+def _format_sources(model: Model) -> str:
+    specs = model.source_specs
+    if not specs:
         return "(none)"
-    cls = type(src).__name__
-    name = getattr(src, "name", None) or getattr(src, "path", "?")
-    schema = getattr(src, "schema", None)
-    if schema:
-        return f"{cls}({schema}.{name})"
-    return f"{cls}({name})"
+    return ", ".join(f"{s['name']} ({s['kind']})" for s in specs)
 
 
 # ── shared formatters ───────────────────────────────────────────────

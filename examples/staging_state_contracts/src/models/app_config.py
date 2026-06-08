@@ -14,7 +14,6 @@ from bollhav.model import (
     State,
     Tags,
     Target,
-    TargetSchema,
     WriteMode,
 )
 from bollhav.postgres import PostgresColumn, PostgresType
@@ -24,7 +23,8 @@ app_config = Model(
     kind=Kind.MONOLITHIC,
     target=Target(
         name="app_config",
-        schema=TargetSchema(name="warehouse"),
+        schema="warehouse",
+        catalog="demo",
         database=Database.POSTGRES,
         write_mode=WriteMode.APPEND,
         dsn_env_var="TARGET_DSN",

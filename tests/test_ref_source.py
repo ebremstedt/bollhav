@@ -1,10 +1,10 @@
-"""ref() / source() — referencing upstreams and external sources in SQL.
+"""ref() — referencing a model's inputs in SQL.
 
-`ref()` resolves a declared **managed upstream** to a quoted, schema-suffix-
-aware identifier (it moves with the environment). `source()` resolves a
-declared **external source** to a quoted LITERAL identifier (no suffix —
-external tables live at a fixed location in every environment). The two
-namespaces are separate, and an undeclared name raises in both.
+Every input is a `Source` in `upstream`. `ref(name)` resolves it to a quoted
+identifier: **suffix-aware** when the Source is gated (a managed model, carries
+a contract — it moves with the environment) and **literal** when it isn't (an
+external source at a fixed location). Only `SourceModel` inputs are
+SQL-addressable; files / APIs raise. An undeclared name raises.
 """
 
 import sys
@@ -21,21 +21,31 @@ from bollhav.model import (  # noqa: E402
     IntervalContract,
     Kind,
     Model,
+    MonolithicContract,
     Source,
-    SourceKind,
+    SourceApi,
+    SourceFile,
+    SourceModel,
     State,
     Target,
-    TargetSchema,
+    ViewContract,
 )
 from bollhav.mssql.columns import MssqlColumn, MssqlType  # noqa: E402
 from bollhav.postgres.columns import PostgresColumn, PostgresType  # noqa: E402
 
 
-def _pg_model(*, schema="warehouse_clean", suffix="", upstream=None, sources=None):
+def _has_gate(upstream) -> bool:
+    return bool(upstream) and any(getattr(s, "gated", False) for s in upstream)
+
+
+def _pg_model(*, schema="warehouse_clean", suffix="", upstream=None):
     return Model(
         target=Target(
             name="daily_summary",
-            schema=TargetSchema(name=schema, suffix=suffix, suffix_appendix=None),
+            schema=schema,
+            schema_suffix=suffix,
+            schema_suffix_appendix=None,
+            catalog="intel",
             database=Database.POSTGRES,
             columns=[
                 PostgresColumn(name="id", data_type=PostgresType.BIGINT, nullable=False)
@@ -43,20 +53,20 @@ def _pg_model(*, schema="warehouse_clean", suffix="", upstream=None, sources=Non
         ),
         batching=Batch(interval=IntervalChunks(expression="@daily")),
         kind=Kind.INTERVAL,
-        # upstream is only valid with state; sources need no state.
-        state=State() if upstream else None,
+        # gated upstreams need state; ungated sources don't.
+        state=State() if _has_gate(upstream) else None,
         upstream=upstream,
-        sources=sources,
     )
 
 
-def _mssql_model(*, sources=None):
+def _mssql_model(*, upstream=None):
     # MSSQL models aren't state-tracked (state is Postgres-only), so they use
-    # `sources`, not managed `upstream` contracts.
+    # ungated sources, not gated contracts.
     return Model(
         target=Target(
             name="daily_summary",
-            schema=TargetSchema(name="warehouse"),
+            schema="warehouse",
+            catalog="Intelligence",
             database=Database.MSSQL,
             columns=[
                 MssqlColumn(name="id", data_type=MssqlType.BIGINT, nullable=False)
@@ -64,71 +74,82 @@ def _mssql_model(*, sources=None):
         ),
         batching=Batch(interval=IntervalChunks(expression="@daily")),
         kind=Kind.INTERVAL,
-        sources=sources,
+        upstream=upstream,
     )
 
 
-class TestRef:
+def _gated(name, contract=None):
+    """A gated upstream: a SourceModel carrying a contract."""
+    return Source(name, type=SourceModel(), contract=contract or IntervalContract())
+
+
+def _src(name):
+    """An ungated relational source."""
+    return Source(name, type=SourceModel())
+
+
+class TestRefGated:
     def test_managed_resolves_quoted(self) -> None:
-        m = _pg_model(upstream=[IntervalContract("warehouse.orders")])
+        m = _pg_model(upstream=[_gated("warehouse.orders")])
         assert m.ref("warehouse.orders") == '"warehouse"."orders"'
 
     def test_applies_schema_suffix(self) -> None:
-        m = _pg_model(suffix="pr123", upstream=[IntervalContract("warehouse.orders")])
+        m = _pg_model(suffix="pr123", upstream=[_gated("warehouse.orders")])
         assert m.ref("warehouse.orders") == '"warehouse_pr123"."orders"'
 
-    def test_bare_string_upstream_is_refable(self) -> None:
-        m = _pg_model(upstream=["warehouse.orders"])
-        assert m.ref("warehouse.orders") == '"warehouse"."orders"'
-
     def test_undeclared_raises(self) -> None:
-        m = _pg_model(upstream=[IntervalContract("warehouse.orders")])
-        with pytest.raises(ValueError, match="not a declared upstream"):
+        m = _pg_model(upstream=[_gated("warehouse.orders")])
+        with pytest.raises(ValueError, match="not a declared input"):
             m.ref("warehouse.ordrs")
 
-    def test_mssql_uses_bracket_quoting(self) -> None:
-        # source() shares the same quoting path as ref(); MSSQL models use
-        # sources (no state), so this also covers 3-part catalog.schema.table.
-        m = _mssql_model(sources=["Intelligence.warehouse.orders"])
-        assert m.source_ref("Intelligence.warehouse.orders") == (
-            "[Intelligence].[warehouse].[orders]"
-        )
+    def test_mssql_bracket_quoting_drops_catalog(self) -> None:
+        # ref() shares the quoting path regardless of gating. A 3-part
+        # catalog.schema.table name is accepted, but resolves to schema.table —
+        # the catalog is connection-level, not part of the FROM.
+        m = _mssql_model(upstream=[_src("Intelligence.warehouse.orders")])
+        assert m.ref("Intelligence.warehouse.orders") == "[warehouse].[orders]"
 
 
-class TestSource:
+class TestRefUngated:
     def test_resolves_literal_without_suffix(self) -> None:
-        # suffix is set on the model, but an external source ignores it.
-        m = _pg_model(suffix="pr123", sources=[Source("raw.landing_orders")])
-        assert m.source_ref("raw.landing_orders") == '"raw"."landing_orders"'
+        # suffix is set on the model, but an ungated (external) source ignores it.
+        m = _pg_model(suffix="pr123", upstream=[_src("raw.landing_orders")])
+        assert m.ref("raw.landing_orders") == '"raw"."landing_orders"'
 
-    def test_bare_string_source_is_resolvable(self) -> None:
-        m = _pg_model(sources=["raw.landing_orders"])
-        assert m.source_ref("raw.landing_orders") == '"raw"."landing_orders"'
-
-    def test_undeclared_raises(self) -> None:
-        m = _pg_model(sources=[Source("raw.landing_orders")])
-        with pytest.raises(ValueError, match="not a declared source"):
-            m.source_ref("raw.nope")
+    def test_catalog_in_name_is_dropped(self) -> None:
+        # A model may be referenced as catalog.schema.table, but ref() resolves
+        # to schema.table — the catalog is connection-level, not in the FROM.
+        m = _pg_model(upstream=[_src("intel.raw.orders")])
+        assert m.ref("intel.raw.orders") == '"raw"."orders"'
 
 
-class TestSourceKind:
-    def test_default_kind_is_database_and_addressable(self) -> None:
-        assert Source("raw.x").kind is SourceKind.DATABASE
-        assert Source("raw.x").sql_addressable is True
-        assert Source("raw.x", kind=SourceKind.VIEW).sql_addressable is True
+class TestRefAddressability:
+    def test_addressable_flags(self) -> None:
+        assert Source("x", type=SourceModel()).sql_addressable is True
+        assert Source("x", type=SourceApi()).sql_addressable is False
+        assert Source("x", type=SourceFile(path="x.csv")).sql_addressable is False
 
-    def test_non_sql_kinds_are_not_addressable(self) -> None:
-        for k in (SourceKind.FILE, SourceKind.API, SourceKind.STREAM):
-            assert Source("ext", kind=k).sql_addressable is False
-
-    def test_source_ref_works_for_view_kind(self) -> None:
-        m = _pg_model(sources=[Source("raw.v_orders", kind=SourceKind.VIEW)])
-        assert m.source_ref("raw.v_orders") == '"raw"."v_orders"'
-
-    def test_source_ref_raises_for_non_sql_kind(self) -> None:
-        m = _pg_model(sources=[Source("vendor.orders", kind=SourceKind.API)])
+    def test_api_source_raises(self) -> None:
+        m = _pg_model(upstream=[Source("vendor.orders", type=SourceApi())])
         with pytest.raises(ValueError, match="not SQL-addressable"):
-            m.source_ref("vendor.orders")
+            m.ref("vendor.orders")
+
+    def test_view_kind_is_addressable(self) -> None:
+        m = _pg_model(
+            upstream=[Source("raw.v_orders", type=SourceModel(query="SELECT 1"))]
+        )
+        assert m.ref("raw.v_orders") == '"raw"."v_orders"'
+
+
+class TestContractValidation:
+    def test_contract_only_valid_on_source_model(self) -> None:
+        with pytest.raises(ValueError, match="only a SourceModel can be gated"):
+            Source("x", type=SourceApi(), contract=IntervalContract())
+
+    def test_contract_on_model_is_ok(self) -> None:
+        s = Source("warehouse.orders", type=SourceModel(), contract=ViewContract())
+        assert s.gated is True
+        assert s.contract.kind == "view"
 
 
 class TestDeclaredInputs:
@@ -137,38 +158,66 @@ class TestDeclaredInputs:
         assert m.declared_inputs == []
         assert m.inputs_known is False
 
-    def test_known_with_upstream(self) -> None:
-        m = _pg_model(upstream=[IntervalContract("warehouse.orders")])
+    def test_known_with_gated_upstream(self) -> None:
+        m = _pg_model(upstream=[_gated("warehouse.orders")])
         assert m.declared_inputs == ["warehouse.orders"]
         assert m.inputs_known is True
+        assert m.upstream_names == ["warehouse.orders"]
+        assert m.source_names == []
 
-    def test_known_with_sources(self) -> None:
-        m = _pg_model(sources=[Source("raw.landing"), "raw.other"])
+    def test_known_with_ungated_sources(self) -> None:
+        m = _pg_model(upstream=[_src("raw.landing"), _src("raw.other")])
         assert m.declared_inputs == ["raw.landing", "raw.other"]
-        assert m.inputs_known is True
+        assert m.source_names == ["raw.landing", "raw.other"]
+        assert m.upstream_names == []
 
-    def test_combines_upstream_and_sources(self) -> None:
+    def test_combines_gated_and_ungated(self) -> None:
         m = _pg_model(
-            upstream=[IntervalContract("warehouse.orders")],
-            sources=[Source("raw.landing", kind=SourceKind.FILE)],
+            upstream=[
+                _gated("warehouse.orders"),
+                Source("raw.landing", type=SourceFile(path="raw.csv")),
+            ]
         )
         assert m.declared_inputs == ["warehouse.orders", "raw.landing"]
-        assert m.inputs_known is True
+        assert m.upstream_names == ["warehouse.orders"]
+        assert m.source_names == ["raw.landing"]
+
+
+class TestUnknownProvenance:
+    def test_unknown_sentinel_populated_when_no_inputs(self) -> None:
+        m = _pg_model()
+        assert len(m.upstream) == 1
+        sentinel = m.upstream[0]
+        assert sentinel.type is None
+        assert sentinel.name.startswith("unknown-")
+        # …but it isn't counted as a declared input.
+        assert m.source_names == []
+        assert m.upstream_names == []
+        assert m.inputs_known is False
+
+    def test_each_unknown_is_a_distinct_node(self) -> None:
+        a = _pg_model().upstream[0].name
+        b = _pg_model().upstream[0].name
+        assert a != b  # uuid-suffixed for lineage-node uniqueness
 
 
 class TestLineage:
     def _model(self):
-        from bollhav.model import MonolithicContract, ViewContract
-
         return _pg_model(
             upstream=[
-                IntervalContract("warehouse.orders"),
-                ViewContract("warehouse.customers"),
-                MonolithicContract("warehouse.app_config"),
-            ],
-            sources=[
-                Source("raw.landing", kind=SourceKind.DATABASE),
-                Source("vendor.orders", kind=SourceKind.API),
+                Source(
+                    "warehouse.orders", type=SourceModel(), contract=IntervalContract()
+                ),
+                Source(
+                    "warehouse.customers", type=SourceModel(), contract=ViewContract()
+                ),
+                Source(
+                    "warehouse.app_config",
+                    type=SourceModel(),
+                    contract=MonolithicContract(),
+                ),
+                Source("raw.landing", type=SourceModel()),
+                Source("vendor.orders", type=SourceApi()),
             ],
         )
 
@@ -178,10 +227,11 @@ class TestLineage:
         assert lin["inputs_known"] is True
         assert {"name": "warehouse.customers", "kind": "view"} in lin["upstream"]
         assert {"name": "vendor.orders", "kind": "api"} in lin["sources"]
+        assert {"name": "raw.landing", "kind": "model"} in lin["sources"]
 
-    def test_upstream_specs_bare_string_kind_is_none(self) -> None:
-        m = _pg_model(upstream=["warehouse.orders"])
-        assert m.upstream_specs == [{"name": "warehouse.orders", "kind": None}]
+    def test_upstream_specs_use_contract_kind(self) -> None:
+        m = _pg_model(upstream=[_gated("warehouse.orders", IntervalContract())])
+        assert m.upstream_specs == [{"name": "warehouse.orders", "kind": "interval"}]
 
     def test_lineage_json_roundtrips(self) -> None:
         import json
@@ -203,19 +253,10 @@ class TestLineage:
         assert "no declared inputs" in tree
 
 
-class TestSeparateNamespaces:
-    def test_ref_cannot_resolve_a_source(self) -> None:
+class TestSeparation:
+    def test_ref_resolves_both_gated_and_ungated(self) -> None:
         m = _pg_model(
-            upstream=[IntervalContract("a.orders")],
-            sources=[Source("raw.landing")],
+            upstream=[_gated("a.orders"), _src("raw.landing")],
         )
-        with pytest.raises(ValueError, match="not a declared upstream"):
-            m.ref("raw.landing")
-
-    def test_source_cannot_resolve_an_upstream(self) -> None:
-        m = _pg_model(
-            upstream=[IntervalContract("a.orders")],
-            sources=[Source("raw.landing")],
-        )
-        with pytest.raises(ValueError, match="not a declared source"):
-            m.source_ref("a.orders")
+        assert m.ref("a.orders") == '"a"."orders"'
+        assert m.ref("raw.landing") == '"raw"."landing"'

@@ -39,7 +39,7 @@ python main.py        # every model, in order, gated by contracts
 
 ## Bake upstreams into the config
 
-Declaring `upstream=[IntervalContract("warehouse.orders"), ...]` with `state=State(...)` makes ordering and gating **data, not orchestration code**. So locally there's nothing to wire: the contract that blocks a model in prod blocks it identically on your laptop. You test the real dependency behavior, not a mock of it — run `python main.py` twice and the second run does nothing (everything `applied`), same as prod.
+Declaring `upstream=[Source("warehouse.orders", type=SourceModel(), contract=IntervalContract()), ...]` with `state=State(...)` makes ordering and gating **data, not orchestration code**. So locally there's nothing to wire: the contract that blocks a model in prod blocks it identically on your laptop. You test the real dependency behavior, not a mock of it — run `python main.py` twice and the second run does nothing (everything `applied`), same as prod.
 
 ## Backfill with separate processes
 
@@ -62,7 +62,7 @@ All three see the same `pending` rows, race per interval, and converge. Scale up
 | Env var | Effect |
 |---|---|
 | `DRY_RUN=true` | print the matched models (cron, interval count) and exit — no DB needed |
-| `PEEK=true` | bootstrap + print the state banner, then exit — see what *would* run |
+| `DRY_STATE=true` | bootstrap state + print each model's plan (would-run / applied / blocked), then exit — see what *would* run against state, without executing |
 | `DEBUG=true` | pretty-print every fully-resolved model |
 | `STATE_DISABLED=true` | run the write path with no state DB (quick smoke test on a fresh DB) |
 | `STATE_MODE=bulldozer` | reset every state row and recompute from scratch |

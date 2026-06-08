@@ -1,22 +1,30 @@
-[Home](index.md) › [Model](MODEL.md) › Source › **SourceTable**
+[Home](index.md) › [Model](MODEL.md) › Source › **SourceModel**
 
-# SourceTable
+# SourceModel
 
-Where data is read from when the model uses a table source. For file-backed sources see [SourceFile](SOURCEFILE.md).
+The `type` of a **relational** input — a `Source` that is a database table, a view, or another bollhav-managed model. It carries the config to read it. Use it in a model's [`upstream`](UPSTREAM.md) list:
 
-`source` is **optional** — `Model(source=...)` defaults to `None`. It's metadata/config for code that wants it; your `read()` function supplies the data, so a model needs no `source` at all. The one exception: a [VIEW](KINDS.md) model needs a `SourceTable` with a `query` (that's the view's definition).
+```python
+upstream=[
+    Source("raw.orders", type=SourceModel(schema="raw", dsn_env_var="RAW_DSN")),
+]
+```
 
-## name
+A `SourceModel` is the only **SQL-addressable** type — `model.ref("raw.orders")` resolves it into a `FROM`. It's also the only type that can be **gated**: attach a `contract` to make it a managed upstream (see [Upstream](UPSTREAM.md)). For file/API inputs see [SourceFile](SOURCEFILE.md) / `SourceApi`.
 
-Type: `str` · Default: required
-
-Source table or entity name.
+A [VIEW](KINDS.md) model's definition *is* a `SourceModel` with a `query` set, in its `upstream` list — that's what `CREATE OR REPLACE VIEW` runs.
 
 ## schema
 
 Type: `str` · Default: `None`
 
 Source schema.
+
+## catalog
+
+Type: `str` · Default: `None`
+
+Source catalog / database (3-part `catalog.schema.table` names).
 
 ## dsn_env_var
 
@@ -28,10 +36,22 @@ DSN env var for the source connection.
 
 Type: `str` · Default: `None`
 
-Optional query override. When set, the loader uses this SQL instead of `SELECT * FROM <schema>.<name>`.
+Optional query override. When set on a [VIEW](KINDS.md) model's source, it *is* the view definition. Otherwise the loader may use this SQL instead of `SELECT * FROM <schema>.<name>`.
+
+## partitioned_by
+
+Type: `str` · Default: `None`
+
+Partition column on the source, when relevant to the read.
 
 ## infer_schema_length
 
 Type: `int` · Default: `None`
 
 Passed to polars as `infer_schema_length` — the maximum number of rows to scan when inferring column types. `None` scans every row, which can be slow on large sources.
+
+## extra
+
+Type: `dict` · Default: `{}`
+
+Free-form config bag for read functions that need extra knobs.

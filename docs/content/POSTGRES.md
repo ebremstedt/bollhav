@@ -48,4 +48,4 @@ Loads data into a temp table via `COPY`, then runs `INSERT ... ON CONFLICT (...)
 
 ## VIEW
 
-Runs `CREATE OR REPLACE VIEW`. Requires `model.source.query` to be set. No dataframe needed.
+Runs `CREATE OR REPLACE VIEW`. Requires a `Source` in `upstream` whose `SourceModel.query` is set (the view's definition). No dataframe needed.

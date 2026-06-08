@@ -13,7 +13,7 @@ A model that declares neither has unknown provenance (`model.inputs_known is Fal
 
 ## Inspect one model's lineage in code
 
-A `Model` can describe its **own** declared inputs without any database — useful for a quick look, a CI check, or feeding a diagram. Each input is typed: an upstream by its [contract](UPSTREAM.md) kind (`interval` / `view` / `monolithic`), a [source](SOURCES.md) by its `SourceKind` (`database` / `api` / `file` / …).
+A `Model` can describe its **own** declared inputs without any database — useful for a quick look, a CI check, or feeding a diagram. Each input is typed: a gated [upstream](UPSTREAM.md) by its contract kind (`interval` / `view` / `monolithic`), an ungated [source](SOURCES.md) by its type (`model` / `file` / `api`).
 
 `model.lineage_tree()` returns a little ASCII tree:
 
@@ -132,5 +132,5 @@ A **model-level, cross-pipeline, state-aware** lineage graph straight from `libr
 
 - [Library](LIBRARY.md) — the registry the graph is read from.
 - [Upstream](UPSTREAM.md) — managed edges and `ref()`.
-- [Sources](SOURCES.md) — external boundary nodes and `source_ref()`.
+- [Sources](SOURCES.md) — ungated external boundary nodes; `ref()` resolution.
 - [State](STATE.md) · [Orchestration](ORCHESTRATION.md)

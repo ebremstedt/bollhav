@@ -39,12 +39,11 @@ from bollhav.model import (
     Kind,
     Model,
     Source,
-    SourceKind,
-    SourceTable,
+    SourceApi,
+    SourceModel,
     Staging,
     State,
     Target,
-    TargetSchema,
     WriteMode,
 )
 from bollhav.model.state import StateMode
@@ -55,11 +54,12 @@ from bollhav.postgres import (
     write,
 )
 from bollhav.postgres.data import PostgresData
-from bollhav.postgres.state import STATE_SCHEMA, PostgresState, state_table_name
+from bollhav.postgres.state import LIBRARY_SCHEMA, PostgresState, state_table_name
 
 
 DEFAULT_DSN = "postgresql://postgres:postgres@localhost:5432/postgres"
 SINCE = datetime(2024, 1, 1, tzinfo=timezone.utc)
+CAT = "e2e"  # catalog for e2e models (full identity catalog.schema.table)
 UNTIL = datetime(2024, 1, 4, tzinfo=timezone.utc)
 
 
@@ -124,22 +124,28 @@ def _drop_central_state_tables(conn, target_schema: str) -> None:
     `target_schema.%` and drop it. Errors are one shared table keyed by
     `full_name`, so we just delete this schema's rows. Only this test's data
     is touched, so it's safe under parallel runs."""
-    from bollhav.postgres.state import ERRORS_TABLE, LIBRARY_SCHEMA, STATE_SCHEMA
+    from bollhav.postgres.state import ERRORS_TABLE, LIBRARY_SCHEMA, LIBRARY_TABLE
 
     have_state = conn.execute(
         "SELECT 1 FROM information_schema.schemata WHERE schema_name = %s",
-        [STATE_SCHEMA],
+        [LIBRARY_SCHEMA],
     ).fetchone()
     if have_state:
         tables = conn.execute(
-            "SELECT tablename FROM pg_tables WHERE schemaname = %s", [STATE_SCHEMA]
+            "SELECT tablename FROM pg_tables WHERE schemaname = %s", [LIBRARY_SCHEMA]
         ).fetchall()
         for (table,) in tables:
+            # State tables now share the schema with the fixed library/errors
+            # tables (which have no model_name column) — skip those.
+            if table in (LIBRARY_TABLE, ERRORS_TABLE):
+                continue
             owner = conn.execute(
-                f'SELECT model_name FROM "{STATE_SCHEMA}"."{table}" LIMIT 1'
+                f'SELECT model_name FROM "{LIBRARY_SCHEMA}"."{table}" LIMIT 1'
             ).fetchone()
-            if owner and owner[0] and str(owner[0]).startswith(f"{target_schema}."):
-                conn.execute(f'DROP TABLE IF EXISTS "{STATE_SCHEMA}"."{table}"')
+            # full_name is catalog.schema.table now, so match the schema as a
+            # dot-delimited component (not a prefix).
+            if owner and owner[0] and target_schema in str(owner[0]).split("."):
+                conn.execute(f'DROP TABLE IF EXISTS "{LIBRARY_SCHEMA}"."{table}"')
 
     have_errors = conn.execute(
         "SELECT 1 FROM information_schema.tables "
@@ -149,7 +155,7 @@ def _drop_central_state_tables(conn, target_schema: str) -> None:
     if have_errors:
         conn.execute(
             f'DELETE FROM "{LIBRARY_SCHEMA}"."{ERRORS_TABLE}" WHERE full_name LIKE %s',
-            [f"{target_schema}.%"],
+            [f"%{target_schema}.%"],
         )
 
 
@@ -187,13 +193,14 @@ def _orders_model(
     state: State | None = None,
     staging: Staging | None = None,
     bounds_end: datetime = UNTIL,
-    upstream: list[str] | None = None,
-    sources: list | None = None,
+    upstream: list[Source] | None = None,
+    sources: list[Source] | None = None,
 ) -> Model:
     m = Model(
         target=Target(
             name=name,
-            schema=TargetSchema(name=schema_name),
+            schema=schema_name,
+            catalog=CAT,
             database=Database.POSTGRES,
             write_mode=WriteMode.APPEND,
             dsn_env_var="TARGET_DSN",
@@ -204,8 +211,8 @@ def _orders_model(
         batching=Batch(interval=IntervalChunks(expression="@daily")),
         kind=Kind.INTERVAL,
         bounds=Bounds(begin=SINCE, end=bounds_end),
-        upstream=upstream or [],
-        sources=sources or [],
+        # Gated upstreams and ungated sources are one list now.
+        upstream=(upstream or []) + (sources or []),
     )
     # `@load_models` normally sets backfill directives from env vars
     # before invoking the bootstrap. E2E tests call the bootstrap
@@ -398,7 +405,7 @@ def test_e2e_state_lifecycle(schema_name):
     m = _orders_model(schema_name, state=State(), staging=Staging())
     _run_intervals(m)
 
-    rows = _state_rows(STATE_SCHEMA, state_table_name(f"{schema_name}.orders"))
+    rows = _state_rows(LIBRARY_SCHEMA, state_table_name(f"{CAT}.{schema_name}.orders"))
     assert len(rows) == 3
     assert all(status == "applied" for status, _, _ in rows)
     assert _row_count(schema_name, "orders") == 15  # 3 intervals × 5 rows
@@ -449,13 +456,13 @@ def test_e2e_library_state_tracked_table_registers(schema_name):
     _run_intervals(m)
 
     rows = _library_rows()
-    fq = f"{schema_name}.orders"
+    fq = f"{CAT}.{schema_name}.orders"
     matches = [r for r in rows if r[0] == fq]
     assert len(matches) == 1
     _, model_type, st_sch, st_tbl = matches[0]
     assert model_type == "TABLE"
-    assert st_sch == STATE_SCHEMA
-    assert st_tbl == state_table_name(f"{schema_name}.orders")
+    assert st_sch == LIBRARY_SCHEMA
+    assert st_tbl == state_table_name(f"{CAT}.{schema_name}.orders")
 
 
 # ── 8. view-as-upstream: unregistered upstream is documentation ──────
@@ -473,24 +480,31 @@ def test_e2e_view_as_upstream_does_not_block_downstream(schema_name):
     orders = _orders_model(schema_name, state=State(), staging=Staging())
 
     view = Model(
-        source=SourceTable(
-            name="v_high_value",
-            query=f"SELECT * FROM {schema_name}.orders WHERE total >= 0",
-        ),
+        upstream=[
+            Source(
+                "v_high_value",
+                type=SourceModel(
+                    query=f"SELECT * FROM {schema_name}.orders WHERE total >= 0"
+                ),
+            )
+        ],
         target=Target(
             name="v_high_value",
-            schema=TargetSchema(name=schema_name),
+            schema=schema_name,
+            catalog=CAT,
             dsn_env_var="TARGET_DSN",
         ),
         kind=Kind.VIEW,
     )
 
+    # An ungated source (no contract) is never enforced — the unregistered
+    # view is documentation, so enriched's intervals come up applied.
     enriched = _orders_model(
         schema_name,
         name="enriched",
         state=State(),
         staging=Staging(),
-        upstream=[f"{schema_name}.v_high_value"],
+        upstream=[Source(f"{CAT}.{schema_name}.v_high_value", type=SourceModel())],
     )
 
     _bootstrap([orders, view, enriched])
@@ -501,14 +515,14 @@ def test_e2e_view_as_upstream_does_not_block_downstream(schema_name):
     _run_intervals(enriched)
 
     enriched_rows = _state_rows(
-        STATE_SCHEMA, state_table_name(f"{schema_name}.enriched")
+        LIBRARY_SCHEMA, state_table_name(f"{CAT}.{schema_name}.enriched")
     )
     assert len(enriched_rows) == 3
     assert all(status == "applied" for status, _, _ in enriched_rows)
 
     # The view is state-less → it does not register in the library.
     lib = {r[0] for r in _library_rows()}
-    assert f"{schema_name}.v_high_value" not in lib
+    assert f"{CAT}.{schema_name}.v_high_value" not in lib
 
 
 # ── 9. orphan staging GC at bootstrap ────────────────────────────────
@@ -817,7 +831,7 @@ def test_e2e_staging_append_target_append(schema_name, caplog):
         assert _row_count(schema_name, "orders") == 72
         # State table has 3 applied rows.
         state_rows = _state_rows(
-            STATE_SCHEMA, state_table_name(f"{schema_name}.orders")
+            LIBRARY_SCHEMA, state_table_name(f"{CAT}.{schema_name}.orders")
         )
         assert len(state_rows) == 3
         assert all(status == "applied" for status, _, _ in state_rows)
@@ -1060,10 +1074,16 @@ def _registry_models(schema_name):
         name="summary",
         state=State(),
         staging=Staging(),
-        upstream=[IntervalContract(f"{schema_name}.orders")],
+        upstream=[
+            Source(
+                f"{CAT}.{schema_name}.orders",
+                type=SourceModel(),
+                contract=IntervalContract(),
+            )
+        ],
         sources=[
-            Source("raw.landing", kind=SourceKind.DATABASE),
-            Source("vendor.api_orders", kind=SourceKind.API),
+            Source("raw.landing", type=SourceModel()),
+            Source("vendor.api_orders", type=SourceApi()),
         ],
     )
     return orders, summary
@@ -1075,16 +1095,16 @@ def test_e2e_registry_get_lineage_matches_model_lineage(schema_name):
     orders, summary = _registry_models(schema_name)
     _bootstrap([orders, summary])
 
-    summary_fqn = f"{schema_name}.summary"
+    summary_fqn = f"{CAT}.{schema_name}.summary"
     with _conn() as c:
         lineage = registry.get_lineage(c, summary_fqn)
 
     # The DB-read lineage matches the in-code Model.lineage() shape exactly:
     # upstream typed by the upstream's registered kind (= the contract kind
-    # here), sources typed by SourceKind.
+    # here), sources typed by their source type (model / file / api).
     assert lineage == summary.lineage()
     assert lineage["upstream"] == [
-        {"name": f"{schema_name}.orders", "kind": "interval"}
+        {"name": f"{CAT}.{schema_name}.orders", "kind": "interval"}
     ]
     assert {"name": "vendor.api_orders", "kind": "api"} in lineage["sources"]
     assert lineage["inputs_known"] is True
@@ -1095,8 +1115,8 @@ def test_e2e_registry_list_and_downstreams_and_graph(schema_name):
 
     orders, summary = _registry_models(schema_name)
     _bootstrap([orders, summary])
-    orders_fqn = f"{schema_name}.orders"
-    summary_fqn = f"{schema_name}.summary"
+    orders_fqn = f"{CAT}.{schema_name}.orders"
+    summary_fqn = f"{CAT}.{schema_name}.summary"
 
     with _conn() as c:
         names = {m["full_name"] for m in registry.list_models(c)}
@@ -1122,7 +1142,7 @@ def test_e2e_registry_list_and_downstreams_and_graph(schema_name):
         "from": "raw.landing",
         "to": summary_fqn,
         "relation": "source",
-        "kind": "database",
+        "kind": "model",
     } in graph["edges"]
 
 
@@ -1136,27 +1156,39 @@ def test_e2e_registry_get_upstream_tree_nests(schema_name):
         name="summary",
         state=State(),
         staging=Staging(),
-        upstream=[IntervalContract(f"{schema_name}.orders")],
-        sources=[Source("raw.landing", kind=SourceKind.API)],
+        upstream=[
+            Source(
+                f"{CAT}.{schema_name}.orders",
+                type=SourceModel(),
+                contract=IntervalContract(),
+            )
+        ],
+        sources=[Source("raw.landing", type=SourceApi())],
     )
     rollup = _orders_model(
         schema_name,
         name="rollup",
         state=State(),
         staging=Staging(),
-        upstream=[IntervalContract(f"{schema_name}.summary")],
+        upstream=[
+            Source(
+                f"{CAT}.{schema_name}.summary",
+                type=SourceModel(),
+                contract=IntervalContract(),
+            )
+        ],
     )
     _bootstrap([orders, summary, rollup])
 
     with _conn() as c:
-        tree = registry.get_upstream_tree(c, f"{schema_name}.rollup")
+        tree = registry.get_upstream_tree(c, f"{CAT}.{schema_name}.rollup")
 
-    assert tree["model"] == f"{schema_name}.rollup"
+    assert tree["model"] == f"{CAT}.{schema_name}.rollup"
     child = tree["upstream"][0]
-    assert child["model"] == f"{schema_name}.summary"
+    assert child["model"] == f"{CAT}.{schema_name}.summary"
     assert child["sources"] == [{"name": "raw.landing", "kind": "api"}]
     grandchild = child["upstream"][0]
-    assert grandchild["model"] == f"{schema_name}.orders"
+    assert grandchild["model"] == f"{CAT}.{schema_name}.orders"
 
 
 def test_e2e_registry_get_recent_state(schema_name):
@@ -1166,7 +1198,7 @@ def test_e2e_registry_get_recent_state(schema_name):
     _run_intervals(m)  # bootstrap + run all intervals -> applied state rows
 
     with _conn() as c:
-        rows = registry.get_recent_state(c, f"{schema_name}.orders")
+        rows = registry.get_recent_state(c, f"{CAT}.{schema_name}.orders")
 
     assert len(rows) >= 1
     assert all(r["status"] == "applied" for r in rows)
@@ -1179,7 +1211,7 @@ def test_e2e_registry_get_errors(schema_name):
 
     m = _orders_model(schema_name, name="orders", state=State(), staging=Staging())
     _bootstrap([m])
-    fqn = f"{schema_name}.orders"
+    fqn = f"{CAT}.{schema_name}.orders"
     # Log a failure the way @execute_lifecycle would, into z_bollhav.errors.
     with psycopg.connect(_dsn(), autocommit=True) as conn:
         PostgresState(model=m, conn=conn).record_failure(
@@ -1198,3 +1230,182 @@ def test_e2e_registry_get_errors(schema_name):
     assert errs[0]["full_name"] == fqn
     assert errs[0]["error_type"] == "RuntimeError"
     assert errs[0]["created_at"]  # ISO string
+
+
+# ── 14. SCHEMA_SUFFIX env isolation ──────────────────────────────────
+
+
+def test_e2e_schema_suffix_isolates_state_and_library(schema_name):
+    """A SCHEMA_SUFFIX run registers + gates in its OWN bollhav schemas
+    (`z_bollhav_state_<suffix>` / `z_bollhav_<suffix>`), isolated from prod's
+    `z_bollhav_state` / `z_bollhav` — dev and prod state never mix."""
+    from bollhav.model import Source, SourceModel
+    from bollhav.model.upstream import MonolithicContract
+    from bollhav.postgres.state import LIBRARY_SCHEMA
+
+    suf = "iso"  # appendix disabled below → stable env-schema name
+    env_lib = f"z_bollhav_{suf}"  # dev consolidates state + library + errors here
+    env_state = f"z_bollhav_state_{suf}"  # must NOT be created (prod-only split)
+
+    def mk(name, upstream=None):
+        return Model(
+            target=Target(
+                name=name,
+                schema=schema_name,
+                catalog=CAT,
+                schema_suffix=suf,
+                schema_suffix_appendix=None,
+                database=Database.POSTGRES,
+                dsn_env_var="TARGET_DSN",
+                columns=_orders_columns(),
+            ),
+            kind=Kind.MONOLITHIC,
+            state=State(),
+            upstream=upstream or [],
+        )
+
+    orders = mk("orders")
+    summary = mk(
+        "summary",
+        upstream=[
+            Source(
+                f"{CAT}.{schema_name}.orders",
+                type=SourceModel(),
+                contract=MonolithicContract(),
+            )
+        ],
+    )
+
+    def _drop_env():
+        with psycopg.connect(_dsn(), autocommit=True) as conn:
+            conn.execute(f'DROP SCHEMA IF EXISTS "{env_lib}" CASCADE')
+            conn.execute(f'DROP SCHEMA IF EXISTS "{env_state}" CASCADE')
+
+    _drop_env()
+    try:
+        with psycopg.connect(_dsn(), autocommit=True) as conn:
+            so = PostgresState(orders, conn)
+            # dev consolidates: state schema == library schema == one env schema
+            assert so._library_schema() == env_lib
+            assert so._state_schema() == env_lib
+            so.ensure_library()
+            so.ensure_tables()
+            so.register_model()
+
+            # the separate prod-style state schema is NOT created for dev
+            assert (
+                conn.execute(
+                    "SELECT 1 FROM information_schema.schemata WHERE schema_name = %s",
+                    [env_state],
+                ).fetchone()
+                is None
+            )
+
+            # registered in the ENV library, absent from prod's
+            assert (
+                PostgresState.lookup_model(conn, orders.target.full_name, env_lib)
+                is not None
+            )
+            assert (
+                PostgresState.lookup_model(
+                    conn, orders.target.full_name, LIBRARY_SCHEMA
+                )
+                is None
+            )
+
+            # summary's gating resolves orders WITHIN the env (suffixed lookup +
+            # env library) — it finds it (no 'unregistered' raise) and is merely
+            # blocked because orders has no applied row yet.
+            ss = PostgresState(summary, conn)
+            ss.ensure_library()
+            assert ss.is_upstream_satisfied_live(None).satisfied is False
+    finally:
+        _drop_env()
+
+
+# ── 15. DRY_STATE ────────────────────────────────────────────────────
+
+
+def test_e2e_dry_state_plans_without_executing(schema_name, capsys, monkeypatch):
+    """DRY_STATE=true runs the state bootstrap and prints the resolved plan,
+    but creates no target assets, writes no data, and runs no model logic."""
+    from bollhav.model.lifecycle import model_lifecycle
+
+    monkeypatch.setenv("DRY_STATE", "true")
+    ran = {"executed": False}
+
+    @model_lifecycle
+    def run_model(model, data_conn, state_conn=None):
+        ran["executed"] = True  # must not happen under DRY_STATE
+
+    m = _orders_model(schema_name, name="orders", state=State(), staging=Staging())
+
+    with psycopg.connect(_dsn(), autocommit=True) as conn:
+        run_model(m, conn, conn)
+        out = capsys.readouterr().out
+
+        # the plan was printed for this model
+        assert f"{CAT}.{schema_name}.orders" in out
+        assert "would run" in out
+        # the model body never ran
+        assert ran["executed"] is False
+        # no target table was created (asset DDL skipped)
+        assert (
+            conn.execute(
+                "SELECT 1 FROM information_schema.tables "
+                "WHERE table_schema=%s AND table_name='orders'",
+                [schema_name],
+            ).fetchone()
+            is None
+        )
+        # but state WAS bootstrapped (so the plan could be resolved)
+        st = PostgresState(m, conn)._state_table()
+        assert (
+            conn.execute(
+                "SELECT 1 FROM information_schema.tables "
+                "WHERE table_schema='z_bollhav' AND table_name=%s",
+                [st],
+            ).fetchone()
+            is not None
+        )
+
+
+def test_e2e_dry_state_cascade_shows_will_run_after(schema_name, capsys, monkeypatch):
+    """DRY_STATE understands the cascade: a downstream gated on an upstream that
+    would itself run this pass shows 'will run after <upstream>', not blocked."""
+    from bollhav.model.lifecycle import _DRY_STATE_RUNS, model_lifecycle
+
+    _DRY_STATE_RUNS.clear()
+    monkeypatch.setenv("DRY_STATE_EXTRA", "true")
+
+    @model_lifecycle
+    def run_model(model, data_conn, state_conn=None):
+        for _ in model.intervals:
+            pass
+
+    orders = _orders_model(schema_name, name="orders", state=State(), staging=Staging())
+    summary = _orders_model(
+        schema_name,
+        name="summary",
+        state=State(),
+        staging=Staging(),
+        upstream=[
+            Source(
+                f"{CAT}.{schema_name}.orders",
+                type=SourceModel(),
+                contract=IntervalContract(),
+            )
+        ],
+    )
+
+    with psycopg.connect(_dsn(), autocommit=True) as conn:
+        run_model(orders, conn, conn)  # records orders' would-run windows
+        run_model(summary, conn, conn)  # sees orders in the cascade overlay
+        out = capsys.readouterr().out
+
+    # orders runs now; summary cascades off it (not blocked)
+    assert f"{CAT}.{schema_name}.summary" in out
+    assert f"will run after {CAT}.{schema_name}.orders" in out
+    # summary's per-model summary line: all 3 would run, none blocked
+    assert "would run 3  ·  blocked 0" in out
+    assert "blocked:" not in out  # nothing actually blocked

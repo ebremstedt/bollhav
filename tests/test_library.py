@@ -57,16 +57,27 @@ def _model(
     model = MagicMock()
     model.target.name = full_name.split(".")[-1]
     model.target.full_name = full_name
-    model.target.schema.resolved = full_name.split(".")[0]
+    model.target.schema_resolved = full_name.split(".")[0]
+    model.target.schema_suffix = ""
+    model.target.schema_suffix_appendix = None
     # `register_model` keys off the Model-level `is_view` flag and the
     # `kind` enum (it writes `'VIEW' if model.is_view else 'TABLE'` into
     # model_type and `model.kind.value` into kind).
     model.is_view = is_view
     upstream_list = list(upstream) if upstream is not None else []
-    model.upstream = upstream_list
-    # `register_model` reads `upstream_names` (the bare-string projection)
-    # and `kind` off the model; pin them on the mock.
+    # Each declared name becomes a gated upstream (a SourceModel + contract);
+    # `register_model` reads `upstream_names` and the live gating loop reads
+    # `gated_upstreams`. Pin both on the mock.
+    from bollhav.model.source import Source, SourceModel
+    from bollhav.model.upstream import IntervalContract
+
+    gated = [
+        Source(n, type=SourceModel(), contract=IntervalContract())
+        for n in upstream_list
+    ]
+    model.upstream = gated
     model.upstream_names = upstream_list
+    model.gated_upstreams = gated
     if is_view:
         model.target.staging = None
         model.state = None
@@ -110,7 +121,7 @@ class TestRegister:
 
     def test_table_writes_state_pointers(self) -> None:
         from bollhav.postgres.state import (
-            STATE_SCHEMA,
+            LIBRARY_SCHEMA,
             PostgresState,
             state_table_name,
         )
@@ -128,7 +139,7 @@ class TestRegister:
         assert params[1] == ["raw.orders"]
         assert params[2] == "TABLE"
         # state pointers now point at the central schema + deterministic name
-        assert params[3] == STATE_SCHEMA
+        assert params[3] == LIBRARY_SCHEMA
         assert params[4] == state_table_name("warehouse.orders")
         assert params[5] == "interval"
 
@@ -344,18 +355,21 @@ class TestUpstreamSatisfiedLive:
 
         return PostgresState(model=model, conn=conn)
 
-    def test_unregistered_bare_upstream_is_documentation_not_blocked(self) -> None:
+    def test_unregistered_gated_upstream_raises(self) -> None:
+        # A gated upstream is a hard demand: if it isn't registered (never
+        # ran), that's an error, not a silent pass. (An ungated source would
+        # never be checked here at all.)
         from unittest.mock import patch
+
+        import pytest
 
         from bollhav.postgres.state import PostgresState
 
         m = _model(upstream=["raw.orders"])
         conn = _mock_conn()
         with patch.object(PostgresState, "lookup_model", return_value=None):
-            check = self._state(m, conn).is_upstream_satisfied_live(INTERVAL)
-
-        assert check.satisfied
-        assert check.reason is None
+            with pytest.raises(ValueError, match="not registered"):
+                self._state(m, conn).is_upstream_satisfied_live(INTERVAL)
 
     def test_unsatisfied_upstream_blocks_with_state_002(self) -> None:
         from unittest.mock import patch

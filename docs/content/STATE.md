@@ -102,4 +102,4 @@ When set: `@load_models` clears `state` and `target.staging` on every matched mo
 |---|---|---|
 | `STATE_MODE` | `discover` | `discover` preserves `applied` rows on re-evaluation and adds new pending intervals as discovered; `bulldozer` resets every row to the freshly-computed status |
 | `STATE_DISABLED` | `false` | When `true`, force no-state behavior on every matched model |
-| `PEEK` | `false` | When `true`, run bootstrap + print state banner, then exit without invoking `main()` |
+| `DRY_STATE` | `false` | When `true`, run the state bootstrap and print each model's resolved plan (would-run / applied / blocked), then exit without creating assets, writing data, or running model logic |

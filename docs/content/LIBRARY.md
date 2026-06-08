@@ -63,8 +63,9 @@ Model(target=Target(...), state=State(), batching=Batch(...))
 
 # View intended as upstream — opt in via library=True
 Model(
-    target=Target(name="v_x", model_type=ModelType.VIEW, write_mode=WriteMode.VIEW, ...),
-    source=SourceTable(name="v_x", query="SELECT ..."),
+    target=Target(name="v_x", ...),
+    kind=Kind.VIEW,
+    upstream=[Source("v_x", type=SourceModel(query="SELECT ..."))],
     library=True,
 )
 

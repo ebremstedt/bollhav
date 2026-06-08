@@ -70,7 +70,7 @@ class PostgresData:
             if model.state is not None and model.state.schema_prefix is not None
             else "z_"
         )
-        return f"{prefix}{model.target.schema.resolved}"
+        return f"{prefix}{model.target.schema_resolved}"
 
     def _staging_table_prefix(self) -> str:
         """Staging-table name prefix. `Staging.table_prefix` overrides
@@ -119,14 +119,15 @@ class PostgresData:
     def create_schema(self) -> None:
         self.conn.execute(
             sql.SQL("CREATE SCHEMA IF NOT EXISTS {}").format(
-                sql.Identifier(self.model.target.schema.resolved)
+                sql.Identifier(self.model.target.schema_resolved)
             )
         )
 
     def create_or_replace_view(self) -> None:
-        """`CREATE OR REPLACE VIEW` from the model's `SourceTable.query` —
-        the target-side asset for a VIEW model. The lifecycle hook calls
-        this instead of the table DDL when `model.is_view`."""
+        """`CREATE OR REPLACE VIEW` from the model's defining `SourceModel.query`
+        (the Source in `upstream` whose type carries a query) — the target-side
+        asset for a VIEW model. The lifecycle hook calls this instead of the
+        table DDL when `model.is_view`."""
         from bollhav.postgres.modes import create_replace_view
 
         create_replace_view(conn=self.conn, model=self.model)
@@ -135,7 +136,7 @@ class PostgresData:
         target = self.model.target
         self.conn.execute(
             sql.SQL("DROP TABLE IF EXISTS {}.{}").format(
-                sql.Identifier(target.schema.resolved),
+                sql.Identifier(target.schema_resolved),
                 sql.Identifier(target.name_resolved),
             )
         )
@@ -151,7 +152,7 @@ class PostgresData:
         )
         self.conn.execute(
             sql.SQL("CREATE TABLE IF NOT EXISTS {}.{} (\n{}\n)").format(
-                sql.Identifier(target.schema.resolved),
+                sql.Identifier(target.schema_resolved),
                 sql.Identifier(target.name_resolved),
                 col_defs,
             )
@@ -161,7 +162,7 @@ class PostgresData:
         target = self.model.target
         self.conn.execute(
             sql.SQL("TRUNCATE TABLE {}.{}").format(
-                sql.Identifier(target.schema.resolved),
+                sql.Identifier(target.schema_resolved),
                 sql.Identifier(target.name_resolved),
             )
         )
@@ -178,7 +179,7 @@ class PostgresData:
         self.conn.execute(
             sql.SQL("CREATE INDEX IF NOT EXISTS {} ON {}.{} ({})").format(
                 sql.Identifier(index_name),
-                sql.Identifier(target.schema.resolved),
+                sql.Identifier(target.schema_resolved),
                 sql.Identifier(target.name_resolved),
                 sql.Identifier(col),
             )
@@ -198,7 +199,7 @@ class PostgresData:
                 EXCEPTION WHEN duplicate_table THEN NULL;
                 END $$
             """).format(
-                sql.Identifier(target.schema.resolved),
+                sql.Identifier(target.schema_resolved),
                 sql.Identifier(target.name_resolved),
                 sql.Identifier(constraint_name),
                 unique_col_ids,

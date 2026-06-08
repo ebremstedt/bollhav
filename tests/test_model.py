@@ -19,7 +19,6 @@ def make_model(**overrides) -> Model:
         overrides.setdefault("batching", Batch())
     return Model(
         target=overrides.pop("target", Target(name="orders")),
-        source=overrides.pop("source", None),
         **overrides,
     )
 
@@ -27,16 +26,15 @@ def make_model(**overrides) -> Model:
 def test_model_stores_fields():
     m = make_model()
     assert m.target.name == "orders"
-    assert m.source is None
+    assert m.source_names == []
 
 
 def test_model_exposes_sub_configs():
-    from bollhav.model.target_schema import TargetSchema
     from bollhav.model.target import Target
     from bollhav.model.bounds import Bounds
 
     m = make_model()
-    assert isinstance(m.target.schema, TargetSchema)
+    assert isinstance(m.target.schema, str)
     assert isinstance(m.target, Target)
     assert isinstance(m.batching, Batch)
     assert isinstance(m.bounds, Bounds)
@@ -146,26 +144,47 @@ class TestModelKind:
 
 
 class TestUpstreamRequiresState:
-    """`upstream` contracts are only enforced by the state machine, so a
-    model declaring upstream must also be state-tracked — else the
-    contract would silently never run."""
+    """A **gated** upstream (a Source carrying a contract) is only enforced by
+    the state machine, so a model with one must also be state-tracked — else
+    the contract would silently never run. Ungated sources need no state."""
 
-    def test_upstream_without_state_raises(self):
+    def test_gated_upstream_without_state_raises(self):
+        from bollhav.model.source import Source, SourceModel
         from bollhav.model.upstream import IntervalContract
 
-        with pytest.raises(ValueError, match="upstream"):
-            make_model(upstream=[IntervalContract("warehouse.orders")])
+        with pytest.raises(ValueError, match="gated upstream"):
+            make_model(
+                upstream=[
+                    Source(
+                        "warehouse.orders",
+                        type=SourceModel(),
+                        contract=IntervalContract(),
+                    )
+                ]
+            )
 
-    def test_bare_string_upstream_without_state_raises(self):
-        with pytest.raises(ValueError, match="upstream"):
-            make_model(upstream=["warehouse.orders"])
+    def test_ungated_source_without_state_is_fine(self):
+        from bollhav.model.source import Source, SourceModel
 
-    def test_upstream_with_state_is_fine(self):
+        m = make_model(upstream=[Source("raw.landing", type=SourceModel())])
+        assert m.source_names == ["raw.landing"]
+
+    def test_gated_upstream_with_state_is_fine(self):
+        from bollhav.model.source import Source, SourceModel
         from bollhav.model.state import State
         from bollhav.model.upstream import ViewContract
 
-        m = make_model(upstream=[ViewContract("warehouse.customers")], state=State())
+        m = make_model(
+            upstream=[
+                Source(
+                    "warehouse.customers", type=SourceModel(), contract=ViewContract()
+                )
+            ],
+            state=State(),
+        )
         assert m.upstream_names == ["warehouse.customers"]
 
     def test_no_upstream_no_state_is_fine(self):
-        assert make_model().upstream == []
+        m = make_model()
+        assert m.upstream_names == []
+        assert m.inputs_known is False

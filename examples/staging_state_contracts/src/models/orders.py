@@ -21,7 +21,6 @@ from bollhav.model import (
     State,
     Tags,
     Target,
-    TargetSchema,
     WriteMode,
 )
 from bollhav.postgres import PostgresColumn, PostgresType
@@ -30,7 +29,8 @@ from bollhav.postgres import PostgresColumn, PostgresType
 orders = Model(
     target=Target(
         name="orders",
-        schema=TargetSchema(name="warehouse"),
+        schema="warehouse",
+        catalog="demo",
         database=Database.POSTGRES,
         write_mode=WriteMode.APPEND,
         dsn_env_var="TARGET_DSN",

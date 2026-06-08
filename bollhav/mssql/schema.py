@@ -62,7 +62,7 @@ def ensure_schema(conn: pyodbc.Connection, schema: str) -> None:
 
 
 def ensure_table(conn: pyodbc.Connection, model: Model) -> None:
-    schema = model.target.schema.resolved
+    schema = model.target.schema_resolved
     table = model.target.name_resolved
     logger.debug("Ensuring table: %s.%s", schema, table)
 
@@ -123,7 +123,7 @@ def ensure_primary_key(conn: pyodbc.Connection, model: Model) -> None:
     KEY) so new and existing tables both get a deterministically named, clustered
     PK from this single code path.
     """
-    schema = model.target.schema.resolved
+    schema = model.target.schema_resolved
     table = model.target.name_resolved
     mssql_cols = [c for c in model.target.columns if isinstance(c, MssqlColumn)]
     pk_cols = [c for c in mssql_cols if c.primary_key]
@@ -149,7 +149,7 @@ def ensure_primary_key(conn: pyodbc.Connection, model: Model) -> None:
 
 
 def ensure_indexes(conn: pyodbc.Connection, model: Model) -> None:
-    schema = model.target.schema.resolved
+    schema = model.target.schema_resolved
     table = model.target.name_resolved
     mssql_indexes = [i for i in model.target.indexes if isinstance(i, MssqlIndex)]
     if not mssql_indexes:
@@ -170,13 +170,13 @@ def ensure_indexes(conn: pyodbc.Connection, model: Model) -> None:
 
 
 def ensure_schema_and_table(conn: pyodbc.Connection, model: Model) -> None:
-    ensure_schema(conn=conn, schema=model.target.schema.resolved)
+    ensure_schema(conn=conn, schema=model.target.schema_resolved)
     ensure_table(conn=conn, model=model)
     ensure_primary_key(conn=conn, model=model)
 
 
 def ensure_schema_table_and_indexes(conn: pyodbc.Connection, model: Model) -> None:
-    ensure_schema(conn=conn, schema=model.target.schema.resolved)
+    ensure_schema(conn=conn, schema=model.target.schema_resolved)
     ensure_table(conn=conn, model=model)
     ensure_primary_key(conn=conn, model=model)
     ensure_indexes(conn=conn, model=model)
