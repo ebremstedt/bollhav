@@ -23,7 +23,7 @@ def append(
 ) -> None:
     col_names = sql.SQL(", ").join(sql.Identifier(c) for c in df.columns)
     query = sql.SQL("COPY {schema}.{table} ({cols}) FROM STDIN").format(
-        schema=sql.Identifier(model.target.schema.resolved),
+        schema=sql.Identifier(model.target.schema_resolved),
         table=sql.Identifier(model.target.name),
         cols=col_names,
     )
@@ -54,7 +54,7 @@ def recreate_partition(
             sql.SQL(
                 "DELETE FROM {schema}.{table} WHERE {col} >= %s AND {col} < %s"
             ).format(
-                schema=sql.Identifier(model.target.schema.resolved),
+                schema=sql.Identifier(model.target.schema_resolved),
                 table=sql.Identifier(model.target.name),
                 col=sql.Identifier(partition_col),
             ),
@@ -62,7 +62,7 @@ def recreate_partition(
         )
         col_names = sql.SQL(", ").join(sql.Identifier(c) for c in df.columns)
         copy_query = sql.SQL("COPY {schema}.{table} ({cols}) FROM STDIN").format(
-            schema=sql.Identifier(model.target.schema.resolved),
+            schema=sql.Identifier(model.target.schema_resolved),
             table=sql.Identifier(model.target.name),
             cols=col_names,
         )
@@ -121,7 +121,7 @@ def upsert_no_delete(conn: psycopg.Connection, model: Model, df: pl.DataFrame) -
                 "SELECT {cols} FROM {temp} t "
                 "ON CONFLICT ({pk_cols}) DO UPDATE SET {update_set}"
             ).format(
-                schema=sql.Identifier(model.target.schema.resolved),
+                schema=sql.Identifier(model.target.schema_resolved),
                 table=sql.Identifier(model.target.name),
                 cols=col_names,
                 temp=sql.Identifier(temp_table),
@@ -135,21 +135,29 @@ def create_replace_view(
     conn: psycopg.Connection,
     model: Model,
 ) -> None:
-    from bollhav.model.source_table import SourceTable
+    from bollhav.model.source import SourceModel
 
-    if not isinstance(model.source, SourceTable) or model.source.query is None:
+    src = next(
+        (
+            s
+            for s in model.upstream
+            if isinstance(s.type, SourceModel) and s.type.query is not None
+        ),
+        None,
+    )
+    if src is None:
         raise ValueError(
-            f"create_replace_view requires model.source to be a SourceTable "
-            f"with .query set, got {type(model.source).__name__} on "
+            f"create_replace_view requires a Source with a SourceModel type "
+            f"whose .query is set, in upstream=[...] on "
             f"{model.target.full_name!r}"
         )
 
     with conn.transaction():
-        ensure_schema(conn, model.target.schema.resolved)
+        ensure_schema(conn, model.target.schema_resolved)
         conn.execute(
             sql.SQL("CREATE OR REPLACE VIEW {schema}.{view} AS {query}").format(
-                schema=sql.Identifier(model.target.schema.resolved),
+                schema=sql.Identifier(model.target.schema_resolved),
                 view=sql.Identifier(model.target.name),
-                query=sql.SQL(cast(LiteralString, model.source.query)),
+                query=sql.SQL(cast(LiteralString, src.type.query)),
             )
         )

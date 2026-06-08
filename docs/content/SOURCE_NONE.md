@@ -1,26 +1,45 @@
 [Home](index.md) › [Model](MODEL.md) › Source › **None**
 
-# No source
+# No declared inputs (unknown provenance)
 
-`source` is **optional** — `Model(source=...)` defaults to `None`, and most models leave it unset.
-
-A model doesn't need a declared source. Your `read()` function is what actually produces the data (it receives the model + the interval and returns DataFrames), so where the rows come from is the read function's business, not the model's. `source` is there only as metadata/config for code that wants to introspect it.
+A model doesn't have to declare any inputs. Your `read()` function is what actually produces the data (it receives the model + the interval and returns DataFrames), so where the rows come from is the read function's business — it can read from hardcoded SQL or anything else.
 
 ```python
 Model(
     target=Target(name="orders", ...),
     kind=Kind.INTERVAL,
     batching=Batch(...),
-    # no source — read() supplies the rows
+    # no upstream — read() supplies the rows
 )
 ```
 
-## When you *do* set it
+## The unknown sentinel
 
-| Use `source=` when | Type |
+When a model declares an empty `upstream`, bollhav doesn't leave it empty — provenance is *total*. It auto-injects a single **typeless** `Source`:
+
+```python
+Source(name="unknown-<uuid>", type=None)
+```
+
+- `type=None` is the marker for unknown provenance. It's never SQL-addressable and never gated.
+- The name is uuid-suffixed so each unknown is a **distinct** node in the [lineage](LINEAGE.md) graph (two unknown-provenance models don't collapse into one).
+- It isn't counted as a declared input — `source_names` / `upstream_names` exclude it.
+
+Two computed fields surface this for a lineage audit:
+
+```python
+model.declared_inputs   # [] — nothing real declared
+model.inputs_known      # False — its only input is the unknown sentinel
+```
+
+## When you *do* declare inputs
+
+Everything goes in one [`upstream`](UPSTREAM.md) list as a `Source`, typed by what it is:
+
+| your input is | type |
 |---|---|
-| your `read()` (or tooling) wants the source table/schema/DSN as config | [SourceTable](SOURCETABLE.md) |
-| your `read()` (or tooling) wants the file path/encoding/separator as config | [SourceFile](SOURCEFILE.md) |
-| the model is a [VIEW](KINDS.md) — the view's definition *is* a query | `SourceTable(query=...)` (required) |
+| a relational table / view / managed model | [`SourceModel`](SOURCETABLE.md) |
+| a file | [`SourceFile`](SOURCEFILE.md) |
+| an HTTP API | `SourceApi` |
 
-Only the VIEW case makes `source` mandatory; everywhere else it's a convenience.
+…and gated (a managed upstream the state machine waits for) iff it carries a `contract` — see [Upstream](UPSTREAM.md).

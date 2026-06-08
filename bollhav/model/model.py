@@ -6,8 +6,6 @@ from datetime import datetime, timezone, tzinfo
 from uuid import UUID, uuid4
 
 from icron import croniter
-from bollhav.model.source_file import SourceFile
-from bollhav.model.source_table import SourceTable
 from bollhav.model.target import Target
 from bollhav.model.bounds import Bounds
 from bollhav.model.batch import Batch, _resolve_cron, _chunk_interval
@@ -16,7 +14,7 @@ from bollhav.model.directives import Directives
 from bollhav.model.kind import Kind
 from bollhav.model.state import State
 from bollhav.model.tags import Tags
-from bollhav.model.upstream import Contract, Source, SourceKind
+from bollhav.model.source import Source
 from roskarl import IntervalExpression, IntervalExpressionExtended
 
 logger = logging.getLogger(__name__)
@@ -26,7 +24,6 @@ class Model:
     def __init__(
         self,
         target: Target,
-        source: SourceFile | SourceTable | None = None,
         bounds: Bounds | None = None,
         batching: Batch | None = None,
         *,
@@ -36,11 +33,9 @@ class Model:
         enabled: bool = True,
         debug: bool = False,
         description: str | None = None,
-        upstream: list[Contract | str] | None = None,
-        sources: list[Source | str] | None = None,
+        upstream: list[Source] | None = None,
         **kwargs,
     ):
-        self.source = source
         self.target = target
         self.bounds = bounds or Bounds()
         self.batching = batching
@@ -49,11 +44,17 @@ class Model:
         self.enabled = enabled
         self.debug = debug
         self.description = description
-        self.upstream: list[Contract | str] = upstream or []
-        self.sources: list[Source | str] = sources or []
+        # Every input — gated upstream or ungated source — is one Source in
+        # this list. Provenance is total: a model that declares nothing gets a
+        # single typeless UNKNOWN source (uuid-named so each unknown is a
+        # distinct lineage node). Carried through runtime copies untouched — a
+        # non-empty list never re-triggers this.
+        self.upstream: list[Source] = upstream or []
+        if not self.upstream:
+            self.upstream = [Source(name=f"unknown-{uuid4()}", type=None)]
         self.directives = Directives()
         self.tags: set[str] = (tagging or Tags()).assemble(
-            self.target.name, self.target.schema.name, self.target.catalog
+            self.target.name, self.target.schema, self.target.catalog
         )
         self.intervals: tuple[TZInterval, ...] | tuple[None] = (None,)
 
@@ -117,14 +118,16 @@ class Model:
                 )
 
     def _validate_upstream_requires_state(self) -> None:
-        """Upstream contracts are only enforced for state-tracked models (the
-        state machine checks them), so declaring `upstream` without `state`
-        would silently never enforce it — make that a definition-time error."""
-        if self.upstream and self.state is None:
+        """Gating contracts are only enforced for state-tracked models (the
+        state machine checks them), so a gated upstream without `state` would
+        silently never enforce — make that a definition-time error. Ungated
+        sources need no state."""
+        if self.gated_upstreams and self.state is None:
             raise ValueError(
-                f"model {self.target.name!r} declares upstream but has no "
-                f"state — upstream contracts are only checked for state-tracked "
-                f"models. Add state=State(...), or drop upstream."
+                f"model {self.target.name!r} declares a gated upstream (a Source "
+                f"with a contract) but has no state — contracts are only checked "
+                f"for state-tracked models. Add state=State(...), or drop the "
+                f"contract."
             )
 
     def pretty(self) -> None:
@@ -138,11 +141,12 @@ class Model:
             f"  enabled:       {self.enabled}",
             f"  description:   {self.description}",
             f"  tags:          {', '.join(sorted(self.tags))}",
-            f"  upstream:      {', '.join(self.upstream_names) if self.upstream else '(none)'}",
+            f"  upstream:      {', '.join(self.upstream_names) or '(none)'}",
+            f"  sources:       {', '.join(self.source_names) or '(none)'}",
             "",
             "  target:",
             f"    name:        {self.target.name_resolved}",
-            f"    schema:      {self.target.schema.resolved}",
+            f"    schema:      {self.target.schema_resolved}",
             *(
                 [f"    catalog:     {self.target.catalog}"]
                 if self.target.catalog
@@ -153,23 +157,6 @@ class Model:
             f"    partitioned: {self.target.partitioned_by}",
             f"    columns ({len(cols)}): {col_summary}",
         ]
-        if isinstance(self.source, SourceTable):
-            lines += [
-                "",
-                "  source (table):",
-                f"    name:        {self.source.name}",
-                f"    schema:      {self.source.schema}",
-                f"    dsn_env_var: {self.source.dsn_env_var}",
-            ]
-        elif isinstance(self.source, SourceFile):
-            lines += [
-                "",
-                "  source (file):",
-                f"    name:        {self.source.name}",
-                f"    path:        {self.source.path}",
-                f"    encoding:    {self.source.encoding}",
-                f"    separator:   {self.source.separator}",
-            ]
         if self.batching is None:
             lines += [
                 "",
@@ -193,68 +180,64 @@ class Model:
         logger.debug("\n".join(lines))
 
     @property
+    def gated_upstreams(self) -> list[Source]:
+        """The Sources that gate this model — those carrying a `contract`, the
+        managed upstreams the state machine waits for before this model runs."""
+        return [s for s in self.upstream if s.gated]
+
+    @property
     def upstream_names(self) -> list[str]:
-        """The full names of this model's upstreams, regardless of whether
-        each was declared as a bare string or a `Contract`. Used wherever
-        only the identity matters (library registration, banner, repr)."""
-        return [u.name if isinstance(u, Contract) else u for u in self.upstream]
+        """Names of this model's **gated** upstreams (Sources with a contract).
+        Used for run ordering, the library `upstream` column, and gating."""
+        return [s.name for s in self.upstream if s.gated]
 
     @property
     def source_names(self) -> list[str]:
-        """The names of this model's declared external `sources`, whether
-        each was declared as a bare string or a `Source`. External inputs
-        bollhav reads but does not manage; resolved by `source_ref()`."""
-        return [s.name if isinstance(s, Source) else s for s in self.sources]
+        """Names of this model's **ungated** sources — external inputs with no
+        contract and known provenance (the UNKNOWN sentinel is excluded).
+        Resolved literally by `ref()`."""
+        return [s.name for s in self.upstream if not s.gated and s.type is not None]
 
     @property
     def source_specs(self) -> list[dict]:
-        """Typed external sources as `[{"name", "kind"}]` — what the library
-        stores for typed lineage. A bare-string source defaults to kind
-        `database`. (Upstream edges don't need this: an upstream's type is the
-        upstream model's own `kind`, joinable from its library row.)"""
-        out: list[dict] = []
-        for s in self.sources:
-            if isinstance(s, Source):
-                out.append({"name": s.name, "kind": s.kind.value})
-            else:
-                out.append({"name": s, "kind": SourceKind.DATABASE.value})
-        return out
+        """Typed ungated sources as `[{"name", "kind"}]` for the library's
+        `sources` column and lineage. `kind` is the source type label
+        (`model` / `file` / `api`). The UNKNOWN sentinel is excluded."""
+        return [
+            {"name": s.name, "kind": s.kind}
+            for s in self.upstream
+            if not s.gated and s.type is not None
+        ]
 
     @property
     def declared_inputs(self) -> list[str]:
-        """Every declared input — managed `upstream`s + external `sources` —
-        by name. The model's known provenance. Empty means the model declares
-        nothing, so where its data comes from is untracked (`inputs_known` is
-        False) — it reads from hardcoded SQL or a Python read with no
-        declarations."""
+        """Every declared input by name — gated upstreams + ungated sources,
+        excluding the UNKNOWN sentinel. Empty means provenance is untracked
+        (`inputs_known` is False)."""
         return self.upstream_names + self.source_names
 
     @property
     def inputs_known(self) -> bool:
-        """False when the model declares no upstreams and no sources — its
-        data provenance is unknown for lineage. Use it to audit which models
-        have untracked inputs."""
-        return bool(self.declared_inputs)
+        """False when the model's only input is the auto-injected UNKNOWN
+        sentinel (it declared no real provenance). Use it to audit which
+        models have untracked inputs."""
+        return not any(s.type is None for s in self.upstream)
 
     @property
     def upstream_specs(self) -> list[dict]:
-        """Typed managed upstreams as `[{"name", "kind"}]`. `kind` is the
-        contract kind (`interval` / `view` / `monolithic`), or `None` for a
-        bare-string upstream that didn't declare one. Symmetric with
+        """Typed gated upstreams as `[{"name", "kind"}]`. `kind` is the
+        contract kind (`interval` / `view` / `monolithic`). Symmetric with
         `source_specs`; together they're the model's typed lineage inputs."""
-        out: list[dict] = []
-        for u in self.upstream:
-            if isinstance(u, Contract):
-                out.append({"name": u.name, "kind": u.kind})
-            else:
-                out.append({"name": u, "kind": None})
-        return out
+        return [
+            {"name": s.name, "kind": s.contract.kind} for s in self.upstream if s.gated
+        ]
 
     def lineage(self) -> dict:
         """This model's inputs as a structured dict — the basis for both
-        `lineage_json()` and `lineage_tree()`. Upstreams are managed models
-        (typed by contract kind); sources are external inputs (typed by
-        `SourceKind`). `inputs_known` is False when neither is declared."""
+        `lineage_json()` and `lineage_tree()`. Upstreams are gated managed
+        models (typed by contract kind); sources are ungated external inputs
+        (typed by source kind). `inputs_known` is False when only the UNKNOWN
+        sentinel is present."""
         return {
             "model": self.target.full_name,
             "kind": self.kind.value,
@@ -304,88 +287,72 @@ class Model:
                 lines.append(f"{child_prefix}{connector} {item['name']} ({kind})")
         return "\n".join(lines)
 
+    def _find_source(self, name: str) -> Source | None:
+        for s in self.upstream:
+            if s.name == name:
+                return s
+        return None
+
     def ref(self, name: str) -> str:
-        """Resolve a declared **managed upstream** to its quoted,
-        schema-suffix-aware table identifier, for embedding in a read query:
+        """Resolve a declared input to a quoted table identifier for embedding
+        in a read query — **suffix-aware when it's gated**, literal when it's
+        not:
 
-            f"SELECT * FROM {model.ref('warehouse.orders')} WHERE ..."
-            -> SELECT * FROM "warehouse"."orders" WHERE ...
+            # gated upstream (managed) — moves with the env's schema suffix
+            f"...FROM {model.ref('warehouse.orders')}"  -> "warehouse_pr12"."orders"
+            # ungated source (external) — fixed location, no suffix
+            f"...FROM {model.ref('raw.landing')}"        -> "raw"."landing"
 
-        `name` must be one of this model's declared `upstream` entries (bare
-        string or `Contract`) — referencing an undeclared upstream raises, so
-        the SQL and the dependency graph can't drift. The upstream's schema
-        gets the same suffix this run applied to the model's own target, so
-        the query is portable across dev / prod / PR environments.
+        `name` must be one of this model's declared `upstream` Sources, and its
+        `type` must be a `SourceModel` (a relational input). A `SourceFile` /
+        `SourceApi` has no `FROM`, so `ref()` on it raises — read those in your
+        read function. Referencing an undeclared name raises, so the SQL and
+        the dependency graph can't drift.
 
-        Use `source()` for external (unmanaged) tables — those resolve
-        literally, without the suffix."""
-        if name not in set(self.upstream_names):
-            declared = sorted(self.upstream_names)
+        A gated source (one with a contract) is a managed model whose schema
+        gets the same suffix this run applied to the model's own target — so
+        the query is portable across dev / prod / PR."""
+        src = self._find_source(name)
+        if src is None:
+            declared = sorted(s.name for s in self.upstream if s.type is not None)
             raise ValueError(
-                f"{name!r} is not a declared upstream of "
+                f"{name!r} is not a declared input of "
                 f"{self.target.full_name!r} — add it to upstream=[...] before "
                 f"referencing it with ref() (declared: {declared or 'none'})"
             )
-        return self._resolve_relation(name, apply_suffix=True)
-
-    def source_ref(self, name: str) -> str:
-        """Resolve a declared **external source** to its quoted, LITERAL
-        table identifier (no schema suffix), for embedding in a read query:
-
-            f"SELECT * FROM {model.source_ref('raw.landing_orders')} WHERE ..."
-            -> SELECT * FROM "raw"."landing_orders" WHERE ...
-
-        Named `source_ref` (not `source`) because `model.source` is already
-        the model's own read-source definition (`SourceTable`/`SourceFile`).
-
-        `name` must be one of this model's declared `sources` entries (bare
-        string or `Source`). External tables bollhav doesn't manage live at
-        the same fixed location in every environment, so the suffix is NOT
-        applied. They are never gated; declaring them just records the
-        lineage boundary where data enters the system.
-
-        (You can always hardcode an external table directly in the SQL
-        instead — `source_ref()` is the opt-in for lineage + resolution.)"""
-        match: Source | str | None = None
-        for s in self.sources:
-            if (s.name if isinstance(s, Source) else s) == name:
-                match = s
-                break
-        if match is None:
-            declared = sorted(self.source_names)
+        if not src.sql_addressable:
             raise ValueError(
-                f"{name!r} is not a declared source of "
-                f"{self.target.full_name!r} — add it to sources=[...] before "
-                f"referencing it with source_ref() (declared: {declared or 'none'})"
+                f"input {name!r} is a {src.kind} — not SQL-addressable, so it "
+                f"can't go in a FROM. Read it in your read function instead; "
+                f"ref() is only for SourceModel inputs."
             )
-        if isinstance(match, Source) and not match.sql_addressable:
-            raise ValueError(
-                f"source {name!r} is kind={match.kind.value} — not SQL-addressable, "
-                f"so it can't go in a FROM. Read it in your read function instead; "
-                f"source_ref() is only for DATABASE/VIEW sources."
-            )
-        return self._resolve_relation(name, apply_suffix=False)
+        return self._resolve_relation(name, apply_suffix=src.gated)
 
     def _resolve_relation(self, name: str, *, apply_suffix: bool) -> str:
-        """Split a dotted `[catalog.]schema.table` name, optionally apply
-        this model's active schema suffix (managed refs only), and quote per
+        """Resolve a dotted `[catalog.]schema.table` name to a quoted
+        `schema.table` identifier (the catalog is parsed but dropped — it's
+        connection-level, not part of the FROM), optionally applying this
+        model's active schema suffix (gated refs only), quoted per
         `target.database` (Postgres `"x"."y"`, MSSQL `[x].[y]`)."""
         from bollhav.model.database import Database
-        from bollhav.model.target_schema import TargetSchema
+        from bollhav.model.target import resolve_schema_name
 
         parts = name.split(".")
         table = parts[-1]
         schema = parts[-2] if len(parts) >= 2 else None
-        catalog = parts[-3] if len(parts) >= 3 else None
+        # A model may be *referenced* as catalog.schema.table (full identity,
+        # for lineage / matching), but ref() always resolves to schema.table:
+        # the catalog is connection-level (the DSN you're already on), not part
+        # of the FROM. So parse it off the name and drop it from the output.
 
         if schema is not None and apply_suffix:
-            schema = TargetSchema(
-                name=schema,
-                suffix=self.target.schema.suffix,
-                suffix_appendix=self.target.schema.suffix_appendix,
-            ).resolved
+            schema = resolve_schema_name(
+                schema,
+                self.target.schema_suffix,
+                self.target.schema_suffix_appendix,
+            )
 
-        idents = [p for p in (catalog, schema, table) if p]
+        idents = [p for p in (schema, table) if p]
         if self.target.database is Database.MSSQL:
             return ".".join(f"[{p}]" for p in idents)
         return ".".join('"' + p.replace('"', '""') + '"' for p in idents)
@@ -444,7 +411,6 @@ class Model:
         return (
             f"Model("
             f"name={self.target.full_name!r}, "
-            f"source={self.source!r}, "
             f"target={self.target!r}, "
             f"bounds={self.bounds!r}, "
             f"batching={self.batching!r}, "
@@ -647,4 +613,13 @@ class Model:
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, Model):
             return NotImplemented
-        return self.__dict__ == other.__dict__
+
+        def _norm(m: "Model") -> dict:
+            # The auto-injected UNKNOWN sentinel carries a per-instance uuid
+            # (so each is a distinct lineage node), which would make two
+            # otherwise-identical models unequal — drop it before comparing.
+            d = dict(m.__dict__)
+            d["upstream"] = [s for s in m.upstream if s.type is not None]
+            return d
+
+        return _norm(self) == _norm(other)

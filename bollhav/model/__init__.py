@@ -9,9 +9,7 @@ from bollhav.model.model import Model
 from bollhav.model.kind import Kind
 from bollhav.model.column_sorting import sort_columns
 from bollhav.model.write_modes import WriteMode
-from bollhav.model.target_schema import TargetSchema
-from bollhav.model.source_file import SourceFile
-from bollhav.model.source_table import SourceTable
+from bollhav.model.source import Source, SourceModel, SourceFile, SourceApi
 from bollhav.model.target import Target
 from bollhav.model.bounds import Bounds
 from bollhav.model.batch import Batch, IntervalChunks
@@ -29,8 +27,6 @@ from bollhav.model.upstream import (
     IntervalContract,
     ViewContract,
     MonolithicContract,
-    Source,
-    SourceKind,
     UpstreamCheck,
 )
 from bollhav.model.progress_bar import progress_bar, ProgressLevel, name_width_for
@@ -56,9 +52,10 @@ __all__ = [
     "model_lifecycle",
     "execute_lifecycle",
     "ModelLockedError",
-    "TargetSchema",
+    "Source",
+    "SourceModel",
     "SourceFile",
-    "SourceTable",
+    "SourceApi",
     "Target",
     "Bounds",
     "Batch",
@@ -68,8 +65,6 @@ __all__ = [
     "IntervalContract",
     "ViewContract",
     "MonolithicContract",
-    "Source",
-    "SourceKind",
     "UpstreamCheck",
     "progress_bar",
     "ProgressLevel",

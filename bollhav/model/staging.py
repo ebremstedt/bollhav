@@ -27,7 +27,7 @@ class Staging:
     isinstance-checks for its own fields.
 
     `schema` — override the default staging schema. When unset (the
-        normal case), staging tables live in `z_<target.schema.resolved>`
+        normal case), staging tables live in `z_<target.schema_resolved>`
         so bollhav-owned tables stay out of the user's schemas. Override
         if your team has a different convention (e.g. everything in `ops`).
     `table_prefix` — override the default `<target.name>_staging_`

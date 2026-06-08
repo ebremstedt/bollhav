@@ -50,7 +50,7 @@ class MssqlData:
     # ── asset DDL ─────────────────────────────────────────────────────
 
     def create_schema(self) -> None:
-        ensure_schema(self.conn, self.model.target.schema.resolved)
+        ensure_schema(self.conn, self.model.target.schema_resolved)
 
     def create_or_replace_view(self) -> None:
         """`CREATE OR ALTER VIEW` from the model's source query — the
@@ -62,7 +62,7 @@ class MssqlData:
 
     def recreate_table(self) -> None:
         target = self.model.target
-        schema, table = target.schema.resolved, target.name_resolved
+        schema, table = target.schema_resolved, target.name_resolved
         cursor = self.conn.cursor()
         cursor.execute(
             f"IF OBJECT_ID(?, 'U') IS NOT NULL DROP TABLE {_bracket_quote(schema)}.{_bracket_quote(table)}",
@@ -75,7 +75,7 @@ class MssqlData:
         KEY and indexes. Non-destructive and idempotent — recreate /
         truncate are separate, lifecycle-ordered steps."""
         target = self.model.target
-        schema, table = target.schema.resolved, target.name_resolved
+        schema, table = target.schema_resolved, target.name_resolved
         mssql_cols = [c for c in target.columns if isinstance(c, MssqlColumn)]
         col_defs = ",\n".join(_col_ddl(c) for c in mssql_cols)
 
@@ -94,7 +94,7 @@ class MssqlData:
 
     def truncate_table(self) -> None:
         target = self.model.target
-        schema, table = target.schema.resolved, target.name_resolved
+        schema, table = target.schema_resolved, target.name_resolved
         cursor = self.conn.cursor()
         cursor.execute(
             f"TRUNCATE TABLE {_bracket_quote(schema)}.{_bracket_quote(table)}"
@@ -111,7 +111,7 @@ class MssqlData:
         target = self.model.target
         if not target.unique_columns:
             return
-        schema, table = target.schema.resolved, target.name_resolved
+        schema, table = target.schema_resolved, target.name_resolved
         constraint_name = f"{table}_uq"
         cols = ", ".join(_bracket_quote(c.name) for c in target.unique_columns)
         cursor = self.conn.cursor()

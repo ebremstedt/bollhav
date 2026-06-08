@@ -24,14 +24,12 @@ The `Model` itself is the top-level container. Its sub-objects each have their o
 
 - [Kind](KINDS.md) — the model's unit of work (`INTERVAL` / `MONOLITHIC` / `VIEW`)
 - [Target](TARGET.md) — where data lands (table, schema, columns, write mode)
-- [TargetSchema](TARGETSCHEMA.md) — schema part of Target (with optional rotating suffix)
 - [Staging](STAGING.md) — optional staging table on Target
-- [SourceTable](SOURCETABLE.md) — where data is read from (database)
-- [SourceFile](SOURCEFILE.md) — where data is read from (file)
 - [Bounds](BOUNDS.md) — historical envelope for backfill mode
 - [Batch](BATCH.md) — chunk size, lookback, retries
 - [State](STATE.md) — per-model state tracking
-- [Upstream](UPSTREAM.md) — dependencies on other models, checked by kind
+- [Upstream](UPSTREAM.md) — the model's inputs (`list[Source]`): gated upstreams + ungated sources
+- [SourceModel](SOURCETABLE.md) / [SourceFile](SOURCEFILE.md) — input `type`s
 - [Tagging](TAGGING.md) — controls which auto-derived tags get added to the model
 
 ## Example
@@ -39,7 +37,7 @@ The `Model` itself is the top-level container. Its sub-objects each have their o
 ```python
 from datetime import datetime, timezone
 from bollhav.model import (
-    Model, Kind, Target, TargetSchema, SourceTable,
+    Model, Kind, Target, Source, SourceModel,
     Bounds, Batch, Database, WriteMode,
 )
 from bollhav.postgres import PostgresColumn, PostgresType
@@ -48,7 +46,7 @@ model = Model(
     kind=Kind.INTERVAL,
     target=Target(
         name="orders",
-        schema=TargetSchema(name="public"),
+        schema="public",
         database=Database.POSTGRES,
         columns=[
             PostgresColumn(name="id", data_type=PostgresType.BIGINT, primary_key=True, nullable=False),
@@ -57,7 +55,7 @@ model = Model(
         ],
         write_mode=WriteMode.APPEND,
     ),
-    source=SourceTable(name="raw.orders"),
+    upstream=[Source("raw.orders", type=SourceModel())],
     bounds=Bounds(begin=datetime(2024, 1, 1, tzinfo=timezone.utc)),
     batching=Batch(interval_expression="0 * * * *"),
     debug=True,
@@ -78,11 +76,11 @@ Type: `Target` · Default: required
 
 Defines where and how data is written. See [Target](TARGET.md).
 
-### source
+### upstream
 
-Type: `SourceTable` · Default: `None`
+Type: `list[Source]` · Default: `[]`
 
-Defines where data is read from. See [SourceTable](SOURCETABLE.md) or [SourceFile](SOURCEFILE.md).
+The model's inputs — gated upstreams (a `Source` with a `contract`) and ungated sources (no contract), in one list. See [Upstream](UPSTREAM.md); input `type`s are [SourceModel](SOURCETABLE.md) / [SourceFile](SOURCEFILE.md) / `SourceApi`.
 
 ### bounds
 
@@ -120,12 +118,6 @@ Type: `str` · Default: `None`
 
 Human-readable description.
 
-### upstream
-
-Type: `list[Contract | str]` · Default: `None`
-
-Models that must run before this one. Each entry is a contract (`IntervalContract` / `MonolithicContract` / `ViewContract`) keyed on the upstream's kind, or a bare name string. **Requires `state=State(...)`** — contracts are only enforced for state-tracked models, so declaring `upstream` without state raises. See [Upstream dependencies](#upstream-dependencies) below and [Upstream](UPSTREAM.md).
-
 ### `**kwargs`
 
 Extra metadata. Callable values are resolved with non-callable kwargs as arguments.
@@ -142,7 +134,7 @@ Extra metadata. Callable values are resolved with non-callable kwargs as argumen
 | `target.sensitive` | `True` if any column has `sensitive=True` |
 | `target.unique_columns` | Columns with `unique=True` — required for `UPSERT_NO_DELETE` |
 | `target.partitioned_by_index` | `True` if `partitioned_by` is set |
-| `tags` | Auto-assembled from `name`, `target.schema.name`, and `"all"` |
+| `tags` | Auto-assembled from `name`, `target.schema`, and `"all"` |
 
 ## Upstream dependencies
 
@@ -155,7 +147,7 @@ raw_orders = Model(
 
 enriched_orders = Model(
     target=Target(name="enriched_orders"),
-    upstream=["raw_orders"],
+    upstream=[Source("raw_orders", type=SourceModel())],
 )
 ```
 

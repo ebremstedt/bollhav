@@ -75,7 +75,7 @@ def _staging_schema(model: "Model") -> str:
     user's schemas."""
     if model.target.staging is not None and model.target.staging.schema:
         return model.target.staging.schema
-    return f"z_{model.target.schema.resolved}"
+    return f"z_{model.target.schema_resolved}"
 
 
 def _staging_table_prefix(model: "Model") -> str:
@@ -338,7 +338,7 @@ def apply_atomically_to_target(
     visible in target."""
     staging_schema = _staging_schema(model)
     staging_table = _staging_table(model, run_id)
-    target_schema = model.target.schema.resolved
+    target_schema = model.target.schema_resolved
     target_table = model.target.name_resolved
 
     keep = model.target.staging is not None and model.target.staging.keep_after_apply

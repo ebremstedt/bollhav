@@ -17,9 +17,9 @@ The four models (`src/models/`):
 
 ```python
 upstream=[
-    IntervalContract("warehouse.orders"),       # an applied interval covering the window
-    ViewContract("warehouse.customers"),         # the view exists
-    MonolithicContract("warehouse.app_config"),  # the whole table is loaded
+    Source("warehouse.orders",     type=SourceModel(), contract=IntervalContract()),    # applied interval covering the window
+    Source("warehouse.customers",  type=SourceModel(), contract=ViewContract()),         # the view exists
+    Source("warehouse.app_config", type=SourceModel(), contract=MonolithicContract()),  # the whole table is loaded
 ]
 ```
 

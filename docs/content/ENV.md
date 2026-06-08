@@ -52,11 +52,11 @@ One of `enforce` / `ignore_views` / `ignore_completely`, default `enforce`. Cont
 
 ## USE_SCHEMA_SUFFIX
 
-Bool, default `true`. When `true`, each model's `TargetSchema` honors its `suffix` / `suffix_appendix` config. Set `false` in production to write to the bare schema name.
+Bool, default `true`. When `true`, each model's `schema_suffix` / `schema_suffix_appendix` is honored. Set `false` in production to write to the bare schema name.
 
 ## SCHEMA_SUFFIX
 
-String, optional. Overrides every model's `TargetSchema.suffix` for this run — typically used in dev (`SCHEMA_SUFFIX=$USER`) to isolate writes per developer.
+String, optional. Overrides every model's `schema_suffix` for this run — typically used in dev (`SCHEMA_SUFFIX=$USER`) to isolate writes per developer.
 
 ## USE_TABLE_SUFFIX
 
@@ -76,7 +76,19 @@ Bool, default `false`. Prints a concise summary of every matched model (cron + i
 
 ## DRY_RUN_EXTRA
 
-Bool, default `false`. Same short-circuit as `DRY_RUN` but prints an exhaustive per-model block (schema, write mode, cron/window/intervals, bounds, tags, upstream, source, description). Setting just `DRY_RUN_EXTRA=true` implies `DRY_RUN=true`.
+Bool, default `false`. Same short-circuit as `DRY_RUN` but prints an exhaustive per-model block (schema, write mode, cron/window/intervals, bounds, tags, upstream, sources, description). Setting just `DRY_RUN_EXTRA=true` implies `DRY_RUN=true`.
+
+## DRY_STATE
+
+Bool, default `false`. The **state-level** dry run (vs `DRY_RUN`, which is model-level). For each model it runs the state bootstrap and prints the resolved plan — how many units **would run**, plus the `applied` / `blocked` (with reasons) breakdown — then exits **without** creating target assets, writing data, or running your model logic.
+
+Because it resolves against the real state DB, it **initializes/refreshes the state bookkeeping** (idempotent — the same setup a real run does), so it is *not* purely read-only the way `DRY_RUN` is: it writes the per-model state tables / library rows (no target-schema DDL, no data).
+
+It accounts for the **cascade**: a model gated on an upstream that would itself run earlier in this pass shows `will run after <upstream>` (counted as would-run), not `blocked`; only gates on upstreams that would *not* run are `blocked`. This relies on models being processed in dependency order — which a real `@load_models` run guarantees (it topologically sorts).
+
+## DRY_STATE_EXTRA
+
+Bool, default `false`. Same short-circuit as `DRY_STATE`, but lists **every actionable interval individually** (its window + `would run` / `blocked: <reason>`) instead of just the per-model counts. Setting just `DRY_STATE_EXTRA=true` implies `DRY_STATE=true`. Mirrors `DRY_RUN_EXTRA` over `DRY_RUN`.
 
 ## PROGRESS_BAR
 
@@ -84,7 +96,7 @@ One of `minimal` / `model` / `batch`, default `model`. Controls the verbosity of
 
 ## DSN env vars
 
-User-named. Whatever string you pass to `Target(dsn_env_var="MY_DB")` or `SourceTable(dsn_env_var="MY_DB")` must be set in the environment at runtime with the connection string (e.g. `MY_DB=postgresql://host/db`).
+User-named. Whatever string you pass to `Target(dsn_env_var="MY_DB")` or `SourceModel(dsn_env_var="MY_DB")` must be set in the environment at runtime with the connection string (e.g. `MY_DB=postgresql://host/db`).
 
 ## STATE_MODE
 
@@ -93,9 +105,5 @@ One of `discover` / `bulldozer`, default `discover`. Controls re-evaluation on r
 ## STATE_DISABLED
 
 Bool, default `false`. When `true`, forces no-state behavior on every matched model — `state` and `target.staging` are cleared, the state bootstrap and banner are skipped, and `write()` uses the direct (non-staged) path.
-
-## PEEK
-
-Bool, default `false`. When `true`, run bootstrap + print the state banner, then exit without invoking your `main()`.
 
 Full reference: [State](STATE.md).

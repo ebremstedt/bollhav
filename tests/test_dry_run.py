@@ -51,13 +51,14 @@ def _mk_model(
     model.target.full_name = full_name
     model.target.name = name
     model.target.name_resolved = name
-    model.target.schema.resolved = schema
+    model.target.schema_resolved = schema
     model.target.write_mode.value = "APPEND"
     model.bounds.begin = None
     model.bounds.end = None
     model.tags = set()
     model.upstream = []
-    model.source = None
+    model.upstream_names = []
+    model.source_specs = []
     model.description = None
     if with_batching:
         model.batching = MagicMock()

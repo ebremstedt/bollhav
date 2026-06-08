@@ -20,10 +20,9 @@ The canonical hierarchy:
 Home
 ├─ Model                      MODEL.md
 │  ├─ Target                  TARGET.md
-│  │  ├─ TargetSchema         TARGETSCHEMA.md
 │  │  ├─ Staging              STAGING.md
 │  │  └─ Write modes          WRITEMODES.md
-│  ├─ SourceTable / SourceFile  SOURCETABLE.md / SOURCEFILE.md
+│  ├─ SourceModel / SourceFile  SOURCETABLE.md / SOURCEFILE.md
 │  ├─ Bounds                  BOUNDS.md
 │  ├─ Batch                   BATCH.md
 │  ├─ Kind                    KINDS.md

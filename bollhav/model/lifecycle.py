@@ -37,6 +37,8 @@ from __future__ import annotations
 
 import inspect
 import logging
+import os
+import sys
 import traceback as _tb
 from functools import wraps
 from typing import Callable
@@ -44,6 +46,117 @@ from typing import Callable
 from bollhav.model.progress_bar import PROGRESS
 
 logger = logging.getLogger(__name__)
+
+
+def _sgr(s: str, code: str) -> str:
+    """Wrap `s` in an ANSI SGR `code` for terminal output; left plain when
+    stdout isn't a TTY (so piped/captured output has no escape codes)."""
+    return f"\033[{code}m{s}\033[0m" if sys.stdout.isatty() else s
+
+
+def _blue(s: str) -> str:
+    return _sgr(s, "34")
+
+
+def _red(s: str) -> str:
+    return _sgr(s, "31")
+
+
+def _truthy(name: str) -> bool:
+    # Read straight off os.environ (not via roskarl) so it's independent of the
+    # env-var library and robust under the test suite's roskarl mock.
+    return os.environ.get(name, "").strip().lower() in ("true", "1", "yes", "on")
+
+
+def _dry_state() -> bool:
+    """`DRY_STATE=true` — run the state bootstrap and print each model's
+    resolved plan (what would run / is applied / is blocked), then exit
+    without creating target assets, writing data, or executing the model.
+
+    Unlike `DRY_RUN` (model-level, no DB), this resolves against the real
+    state: it initializes/refreshes the state bookkeeping (idempotent — the
+    same thing a real run's bootstrap does), so it reflects current `applied`
+    rows and upstream gates. It performs **no** target-schema DDL, **no** data
+    writes, and runs **no** model logic. `DRY_STATE_EXTRA` implies it."""
+    return _truthy("DRY_STATE") or _truthy("DRY_STATE_EXTRA")
+
+
+def _dry_state_extra() -> bool:
+    """`DRY_STATE_EXTRA=true` — same as `DRY_STATE`, but list every actionable
+    interval individually (its window + would-run / blocked) instead of just
+    the per-model counts. Mirrors `DRY_RUN_EXTRA` over `DRY_RUN`."""
+    return _truthy("DRY_STATE_EXTRA")
+
+
+def _fmt_window(interval) -> str:
+    """A compact window label for one unit of work; `None` is the whole-table
+    / view singleton."""
+    if interval is None:
+        return "(whole table)"
+    return f"{interval.since:%Y-%m-%d %H:%M} → {interval.until:%Y-%m-%d %H:%M}"
+
+
+# DRY_STATE cascade accumulator: full_name → windows that would run this pass.
+# Models are processed in dependency order (a real `@load_models` run topo-sorts
+# them), so a downstream sees its upstreams' would-run windows here and can show
+# "will run after <upstream>" instead of "blocked". Populated only under
+# DRY_STATE; never consulted by real gating.
+_DRY_STATE_RUNS: dict[str, list] = {}
+
+
+def _print_state_plan(model, postgres_state) -> None:
+    """One model's state-resolved plan, for `DRY_STATE`. Each actionable unit is
+    classified — **would run** (gates already satisfied), **will run after** an
+    upstream that would itself run earlier in this pass (the cascade), or
+    **blocked** by an upstream that would NOT run — then summarized (counts) or,
+    with `DRY_STATE_EXTRA`, listed per interval. Read-only: gates are evaluated
+    live, the cascade via the in-pass `_DRY_STATE_RUNS` overlay."""
+    extra = _dry_state_extra()
+    name = model.target.full_name
+    kind = model.kind.value
+    if postgres_state is None:
+        print(
+            f"  {name} ({kind})  ·  stateless → would run {len(model.intervals)} unit(s)"
+        )
+        if extra:
+            for interval in model.intervals:
+                print(f"      {_blue(_fmt_window(interval))}   would run")
+        _DRY_STATE_RUNS[name] = list(model.intervals)
+        return
+
+    # (interval, status, upstreams) — status in {"run", "after", "blocked"}.
+    rows = [
+        (interval, *postgres_state.dry_state_classify(interval, _DRY_STATE_RUNS))
+        for interval in model.intervals
+    ]
+
+    would_run = sum(1 for _, s, _ in rows if s in ("run", "after"))
+    blocked = sum(1 for _, s, _ in rows if s == "blocked")
+    applied = postgres_state.read_status_summary()["counts"].get("applied", 0)
+    blocked_seg = _red(f"blocked {blocked}") if blocked else f"blocked {blocked}"
+    print(
+        f"  {name} ({kind})  ·  would run {would_run}  ·  {blocked_seg}  ·  applied {applied}"
+    )
+
+    # Record would-run (immediate + cascade) windows so downstreams resolve.
+    _DRY_STATE_RUNS[name] = [iv for iv, s, _ in rows if s in ("run", "after")]
+
+    if extra:
+        for interval, status, ups in rows:
+            if status == "run":
+                tail = "would run"
+            elif status == "after":
+                tail = f"will run after {', '.join(ups)}"
+            else:
+                tail = _red(f"blocked: {'; '.join(ups)}")
+            print(f"      {_blue(_fmt_window(interval))}   {tail}")
+    else:
+        agg: dict[str, int] = {}
+        for _, s, ups in rows:
+            if s == "blocked":
+                agg["; ".join(ups)] = agg.get("; ".join(ups), 0) + 1
+        for reason, n in sorted(agg.items()):
+            print(_red(f"      blocked by: {reason}{f'  ×{n}' if n > 1 else ''}"))
 
 
 def _conns(arguments: dict):
@@ -106,22 +219,32 @@ def model_lifecycle(func: Callable) -> Callable:
         from bollhav.model.database import Database
         from bollhav.model.state import StateBackend
 
+        dry_state = _dry_state()
+        postgres_state = None
+
         locked = False
-        if model.stateful and model.state.backend == StateBackend.POSTGRES:
+        if (
+            not dry_state
+            and model.stateful
+            and model.state.backend == StateBackend.POSTGRES
+        ):
             from bollhav.postgres.state import PostgresState
 
             postgres_state = PostgresState(model=model, conn=state_conn)
             locked = postgres_state.acquire_model_lock()
 
+        # DRY_STATE does no target-schema work — no data backend, so the
+        # asset-DDL block below is skipped entirely (no CREATE TABLE etc.).
         data = None
-        if model.target.database is Database.POSTGRES:
-            from bollhav.postgres.data import PostgresData
+        if not dry_state:
+            if model.target.database is Database.POSTGRES:
+                from bollhav.postgres.data import PostgresData
 
-            data = PostgresData(model=model, conn=data_conn)
-        elif model.target.database is Database.MSSQL:
-            from bollhav.mssql.data import MssqlData
+                data = PostgresData(model=model, conn=data_conn)
+            elif model.target.database is Database.MSSQL:
+                from bollhav.mssql.data import MssqlData
 
-            data = MssqlData(model=model, conn=data_conn)
+                data = MssqlData(model=model, conn=data_conn)
 
         try:
             if data is not None:
@@ -165,6 +288,9 @@ def model_lifecycle(func: Callable) -> Callable:
                 model.intervals = postgres_state.get_actionable_intervals()
 
             PROGRESS.begin_model_for(model, total=len(model.intervals))
+            if dry_state:
+                _print_state_plan(model, postgres_state)
+                return None
             return func(*args, **kwargs)
         finally:
             PROGRESS.finish_model()
@@ -266,7 +392,7 @@ def execute_lifecycle(func: Callable) -> Callable:
                 return None
 
             try:
-                if model.upstream:
+                if model.gated_upstreams:
                     check = postgres_state.is_upstream_satisfied_live(interval)
                     if not check.satisfied:
                         postgres_state.mark_blocked(

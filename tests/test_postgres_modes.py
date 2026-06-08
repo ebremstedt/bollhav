@@ -19,9 +19,8 @@ from bollhav.postgres.modes import (  # noqa: E402
 )
 from bollhav.postgres.columns import PostgresColumn, PostgresType  # noqa: E402
 from bollhav.model.model import Model  # noqa: E402
-from bollhav.model.source_table import SourceTable  # noqa: E402
+from bollhav.model.source import Source, SourceModel  # noqa: E402
 from bollhav.model.target import Target  # noqa: E402
-from bollhav.model.target_schema import TargetSchema  # noqa: E402
 from bollhav.model.write_modes import WriteMode  # noqa: E402
 from bollhav.model.kind import Kind  # noqa: E402
 from bollhav.model.batch import Batch  # noqa: E402
@@ -60,10 +59,11 @@ def _model(
 ) -> Model:
     cols = columns or [_col("id"), _col("val")]
     return Model(
-        source=SourceTable(name="src", query=source_query),
+        upstream=[Source("src", type=SourceModel(query=source_query))],
         target=Target(
             name="test_table",
-            schema=TargetSchema(name="test_schema"),
+            schema="test_schema",
+            catalog="cat",
             database=Database.POSTGRES,
             columns=cols,
             write_mode=write_mode,
@@ -176,13 +176,13 @@ class TestAppend:
 class TestOverwriteInsert:
     def test_raises_without_partitioned_by(self) -> None:
         from bollhav.model.database import Database
-        from bollhav.model.target_schema import TargetSchema
         from bollhav.model.target import Target
 
         with pytest.raises(ValueError, match="partition_on"):
             Target(
                 name="t",
-                schema=TargetSchema(name="s"),
+                schema="s",
+                catalog="cat",
                 database=Database.POSTGRES,
                 columns=[_col("id"), _col("val")],
                 write_mode=WriteMode.RECREATE_PARTITION,
@@ -258,11 +258,12 @@ class TestUpdateInsert:
             _col("val"),
         ]
         model = Model(
-            source=SourceTable(name="src"),
+            upstream=[Source("src", type=SourceModel())],
             target=Target(
                 name="test_table",
-                schema=TargetSchema(name="test_schema"),
+                schema="test_schema",
                 columns=cols,
+                catalog="cat",
                 database=Database.POSTGRES,
                 write_mode=WriteMode.UPSERT_NO_DELETE,
             ),

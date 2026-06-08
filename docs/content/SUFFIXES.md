@@ -11,7 +11,7 @@ They compose: you can use both at once.
 
 | Knob | Default | What it changes | Typical use |
 |---|---|---|---|
-| **`SCHEMA_SUFFIX`** | required (set at runtime) | `target.schema.resolved` | Separating dev / PR / CI runs from prod |
+| **`SCHEMA_SUFFIX`** | required (set at runtime) | `target.schema_resolved` | Separating dev / PR / CI runs from prod |
 | **`TABLE_SUFFIX`** | empty (off) | `target.name_resolved` | Blue/green hotswap inside a single schema |
 
 ## How it works
@@ -19,8 +19,8 @@ They compose: you can use both at once.
 Both suffixes flow through `apply_runtime_overrides`, which **copies** each matched model and bakes the resolved identifier onto the copy. The source model files are never mutated.
 
 ```
-TARGETSCHEMA(name=warehouse, suffix=pr123, suffix_appendix=%y%V)
-                                        └─ resolved → "warehouse_pr123_2614_"
+TARGET(schema=warehouse, schema_suffix=pr123, schema_suffix_appendix=%y%V)
+                                        └─ schema_resolved → "warehouse_pr123_2614_"
 
 TARGET(name=customers,        suffix=v2,   suffix_appendix=None)
                                         └─ name_resolved → "customers_v2"
@@ -38,6 +38,19 @@ All downstream identifiers follow:
 - DDL targets (`CREATE TABLE`, `TRUNCATE`, `DROP`) use `name_resolved`.
 
 Tag matching does **not** see the suffix — it stays bound to the base `name` so the same `TAGS=[customers]` expression works regardless of whether a suffix is set.
+
+## `SCHEMA_SUFFIX` isolates state, not just data
+
+`SCHEMA_SUFFIX` also moves bollhav's own bookkeeping into a per-branch namespace, so a dev/PR run never shares state with prod. Prod keeps two schemas — `z_bollhav_state` (per-model state tables) and `z_bollhav` (library + errors) — but a dev branch **consolidates everything into one** `z_bollhav_<suffix>`:
+
+| | state tables | library + errors |
+|---|---|---|
+| **prod** (no suffix) | `z_bollhav_state` | `z_bollhav` |
+| **dev** (`SCHEMA_SUFFIX=pr123`) | `z_bollhav_pr123` | `z_bollhav_pr123` |
+
+(State tables are digest-named, so they never clash with the fixed `library` / `errors` tables sharing the dev schema.)
+
+A suffixed run registers, gates, and tracks state entirely within its own environment — its upstreams resolve against *its* library, so a dev branch must build the upstreams it depends on (it can't gate against prod's). Tear the whole branch down by dropping just two schema families: `warehouse_<suffix>` (data) and `z_bollhav_<suffix>` (all bollhav state). With no suffix (prod), the bare `z_bollhav_state` / `z_bollhav` are untouched.
 
 ## When to use which
 
@@ -67,7 +80,7 @@ Both suffixes share Postgres' 63-byte identifier limit and the rule that anythin
 
 ### `SCHEMA_SUFFIX`
 
-- **Cross-schema references break.** If a model in your pipeline reads from `other_schema.things`, the suffix doesn't rewrite that reference — your `WHERE`/`JOIN` SQL still points at the unsuffixed source. Workaround: read sources through bollhav's `SourceTable` (which can be resolved at runtime) instead of hard-coding schema names in your queries.
+- **Cross-schema references break.** If a model in your pipeline reads from `other_schema.things`, the suffix doesn't rewrite that reference — your `WHERE`/`JOIN` SQL still points at the unsuffixed source. Workaround: declare the source as a `Source(type=SourceModel(...))` and resolve it with `model.ref(...)` at runtime instead of hard-coding schema names in your queries.
 - **External consumers don't know about it.** Anything outside the bollhav run (dashboards, downstream ETL, ad-hoc SQL) won't find your suffixed tables. That's the *point* in dev, but be careful not to point production consumers at a suffixed schema.
 - **Schema cleanup is on you.** bollhav creates schemas via `CREATE SCHEMA IF NOT EXISTS` but never drops them. Per-PR suffixes pile up.
 
@@ -97,5 +110,5 @@ Both suffixes are independent: the schema suffix governs *where*, the table suff
 ## See also
 
 - [Runtime overrides](RUNTIME_OVERRIDES.md) — full env-var reference (both `SCHEMA_SUFFIX` and `TABLE_SUFFIX` listed there).
-- [TargetSchema](TARGETSCHEMA.md) — the dataclass behind `SCHEMA_SUFFIX`.
+- [Target](TARGET.md) — `schema_suffix` / `schema_suffix_appendix`, the fields behind `SCHEMA_SUFFIX`.
 - [Target](TARGET.md) — the dataclass behind `TABLE_SUFFIX`.

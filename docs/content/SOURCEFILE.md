@@ -2,9 +2,13 @@
 
 # SourceFile
 
-Where data is read from when the model loads from a file (CSV, etc.) rather than a database. For database sources see [SourceTable](SOURCETABLE.md).
+The `type` of a **file** input — a `Source` that loads from a file (CSV, Parquet, JSON, …) rather than a database. For relational sources see [SourceModel](SOURCETABLE.md). Use it in a model's [`upstream`](UPSTREAM.md) list:
 
-`source` is **optional** — `Model(source=...)` defaults to `None`. A model needs no `source` at all (your `read()` supplies the data); it's there for code that wants the config.
+```python
+upstream=[Source("orders.csv", type=SourceFile(path=Path("dropzone/orders.csv")))]
+```
+
+A `SourceFile` is **not** SQL-addressable (`ref()` on it raises — there's no `FROM` for a file) and can't be gated (no `contract`). Your `read()` function uses its config to load the data.
 
 ## path
 

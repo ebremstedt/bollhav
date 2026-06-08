@@ -36,7 +36,7 @@ from run_model import run_model  # noqa: E402
 
 def _reset_target(model) -> None:
     """Fresh schema + dropped target so the printed row count is clean."""
-    schema = model.target.schema.resolved
+    schema = model.target.schema_resolved
     table = model.target.name
     with connect(autocommit=True) as conn:
         ensure_schema(conn, schema)
@@ -44,7 +44,7 @@ def _reset_target(model) -> None:
 
 
 def _count_rows(model) -> int:
-    schema = model.target.schema.resolved
+    schema = model.target.schema_resolved
     table = model.target.name
     with connect() as conn:
         row = (

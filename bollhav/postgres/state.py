@@ -19,6 +19,13 @@ The cross-pipeline `library` (also in `z_bollhav`) remains the
 authority for *validation* (is an upstream a real, registered model?) and
 the dependency graph.
 
+Under a `SCHEMA_SUFFIX` (dev / PR isolation), bollhav's own bookkeeping moves
+into a per-branch namespace, so a dev branch registers, gates, and tracks
+state in its OWN environment, never touching prod's. Prod keeps the split
+`z_bollhav_state` / `z_bollhav`; a dev branch **consolidates** state + library
++ errors into the single `z_bollhav_<suffix>` (one schema to drop). See
+`_env_schema` / `_state_schema` / `_library_schema`.
+
 The caller owns the connection: a `PostgresState` is constructed with the
 model and the state connection (opened in `main()` and threaded through
 the lifecycle hooks). `PostgresState` does not open its own connections.
@@ -44,14 +51,13 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-# ── fixed schemas + deterministic table naming ───────────────────────
+# ── deterministic state-table naming ─────────────────────────────────
 #
-# Per-model STATE tables live in `z_bollhav_state`, named by a pure function
-# of the model's `full_name`. ERRORS are NOT per-model: every model logs to
-# one shared `z_bollhav.errors` table, keyed by `full_name` (errors are a
-# low-volume append-only log — one table is simpler to query across models).
-
-STATE_SCHEMA = "z_bollhav_state"
+# Per-model STATE tables live in the one bollhav schema (`z_bollhav`, or
+# `z_bollhav_<suffix>` for a dev branch — see `_library_schema`), named by a
+# pure function of the model's `full_name`. ERRORS are NOT per-model: every
+# model logs to one shared `errors` table in the same schema, keyed by
+# `full_name`.
 
 _VOWELS = frozenset("aeiou")
 _SLUG_CAP = 44  # max slug chars; + "_" + 16-hex digest = ≤ 61 (under 63)
@@ -162,6 +168,24 @@ CREATE INDEX IF NOT EXISTS {index} ON {schema}.{table} (created_at DESC)
 _BLOCK_UPSTREAM_RE = re.compile(r"upstream '([^']+)'(?: \(([^)]+)\))?")
 
 
+def _overlay_covers(windows, kind: str, interval) -> bool:
+    """The `DRY_STATE` cascade rule: True when an upstream's would-run
+    `windows` cover this downstream `interval` for the given contract `kind`.
+    A view/monolithic upstream (or a whole-table `None` window) covers any
+    downstream window; an interval upstream needs a would-run window that
+    contains the downstream's."""
+    if not windows:
+        return False
+    if kind in ("view", "monolithic") or interval is None:
+        return True
+    for w in windows:
+        if w is None:
+            return True
+        if w.since <= interval.since and w.until >= interval.until:
+            return True
+    return False
+
+
 # ── cross-pipeline model library ─────────────────────────────────────
 #
 # The central registry of every bollhav model the state DB has ever
@@ -239,10 +263,49 @@ class PostgresState:
             )
         return self.conn
 
+    def _env_schema(self, base: str) -> str:
+        """Suffix a bollhav-owned schema with this model's schema suffix, so a
+        `SCHEMA_SUFFIX` run gets its own isolated state + library environment
+        (`z_bollhav` → `z_bollhav_pr123_2614_`). No suffix → unchanged, so prod
+        is untouched."""
+        from bollhav.model.target import resolve_schema_name
+
+        return resolve_schema_name(
+            base,
+            self.model.target.schema_suffix,
+            self.model.target.schema_suffix_appendix,
+        )
+
     def _state_schema(self) -> str:
-        """Fixed central state schema (`z_bollhav_state`). State tables for
-        every model live here, named deterministically by `state_table_name`."""
-        return STATE_SCHEMA
+        """State tables live in the one bollhav schema, alongside the library +
+        errors — `z_bollhav` (prod), or `z_bollhav_<suffix>` for a dev branch.
+        State tables are digest-named, so they never clash with the fixed
+        `library` / `errors` tables sharing the schema."""
+        return self._library_schema()
+
+    def _library_schema(self) -> str:
+        """Cross-pipeline library + errors schema, per-environment under a
+        `SCHEMA_SUFFIX` (`z_bollhav` → `z_bollhav_pr123_2614_`). A dev branch
+        thus registers and gates against its OWN library, never prod's."""
+        return self._env_schema(LIBRARY_SCHEMA)
+
+    def _suffix_upstream_name(self, full_name: str) -> str:
+        """Apply this model's schema suffix to an upstream's dotted name so the
+        gating lookup matches how that upstream registered in THIS environment.
+        The declared reference stays canonical (so `ref()` still resolves it);
+        only the lookup key is suffixed."""
+        if not self.model.target.schema_suffix:
+            return full_name
+        from bollhav.model.target import resolve_schema_name
+
+        parts = full_name.split(".")
+        if len(parts) >= 2:
+            parts[-2] = resolve_schema_name(
+                parts[-2],
+                self.model.target.schema_suffix,
+                self.model.target.schema_suffix_appendix,
+            )
+        return ".".join(parts)
 
     def _state_table(self) -> str:
         """Deterministic state-table name (`state_table_name(full_name)`).
@@ -738,7 +801,7 @@ class PostgresState:
             "(full_name, run_id, since, until, error_type, error_message, traceback) "
             "VALUES (%s, %s, %s, %s, %s, %s, %s)"
         ).format(
-            schema=sql.Identifier(LIBRARY_SCHEMA),
+            schema=sql.Identifier(self._library_schema()),
             table=sql.Identifier(ERRORS_TABLE),
         )
         match, match_params = self._window_match(interval)
@@ -879,38 +942,77 @@ class PostgresState:
         `UpstreamCheck.reason` composes them into the single concise
         `blocked_reason` the row stores, and `read_status_summary` parses
         each back out so the banner can list every missing upstream."""
-        from bollhav.model.upstream import Contract, UpstreamCheck
+        from bollhav.model.upstream import UpstreamCheck
 
         conn = self._require_conn()
         blockers: list[str] = []
-        for upstream in self.model.upstream:
-            is_contract = isinstance(upstream, Contract)
-            name = upstream.name if is_contract else upstream
-            kind = upstream.kind if is_contract else None
-            match = PostgresState.lookup_model(conn, name)
+        for src in self.model.gated_upstreams:
+            name = src.name
+            kind = src.contract.kind  # gated ⇒ contract is not None
+            # Look the upstream up under THIS env's identity + library: a
+            # suffixed run resolves against its own env, never prod's.
+            match = PostgresState.lookup_model(
+                conn, self._suffix_upstream_name(name), self._library_schema()
+            )
             if match is None:
-                # Not in the library — the upstream has never registered.
-                if is_contract:
-                    # A declared Contract is a demand: an unregistered
-                    # upstream is a real error (a typo, or the upstream was
-                    # never deployed / run), not something to skip.
-                    raise ValueError(
-                        f"upstream contract {name!r} ({kind}) on "
-                        f"{self.model.target.full_name!r} is not registered in "
-                        f"the library — it has never run. A declared Contract "
-                        f"demands the upstream exists; fix the name or run the "
-                        f"upstream first. (A bare-string upstream is treated as "
-                        f"documentation and would not block.)"
-                    )
-                # Bare string → documentation, not an enforced dependency.
-                # Only state-tracked models register, so an unregistered name
-                # (a view, a state-less table, or a typo) does not block.
-                continue
+                # A gated upstream (a Source with a contract) is a hard demand:
+                # an unregistered upstream is a real error (a typo, or the
+                # upstream was never deployed / run). (An ungated source isn't
+                # checked here at all — it's never iterated.)
+                raise ValueError(
+                    f"upstream contract {name!r} ({kind}) on "
+                    f"{self.model.target.full_name!r} is not registered in "
+                    f"the library — it has never run. A gated upstream demands "
+                    f"the upstream exists; fix the name or run the upstream "
+                    f"first. (An ungated source would not block.)"
+                )
             if not PostgresState.is_satisfied(
                 conn, entry=match, interval=interval, kind=kind
             ):
-                blockers.append(f"upstream {name!r} ({kind or match.kind})")
+                blockers.append(f"upstream {name!r} ({kind})")
         return UpstreamCheck(blockers=tuple(blockers))
+
+    def dry_state_classify(
+        self, interval: "TZInterval | None", assume_applied: dict | None = None
+    ) -> tuple[str, list[str]]:
+        """Classify one actionable interval for `DRY_STATE` into three outcomes,
+        accounting for the cascade. `assume_applied` is
+        `{upstream_full_name: [windows that would run this pass]}` — an upstream
+        that hasn't run yet but WOULD run earlier in the same pass counts as
+        satisfied.
+
+        Returns `(status, upstreams)`:
+
+          * `("run", [])`           — runnable now (every gate already applied)
+          * `("after", [u, …])`     — gated only on upstreams that would run
+                                      this pass → would run *after* them
+          * `("blocked", [u, …])`   — gated on upstreams that would NOT run
+
+        Unlike `is_upstream_satisfied_live`, an unregistered upstream is reported
+        as blocked rather than raised — a preview shouldn't crash."""
+        conn = self._require_conn()
+        after: list[str] = []
+        blocked: list[str] = []
+        for src in self.model.gated_upstreams:
+            name = src.name
+            kind = src.contract.kind
+            lookup = self._suffix_upstream_name(name)
+            if assume_applied and _overlay_covers(
+                assume_applied.get(lookup), kind, interval
+            ):
+                after.append(f"{name} ({kind})")
+                continue
+            match = PostgresState.lookup_model(conn, lookup, self._library_schema())
+            if match is not None and PostgresState.is_satisfied(
+                conn, entry=match, interval=interval, kind=kind
+            ):
+                continue  # already applied
+            blocked.append(f"{name} ({kind})")
+        if blocked:
+            return ("blocked", blocked)
+        if after:
+            return ("after", after)
+        return ("run", [])
 
     # ── advisory locks ───────────────────────────────────────────────
 
@@ -1007,12 +1109,12 @@ class PostgresState:
         with conn.transaction():
             conn.execute(
                 sql.SQL("CREATE SCHEMA IF NOT EXISTS {schema}").format(
-                    schema=sql.Identifier(LIBRARY_SCHEMA),
+                    schema=sql.Identifier(self._library_schema()),
                 )
             )
             conn.execute(
                 sql.SQL(_LIBRARY_DDL).format(
-                    schema=sql.Identifier(LIBRARY_SCHEMA),
+                    schema=sql.Identifier(self._library_schema()),
                     table=sql.Identifier(LIBRARY_TABLE),
                 )
             )
@@ -1020,29 +1122,29 @@ class PostgresState:
             # The one shared, central errors table lives in the same schema.
             conn.execute(
                 sql.SQL(_ERRORS_DDL).format(
-                    schema=sql.Identifier(LIBRARY_SCHEMA),
+                    schema=sql.Identifier(self._library_schema()),
                     table=sql.Identifier(ERRORS_TABLE),
                 )
             )
             conn.execute(
                 sql.SQL(_ERRORS_MODEL_INDEX_DDL).format(
                     index=sql.Identifier(f"{ERRORS_TABLE}_full_name_idx"),
-                    schema=sql.Identifier(LIBRARY_SCHEMA),
+                    schema=sql.Identifier(self._library_schema()),
                     table=sql.Identifier(ERRORS_TABLE),
                 )
             )
             conn.execute(
                 sql.SQL(_ERRORS_TIME_INDEX_DDL).format(
                     index=sql.Identifier(f"{ERRORS_TABLE}_created_at_idx"),
-                    schema=sql.Identifier(LIBRARY_SCHEMA),
+                    schema=sql.Identifier(self._library_schema()),
                     table=sql.Identifier(ERRORS_TABLE),
                 )
             )
         logger.debug(
             "library: ensured %s.%s + %s.%s",
-            LIBRARY_SCHEMA,
+            self._library_schema(),
             LIBRARY_TABLE,
-            LIBRARY_SCHEMA,
+            self._library_schema(),
             ERRORS_TABLE,
         )
 
@@ -1060,7 +1162,7 @@ class PostgresState:
                 "ALTER TABLE {schema}.{table} "
                 "ADD COLUMN IF NOT EXISTS sources JSONB NOT NULL DEFAULT '[]'::jsonb"
             ).format(
-                schema=sql.Identifier(LIBRARY_SCHEMA),
+                schema=sql.Identifier(self._library_schema()),
                 table=sql.Identifier(LIBRARY_TABLE),
             )
         )
@@ -1068,7 +1170,7 @@ class PostgresState:
             "SELECT 1 FROM information_schema.columns "
             "WHERE table_schema = %s AND table_name = %s "
             "  AND column_name = 'model_type' LIMIT 1",
-            [LIBRARY_SCHEMA, LIBRARY_TABLE],
+            [self._library_schema(), LIBRARY_TABLE],
         ).fetchone()
         if not has_model_type:
             conn.execute(
@@ -1076,14 +1178,14 @@ class PostgresState:
                     "ALTER TABLE {schema}.{table} "
                     "ADD COLUMN model_type TEXT NOT NULL DEFAULT 'TABLE'"
                 ).format(
-                    schema=sql.Identifier(LIBRARY_SCHEMA),
+                    schema=sql.Identifier(self._library_schema()),
                     table=sql.Identifier(LIBRARY_TABLE),
                 )
             )
             logger.info(
                 "library: migrated %s.%s — added model_type column "
                 "(default 'TABLE' so older images can keep writing)",
-                LIBRARY_SCHEMA,
+                self._library_schema(),
                 LIBRARY_TABLE,
             )
 
@@ -1091,7 +1193,7 @@ class PostgresState:
             "SELECT 1 FROM information_schema.columns "
             "WHERE table_schema = %s AND table_name = %s "
             "  AND column_name = 'kind' LIMIT 1",
-            [LIBRARY_SCHEMA, LIBRARY_TABLE],
+            [self._library_schema(), LIBRARY_TABLE],
         ).fetchone()
         if not has_kind:
             conn.execute(
@@ -1099,14 +1201,14 @@ class PostgresState:
                     "ALTER TABLE {schema}.{table} "
                     "ADD COLUMN kind TEXT NOT NULL DEFAULT 'interval'"
                 ).format(
-                    schema=sql.Identifier(LIBRARY_SCHEMA),
+                    schema=sql.Identifier(self._library_schema()),
                     table=sql.Identifier(LIBRARY_TABLE),
                 )
             )
             logger.info(
                 "library: migrated %s.%s — added kind column (default "
                 "'interval' so older images keep registering interval models)",
-                LIBRARY_SCHEMA,
+                self._library_schema(),
                 LIBRARY_TABLE,
             )
 
@@ -1115,14 +1217,14 @@ class PostgresState:
                 "SELECT is_nullable FROM information_schema.columns "
                 "WHERE table_schema = %s AND table_name = %s "
                 "  AND column_name = %s LIMIT 1",
-                [LIBRARY_SCHEMA, LIBRARY_TABLE, col],
+                [self._library_schema(), LIBRARY_TABLE, col],
             ).fetchone()
             if is_nullable and is_nullable[0] == "NO":
                 conn.execute(
                     sql.SQL(
                         "ALTER TABLE {schema}.{table} ALTER COLUMN {col} DROP NOT NULL"
                     ).format(
-                        schema=sql.Identifier(LIBRARY_SCHEMA),
+                        schema=sql.Identifier(self._library_schema()),
                         table=sql.Identifier(LIBRARY_TABLE),
                         col=sql.Identifier(col),
                     )
@@ -1130,7 +1232,7 @@ class PostgresState:
                 logger.info(
                     "library: migrated %s.%s — relaxed NOT NULL on %s "
                     "(view / library-only rows store NULL here)",
-                    LIBRARY_SCHEMA,
+                    self._library_schema(),
                     LIBRARY_TABLE,
                     col,
                 )
@@ -1166,7 +1268,7 @@ class PostgresState:
             "sources = EXCLUDED.sources, "
             "last_seen = EXCLUDED.last_seen"
         ).format(
-            schema=sql.Identifier(LIBRARY_SCHEMA),
+            schema=sql.Identifier(self._library_schema()),
             table=sql.Identifier(LIBRARY_TABLE),
         )
         with conn.transaction():
@@ -1192,18 +1294,24 @@ class PostgresState:
         )
 
     @staticmethod
-    def lookup_model(conn: psycopg.Connection, full_name: str) -> "LibraryEntry | None":
+    def lookup_model(
+        conn: psycopg.Connection,
+        full_name: str,
+        library_schema: str = LIBRARY_SCHEMA,
+    ) -> "LibraryEntry | None":
         """Return the `LibraryEntry` for a model, or None if unregistered.
 
         Registry-level (not scoped to one model), so it's a static method
         taking the connection — the caller looks up arbitrary upstream
-        names, not `self.model`."""
+        names, not `self.model`. `library_schema` selects the environment's
+        library (the gating caller passes `self._library_schema()`); defaults
+        to the prod `z_bollhav`."""
         row = conn.execute(
             sql.SQL(
                 "SELECT upstream, model_type, state_schema, state_table, kind, sources "
                 "FROM {schema}.{table} WHERE full_name = %s"
             ).format(
-                schema=sql.Identifier(LIBRARY_SCHEMA),
+                schema=sql.Identifier(library_schema),
                 table=sql.Identifier(LIBRARY_TABLE),
             ),
             [full_name],
@@ -1293,6 +1401,5 @@ __all__ = [
     "LIBRARY_SCHEMA",
     "LIBRARY_TABLE",
     "ERRORS_TABLE",
-    "STATE_SCHEMA",
     "state_table_name",
 ]

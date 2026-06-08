@@ -67,11 +67,10 @@ nav:
           - Kind: KINDS.md
           - Target:
               - Overview: TARGET.md
-              - TargetSchema: TARGETSCHEMA.md
               - Staging: STAGING.md
           - Source:
               - None: SOURCE_NONE.md
-              - SourceTable: SOURCETABLE.md
+              - SourceModel: SOURCETABLE.md
               - SourceFile: SOURCEFILE.md
           - Bounds: BOUNDS.md
           - Batch: BATCH.md

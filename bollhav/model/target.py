@@ -6,7 +6,19 @@ from bollhav.model.database import Database, DatabaseColumn, DatabaseIndex
 from bollhav.model.staging import Staging
 from bollhav.model.write_modes import WriteMode
 from bollhav.model.column_sorting import sort_columns
-from bollhav.model.target_schema import TargetSchema
+
+
+def resolve_schema_name(name: str, suffix: str, appendix: str | None) -> str:
+    """Apply a rotating `suffix` (and optional date `appendix`) to a schema
+    name — `warehouse` → `warehouse_pr123_2425_` — or return it unchanged when
+    no suffix is set. Pure: callers pass the base name, never a resolved one,
+    so it's idempotent. (Note the trailing `_`, kept for back-compat.)"""
+    if not suffix:
+        return name
+    s = f"{name}_{suffix}"
+    if appendix:
+        s = s + "_" + datetime.now(tz=timezone.utc).strftime(appendix) + "_"
+    return s
 
 
 @dataclass
@@ -14,7 +26,12 @@ class Target:
     name: str
     suffix: str = ""
     suffix_appendix: str | None = None
-    schema: TargetSchema = field(default_factory=TargetSchema)
+    # The schema is just its name; the dev/prod/PR isolation transform is the
+    # `schema_suffix` (+ optional date `schema_suffix_appendix`), applied at
+    # resolution time by `schema_resolved` — never baked into `schema`.
+    schema: str = ""
+    schema_suffix: str = ""
+    schema_suffix_appendix: str | None = "%y%V"
     catalog: str | None = None
     database: Database | None = None
     columns: list[DatabaseColumn] = field(default_factory=list)
@@ -49,13 +66,22 @@ class Target:
         return s
 
     @property
+    def schema_resolved(self) -> str:
+        """The schema name with its `schema_suffix` (+ optional date
+        `schema_suffix_appendix`) applied. Empty suffix returns the bare
+        schema."""
+        return resolve_schema_name(
+            self.schema, self.schema_suffix, self.schema_suffix_appendix
+        )
+
+    @property
     def full_name(self) -> str:
         """`catalog.schema.name_resolved` when catalog is set, else
         `schema.name_resolved` (or just `name_resolved` when schema is unset —
         same as before catalog existed)."""
         base = (
-            f"{self.schema.resolved}.{self.name_resolved}"
-            if self.schema.resolved
+            f"{self.schema_resolved}.{self.name_resolved}"
+            if self.schema_resolved
             else self.name_resolved
         )
         return f"{self.catalog}.{base}" if self.catalog else base
@@ -86,6 +112,13 @@ class Target:
             raise ValueError("columns must be set when database is provided")
         if len(self.columns) > 0 and self.database is None:
             raise ValueError("database must be set when columns is provided")
+        if self.database is not None and not self.catalog:
+            raise ValueError(
+                f"catalog must be set on model {self.name!r} — a database-backed "
+                f"model's identity is catalog.schema.table, so the catalog is "
+                f"required to keep names unique across databases in the shared "
+                f"library (referencing by anything less risks collisions)."
+            )
 
         partition_cols = [c for c in self.columns if getattr(c, "partition_on", False)]
         if len(partition_cols) > 1:

@@ -28,15 +28,22 @@ A derived `@property` returning the resolved table name: `name` with `suffix` (a
 
 ## schema
 
-Type: `TargetSchema` · Default: `TargetSchema()`
+Type: `str` · Default: `""`
 
-Destination schema. See [TargetSchema](TARGETSCHEMA.md) for the sub-fields.
+Destination schema name (just the name — `"warehouse"`). The dev/prod/PR isolation transform is two sibling fields:
+
+- **`schema_suffix`** (`str`, default `""`) — appended as `_<suffix>`. Set per-run, usually from `SCHEMA_SUFFIX` (e.g. `$USER` in dev). Empty = bare schema.
+- **`schema_suffix_appendix`** (`str | None`, default `"%y%V"`) — a `strftime` appended after the suffix (default = year+week, so suffixed schemas rotate weekly). `None` to disable.
+
+`Target.schema_resolved` applies them: `warehouse` → `warehouse_pr123_2614_`. (It's a pure view over `schema` — the base name is never mutated, so resolution is idempotent. Note the trailing `_`, kept for back-compat; the *table*-name suffix on `name_resolved` does not add one.)
 
 ## catalog
 
-Type: `str` · Default: `None`
+Type: `str` · Default: `None` · **Required when `database` is set**
 
-Destination catalog. Set for three-part addressing (`catalog.schema.table`) on warehouses like Snowflake, BigQuery, and Trino. When set, `Target.full_name` returns `catalog.schema_resolved.name_resolved` and the catalog is added to the model's tags.
+Destination catalog — the top of three-part addressing (`catalog.schema.table`). **Required on every database-backed model**: a model's identity is `catalog.schema.table`, and the catalog keeps names unique across databases in the shared library, so referencing by anything less risks collisions. Constructing a `Target` with a `database` but no `catalog` raises.
+
+`Target.full_name` is then `catalog.schema_resolved.name_resolved`, and the catalog is added to the model's tags. Note that the catalog is **identity only** — `model.ref(name)` drops it when emitting SQL (it resolves to `schema.table`, since the catalog is the DSN you're already connected on). Abstract Targets (no `database`) may still omit it.
 
 ## database
 

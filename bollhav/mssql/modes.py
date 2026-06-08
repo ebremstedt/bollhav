@@ -178,7 +178,7 @@ def merge(
 
     Thin wrapper over `_merge_via_temp` that opens a cursor, runs the
     merge against the target table, and commits."""
-    target_table = f"{_bracket_quote(model.target.schema.resolved)}.{_bracket_quote(model.target.name)}"
+    target_table = f"{_bracket_quote(model.target.schema_resolved)}.{_bracket_quote(model.target.name)}"
     cursor = conn.cursor()
     _merge_via_temp(cursor, target_table, model, df, fast_executemany=fast_executemany)
     cursor.commit()
@@ -191,7 +191,7 @@ def append(
     fast_executemany: bool = True,
 ) -> None:
     """Bulk insert rows into target without clearing existing data."""
-    schema = model.target.schema.resolved
+    schema = model.target.schema_resolved
     table = model.target.name
     all_col_names = [c.name for c in model.target.columns]
 
@@ -209,18 +209,26 @@ def append(
 
 
 def create_replace_view(conn: pyodbc.Connection, model: Model) -> None:
-    """Create or alter a view using the query defined on model.source."""
-    from bollhav.model.source_table import SourceTable
+    """Create or alter a view using the query defined on its SourceModel."""
+    from bollhav.model.source import SourceModel
 
-    if not isinstance(model.source, SourceTable) or model.source.query is None:
+    src = next(
+        (
+            s
+            for s in model.upstream
+            if isinstance(s.type, SourceModel) and s.type.query is not None
+        ),
+        None,
+    )
+    if src is None:
         raise ValueError(
-            f"create_replace_view requires model.source to be a SourceTable "
-            f"with .query set, got {type(model.source).__name__} on "
+            f"create_replace_view requires a Source with a SourceModel type "
+            f"whose .query is set, in upstream=[...] on "
             f"{model.target.full_name!r}"
         )
-    schema = model.target.schema.resolved
+    schema = model.target.schema_resolved
     view = model.target.name
-    query = cast(LiteralString, model.source.query)
+    query = cast(LiteralString, src.type.query)
 
     cursor = conn.cursor()
     cursor.execute(

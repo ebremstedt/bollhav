@@ -92,7 +92,7 @@ def _staging_schema(model: "Model") -> str:
         if model.state is not None and model.state.schema_prefix is not None
         else "z_"
     )
-    return f"{prefix}{model.target.schema.resolved}"
+    return f"{prefix}{model.target.schema_resolved}"
 
 
 def _staging_table_prefix(model: "Model") -> str:
@@ -372,7 +372,7 @@ def apply_atomically_to_target(
     there's no `applied` gate."""
     staging_schema = _staging_schema(model)
     staging_table = _staging_table(model, run_id)
-    target_schema = model.target.schema.resolved
+    target_schema = model.target.schema_resolved
     target_table = model.target.name_resolved
 
     if drop_after_apply is None:
