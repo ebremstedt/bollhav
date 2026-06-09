@@ -17,6 +17,11 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest", "ruff", "time-machine"]
+tui = ["textual>=0.50"]
+
+[project.scripts]
+bollhav = "bollhav.tui.app:main"
+bollhav-tui = "bollhav.tui.app:main"
 
 [project.urls]
 Homepage = "https://github.com/ebremstedt/bollhav"

@@ -45,6 +45,10 @@ def _model(*, write_mode=None, staging_cfg=None):
     model.target.name_resolved = "orders"
     model.target.full_name = "public.orders"
     model.target.schema_resolved = "public"
+    # Staging schema resolves through the central-schema suffix machinery now;
+    # pin these so resolve_schema_name sees real strings (no suffix → z_bollhav).
+    model.target.schema_suffix = ""
+    model.target.schema_suffix_appendix = None
     model.target.write_mode = write_mode or WriteMode.APPEND
     model.target.staging = staging_cfg if staging_cfg is not None else Staging()
     model.target.columns = [
@@ -60,6 +64,18 @@ def _model(*, write_mode=None, staging_cfg=None):
     model._state_run_id = RUN_ID
     model.run_id = RUN_ID
     return model
+
+
+# Staging tables are centralized in `z_bollhav` and digest-named now; derive the
+# expected schema + table prefix from the helpers so these tests track the
+# naming scheme rather than hardcoding the per-model digest.
+from bollhav.postgres.staging import (  # noqa: E402
+    _staging_schema as _resolve_staging_schema,
+    _staging_table_prefix as _resolve_staging_prefix,
+)
+
+STAGING_SCHEMA = _resolve_staging_schema(_model())  # "z_bollhav"
+STAGING_PREFIX = _resolve_staging_prefix(_model())  # "pblc_orders_<digest>_stg_"
 
 
 def _mock_conn():
@@ -191,12 +207,12 @@ class TestNaming:
     def test_staging_table_uses_short_run_id(self) -> None:
         from bollhav.postgres.staging import _staging_table
 
-        assert _staging_table(_model(), RUN_ID) == "orders_staging_00000000"
+        assert _staging_table(_model(), RUN_ID) == f"{STAGING_PREFIX}00000000"
 
-    def test_staging_schema_is_z_prefixed(self) -> None:
+    def test_staging_schema_is_central(self) -> None:
         from bollhav.postgres.staging import _staging_schema
 
-        assert _staging_schema(_model()) == "z_public"
+        assert _staging_schema(_model()) == "z_bollhav"
 
 
 # ── orphan GC ────────────────────────────────────────────────────────
@@ -207,10 +223,10 @@ class TestGc:
         from bollhav.postgres.data import PostgresData
 
         model = _model()
-        current = f"orders_staging_{str(RUN_ID)[:8]}"
+        current = f"{STAGING_PREFIX}{str(RUN_ID)[:8]}"
         rows = [
-            ("orders_staging_aaaaaaaa",),
-            ("orders_staging_bbbbbbbb",),
+            (f"{STAGING_PREFIX}aaaaaaaa",),
+            (f"{STAGING_PREFIX}bbbbbbbb",),
             (current,),
         ]
         conn = _mock_conn()
@@ -242,10 +258,10 @@ class TestGc:
 
 
 class TestStagingSchemaOverride:
-    def test_default_uses_z_prefix(self) -> None:
+    def test_default_uses_central_schema(self) -> None:
         from bollhav.postgres.staging import _staging_schema
 
-        assert _staging_schema(_model()) == "z_public"
+        assert _staging_schema(_model()) == "z_bollhav"
 
     def test_override_takes_precedence(self) -> None:
         from bollhav.model.staging import Staging
@@ -275,7 +291,7 @@ class TestStagingTablePrefixOverride:
     def test_default_prefix(self) -> None:
         from bollhav.postgres.staging import _staging_table_prefix
 
-        assert _staging_table_prefix(_model()) == "orders_staging_"
+        assert _staging_table_prefix(_model()) == STAGING_PREFIX
 
     def test_override_changes_table_name(self) -> None:
         from bollhav.model.staging import Staging
@@ -308,12 +324,12 @@ class TestLoggedField:
         PostgresData(model, conn).create_staging_table(RUN_ID)
 
         # Logged=True: the staging CREATE says "CREATE TABLE IF NOT
-        # EXISTS z_public.orders_staging_..." with no UNLOGGED.
+        # EXISTS z_bollhav.<stem>_stg_..." with no UNLOGGED.
         ddls = [
             str(call.args[0])
             for call in conn.execute.call_args_list
             if "CREATE TABLE IF NOT EXISTS" in str(call.args[0])
-            and "staging_" in str(call.args[0])
+            and "_stg_" in str(call.args[0])
         ]
         assert ddls, "expected a staging CREATE TABLE statement"
         assert all("UNLOGGED" not in d for d in ddls)
@@ -443,7 +459,7 @@ class TestStagingWriteModeAppend:
         merges_into_staging = [
             q
             for q in executed
-            if "ON CONFLICT" in q and 'INTO "z_public"."orders_staging_' in q
+            if "ON CONFLICT" in q and f'INTO "{STAGING_SCHEMA}"."{STAGING_PREFIX}' in q
         ]
         assert not merges_into_staging
 
@@ -470,7 +486,7 @@ class TestStagingWriteModeUpsert:
         staging_upserts = [
             q
             for q in executed
-            if "ON CONFLICT" in q and 'INTO "z_public"."orders_staging_' in q
+            if "ON CONFLICT" in q and f'INTO "{STAGING_SCHEMA}"."{STAGING_PREFIX}' in q
         ]
         assert len(staging_upserts) == 2
 
@@ -491,7 +507,7 @@ class TestApplyTargetAppend:
             q
             for q in executed
             if 'INSERT INTO "public"."orders"' in q
-            and 'FROM "z_public"."orders_staging_' in q
+            and f'FROM "{STAGING_SCHEMA}"."{STAGING_PREFIX}' in q
             and "ON CONFLICT" not in q
         ]
         assert len(applies) == 1
@@ -515,7 +531,7 @@ class TestApplyTargetUpsert:
             q
             for q in executed
             if 'INSERT INTO "public"."orders"' in q
-            and 'FROM "z_public"."orders_staging_' in q
+            and f'FROM "{STAGING_SCHEMA}"."{STAGING_PREFIX}' in q
             and "ON CONFLICT" in q
         ]
         assert len(target_upserts) == 1
@@ -551,6 +567,6 @@ class TestApplyTargetRecreatePartition:
             q
             for q in executed
             if 'INSERT INTO "public"."orders"' in q
-            and 'FROM "z_public"."orders_staging_' in q
+            and f'FROM "{STAGING_SCHEMA}"."{STAGING_PREFIX}' in q
         ]
         assert len(target_inserts) == 1

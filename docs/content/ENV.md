@@ -84,11 +84,11 @@ Bool, default `false`. The **state-level** dry run (vs `DRY_RUN`, which is model
 
 Because it resolves against the real state DB, it **initializes/refreshes the state bookkeeping** (idempotent — the same setup a real run does), so it is *not* purely read-only the way `DRY_RUN` is: it writes the per-model state tables / library rows (no target-schema DDL, no data).
 
-It accounts for the **cascade**: a model gated on an upstream that would itself run earlier in this pass shows `will run after <upstream>` (counted as would-run), not `blocked`; only gates on upstreams that would *not* run are `blocked`. This relies on models being processed in dependency order — which a real `@load_models` run guarantees (it topologically sorts).
+It accounts for the **cascade**: a model gated on an upstream that would itself run earlier in this pass shows `pending after <upstream>` (counted as pending), not `blocked`; only gates on upstreams that would *not* run are `blocked`. This relies on models being processed in dependency order — which a real `@load_models` run guarantees (it topologically sorts).
 
 ## DRY_STATE_EXTRA
 
-Bool, default `false`. Same short-circuit as `DRY_STATE`, but lists **every actionable interval individually** (its window + `would run` / `blocked: <reason>`) instead of just the per-model counts. Setting just `DRY_STATE_EXTRA=true` implies `DRY_STATE=true`. Mirrors `DRY_RUN_EXTRA` over `DRY_RUN`.
+Bool, default `false`. Same short-circuit as `DRY_STATE`, but lists **every actionable interval individually** (its window + `pending` / `blocked: <reason>`) instead of just the per-model counts. Setting just `DRY_STATE_EXTRA=true` implies `DRY_STATE=true`. Mirrors `DRY_RUN_EXTRA` over `DRY_RUN`.
 
 ## PROGRESS_BAR
 

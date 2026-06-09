@@ -42,7 +42,7 @@ customers = Model(
     # A view's definition is a SourceModel with a query, in the inputs list.
     upstream=[
         Source(
-            "orders",
+            "demo.warehouse.orders",
             type=SourceModel(query="SELECT DISTINCT customer_id FROM warehouse.orders"),
         )
     ],

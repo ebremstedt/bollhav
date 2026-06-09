@@ -79,28 +79,60 @@ def _logged(model: "Model") -> bool:
 
 # ── naming ──────────────────────────────────────────────────────────
 
+# Staging tables now live in the one central bollhav schema (`z_bollhav`, or
+# `z_bollhav_<suffix>` per dev branch) alongside state/library/errors — one
+# schema to inspect or drop. Because that schema is shared across every model,
+# the staging-table name carries a per-model identity (devowelled catalog/schema
+# context + table + full-name digest), so two models with the same target name
+# never collide and GC can scope by prefix. Budget leaves room for the digest +
+# `_stg_` + 8-hex run_id under Postgres' 63-char identifier limit.
+_STAGING_SLUG_CAP = 30
+
 
 def _staging_schema(model: "Model") -> str:
-    """Resolve the staging schema. `Staging.schema` overrides; default is
-    `z_<target_schema>` — co-located with the target data (per-model), NOT
-    the central `z_bollhav_state` (state/error tables live there now).
-    `State.schema_prefix` still tunes the `z_` prefix."""
+    """Resolve the staging schema. `Staging.schema` overrides; default is the
+    central bollhav schema (`z_bollhav`, or `z_bollhav_<suffix>` under a
+    `SCHEMA_SUFFIX` run — same resolution as state/library/errors), so all
+    bollhav-owned tables are centralized in one schema."""
     if model.target.staging is not None and model.target.staging.schema:
         return model.target.staging.schema
-    prefix = (
-        model.state.schema_prefix
-        if model.state is not None and model.state.schema_prefix is not None
-        else "z_"
+    from bollhav.model.target import resolve_schema_name
+    from bollhav.postgres.state import LIBRARY_SCHEMA
+
+    return resolve_schema_name(
+        LIBRARY_SCHEMA,
+        model.target.schema_suffix,
+        model.target.schema_suffix_appendix,
     )
-    return f"{prefix}{model.target.schema_resolved}"
+
+
+def _staging_stem(full_name: str) -> str:
+    """Per-model staging stem — devowelled catalog/schema context + table name +
+    full-name digest. Mirrors `state_table_name` so identity rides in the
+    digest (collision-safe over the FULL name); the readable slug is capped to
+    leave room for the `_stg_<run_id8>` per-interval tail under 63 chars."""
+    from bollhav.postgres.state import _CONTEXT_CAP, _devowel, _name_digest
+
+    digest = _name_digest(full_name)
+    parts = full_name.lower().replace("-", "_").split(".")
+    table = parts[-1]
+    context = "_".join(_devowel(p) for p in parts[:-1])[:_CONTEXT_CAP]
+    table_budget = (
+        _STAGING_SLUG_CAP - len(context) - 1 if context else _STAGING_SLUG_CAP
+    )
+    table = table[:table_budget]
+    slug = f"{context}_{table}" if context else table
+    return f"{slug}_{digest}"
 
 
 def _staging_table_prefix(model: "Model") -> str:
-    """Resolve the staging-table name prefix. `Staging.table_prefix`
-    overrides; default is `<target_name>_staging_`."""
+    """Resolve the staging-table name prefix. `Staging.table_prefix` overrides;
+    default is `<per-model stem>_stg_`. The stem makes the prefix unique per
+    model, so GC (`LIKE '<prefix>%'`) scopes to one model in the shared
+    central schema."""
     if model.target.staging is not None and model.target.staging.table_prefix:
         return model.target.staging.table_prefix
-    return f"{model.target.name}_staging_"
+    return f"{_staging_stem(model.target.full_name)}_stg_"
 
 
 def _staging_table(model: "Model", run_id: UUID) -> str:

@@ -26,33 +26,27 @@ class Target:
     name: str
     suffix: str = ""
     suffix_appendix: str | None = None
-    # The schema is just its name; the dev/prod/PR isolation transform is the
-    # `schema_suffix` (+ optional date `schema_suffix_appendix`), applied at
-    # resolution time by `schema_resolved` — never baked into `schema`.
     schema: str = ""
     schema_suffix: str = ""
     schema_suffix_appendix: str | None = "%y%V"
     catalog: str | None = None
     database: Database | None = None
+
     columns: list[DatabaseColumn] = field(default_factory=list)
     indexes: list[DatabaseIndex] = field(default_factory=list)
-    write_mode: WriteMode = WriteMode.APPEND
-    dsn_env_var: str | None = None
     column_sorting: Callable | None = sort_columns
-    extra: dict | None = None
-    # ⚠ Destructive, once-per-run setup. The `@model_lifecycle` hook runs
-    # these once before the interval loop (recreate = DROP, truncate =
-    # empty) — never per write/interval. NOT SAFE for parallel runs of the
-    # same model. Non-destructive asset setup is `PostgresData.ensure_assets`.
-    recreate_table: bool = False
-    truncate_table: bool = False
-    staging: Staging | None = None
-
-    sensitive: bool = field(init=False, default=False)
-    stage: bool = field(init=False, default=False)
     unique_columns: list = field(init=False, default_factory=list)
     primary_key_columns: list = field(init=False, default_factory=list)
     partitioned_by_index: bool = field(init=False, default=False)
+    sensitive: bool = field(init=False, default=False)
+
+    write_mode: WriteMode = WriteMode.APPEND
+    dsn_env_var: str | None = None
+    extra: dict | None = None
+    recreate_table: bool = False
+    truncate_table: bool = False
+    staging: Staging | None = None
+    stage: bool = field(init=False, default=False)
 
     @property
     def name_resolved(self) -> str:

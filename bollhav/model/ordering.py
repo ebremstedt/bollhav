@@ -31,9 +31,13 @@ def topological_sort(
     def _upstream(model: Model) -> list[str]:
         if upstream_mode == UpstreamMode.IGNORE_VIEWS and _is_view(model):
             return []
-        # `upstream` may hold Contract objects or bare strings — order by
-        # the upstream *names* either way.
-        return model.upstream_names
+        # Order on every declared intra-pipeline producer→consumer edge,
+        # not just gated (contract) ones. Gating decides *runtime blocking*
+        # and is contract-only; *ordering* must also respect ungated model
+        # sources (e.g. a view's defining `SELECT … FROM other_table`), or a
+        # consumer can be created before the producer it reads exists.
+        # Unmatched names are filtered out by the caller below.
+        return model.declared_inputs
 
     # Only order against upstreams that are also matched in THIS run.
     # An upstream that isn't matched here (it ships in another pipeline /
