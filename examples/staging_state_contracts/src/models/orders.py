@@ -34,7 +34,7 @@ orders = Model(
         database=Database.POSTGRES,
         write_mode=WriteMode.APPEND,
         dsn_env_var="TARGET_DSN",
-        staging=Staging(),  # defaults: z_warehouse schema, UNLOGGED, APPEND
+        staging=Staging(),  # defaults: central z_bollhav schema, UNLOGGED, APPEND
         columns=[
             PostgresColumn(name="id", data_type=PostgresType.BIGINT, nullable=False),
             PostgresColumn(

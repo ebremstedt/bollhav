@@ -16,7 +16,12 @@ def make_model(
     # mock must expose that — `upstream` itself is no longer read here.
     upstream = upstream or []
     model.upstream = upstream
+    # `topological_sort` orders on `declared_inputs` (gated upstreams + ungated
+    # model sources) so ordering follows every producer→consumer edge, while
+    # runtime gating stays contract-only via `upstream_names`. These tests pass
+    # bare names as the model's full set of inputs, so both resolve to it.
     model.upstream_names = upstream
+    model.declared_inputs = upstream
     # Views are identified by kind now; `_is_view` checks `model.is_view`
     # (kind-based). Set both `kind` and the derived `is_view` so the mock
     # matches the real Model's contract.

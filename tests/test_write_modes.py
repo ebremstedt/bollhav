@@ -41,6 +41,10 @@ def _model(
     model.target.name_resolved = "orders"
     model.target.full_name = "public.orders"
     model.target.schema_resolved = "public"
+    # Staging schema resolves via the central-schema suffix machinery; pin real
+    # strings so resolve_schema_name returns z_bollhav (no suffix).
+    model.target.schema_suffix = ""
+    model.target.schema_suffix_appendix = None
     model.target.write_mode = write_mode or WriteMode.APPEND
     model.target.staging = staging_cfg or (Staging() if staged else None)
     # `stage` is the dispatch switch (Target derives it from `staging`).

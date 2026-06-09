@@ -32,6 +32,26 @@ See [examples/](examples/) for self-contained, runnable pipelines that isolate e
 pip install bollhav
 ```
 
+## TUI
+
+bollhav ships a terminal UI for running and exploring your models — set the run
+env (backfill window, suffixes, state mode, …) in a form and fire a dry run, a
+dry-state run, or the real thing, all without remembering env-var names.
+
+Install it with the `tui` extra, then just run `bollhav` pointed at a folder
+that contains your models:
+
+```bash
+pip install "bollhav[tui]"
+
+bollhav                 # browse the current directory
+bollhav path/to/models  # browse a specific folder
+```
+
+It discovers every `Model` defined below that folder and runs the nearest
+`main.py`. See [bollhav/tui/README.md](bollhav/tui/README.md) for the full guide
+(keybindings, config, the two modes).
+
 ## Testing
 Tests use `pytest`. Run the full suite:
 ```bash

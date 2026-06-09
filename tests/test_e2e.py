@@ -533,23 +533,25 @@ def test_e2e_orphan_staging_gc_at_bootstrap(schema_name):
     bootstrap a new run on the same model. The orphan should be
     dropped by the auto-GC at bootstrap."""
 
-    state_schema = f"z_{schema_name}"
-    # Make the schema and a fake orphan staging table.
+    from bollhav.postgres.staging import _staging_schema, _staging_table_prefix
+
+    m = _orders_model(schema_name, state=State(), staging=Staging())
+    # Staging is centralized now — derive the model's actual staging schema and
+    # per-model prefix, and plant an orphan named like a prior crashed run.
+    staging_schema = _staging_schema(m)
+    orphan = f"{_staging_table_prefix(m)}dead0000"
     with psycopg.connect(_dsn(), autocommit=True) as c:
-        c.execute(f"CREATE SCHEMA IF NOT EXISTS {state_schema}")
+        c.execute(f'CREATE SCHEMA IF NOT EXISTS "{staging_schema}"')
         c.execute(
-            f'CREATE UNLOGGED TABLE "{state_schema}"."orders_staging_dead0000" '
+            f'CREATE UNLOGGED TABLE IF NOT EXISTS "{staging_schema}"."{orphan}" '
             "(id BIGINT)"
         )
 
-    before = [t for t in _list_tables(state_schema) if "staging_" in t]
-    assert "orders_staging_dead0000" in before
+    assert orphan in _list_tables(staging_schema)
 
-    m = _orders_model(schema_name, state=State(), staging=Staging())
     _bootstrap([m])
 
-    after = [t for t in _list_tables(state_schema) if "staging_" in t]
-    assert "orders_staging_dead0000" not in after
+    assert orphan not in _list_tables(staging_schema)
 
 
 # ── 12. additive library migration ───────────────────────────────────
@@ -1346,7 +1348,7 @@ def test_e2e_dry_state_plans_without_executing(schema_name, capsys, monkeypatch)
 
         # the plan was printed for this model
         assert f"{CAT}.{schema_name}.orders" in out
-        assert "would run" in out
+        assert "pending" in out
         # the model body never ran
         assert ran["executed"] is False
         # no target table was created (asset DDL skipped)
@@ -1372,7 +1374,7 @@ def test_e2e_dry_state_plans_without_executing(schema_name, capsys, monkeypatch)
 
 def test_e2e_dry_state_cascade_shows_will_run_after(schema_name, capsys, monkeypatch):
     """DRY_STATE understands the cascade: a downstream gated on an upstream that
-    would itself run this pass shows 'will run after <upstream>', not blocked."""
+    would itself run this pass shows 'pending after <upstream>', not blocked."""
     from bollhav.model.lifecycle import _DRY_STATE_RUNS, model_lifecycle
 
     _DRY_STATE_RUNS.clear()
@@ -1405,7 +1407,9 @@ def test_e2e_dry_state_cascade_shows_will_run_after(schema_name, capsys, monkeyp
 
     # orders runs now; summary cascades off it (not blocked)
     assert f"{CAT}.{schema_name}.summary" in out
-    assert f"will run after {CAT}.{schema_name}.orders" in out
-    # summary's per-model summary line: all 3 would run, none blocked
-    assert "would run 3  ·  blocked 0" in out
+    assert f"pending after {CAT}.{schema_name}.orders" in out
+    # summary's per-model summary line: all 3 pending, none blocked/applied
+    assert "pending 3" in out
+    assert "blocked 0" not in out
+    assert "applied 0" not in out
     assert "blocked:" not in out  # nothing actually blocked

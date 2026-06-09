@@ -46,6 +46,10 @@ class _RuntimeConfig:
     state_disabled: bool
     debug: bool
     table_suffix: str = ""
+    # DRY_STATE is resolved by `@model_lifecycle` (it needs a live connection),
+    # but `@load_models` reads it too so it can keep the progress bar silent —
+    # a dry run executes nothing, so its `▸ … 0ms` rows are pure noise.
+    dry_state: bool = False
 
 
 @overload
@@ -170,10 +174,14 @@ def load_models(
             # the interval-level DEBUG logs can't share the cursor, so under
             # DEBUG the batch level downgrades to model (newline-only rows
             # that interleave cleanly with log lines).
-            level = get_progress_level()
-            if cfg.debug and level == ProgressLevel.EXECUTE:
-                level = ProgressLevel.MODEL
-            PROGRESS.init(models, level)
+            # DRY_STATE prints its own per-model plan and executes nothing, so
+            # leave the progress bar inert — otherwise its `▸ … 0ms` rows and
+            # the `✓ N models done` footer stack on top of the plan as noise.
+            if not cfg.dry_state:
+                level = get_progress_level()
+                if cfg.debug and level == ProgressLevel.EXECUTE:
+                    level = ProgressLevel.MODEL
+                PROGRESS.init(models, level)
 
             # @load_models is discovery only: read env, apply overrides,
             # match models, hand them to the user. State bootstrap (state
@@ -181,7 +189,8 @@ def load_models(
             # and the POST-model sweep now live in `@model_lifecycle`,
             # which runs with the connection the user opens in `main()`.
             func(models=models, debug=cfg.debug)
-            PROGRESS.finish()
+            if not cfg.dry_state:
+                PROGRESS.finish()
 
         return wrapper
 
@@ -256,6 +265,15 @@ def _read_env() -> _RuntimeConfig:
         state_mode=_resolve_state_mode(),
         state_disabled=cast(bool, env_var_bool(name="STATE_DISABLED", default=False)),
         debug=cast(bool, env_var_bool(name="DEBUG", default=False)),
+        dry_state=_resolve_dry_state(),
+    )
+
+
+def _resolve_dry_state() -> bool:
+    """DRY_STATE_EXTRA implies DRY_STATE — mirrors `_resolve_dry_run`. Kept in
+    sync with `lifecycle._dry_state`, which owns the actual dry-state plan."""
+    return cast(bool, env_var_bool(name="DRY_STATE", default=False)) or cast(
+        bool, env_var_bool(name="DRY_STATE_EXTRA", default=False)
     )
 
 

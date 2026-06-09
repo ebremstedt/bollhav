@@ -60,30 +60,23 @@ class PostgresData:
         self.model = model
         self.conn = conn
 
+    # Staging schema + table naming is owned by `bollhav.postgres.staging`
+    # (the single source of truth — write/merge/drop and these create/GC paths
+    # must agree on the names). These delegate so the two can never drift.
     def _staging_schema_name(self) -> str:
-        model = self.model
-        staging = model.target.staging
-        if staging is not None and staging.schema:
-            return staging.schema
-        prefix = (
-            model.state.schema_prefix
-            if model.state is not None and model.state.schema_prefix is not None
-            else "z_"
-        )
-        return f"{prefix}{model.target.schema_resolved}"
+        from bollhav.postgres.staging import _staging_schema
+
+        return _staging_schema(self.model)
 
     def _staging_table_prefix(self) -> str:
-        """Staging-table name prefix. `Staging.table_prefix` overrides
-        the default `<target_name>_staging_`."""
-        staging = self.model.target.staging
-        if staging is not None and staging.table_prefix:
-            return staging.table_prefix
-        return f"{self.model.target.name}_staging_"
+        from bollhav.postgres.staging import _staging_table_prefix
+
+        return _staging_table_prefix(self.model)
 
     def _staging_table_name(self, run_id: UUID) -> str:
-        """Per-interval staging table name. The first 8 hex chars of
-        `run_id` disambiguate within a model."""
-        return f"{self._staging_table_prefix()}{str(run_id)[:8]}"
+        from bollhav.postgres.staging import _staging_table
+
+        return _staging_table(self.model, run_id)
 
     def _staging_logged(self) -> bool:
         """Resolve the Postgres `logged` knob. Only `PostgresStaging`
