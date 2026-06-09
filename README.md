@@ -25,7 +25,7 @@ Implementations:
 
 ## Explore the features
 
-See [examples/](examples/) for self-contained, runnable pipelines that isolate each feature of bollhav.
+See [examples/](examples/) for self-contained, runnable pipelines that isolate each feature of bollhav
 
 ## Installation
 ```bash
