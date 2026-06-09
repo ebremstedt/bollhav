@@ -36,7 +36,7 @@ pip install bollhav
 
 bollhav ships a terminal UI for running and exploring your models — set the run
 env (backfill window, suffixes, state mode, …) in a form and fire a dry run, a
-dry-state run, or the real thing, all without remembering env-var names.
+dry-state run, or the real thing, all without remembering env-var names
 
 Install it with the `tui` extra, then just run `bollhav` pointed at a folder
 that contains your models:
