@@ -456,6 +456,15 @@ class TestStateMode_EnvVar:
             with pytest.raises(ValueError, match="STATE_MODE must be one of"):
                 _resolve_state_mode()
 
+    def test_case_insensitive(self) -> None:
+        from bollhav.model.load_models import _resolve_state_mode
+
+        with patch(
+            "bollhav.model.load_models.env_var",
+            lambda name, **kw: "  BullDozer  " if name == "STATE_MODE" else None,
+        ):
+            assert _resolve_state_mode() is StateMode.BULLDOZER
+
 
 class TestModelIntervals:
     """`ModelRun.intervals` is a plain attribute: the bootstrap computes the

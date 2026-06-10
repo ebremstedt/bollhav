@@ -14,3 +14,8 @@ class TZInterval:
             raise ValueError("since must be before until")
         if self.since == self.until:
             raise ValueError("Since can not be equal to until")
+
+    def __str__(self) -> str:
+        # Human-readable for logs (`%s` / f-strings). The dataclass `__repr__`
+        # (`TZInterval(since=…, until=…)`) stays for debugging/equality.
+        return f"{self.since:%Y-%m-%d %H:%M} → {self.until:%Y-%m-%d %H:%M}"

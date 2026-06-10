@@ -343,9 +343,10 @@ def _resolve_state_mode() -> StateMode:
     if raw is None:
         return StateMode.DISCOVER
     valid = {m.value: m for m in StateMode}
-    if raw not in valid:
+    mode = valid.get(raw.strip().lower())
+    if mode is None:
         raise InvalidStateModeError(raw, list(valid.keys()))
-    return valid[raw]
+    return mode
 
 
 def _resolve_interval_status(
@@ -404,9 +405,10 @@ def _resolve_upstream_mode() -> UpstreamMode:
     if raw is None:
         return UpstreamMode.ENFORCE
     valid = {m.value: m for m in UpstreamMode}
-    if raw not in valid:
+    mode = valid.get(raw.strip().lower())
+    if mode is None:
         raise InvalidUpstreamModeError(raw, list(valid.keys()))
-    return valid[raw]
+    return mode
 
 
 def _print_summary(cfg: _RuntimeConfig, runs: list[ModelRun]) -> None:
