@@ -18,7 +18,9 @@ from run_interval import run_interval
 
 @model_lifecycle
 def run_model(run: ModelRun, data_conn, state_conn=None) -> None:
-    units = run.intervals
-    print(f"\n{run.model.target.full_name}  ({run.model.kind})  {len(units)} unit(s)")
-    for interval in units:
+    # NB: don't print() here — the live progress bar (PROGRESS_BAR=execute)
+    # redraws in place with carriage returns, and a stray print mid-run strands
+    # a half-finished bar frame in the scrollback. The bar already shows the
+    # model name + interval count.
+    for interval in run.intervals:
         run_interval(run, interval, data_conn, state_conn)
