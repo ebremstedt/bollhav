@@ -423,10 +423,9 @@ def _print_summary(cfg: _RuntimeConfig, runs: list[ModelRun]) -> None:
     if cfg.latest:
         _row("mode", "latest")
     elif cfg.backfill_enabled:
-        _row(
-            "mode",
-            f"backfill  {_date(cfg.backfill_since)} → {_date(cfg.backfill_until)}",
-        )
+        _row("mode", "backfill")
+        _row("from", _date(cfg.backfill_since))
+        _row("until", _date(cfg.backfill_until))
     else:
         _row("mode", "off")
     if cfg.debug:
@@ -457,11 +456,8 @@ def _print_summary(cfg: _RuntimeConfig, runs: list[ModelRun]) -> None:
         _row("state", "disabled")
     elif has_state:
         _row("state", cfg.state_mode.value)
-    # Drop the trailing rule when the state banner will follow (it
-    # prints only for state-enabled models) so the two read as one
-    # block; otherwise close the runtime box here.
-    if not has_state:
-        print("────────────────────────────")
+    # Close the runtime box with a lower border.
+    print("────────────────────────────")
 
 
 __all__ = ["load_models", "ModelRun"]
