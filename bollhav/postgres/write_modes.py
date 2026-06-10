@@ -101,10 +101,10 @@ def write(
         run: ModelRun — `run.model` describes the target/write behaviour;
             `run.run_id` keys the staging table.
         df_gen: Generator yielding DataFrames. Required for all non-VIEW modes.
-        since: Start of the overwrite window (UTC). Required for
-            RECREATE_PARTITION and for the staged path.
-        until: End of the overwrite window (UTC, exclusive). Required for
-            RECREATE_PARTITION and for the staged path.
+        since: Start of the overwrite window (timezone-aware; any zone).
+            Required for RECREATE_PARTITION and for the staged path.
+        until: End of the overwrite window (timezone-aware, exclusive).
+            Required for RECREATE_PARTITION and for the staged path.
 
     Raises:
         ValueError: If `df_gen` is missing for a table mode, or if the

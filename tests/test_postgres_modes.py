@@ -188,29 +188,46 @@ class TestOverwriteInsert:
                 write_mode=WriteMode.RECREATE_PARTITION,
             )
 
-    def test_raises_non_utc_since(self) -> None:
+    def test_raises_naive_since(self) -> None:
         conn = _conn()
         import polars as pl
 
         df = pl.DataFrame({"id": [1], "val": ["a"]})
-        since = datetime(2024, 1, 1)
+        since = datetime(2024, 1, 1)  # naive — ambiguous instant
         until = datetime(2024, 1, 2, tzinfo=timezone.utc)
-        with pytest.raises(ValueError, match="UTC"):
+        with pytest.raises(ValueError, match="timezone-aware"):
             recreate_partition(
                 conn=conn, model=_model(), df=df, since=since, until=until
             )
 
-    def test_raises_non_utc_until(self) -> None:
+    def test_raises_naive_until(self) -> None:
         conn = _conn()
         import polars as pl
 
         df = pl.DataFrame({"id": [1], "val": ["a"]})
         since = datetime(2024, 1, 1, tzinfo=timezone.utc)
-        until = datetime(2024, 1, 2)
-        with pytest.raises(ValueError, match="UTC"):
+        until = datetime(2024, 1, 2)  # naive
+        with pytest.raises(ValueError, match="timezone-aware"):
             recreate_partition(
                 conn=conn, model=_model(), df=df, since=since, until=until
             )
+
+    def test_accepts_non_utc_aware(self) -> None:
+        # A non-UTC but timezone-aware window is a valid instant — Postgres
+        # compares timestamptz by instant, so any zone is allowed.
+        from zoneinfo import ZoneInfo
+        import polars as pl
+
+        conn = _conn()
+        df = pl.DataFrame({"id": [1], "ts": ["a"]})
+        cols = [_col("id"), _col("ts", PostgresType.TIMESTAMPTZ, partition_on=True)]
+        tz = ZoneInfo("Europe/Stockholm")
+        since = datetime(2024, 1, 1, tzinfo=tz)
+        until = datetime(2024, 1, 2, tzinfo=tz)
+        # Must not raise; proceeds to the (mocked) DELETE + COPY.
+        recreate_partition(
+            conn=conn, model=_model(columns=cols), df=df, since=since, until=until
+        )
 
 
 class TestRecreateTable:
