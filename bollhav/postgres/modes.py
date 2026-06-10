@@ -3,7 +3,7 @@ import psycopg
 from psycopg import sql
 import polars as pl
 from typing import cast, LiteralString
-from datetime import datetime, timedelta
+from datetime import datetime
 from bollhav.model.model import Model
 from bollhav.postgres.columns import PostgresColumn
 from bollhav.postgres.schema import ensure_schema
@@ -11,9 +11,12 @@ from bollhav.postgres.schema import ensure_schema
 logger = logging.getLogger(__name__)
 
 
-def _assert_utc(dt: datetime, name: str) -> None:
-    if dt.tzinfo is None or dt.utcoffset() != timedelta(0):
-        raise ValueError(f"{name} must be UTC, got {dt!r}")
+def _assert_aware(dt: datetime, name: str) -> None:
+    # A timezone-aware datetime is an unambiguous instant, and Postgres compares
+    # `timestamptz` by instant — so any zone is allowed, not just UTC. Only a
+    # naive datetime is rejected: its instant depends on the session timezone.
+    if dt.tzinfo is None:
+        raise ValueError(f"{name} must be timezone-aware, got naive {dt!r}")
 
 
 def append(
@@ -41,8 +44,8 @@ def recreate_partition(
     since: datetime,
     until: datetime,
 ) -> None:
-    _assert_utc(since, "since")
-    _assert_utc(until, "until")
+    _assert_aware(since, "since")
+    _assert_aware(until, "until")
     partition_col = model.target.partitioned_by
     if partition_col is None:
         raise ValueError(
