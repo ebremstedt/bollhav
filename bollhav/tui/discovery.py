@@ -1,7 +1,3 @@
-"""Pure, Textual-free logic: finding models, remembering folders, locating the
-runner. Everything here is plain functions so it can be tested without a UI.
-"""
-
 from __future__ import annotations
 
 import json

@@ -21,6 +21,7 @@ import pytest
 sys.modules.setdefault("pyodbc", MagicMock())  # bollhav.mssql.data imports it
 
 from bollhav.model.lifecycle import execute_lifecycle, model_lifecycle
+from bollhav.model.modelrun import ModelRun
 from bollhav.model.state import ModelLockedError
 from bollhav.model.upstream import UpstreamCheck
 
@@ -41,7 +42,7 @@ def _model(*, state=True, allow_concurrent=True, upstream=None, staging=False):
     else:
         m.state = None
         m.stateful = False
-    return m
+    return ModelRun(model=m)
 
 
 def _interval():
@@ -73,7 +74,7 @@ class TestExecuteLifecycle:
         ran = []
 
         @execute_lifecycle
-        def execute(model, interval, data_conn, state_conn=None):
+        def execute(run, interval, data_conn, state_conn=None):
             ran.append(True)
             return "ok"
 
@@ -89,7 +90,7 @@ class TestExecuteLifecycle:
         ran = []
 
         @execute_lifecycle
-        def execute(model, interval, data_conn, state_conn=None):
+        def execute(run, interval, data_conn, state_conn=None):
             ran.append(True)
             return "ok"
 
@@ -109,7 +110,7 @@ class TestExecuteLifecycle:
         pg = self._pg()
 
         @execute_lifecycle
-        def execute(model, interval, data_conn, state_conn=None):
+        def execute(run, interval, data_conn, state_conn=None):
             return None
 
         with patch("bollhav.postgres.state.PostgresState", return_value=pg) as pg_cls:
@@ -122,7 +123,7 @@ class TestExecuteLifecycle:
         ran = []
 
         @execute_lifecycle
-        def execute(model, interval, data_conn, state_conn=None):
+        def execute(run, interval, data_conn, state_conn=None):
             ran.append(True)
 
         with patch("bollhav.postgres.state.PostgresState", return_value=pg):
@@ -137,7 +138,7 @@ class TestExecuteLifecycle:
         ran = []
 
         @execute_lifecycle
-        def execute(model, interval, data_conn, state_conn=None):
+        def execute(run, interval, data_conn, state_conn=None):
             ran.append(True)
 
         with patch("bollhav.postgres.state.PostgresState", return_value=pg):
@@ -152,7 +153,7 @@ class TestExecuteLifecycle:
         ran = []
 
         @execute_lifecycle
-        def execute(model, interval, data_conn, state_conn=None):
+        def execute(run, interval, data_conn, state_conn=None):
             ran.append(True)
 
         with patch("bollhav.postgres.state.PostgresState", return_value=pg):
@@ -169,7 +170,7 @@ class TestExecuteLifecycle:
         pg = self._pg()
 
         @execute_lifecycle
-        def execute(model, interval, data_conn, state_conn=None):
+        def execute(run, interval, data_conn, state_conn=None):
             raise RuntimeError("boom")
 
         with patch("bollhav.postgres.state.PostgresState", return_value=pg):
@@ -212,7 +213,10 @@ class TestModelLifecycle:
         m.is_view = False
         m.is_kind_monolithic = False
         m.is_kind_view = False
-        return m
+        # No resolved window on this bare mock → compute_intervals() returns
+        # the (None,) contract instead of trying to split a MagicMock.
+        m.window = None
+        return ModelRun(model=m)
 
     def _stateless_model(self):
         from bollhav.model.database import Database
@@ -231,7 +235,7 @@ class TestModelLifecycle:
         m.is_view = False
         m.is_kind_monolithic = False
         m.is_kind_view = False
-        return m
+        return ModelRun(model=m)
 
     def test_state_less_runs_assets_no_bootstrap(self):
         """State-less model: asset DDL runs (PostgresData), but no state
@@ -239,7 +243,7 @@ class TestModelLifecycle:
         ran = []
 
         @model_lifecycle
-        def execute_model(model, data_conn, state_conn=None):
+        def execute_model(run, data_conn, state_conn=None):
             ran.append(True)
 
         with (
@@ -263,7 +267,7 @@ class TestModelLifecycle:
         model = self._stateful_model()
 
         @model_lifecycle
-        def execute_model(model, data_conn, state_conn=None):
+        def execute_model(run, data_conn, state_conn=None):
             ran.append(True)
 
         with (
@@ -285,7 +289,7 @@ class TestModelLifecycle:
         model = self._stateful_model(allow_concurrent=False)
 
         @model_lifecycle
-        def execute_model(model, data_conn, state_conn=None):
+        def execute_model(run, data_conn, state_conn=None):
             return None
 
         with (
@@ -305,7 +309,7 @@ class TestModelLifecycle:
         model = self._stateful_model(allow_concurrent=False)
 
         @model_lifecycle
-        def execute_model(model, data_conn, state_conn=None):
+        def execute_model(run, data_conn, state_conn=None):
             return None
 
         with (
@@ -341,11 +345,11 @@ class TestBackendDispatch:
         m.is_view = False
         m.is_kind_monolithic = False
         m.is_kind_view = False
-        return m
+        return ModelRun(model=m)
 
     def test_mssql_model_routes_assets_through_mssql_data(self):
         @model_lifecycle
-        def execute_model(model, data_conn, state_conn=None):
+        def execute_model(run, data_conn, state_conn=None):
             return None
 
         with (
@@ -363,7 +367,7 @@ class TestBackendDispatch:
 
     def test_mssql_staged_execute_routes_through_mssql_data(self):
         @execute_lifecycle
-        def execute_interval(model, interval, data_conn, state_conn=None):
+        def execute_interval(run, interval, data_conn, state_conn=None):
             return None
 
         with patch("bollhav.mssql.data.MssqlData") as mssql_cls:

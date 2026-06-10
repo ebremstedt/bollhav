@@ -1,15 +1,10 @@
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timezone, tzinfo
+from datetime import timezone, tzinfo
 
-from icron import croniter
-from bollhav.model.intervals import TZInterval
 from roskarl import IntervalExpression, IntervalExpressionExtended
-from roskarl.cron import INTERVAL_EXPRESSION_SHORTCUTS
 
 logger = logging.getLogger(__name__)
-
-_CRON_ALIASES = INTERVAL_EXPRESSION_SHORTCUTS
 
 MAX_BATCH_SIZE = 100000
 
@@ -21,51 +16,6 @@ def validate_batch_size(batch_size: int, source: str) -> None:
         raise ValueError(
             f"{source} batch_size={batch_size} exceeds max {MAX_BATCH_SIZE}"
         )
-
-
-def _resolve_cron(expr: str) -> str:
-    return _CRON_ALIASES.get(expr, expr)
-
-
-def _resolve_cron_interval(
-    expression: str, tz: tzinfo = timezone.utc
-) -> tuple[datetime, datetime]:
-    now = datetime.now(tz=tz)
-    probe = croniter(expression, now)
-    tick1 = probe.get_next(datetime)
-    tick2 = probe.get_next(datetime)
-    interval_size = tick2 - tick1
-    it = croniter(expression, now - (interval_size * 3))
-    prev, curr = None, None
-    while True:
-        tick = it.get_next(datetime)
-        if tick >= now:
-            break
-        prev, curr = curr, tick
-    # Loop invariant: cron is seeded `interval_size * 3` before now,
-    # so at least 2 ticks have been consumed before the break and both
-    # `prev` and `curr` are populated.
-    if prev is None or curr is None:
-        raise RuntimeError(
-            f"cron seeding invariant violated for {expression!r}: the iterator "
-            f"returned a tick >= now within the first two steps"
-        )
-    return prev, curr
-
-
-def _chunk_interval(cron: str, incoming_interval: TZInterval) -> list[TZInterval]:
-    it = croniter(cron, incoming_interval.since)
-    outgoing_intervals: list[TZInterval] = []
-    current = incoming_interval.since
-    while True:
-        tick = it.get_next(datetime)
-        if tick >= incoming_interval.until:
-            break
-        outgoing_intervals.append(TZInterval(current, tick))
-        current = tick
-    if current < incoming_interval.until:
-        outgoing_intervals.append(TZInterval(current, incoming_interval.until))
-    return outgoing_intervals
 
 
 @dataclass

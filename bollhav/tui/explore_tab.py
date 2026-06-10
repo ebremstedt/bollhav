@@ -1,8 +1,3 @@
-"""The EXPLORE tab: a JIRA-style board of discovered models with a detail pane
-and an output log. Owns per-model run status and the `run_model` worker that
-runs a single model using the shared config.
-"""
-
 from __future__ import annotations
 
 import asyncio

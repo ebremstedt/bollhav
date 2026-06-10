@@ -12,12 +12,12 @@ staging table on `model.run_id`, the same id the hook used to create it.
 
 from __future__ import annotations
 
-from bollhav.model import Model, execute_lifecycle
+from bollhav.model import ModelRun, execute_lifecycle
 from bollhav.mssql import write
 from mock_read import read
 
 
 @execute_lifecycle
-def run_interval(model: Model, interval, data_conn, state_conn=None) -> None:
-    df_gen = read(model, interval)
-    write(conn=data_conn, model=model, df_gen=df_gen)
+def run_interval(run: ModelRun, interval, data_conn, state_conn=None) -> None:
+    df_gen = read(run, interval)
+    write(conn=data_conn, run=run, df_gen=df_gen)

@@ -1,24 +1,3 @@
-"""Per-model interval state tracking — config + shared helpers.
-
-Opt-in: set `state=State(...)` on a Model. The lifecycle hooks drive
-the rest: `@model_lifecycle` bootstraps the state table + prefills the
-contract, and `@interval_lifecycle` gates on applied rows, takes the
-per-interval lock, and flips pending → applied after a successful run.
-See `bollhav/model/lifecycle.py`.
-
-This module holds the user-facing config (`State`, `StateMode`,
-`BlockCode`) and `ModelLockedError`. The run_id shared across a run's
-state transitions is `Model.run_id` (lazily minted). The Postgres
-implementation of the transitions lives in `bollhav/postgres/state.py`.
-
-Scope is intentionally narrow in this first cut:
-  * one state table per model (no separate errors table yet)
-  * DISCOVER / BULLDOZER modes only — DISCOVER, NUKE_STATE come later
-  * state always co-locates with the target DB (atomic flip with
-    staging requires same DB); the `dsn_env_var` field exists on
-    `State` for future use but isn't honored yet
-"""
-
 from __future__ import annotations
 
 import logging
@@ -29,12 +8,6 @@ logger = logging.getLogger(__name__)
 
 
 class StateBackend(Enum):
-    """Which database backend stores a model's interval state.
-
-    Set via `State(backend=...)`. The lifecycle hooks resolve the
-    matching implementation module from this — so the dispatch is driven
-    by the model, not hardcoded. Postgres is the only backend today."""
-
     POSTGRES = "postgres"
 
 
@@ -56,15 +29,6 @@ class State:
 
     `backend` — which database stores the state (a `StateBackend`).
         Defaults to Postgres, the only implementation today.
-    `schema_prefix` — prefix for the per-model **staging** schema
-        (`<prefix><target_schema>`, default `z_`). No longer affects the
-        *state* table location: state and error tables now live in the fixed
-        central schema `z_bollhav_state`, named deterministically by
-        `state_table_name(full_name)`. (Errors go to the shared
-        `z_bollhav.errors` table.)
-    `table_suffix` — deprecated and ignored. State tables are now named by a
-        deterministic hash of the model's full name, not a suffix on the
-        target name. Kept only so existing configs don't break.
     `allow_concurrent_runs` — Default True: the per-interval lock
         `@interval_lifecycle` takes is enough for typical workloads (it
         lets two workers race the same model on different intervals).
@@ -77,8 +41,6 @@ class State:
 
     backend: StateBackend = StateBackend.POSTGRES
     mode: StateMode = StateMode.DISCOVER
-    schema_prefix: str | None = None
-    table_suffix: str | None = None
     allow_concurrent_runs: bool = True
 
 

@@ -1,17 +1,3 @@
-"""Read API for the bollhav library — query the cross-pipeline registry.
-
-These are the functions an app (FastAPI, a CLI, a notebook) imports to read
-lineage out of `z_bollhav.library` (and recent failures out of
-`z_bollhav.errors`). They keep all schema knowledge in bollhav so consumers
-hold none: the web layer just imports and serves the result.
-
-Every function takes a caller-owned `psycopg.Connection` (bollhav never opens
-its own) and returns plain, JSON-serializable dicts/lists — timestamps are
-ISO-8601 strings. `get_lineage` deliberately returns the SAME shape as
-`Model.lineage()`, so a consumer sees one structure whether it asks the code
-(one model, pre-run) or the DB (cross-pipeline, post-registration).
-"""
-
 from __future__ import annotations
 
 from typing import TYPE_CHECKING

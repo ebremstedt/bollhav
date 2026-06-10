@@ -1,38 +1,3 @@
-"""Lifecycle hooks: `@model_lifecycle` and `@execute_lifecycle`.
-
-These wrap the user's execute functions and bracket them with the
-framework's setup/teardown + state machinery. Connections are passed as
-**function parameters**, so the user creates them in `main()` and threads
-them through:
-
-    @model_lifecycle
-    def execute_model(model, data_conn, state_conn=None):
-        for interval in model.intervals:
-            execute_interval(model, interval, data_conn, state_conn)
-
-    @execute_lifecycle
-    def execute_interval(model, interval, data_conn, state_conn=None):
-        ...                       # read / transform / write(conn=data_conn, ...)
-
-`interval` is a window for a batched model, or `None` for a monolithic
-(whole-table) / view model — `model.intervals` yields a single `None` in
-that case, so the same loop runs the unit of work once.
-
-`data_conn` is required; `state_conn` is optional and defaults to
-`data_conn` (co-located state). State work runs only when `model.state`
-is set — a state-less model flows through untouched except for the
-target-side asset DDL.
-
-**Connections must be autocommit** (`psycopg.connect(dsn, autocommit=True)`).
-The non-atomic data→state model commits each step independently — the
-data write durably commits, *then* the state row flips. On a
-non-autocommit connection the bare reads/writes open a dangling
-transaction and the per-step `with conn.transaction()` blocks nest as
-savepoints inside it, so nothing persists until an explicit commit (and
-a crash/close rolls it all back). Staging's `with conn.transaction()`
-still gives per-interval atomicity on top of an autocommit connection.
-"""
-
 from __future__ import annotations
 
 import inspect
@@ -44,6 +9,7 @@ from functools import wraps
 from typing import Callable
 
 from bollhav.model.progress_bar import PROGRESS
+from bollhav.model.window import compute_intervals
 
 logger = logging.getLogger(__name__)
 
@@ -146,30 +112,30 @@ def _fmt_window(interval) -> str:
 _DRY_STATE_RUNS: dict[str, list] = {}
 
 
-def _print_state_plan(model, postgres_state) -> None:
-    """One model's state-resolved plan, for `DRY_STATE`. Each actionable unit is
+def _print_state_plan(run, postgres_state) -> None:
+    """One run's state-resolved plan, for `DRY_STATE`. Each actionable unit is
     classified — **would run** (gates already satisfied), **will run after** an
     upstream that would itself run earlier in this pass (the cascade), or
     **blocked** by an upstream that would NOT run — then summarized (counts) or,
     with `DRY_STATE_EXTRA`, listed per interval. Read-only: gates are evaluated
     live, the cascade via the in-pass `_DRY_STATE_RUNS` overlay."""
     extra = _dry_state_extra()
-    name = model.target.full_name  # raw — used as the `_DRY_STATE_RUNS` key
+    name = run.model.target.full_name  # raw — used as the `_DRY_STATE_RUNS` key
     display = _gradient_name(name)  # colorized for output only
-    kind = model.kind.value
+    kind = run.model.kind.value
     if postgres_state is None:
-        pending = _lgreen(f"pending {len(model.intervals)} unit(s)")
+        pending = _lgreen(f"pending {len(run.intervals)} unit(s)")
         print(f"  {display} ({kind})  ·  stateless → {pending}")
         if extra:
-            for interval in model.intervals:
+            for interval in run.intervals:
                 print(f"      {_blue(_fmt_window(interval))}   {_lgreen('pending')}")
-        _DRY_STATE_RUNS[name] = list(model.intervals)
+        _DRY_STATE_RUNS[name] = list(run.intervals)
         return
 
     # (interval, status, upstreams) — status in {"run", "after", "blocked"}.
     rows = [
         (interval, *postgres_state.dry_state_classify(interval, _DRY_STATE_RUNS))
-        for interval in model.intervals
+        for interval in run.intervals
     ]
 
     would_run = sum(1 for _, s, _ in rows if s in ("run", "after"))
@@ -230,7 +196,8 @@ def _conns(arguments: dict):
     # model is state-tracked, the state machine can't run on the MSSQL
     # data_conn — a separate Postgres state_conn is required. Catch the
     # missing one here with a clear message instead of a driver error later.
-    model = arguments.get("model")
+    run = arguments.get("run")
+    model = run.model if run is not None else None
     if model is not None and getattr(model, "stateful", False):
         from bollhav.model.database import Database
 
@@ -255,15 +222,16 @@ def model_lifecycle(func: Callable) -> Callable:
     def wrapper(*args, **kwargs):
         bound = sig.bind(*args, **kwargs)
         bound.apply_defaults()
-        model = bound.arguments.get("model")
+        run = bound.arguments.get("run")
         data_conn, state_conn = _conns(bound.arguments)
 
-        if model is None:
+        if run is None:
             raise ValueError(
                 "@model_lifecycle-wrapped function was called without a "
-                "`model` argument — it's required (the hook brackets one "
+                "`run` argument — it's required (the hook brackets one "
                 "model's run)."
             )
+        model = run.model
 
         from bollhav.model.database import Database
         from bollhav.model.state import StateBackend
@@ -328,17 +296,17 @@ def model_lifecycle(func: Callable) -> Callable:
                 postgres_state.ensure_tables()
 
                 if model.is_kind_monolithic or model.is_kind_view:
-                    postgres_state.insert_singleton(run_id=model.run_id)
+                    postgres_state.insert_singleton(run_id=run.run_id)
                 else:
                     postgres_state.insert_intervals(
-                        run_id=model.run_id,
-                        intervals=model.compute_intervals(),
+                        run_id=run.run_id,
+                        intervals=compute_intervals(run),
                     )
-                model.intervals = postgres_state.get_actionable_intervals()
+                run.intervals = postgres_state.get_actionable_intervals()
 
-            PROGRESS.begin_model_for(model, total=len(model.intervals))
+            PROGRESS.begin_model_for(model, total=len(run.intervals))
             if dry_state:
-                _print_state_plan(model, postgres_state)
+                _print_state_plan(run, postgres_state)
                 return None
             return func(*args, **kwargs)
         finally:
@@ -387,12 +355,13 @@ def execute_lifecycle(func: Callable) -> Callable:
     def wrapper(*args, **kwargs):
         bound = sig.bind(*args, **kwargs)
         bound.apply_defaults()
-        model = bound.arguments.get("model")
+        run = bound.arguments.get("run")
         interval = bound.arguments.get("interval")
         data_conn, state_conn = _conns(bound.arguments)
 
-        if model is None:
-            raise ValueError("execute cannot be called if Model is none")
+        if run is None:
+            raise ValueError("execute cannot be called if run is None")
+        model = run.model
 
         def staged_execute():
             """Run the user's execute bracketed by the staging lifecycle:
@@ -416,10 +385,10 @@ def execute_lifecycle(func: Callable) -> Callable:
 
                 data = PostgresData(model=model, conn=data_conn)
 
-            data.create_staging_table(model.run_id)
+            data.create_staging_table(run.run_id)
             result = func(*args, **kwargs)
-            data.apply_staging_to_target(model.run_id, interval)
-            data.drop_staging_table(model.run_id)
+            data.apply_staging_to_target(run.run_id, interval)
+            data.drop_staging_table(run.run_id)
             return result
 
         def plain_execute():
@@ -445,19 +414,19 @@ def execute_lifecycle(func: Callable) -> Callable:
                     check = postgres_state.is_upstream_satisfied_live(interval)
                     if not check.satisfied:
                         postgres_state.mark_blocked(
-                            run_id=model.run_id,
+                            run_id=run.run_id,
                             interval=interval,
                             reason=check.reason or "",
                         )
                         return None
 
-                postgres_state.mark_running(run_id=model.run_id, interval=interval)
+                postgres_state.mark_running(run_id=run.run_id, interval=interval)
 
                 try:
                     result = execute()
                 except Exception as exc:
                     postgres_state.record_failure(
-                        run_id=model.run_id,
+                        run_id=run.run_id,
                         interval=interval,
                         error_type=type(exc).__name__,
                         error_message=str(exc),
@@ -466,7 +435,7 @@ def execute_lifecycle(func: Callable) -> Callable:
                     )
                     raise
 
-                postgres_state.mark_applied(run_id=model.run_id, interval=interval)
+                postgres_state.mark_applied(run_id=run.run_id, interval=interval)
                 return result
             finally:
                 try:

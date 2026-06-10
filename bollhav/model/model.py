@@ -2,20 +2,15 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime, timezone, tzinfo
-from uuid import UUID, uuid4
+from uuid import uuid4
 
-from icron import croniter
 from bollhav.model.target import Target
 from bollhav.model.bounds import Bounds
-from bollhav.model.batch import Batch, _resolve_cron, _chunk_interval
-from bollhav.model.intervals import TZInterval
-from bollhav.model.directives import Directives
+from bollhav.model.batch import Batch
 from bollhav.model.kind import Kind
 from bollhav.model.state import State
 from bollhav.model.tags import Tags
 from bollhav.model.source import Source
-from roskarl import IntervalExpression, IntervalExpressionExtended
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +24,7 @@ class Model:
         *,
         kind: Kind,
         tagging: Tags | None = None,
+        tags: set[str] | None = None,
         state: State | None = None,
         enabled: bool = True,
         debug: bool = False,
@@ -52,16 +48,13 @@ class Model:
         self.upstream: list[Source] = upstream or []
         if not self.upstream:
             self.upstream = [Source(name=f"unknown-{uuid4()}", type=None)]
-        self.directives = Directives()
-        self.tags: set[str] = (tagging or Tags()).assemble(
-            self.target.name, self.target.schema, self.target.catalog
+        self.tags: set[str] = (
+            tags
+            if tags is not None
+            else (tagging or Tags()).assemble(
+                self.target.name, self.target.schema, self.target.catalog
+            )
         )
-        self.intervals: tuple[TZInterval, ...] | tuple[None] = (None,)
-
-        # Runtime state stashed by the lifecycle hooks + action runners.
-        # Declared up-front so type-checkers don't complain at the
-        # mutation sites in state.py / lifecycle.py / actions.py.
-        self._state_run_id: UUID | None = None
 
         self.extra = kwargs
 
@@ -75,6 +68,19 @@ class Model:
         )
         if self.debug:
             self.pretty()
+
+        # Frozen after construction: a Model is an immutable *definition*. Any
+        # per-run state (window / intervals / run_id) lives on a `ModelRun`.
+        object.__setattr__(self, "_frozen", True)
+
+    def __setattr__(self, name: str, value: object) -> None:
+        if getattr(self, "_frozen", False):
+            raise AttributeError(
+                f"Model is frozen (an immutable definition); cannot set {name!r}. "
+                f"Per-run state belongs on a ModelRun, and pipe/tag overrides "
+                f"build a new Model via runtime.apply_runtime_overrides."
+            )
+        object.__setattr__(self, name, value)
 
     # ── construction-time validation ──────────────────────────────────
 
@@ -183,20 +189,24 @@ class Model:
     def gated_upstreams(self) -> list[Source]:
         """The Sources that gate this model — those carrying a `contract`, the
         managed upstreams the state machine waits for before this model runs."""
-        return [s for s in self.upstream if s.gated]
+        return [source for source in self.upstream if source.gated]
 
     @property
     def upstream_names(self) -> list[str]:
         """Names of this model's **gated** upstreams (Sources with a contract).
         Used for run ordering, the library `upstream` column, and gating."""
-        return [s.name for s in self.upstream if s.gated]
+        return [source.name for source in self.upstream if source.gated]
 
     @property
     def source_names(self) -> list[str]:
         """Names of this model's **ungated** sources — external inputs with no
         contract and known provenance (the UNKNOWN sentinel is excluded).
         Resolved literally by `ref()`."""
-        return [s.name for s in self.upstream if not s.gated and s.type is not None]
+        return [
+            source.name
+            for source in self.upstream
+            if not source.gated and source.type is not None
+        ]
 
     @property
     def source_specs(self) -> list[dict]:
@@ -204,9 +214,9 @@ class Model:
         `sources` column and lineage. `kind` is the source type label
         (`model` / `file` / `api`). The UNKNOWN sentinel is excluded."""
         return [
-            {"name": s.name, "kind": s.kind}
-            for s in self.upstream
-            if not s.gated and s.type is not None
+            {"name": source.name, "kind": source.kind}
+            for source in self.upstream
+            if not source.gated and source.type is not None
         ]
 
     @property
@@ -221,7 +231,7 @@ class Model:
         """False when the model's only input is the auto-injected UNKNOWN
         sentinel (it declared no real provenance). Use it to audit which
         models have untracked inputs."""
-        return not any(s.type is None for s in self.upstream)
+        return not any(source.type is None for source in self.upstream)
 
     @property
     def upstream_specs(self) -> list[dict]:
@@ -229,7 +239,9 @@ class Model:
         contract kind (`interval` / `view` / `monolithic`). Symmetric with
         `source_specs`; together they're the model's typed lineage inputs."""
         return [
-            {"name": s.name, "kind": s.contract.kind} for s in self.upstream if s.gated
+            {"name": source.name, "kind": source.contract.kind}
+            for source in self.upstream
+            if source.contract is not None
         ]
 
     def lineage(self) -> dict:
@@ -288,9 +300,9 @@ class Model:
         return "\n".join(lines)
 
     def _find_source(self, name: str) -> Source | None:
-        for s in self.upstream:
-            if s.name == name:
-                return s
+        for source in self.upstream:
+            if source.name == name:
+                return source
         return None
 
     def ref(self, name: str) -> str:
@@ -314,7 +326,9 @@ class Model:
         the query is portable across dev / prod / PR."""
         src = self._find_source(name)
         if src is None:
-            declared = sorted(s.name for s in self.upstream if s.type is not None)
+            declared = sorted(
+                source.name for source in self.upstream if source.type is not None
+            )
             raise ValueError(
                 f"{name!r} is not a declared input of "
                 f"{self.target.full_name!r} — add it to upstream=[...] before "
@@ -361,18 +375,9 @@ class Model:
     def stateful(self) -> bool:
         """True when this model tracks state (`state=State(...)`).
 
-        A live derivation, not a cached flag — `STATE_DISABLED` nulls
-        `self.state` at runtime, and the lifecycle hooks must see that."""
+        A live derivation, not a cached flag. The run-level `run_id` lives on
+        the `ModelRun`, not here — the model definition is run-agnostic."""
         return self.state is not None
-
-    @property
-    def run_id(self) -> UUID:
-        """The run_id for this pipeline invocation. Minted lazily on first
-        access and stashed on the model so the bootstrap and every
-        interval's state transitions share one id for the whole run."""
-        if self._state_run_id is None:
-            self._state_run_id = uuid4()
-        return self._state_run_id
 
     # ── output shape: does this model produce a table or a view? ──────
 
@@ -422,194 +427,6 @@ class Model:
             f"extra={self.extra!r})"
         )
 
-    def latest_complete_interval(
-        self,
-        interval_expression_override: IntervalExpression
-        | IntervalExpressionExtended
-        | None = None,
-        tz_override: tzinfo | None = None,
-    ) -> TZInterval:
-        """Return the most recent fully elapsed interval as a TZInterval.
-
-        "Complete" means the interval's entire time window has passed.
-        An in-progress interval is never returned — e.g. at 14:35 with
-        an hourly expression, the 14:00-15:00 interval is still running,
-        so this returns 13:00-14:00.
-
-        Uses the provided interval expression and timezone if set,
-        otherwise falls back to the model's own. Raises if the model has
-        no batching and no override is supplied."""
-        if interval_expression_override is None and self.batching is None:
-            raise ValueError(
-                f"latest_complete_interval on model {self.target.full_name!r} "
-                f"needs either an override or a configured batching."
-            )
-        cron_expression = _resolve_cron(
-            interval_expression_override
-            or (self.batching.interval.expression if self.batching else "@daily")
-        )
-        tz = tz_override or (
-            self.batching.interval.tz if self.batching else timezone.utc
-        )
-        now = datetime.now(tz=tz)
-        # Get two ticks from now to measure the interval size, then seed
-        # far enough back to guarantee at least two ticks before now.
-        probe = croniter(cron_expression, now)
-        tick1 = probe.get_next(datetime)
-        tick2 = probe.get_next(datetime)
-        interval_size = tick2 - tick1
-        it = croniter(cron_expression, now - (interval_size * 3))
-        prev, curr = None, None
-        while True:
-            tick = it.get_next(datetime)
-            if tick >= now:
-                break
-            prev, curr = curr, tick
-        # Loop invariant: at least 2 ticks consumed before the break
-        # (the cron is seeded `interval_size * 3` before now), so both
-        # `prev` and `curr` are populated. If this ever fires the cron
-        # iterator returned a tick >= now on the first or second call.
-        if prev is None or curr is None:
-            raise RuntimeError(
-                f"cron seeding invariant violated for {cron_expression!r} on "
-                f"{self.target.full_name!r}: iterator returned a tick >= now "
-                f"within the first two steps"
-            )
-        return TZInterval(prev, curr)
-
-    def _apply_lookback(self, cron_expression: str, since: datetime) -> datetime:
-        lookback = self._lookback_or_raise()
-        it = croniter(cron_expression, since)
-        tick1 = it.get_next(datetime)
-        tick2 = it.get_next(datetime)
-        tick_size = tick2 - tick1
-        return since - (tick_size * lookback)
-
-    def _lookback_or_raise(self) -> int:
-        """Return the configured lookback (the number of cron ticks to shift
-        an interval's `since` back), or raise. Lookback is an interval
-        feature, so it requires batching with an explicit non-negative
-        `interval.lookback`."""
-        if self.batching is None:
-            raise ValueError(
-                f"lookback is an interval feature, but model "
-                f"{self.target.full_name!r} has no batching configured"
-            )
-        if self.batching.interval.lookback is None:
-            raise ValueError(
-                f"model {self.target.full_name!r} has batching.interval.lookback "
-                f"unset — set a non-negative int to enable lookback"
-            )
-        return self.batching.interval.lookback
-
-    def compute_intervals(self) -> tuple[TZInterval, ...] | tuple[None]:
-        """Resolve and chunk a time interval into TZIntervals.
-
-        Pure computation from the model's own settings + `directives`.
-        Call this once — at a point where directives are final (e.g.
-        `@load_models` discovery, after pipe overrides bake in) — and
-        assign the result to `model.intervals`. The result depends on
-        `datetime.now()` (via `latest_complete_interval`), which is the
-        reason it isn't recomputed on every read: snapshot it once.
-
-        Returns `(None,)` when the model has no `batching` configured —
-        signalling to callers that no interval filtering should be
-        applied to the read (the model runs once, unfiltered).
-
-        All inputs come from the model's own settings (with pipe overrides
-        already baked in by `apply_pipe`) and its `directives`.
-
-        Two cron expressions are consulted:
-            batching.interval.expression          defines the chunk size — how
-                                                  the resolved interval is split
-                                                  into TZIntervals.
-            batching.interval.window_expression   defines the scope for `latest`
-                                                  mode only; defaults to
-                                                  `expression` when unset.
-
-        Three modes, evaluated in this order:
-
-        1. latest (directives.latest)
-           Both since and until are inferred by finding the last two
-           cron ticks before now:
-
-            @hourly, now is 2024-06-15 14:35 UTC:
-
-                ticks: ... 12:00  13:00  14:00  [14:35]  15:00
-                                  ^^^^^  ^^^^^
-                                  since  until
-
-                14:00-15:00 is still in progress -> 13:00-14:00.
-
-            @daily, now is 2024-06-15 14:35 UTC:
-
-                ticks: ... Jun 13  Jun 14  Jun 15  [14:35]  Jun 16
-                                   ^^^^^^  ^^^^^^
-                                   since   until
-
-                Jun 15-16 is still in progress -> Jun 14-15.
-
-        2. reload (directives.reload)
-           since = model.bounds.begin
-           until = model.bounds.end, or latest complete interval end:
-
-            expression  | until resolves to
-            ------------|---------------------
-            @hourly     | 2024-06-15 14:00 UTC
-            @daily      | 2024-06-15 00:00 UTC
-            @weekly     | 2024-06-09 00:00 UTC
-
-        3. backfill (default)
-           since = directives.since, or bounds.begin if unset
-           until = directives.until — required. Raises if unset.
-
-           Backfill is the "specific window" mode: both ends must be
-           pinned. For "to the latest complete tick" use latest mode;
-           for "to bounds.end (with a latest-tick fallback)" use
-           reload mode. Backfill never silently extends to "now."
-        """
-        if self.batching is None:
-            return (None,)
-
-        d = self.directives
-        tz = self.batching.interval.tz
-        expr = self.batching.interval.expression
-
-        if d.latest:
-            windowexpr = self.batching.interval.window_expression or expr
-            interval = self.latest_complete_interval(windowexpr, tz)
-            since, until = interval.since, interval.until
-        elif d.reload:
-            if self.bounds.begin is None:
-                raise ValueError(
-                    f"reload requires bounds.begin to be set on model "
-                    f"{self.target.full_name!r}"
-                )
-            since = self.bounds.begin
-            until = self.bounds.end or self.latest_complete_interval(expr).until
-        else:
-            since = d.since or self.bounds.begin
-            if since is None:
-                raise ValueError(
-                    f"backfill requires a since value — set bounds.begin on model "
-                    f"{self.target.full_name!r} or pass --since at runtime"
-                )
-            if d.until is None:
-                raise ValueError(
-                    f"backfill requires an explicit until on model "
-                    f"{self.target.full_name!r} — set BACKFILL_UNTIL (or "
-                    f"directives.until programmatically). Backfill means a "
-                    f'specific window; for "to the latest complete tick" use '
-                    f'latest mode, for "to bounds.end" use reload mode.'
-                )
-            until = d.until
-
-        cron_expression = _resolve_cron(expr)
-        if self.batching.interval.lookback:
-            since = self._apply_lookback(cron_expression, since)
-
-        return tuple(_chunk_interval(cron_expression, TZInterval(since, until)))
-
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, Model):
             return NotImplemented
@@ -619,7 +436,7 @@ class Model:
             # (so each is a distinct lineage node), which would make two
             # otherwise-identical models unequal — drop it before comparing.
             d = dict(m.__dict__)
-            d["upstream"] = [s for s in m.upstream if s.type is not None]
+            d["upstream"] = [source for source in m.upstream if source.type is not None]
             return d
 
         return _norm(self) == _norm(other)

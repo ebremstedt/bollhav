@@ -1,36 +1,3 @@
-"""MSSQL staging: stream sub-batches into a per-interval staging table,
-then atomically apply the staged content to the target.
-
-Use case: an interval produces more rows than fit in memory (or one
-transaction), but the unit of recovery stays at `(since, until)`.
-Sub-batches bulk-insert (or MERGE) into a staging table; the context
-exit applies staging → target and drops staging in one transaction, so
-a crash mid-stream cannot leave a half-applied interval visible in the
-target.
-
-Scope:
-  * Target write modes: APPEND, UPSERT_NO_DELETE, RECREATE_PARTITION
-  * Staging write modes: APPEND, UPSERT_NO_DELETE (chosen by
-    `Staging.write_mode`)
-  * Works with or without state. A state-tracked MSSQL model keeps its
-    state in Postgres (the state machine runs on a separate connection), so
-    staging composes with state the same way it does for Postgres targets.
-
-API:
-    with stage(conn, model, since=since, until=until) as s:
-        for chunk in source:
-            s.write(chunk)
-    # context exit: apply_atomically_to_target(...)
-    #   INSERT/MERGE/(DELETE+INSERT) staging -> target
-    #   DROP staging (unless keep_after_apply)
-    #   commit
-    # all in one transaction.
-
-Crash mid-stream: staging table is left in place. The next
-invocation's `gc_orphan_staging_tables(model)` cleans it up by name
-pattern.
-"""
-
 from __future__ import annotations
 
 import logging

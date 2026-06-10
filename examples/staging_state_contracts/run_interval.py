@@ -14,14 +14,14 @@ flips its existence row to `applied`.
 
 from __future__ import annotations
 
-from bollhav.model import Model, execute_lifecycle
+from bollhav.model import ModelRun, execute_lifecycle
 from bollhav.postgres import write
 from mock_read import read
 
 
 @execute_lifecycle
-def run_interval(model: Model, interval, data_conn, state_conn=None) -> None:
-    if model.is_view:
+def run_interval(run: ModelRun, interval, data_conn, state_conn=None) -> None:
+    if run.model.is_view:
         return
-    df_gen = read(model, interval)
-    write(conn=data_conn, model=model, df_gen=df_gen)
+    df_gen = read(run, interval)
+    write(conn=data_conn, run=run, df_gen=df_gen)

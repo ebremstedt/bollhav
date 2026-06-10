@@ -244,7 +244,7 @@ def test_load_models_passes_table_suffix_to_apply_runtime_overrides():
     ):
 
         @load_models
-        def main(models, debug):
+        def main(runs, debug):
             pass
 
         main()

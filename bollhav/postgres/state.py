@@ -1,36 +1,3 @@
-"""Postgres backend for bollhav state tracking.
-
-Each state-enabled model gets one STATE table in `z_bollhav_state`:
-
-    z_bollhav_state.<deterministic_name>
-
-The table name is a pure function of the model's `full_name`
-(`state_table_name`): a de-vowelled catalog/schema context, the readable
-table name, and a blake2b hash that guarantees global uniqueness and a
-≤63-char fit. Because it's deterministic, any process recomputes a model's
-(or an upstream's) table name on the fly — no lookup needed. The state
-table also carries a `model_name` column so the table self-identifies and a
-hash collision (≈1e-12) surfaces as a loud error instead of silent shared
-state.
-
-ERRORS are centralized: every model logs failures to one shared
-`z_bollhav.errors` table, keyed by `full_name` — no per-model error table.
-The cross-pipeline `library` (also in `z_bollhav`) remains the
-authority for *validation* (is an upstream a real, registered model?) and
-the dependency graph.
-
-Under a `SCHEMA_SUFFIX` (dev / PR isolation), bollhav's own bookkeeping moves
-into a per-branch namespace, so a dev branch registers, gates, and tracks
-state in its OWN environment, never touching prod's. Prod keeps the split
-`z_bollhav_state` / `z_bollhav`; a dev branch **consolidates** state + library
-+ errors into the single `z_bollhav_<suffix>` (one schema to drop). See
-`_env_schema` / `_state_schema` / `_library_schema`.
-
-The caller owns the connection: a `PostgresState` is constructed with the
-model and the state connection (opened in `main()` and threaded through
-the lifecycle hooks). `PostgresState` does not open its own connections.
-"""
-
 from __future__ import annotations
 
 import hashlib

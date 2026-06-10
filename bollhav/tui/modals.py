@@ -1,5 +1,3 @@
-"""The app's modal screens: a guard before a real run."""
-
 from __future__ import annotations
 
 from textual.app import ComposeResult

@@ -25,18 +25,12 @@ class TestStateConfig:
 
         s = State()
         assert s.backend is StateBackend.POSTGRES
-        assert s.schema_prefix is None
-        assert s.table_suffix is None
         assert s.allow_concurrent_runs is True
 
     def test_explicit_values(self) -> None:
         s = State(
-            schema_prefix="ops_",
-            table_suffix="_history",
             allow_concurrent_runs=False,
         )
-        assert s.schema_prefix == "ops_"
-        assert s.table_suffix == "_history"
         assert s.allow_concurrent_runs is False
 
 
@@ -184,13 +178,15 @@ class TestStateSchemaName:
         assert PostgresState(_pg_model())._state_schema() == LIBRARY_SCHEMA
         assert LIBRARY_SCHEMA == "z_bollhav"
 
-    def test_schema_prefix_no_longer_affects_state_schema(self) -> None:
-        from bollhav.model.state import State
-        from bollhav.postgres.state import LIBRARY_SCHEMA, PostgresState
+    def test_schema_suffix_isolates_state_schema(self) -> None:
+        from bollhav.postgres.state import PostgresState
 
-        # schema_prefix now only affects the staging schema; state is fixed.
-        m = _pg_model(state_cfg=State(schema_prefix="ops_"))
-        assert PostgresState(m)._state_schema() == LIBRARY_SCHEMA
+        # A SCHEMA_SUFFIX run gets its own bollhav environment, so state
+        # tables land in z_bollhav_<suffix>, never touching prod's z_bollhav.
+        m = _pg_model()
+        m.target.schema_suffix = "pr123"
+        m.target.schema_suffix_appendix = None
+        assert PostgresState(m)._state_schema() == "z_bollhav_pr123"
 
 
 class TestStateTableName:
@@ -200,13 +196,6 @@ class TestStateTableName:
         assert PostgresState(_pg_model())._state_table() == state_table_name(
             "public.orders"
         )
-
-    def test_table_suffix_is_ignored(self) -> None:
-        from bollhav.model.state import State
-        from bollhav.postgres.state import PostgresState, state_table_name
-
-        m = _pg_model(state_cfg=State(table_suffix="_history"))
-        assert PostgresState(m)._state_table() == state_table_name("public.orders")
 
     def test_name_fits_postgres_limit_and_carries_table(self) -> None:
         from bollhav.postgres.state import state_table_name
@@ -469,9 +458,9 @@ class TestStateMode_EnvVar:
 
 
 class TestModelIntervals:
-    """`model.intervals` is a plain attribute now: the bootstrap computes
-    the contract via `compute_intervals()` and assigns the actionable
-    subset onto it; the user's loop reads it back."""
+    """`ModelRun.intervals` is a plain attribute: the bootstrap computes the
+    contract via `compute_intervals(run)` and assigns the actionable subset
+    onto it; the user's loop reads it back. The `Model` definition is frozen."""
 
     def test_assignment_holds(self) -> None:
         from bollhav.model import (
@@ -479,6 +468,7 @@ class TestModelIntervals:
             IntervalChunks,
             Kind,
             Model,
+            ModelRun,
             Target,
         )
 
@@ -487,8 +477,16 @@ class TestModelIntervals:
             batching=Batch(interval=IntervalChunks(expression="@daily")),
             kind=Kind.INTERVAL,
         )
-        m.intervals = ("fake1", "fake2")
-        assert m.intervals == ("fake1", "fake2")
+        run = ModelRun(model=m)
+        run.intervals = ("fake1", "fake2")
+        assert run.intervals == ("fake1", "fake2")
+
+    def test_model_is_frozen(self) -> None:
+        from bollhav.model import Kind, Model, Target
+
+        m = Model(target=Target(name="orders", schema="public"), kind=Kind.MONOLITHIC)
+        with pytest.raises(AttributeError, match="frozen"):
+            m.state = None  # type: ignore[misc]
 
     def test_compute_intervals_is_independent_of_assignment(self) -> None:
         from datetime import timezone
@@ -501,15 +499,24 @@ class TestModelIntervals:
             Model,
             Target,
         )
+        from bollhav.model.modelrun import ModelRun
+        from bollhav.model.window import compute_intervals, resolve_window
 
+        batching = Batch(interval=IntervalChunks(expression="@daily"))
+        bounds = Bounds(begin=datetime(2024, 1, 1, tzinfo=timezone.utc))
         m = Model(
             target=Target(name="orders", schema="public"),
-            batching=Batch(interval=IntervalChunks(expression="@daily")),
-            bounds=Bounds(begin=datetime(2024, 1, 1, tzinfo=timezone.utc)),
+            batching=batching,
+            bounds=bounds,
             kind=Kind.INTERVAL,
         )
-        m.directives.until = datetime(2024, 1, 3, tzinfo=timezone.utc)
+        run = ModelRun(
+            model=m,
+            window=resolve_window(
+                batching, bounds, until=datetime(2024, 1, 3, tzinfo=timezone.utc)
+            ),
+        )
         # Assigning the attribute doesn't perturb the pure computation.
-        m.intervals = ()
-        assert m.intervals == ()
-        assert len(m.compute_intervals()) > 0
+        run.intervals = ()
+        assert run.intervals == ()
+        assert len(compute_intervals(run)) > 0

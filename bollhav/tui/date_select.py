@@ -1,8 +1,3 @@
-"""A scrollable date-time picker: dropdowns for year / month / day / hour that
-together produce an ISO 8601 datetime (UTC). Reads/writes a plain ISO string so
-it drops into the config form like any other field.
-"""
-
 from __future__ import annotations
 
 from datetime import datetime

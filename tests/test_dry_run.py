@@ -44,8 +44,10 @@ def _mk_model(
     schema: str = "public",
     with_batching: bool = True,
 ):
-    """Build a model-shaped MagicMock that the dry-run module accepts."""
+    """Build a `ModelRun` wrapping a model-shaped MagicMock that the dry-run
+    module accepts."""
     from bollhav.model.intervals import TZInterval
+    from bollhav.model.modelrun import ModelRun
 
     model = MagicMock()
     model.target.full_name = full_name
@@ -65,12 +67,13 @@ def _mk_model(
         model.batching.interval.expression = "@daily"
         model.batching.interval.lookback = None
         model.batching.size = 10000
-        # @load_models stashes the computed contract on `model.intervals`;
+        # @load_models stashes the computed contract on `run.intervals`;
         # dry-run reads the attribute.
-        model.intervals = [TZInterval(SINCE, UNTIL)]
+        intervals = [TZInterval(SINCE, UNTIL)]
     else:
         model.batching = None
-    return model
+        intervals = (None,)
+    return ModelRun(model=model, intervals=intervals)
 
 
 class TestConcise:
@@ -264,7 +267,7 @@ class TestLoadModelsShortCircuit:
         ):
 
             @load_models
-            def main(models, debug):
+            def main(runs, debug):
                 called["main"] = True
 
             main()

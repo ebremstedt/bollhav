@@ -93,16 +93,18 @@ def _patches(
     ]
 
 
-class _FakeModel:
-    """Minimal stand-in for a Model: `@load_models` computes + stashes
-    `intervals` on each matched model, so the fake needs
-    `compute_intervals()` and an assignable `intervals` attribute."""
+class _FakeRun:
+    """Minimal stand-in for a ModelRun: `@load_models` calls
+    `compute_intervals(run)` and stashes the result on `run.intervals`, so the
+    fake needs a `model` (with `batching=None` → the (None,) contract), a
+    `window`, and an assignable `intervals`."""
 
     def __init__(self, name: str) -> None:
         self.name = name
-
-    def compute_intervals(self):
-        return (None,)
+        self.model = MagicMock()
+        self.model.batching = None
+        self.window = None
+        self.intervals = (None,)
 
 
 def _run_decorator(**env):
@@ -114,7 +116,7 @@ def _run_decorator(**env):
 
     def _fake_apm(**kwargs):
         apm_kwargs.update(kwargs)
-        return [_FakeModel("fake-model-1"), _FakeModel("fake-model-2")]
+        return [_FakeRun("fake-model-1"), _FakeRun("fake-model-2")]
 
     with (
         patches[0],
@@ -125,12 +127,12 @@ def _run_decorator(**env):
         patch(
             "bollhav.model.load_models.apply_runtime_overrides", side_effect=_fake_apm
         ),
-        patch("bollhav.model.load_models._print_summary", lambda cfg, models: None),
+        patch("bollhav.model.load_models._print_summary", lambda cfg, runs: None),
     ):
 
         @load_models
-        def main(models, debug):
-            received["models"] = models
+        def main(runs, debug):
+            received["runs"] = runs
             received["debug"] = debug
 
         main()
@@ -145,7 +147,7 @@ class TestEnvReading:
         assert apm["schema_suffix"] == "dev"
         assert apm["latest"] is False
         assert apm["upstream_mode"] is UpstreamMode.ENFORCE
-        assert [m.name for m in received["models"]] == [
+        assert [r.name for r in received["runs"]] == [
             "fake-model-1",
             "fake-model-2",
         ]
@@ -256,7 +258,7 @@ class TestDecoratorForms:
         ):
 
             @load_models(folder="custom/path")
-            def main(models, debug):
+            def main(runs, debug):
                 pass
 
             main()

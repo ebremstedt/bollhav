@@ -17,7 +17,7 @@ from typing import Generator
 
 import polars as pl
 
-from bollhav.model import Model
+from bollhav.model import ModelRun
 
 ROWS_PER_DAY = 5_000
 
@@ -37,8 +37,8 @@ def _rows_for_interval(since: datetime, until: datetime) -> list[dict]:
     ]
 
 
-def read(model: Model, interval) -> Generator[pl.DataFrame, None, None]:
-    size = model.batching.size
+def read(run: ModelRun, interval) -> Generator[pl.DataFrame, None, None]:
+    size = run.model.batching.size
     rows = _rows_for_interval(interval.since, interval.until)
     for start in range(0, len(rows), size):
         chunk = rows[start : start + size]

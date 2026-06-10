@@ -1,8 +1,3 @@
-"""Static data the UI is built from: the config form schema, the run-mode
-table, and the board status vocabulary. Keep declarations here so the widgets
-stay about behaviour, not content.
-"""
-
 from __future__ import annotations
 
 from rich.text import Text

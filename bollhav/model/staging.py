@@ -1,14 +1,3 @@
-"""Per-target staging config.
-
-`Staging` is the opt-in object for the staged write path. Set
-`Target(staging=Staging(...))` and the `write()` dispatcher routes
-through the staging mechanism: sub-batches COPY into a staging
-table; one transaction at the end moves staging → target. When
-`state=State(...)` is also set, the same transaction flips the
-model's state row to `applied` — staged write and state flip are
-atomic-or-neither.
-"""
-
 from __future__ import annotations
 
 from dataclasses import dataclass, field

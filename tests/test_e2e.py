@@ -38,6 +38,7 @@ from bollhav.model import (
     IntervalContract,
     Kind,
     Model,
+    ModelRun,
     Source,
     SourceApi,
     SourceModel,
@@ -47,6 +48,7 @@ from bollhav.model import (
     WriteMode,
 )
 from bollhav.model.state import StateMode
+from bollhav.model.window import compute_intervals, resolve_window
 from bollhav.postgres import (
     PostgresColumn,
     PostgresType,
@@ -195,8 +197,13 @@ def _orders_model(
     bounds_end: datetime = UNTIL,
     upstream: list[Source] | None = None,
     sources: list[Source] | None = None,
-) -> Model:
-    m = Model(
+) -> ModelRun:
+    # `apply_runtime_overrides` normally resolves the window from env vars and
+    # returns a ModelRun. E2E tests call the bootstrap directly, so we build
+    # the model + resolve the window by hand to the test's fixed window.
+    batching = Batch(interval=IntervalChunks(expression="@daily"))
+    bounds = Bounds(begin=SINCE, end=bounds_end)
+    model = Model(
         target=Target(
             name=name,
             schema=schema_name,
@@ -208,20 +215,16 @@ def _orders_model(
             columns=_orders_columns(),
         ),
         state=state,
-        batching=Batch(interval=IntervalChunks(expression="@daily")),
+        batching=batching,
         kind=Kind.INTERVAL,
-        bounds=Bounds(begin=SINCE, end=bounds_end),
+        bounds=bounds,
         # Gated upstreams and ungated sources are one list now.
         upstream=(upstream or []) + (sources or []),
     )
-    # `@load_models` normally sets backfill directives from env vars
-    # before invoking the bootstrap. E2E tests call the bootstrap
-    # directly, so we pin them by hand to the test's fixed window —
-    # otherwise the model defaults to backfilling all the way to
-    # "now" (today), generating ~hundreds of intervals.
-    m.directives.since = SINCE
-    m.directives.until = bounds_end
-    return m
+    return ModelRun(
+        model=model,
+        window=resolve_window(batching, bounds, since=SINCE, until=bounds_end),
+    )
 
 
 def _gen_rows(
@@ -260,7 +263,8 @@ def _bootstrap(models, *, state_mode: StateMode = StateMode.DISCOVER) -> None:
     register_model / ensure_tables, seed the interval or singleton rows,
     and filter `model.intervals` down to the actionable subset)."""
     with psycopg.connect(_dsn(), autocommit=True) as conn:
-        for model in models:
+        for run in models:
+            model = run.model
             # `model.state.mode` drives DISCOVER vs BULLDOZER prefill.
             if model.state is not None:
                 model.state.mode = state_mode
@@ -289,34 +293,34 @@ def _bootstrap(models, *, state_mode: StateMode = StateMode.DISCOVER) -> None:
                 state.register_model()
                 state.ensure_tables()
                 if model.is_kind_monolithic or model.is_view:
-                    state.insert_singleton(run_id=model.run_id)
+                    state.insert_singleton(run_id=run.run_id)
                 else:
                     state.insert_intervals(
-                        run_id=model.run_id,
-                        intervals=model.compute_intervals(),
+                        run_id=run.run_id,
+                        intervals=compute_intervals(run),
                     )
-                model.intervals = state.get_actionable_intervals()
+                run.intervals = state.get_actionable_intervals()
 
 
-def _run_intervals(model: Model, *, error_on_interval: int | None = None):
-    """Drive a model's intervals through the staged write path, the way a
-    user's `@model_lifecycle`-wrapped loop would after the bootstrap.
+def _run_intervals(run: ModelRun, *, error_on_interval: int | None = None):
+    """Drive a run's intervals through the staged write path, the way a user's
+    `@model_lifecycle`-wrapped loop would after the bootstrap.
 
     Mirrors `@execute_lifecycle`'s staged-execute flow per interval:
     `PostgresData.create_staging_table` → `write` (lands chunks into
     staging) → `apply_staging_to_target` → `drop_staging_table`, then the
     decoupled state flip via `PostgresState.mark_applied` on the same
     connection."""
+    model = run.model
     # Mint the contract before bootstrap so we know the full interval set.
-    contract = list(model.compute_intervals())
-    _bootstrap([model])
+    contract = list(compute_intervals(run))
+    _bootstrap([run])
 
-    # `model.intervals` is the bootstrap's filtered set (only
-    # non-applied rows when state is set). An empty list is
-    # meaningful — "everything's already done" — so don't fall back
-    # to the contract here; treat empty as no work.
+    # `run.intervals` is the bootstrap's filtered set (only non-applied rows
+    # when state is set). An empty list is meaningful — "everything's already
+    # done" — so don't fall back to the contract here; treat empty as no work.
     if model.state is not None:
-        intervals = list(model.intervals)
+        intervals = list(run.intervals)
     else:
         intervals = contract
     for idx, interval in enumerate(intervals):
@@ -331,20 +335,20 @@ def _run_intervals(model: Model, *, error_on_interval: int | None = None):
                 df_gen = _gen_rows(since, until)
                 if model.target.stage:
                     data = PostgresData(model=model, conn=conn)
-                    data.create_staging_table(model.run_id)
+                    data.create_staging_table(run.run_id)
                     write(
                         conn=conn,
-                        model=model,
+                        run=run,
                         df_gen=df_gen,
                         since=since,
                         until=until,
                     )
-                    data.apply_staging_to_target(model.run_id, interval)
-                    data.drop_staging_table(model.run_id)
+                    data.apply_staging_to_target(run.run_id, interval)
+                    data.drop_staging_table(run.run_id)
                 else:
                     write(
                         conn=conn,
-                        model=model,
+                        run=run,
                         df_gen=df_gen,
                         since=since,
                         until=until,
@@ -354,7 +358,7 @@ def _run_intervals(model: Model, *, error_on_interval: int | None = None):
                 # @execute_lifecycle does — no new connection opened.
                 if model.state is not None:
                     PostgresState(model=model, conn=conn).mark_applied(
-                        run_id=model.run_id,
+                        run_id=run.run_id,
                         interval=interval,
                     )
 
@@ -479,22 +483,24 @@ def test_e2e_view_as_upstream_does_not_block_downstream(schema_name):
 
     orders = _orders_model(schema_name, state=State(), staging=Staging())
 
-    view = Model(
-        upstream=[
-            Source(
-                "v_high_value",
-                type=SourceModel(
-                    query=f"SELECT * FROM {schema_name}.orders WHERE total >= 0"
-                ),
-            )
-        ],
-        target=Target(
-            name="v_high_value",
-            schema=schema_name,
-            catalog=CAT,
-            dsn_env_var="TARGET_DSN",
-        ),
-        kind=Kind.VIEW,
+    view = ModelRun(
+        model=Model(
+            upstream=[
+                Source(
+                    "v_high_value",
+                    type=SourceModel(
+                        query=f"SELECT * FROM {schema_name}.orders WHERE total >= 0"
+                    ),
+                )
+            ],
+            target=Target(
+                name="v_high_value",
+                schema=schema_name,
+                catalog=CAT,
+                dsn_env_var="TARGET_DSN",
+            ),
+            kind=Kind.VIEW,
+        )
     )
 
     # An ungated source (no contract) is never enforced — the unregistered
@@ -538,8 +544,8 @@ def test_e2e_orphan_staging_gc_at_bootstrap(schema_name):
     m = _orders_model(schema_name, state=State(), staging=Staging())
     # Staging is centralized now — derive the model's actual staging schema and
     # per-model prefix, and plant an orphan named like a prior crashed run.
-    staging_schema = _staging_schema(m)
-    orphan = f"{_staging_table_prefix(m)}dead0000"
+    staging_schema = _staging_schema(m.model)
+    orphan = f"{_staging_table_prefix(m.model)}dead0000"
     with psycopg.connect(_dsn(), autocommit=True) as c:
         c.execute(f'CREATE SCHEMA IF NOT EXISTS "{staging_schema}"')
         c.execute(
@@ -584,7 +590,7 @@ def test_e2e_library_migration_is_additive(schema_name):
     # model serves to drive it.
     m = _orders_model(schema_name, state=State(), staging=Staging())
     with psycopg.connect(_dsn()) as c:
-        PostgresState(model=m, conn=c).ensure_library()
+        PostgresState(model=m.model, conn=c).ensure_library()
         c.commit()
 
     # New column present
@@ -757,18 +763,18 @@ def _orders_columns_with_status(*, unique_id: bool = False):
 
 
 def _drive_through_intervals(
-    model: Model,
+    run: ModelRun,
     source_schema: str,
     source_table: str,
     chunk_size: int = 100,
 ):
-    """Drive `model` through its intervals, reading each from the
-    planted source table. Mirrors `_run_intervals` but uses real
-    SELECT-from-source as the data feed."""
-
-    contract = list(model.compute_intervals())
-    _bootstrap([model])
-    intervals = list(model.intervals) if model.state is not None else contract
+    """Drive a run through its intervals, reading each from the planted source
+    table. Mirrors `_run_intervals` but uses real SELECT-from-source as the
+    data feed."""
+    model = run.model
+    contract = list(compute_intervals(run))
+    _bootstrap([run])
+    intervals = list(run.intervals) if model.state is not None else contract
     for interval in intervals:
         df_gen = _read_source_for_interval(
             source_schema,
@@ -781,21 +787,21 @@ def _drive_through_intervals(
             # Staged-execute flow: fresh staging table → land chunks →
             # atomic apply → drop, then the decoupled state flip.
             data = PostgresData(model=model, conn=conn)
-            data.create_staging_table(model.run_id)
+            data.create_staging_table(run.run_id)
             write(
                 conn=conn,
-                model=model,
+                run=run,
                 df_gen=df_gen,
                 since=interval.since,
                 until=interval.until,
             )
-            data.apply_staging_to_target(model.run_id, interval)
-            data.drop_staging_table(model.run_id)
+            data.apply_staging_to_target(run.run_id, interval)
+            data.drop_staging_table(run.run_id)
             # Staging no longer flips state — mark applied on the same
             # connection, the way @execute_lifecycle does.
             if model.state is not None:
                 PostgresState(model=model, conn=conn).mark_applied(
-                    run_id=model.run_id,
+                    run_id=run.run_id,
                     interval=interval,
                 )
 
@@ -825,8 +831,8 @@ def test_e2e_staging_append_target_append(schema_name, caplog):
     try:
         m = _orders_model(schema_name, state=State(), staging=Staging())
         # Switch the columns to the status-aware ones — source carries it.
-        m.target.columns = _orders_columns_with_status(unique_id=False)
-        m.target.write_mode = WriteMode.APPEND
+        m.model.target.columns = _orders_columns_with_status(unique_id=False)
+        m.model.target.write_mode = WriteMode.APPEND
         _drive_through_intervals(m, source_schema, "orders_source")
 
         # All 72 rows landed.
@@ -885,9 +891,9 @@ def test_e2e_staging_append_target_upsert(schema_name, caplog):
     _plant_source_table(source_schema, "orders_source", rows)
     try:
         m = _orders_model(schema_name, state=State(), staging=Staging())
-        m.target.columns = _orders_columns_with_status(unique_id=True)
-        m.target.write_mode = WriteMode.UPSERT_NO_DELETE
-        m.target.unique_columns = [m.target.columns[0]]  # id
+        m.model.target.columns = _orders_columns_with_status(unique_id=True)
+        m.model.target.write_mode = WriteMode.UPSERT_NO_DELETE
+        m.model.target.unique_columns = [m.model.target.columns[0]]  # id
         _drive_through_intervals(m, source_schema, "orders_source")
 
         # 100 distinct ids × 3 days = 300 rows in target.
@@ -948,9 +954,9 @@ def test_e2e_staging_upsert_target_upsert(schema_name, caplog):
             state=State(),
             staging=Staging(write_mode=WriteMode.UPSERT_NO_DELETE),
         )
-        m.target.columns = _orders_columns_with_status(unique_id=True)
-        m.target.write_mode = WriteMode.UPSERT_NO_DELETE
-        m.target.unique_columns = [m.target.columns[0]]
+        m.model.target.columns = _orders_columns_with_status(unique_id=True)
+        m.model.target.write_mode = WriteMode.UPSERT_NO_DELETE
+        m.model.target.unique_columns = [m.model.target.columns[0]]
         # chunk_size=50 aligns each chunk to a single status round → each
         # chunk has unique ids, so chunk-level `INSERT ... ON CONFLICT`
         # into staging works. Dupes (different statuses for the same id)
@@ -1025,7 +1031,7 @@ def test_e2e_staging_append_target_recreate_partition(schema_name, caplog):
             conn.commit()
 
         m = _orders_model(schema_name, state=State(), staging=Staging())
-        m.target.columns = [
+        m.model.target.columns = [
             PostgresColumn(name="id", data_type=PostgresType.BIGINT, nullable=False),
             PostgresColumn(
                 name="customer_id", data_type=PostgresType.BIGINT, nullable=False
@@ -1041,7 +1047,7 @@ def test_e2e_staging_append_target_recreate_partition(schema_name, caplog):
             ),
             PostgresColumn(name="status", data_type=PostgresType.TEXT, nullable=True),
         ]
-        m.target.write_mode = WriteMode.RECREATE_PARTITION
+        m.model.target.write_mode = WriteMode.RECREATE_PARTITION
         # `partitioned_by` is a @property derived from columns; setting
         # `partition_on=True` on the order_date column above is enough.
         _drive_through_intervals(m, source_schema, "orders_source")
@@ -1104,7 +1110,7 @@ def test_e2e_registry_get_lineage_matches_model_lineage(schema_name):
     # The DB-read lineage matches the in-code Model.lineage() shape exactly:
     # upstream typed by the upstream's registered kind (= the contract kind
     # here), sources typed by their source type (model / file / api).
-    assert lineage == summary.lineage()
+    assert lineage == summary.model.lineage()
     assert lineage["upstream"] == [
         {"name": f"{CAT}.{schema_name}.orders", "kind": "interval"}
     ]
@@ -1216,7 +1222,7 @@ def test_e2e_registry_get_errors(schema_name):
     fqn = f"{CAT}.{schema_name}.orders"
     # Log a failure the way @execute_lifecycle would, into z_bollhav.errors.
     with psycopg.connect(_dsn(), autocommit=True) as conn:
-        PostgresState(model=m, conn=conn).record_failure(
+        PostgresState(model=m.model, conn=conn).record_failure(
             run_id=m.run_id,
             interval=None,
             error_type="RuntimeError",
@@ -1250,20 +1256,22 @@ def test_e2e_schema_suffix_isolates_state_and_library(schema_name):
     env_state = f"z_bollhav_state_{suf}"  # must NOT be created (prod-only split)
 
     def mk(name, upstream=None):
-        return Model(
-            target=Target(
-                name=name,
-                schema=schema_name,
-                catalog=CAT,
-                schema_suffix=suf,
-                schema_suffix_appendix=None,
-                database=Database.POSTGRES,
-                dsn_env_var="TARGET_DSN",
-                columns=_orders_columns(),
-            ),
-            kind=Kind.MONOLITHIC,
-            state=State(),
-            upstream=upstream or [],
+        return ModelRun(
+            model=Model(
+                target=Target(
+                    name=name,
+                    schema=schema_name,
+                    catalog=CAT,
+                    schema_suffix=suf,
+                    schema_suffix_appendix=None,
+                    database=Database.POSTGRES,
+                    dsn_env_var="TARGET_DSN",
+                    columns=_orders_columns(),
+                ),
+                kind=Kind.MONOLITHIC,
+                state=State(),
+                upstream=upstream or [],
+            )
         )
 
     orders = mk("orders")
@@ -1286,7 +1294,7 @@ def test_e2e_schema_suffix_isolates_state_and_library(schema_name):
     _drop_env()
     try:
         with psycopg.connect(_dsn(), autocommit=True) as conn:
-            so = PostgresState(orders, conn)
+            so = PostgresState(orders.model, conn)
             # dev consolidates: state schema == library schema == one env schema
             assert so._library_schema() == env_lib
             assert so._state_schema() == env_lib
@@ -1305,12 +1313,12 @@ def test_e2e_schema_suffix_isolates_state_and_library(schema_name):
 
             # registered in the ENV library, absent from prod's
             assert (
-                PostgresState.lookup_model(conn, orders.target.full_name, env_lib)
+                PostgresState.lookup_model(conn, orders.model.target.full_name, env_lib)
                 is not None
             )
             assert (
                 PostgresState.lookup_model(
-                    conn, orders.target.full_name, LIBRARY_SCHEMA
+                    conn, orders.model.target.full_name, LIBRARY_SCHEMA
                 )
                 is None
             )
@@ -1318,7 +1326,7 @@ def test_e2e_schema_suffix_isolates_state_and_library(schema_name):
             # summary's gating resolves orders WITHIN the env (suffixed lookup +
             # env library) — it finds it (no 'unregistered' raise) and is merely
             # blocked because orders has no applied row yet.
-            ss = PostgresState(summary, conn)
+            ss = PostgresState(summary.model, conn)
             ss.ensure_library()
             assert ss.is_upstream_satisfied_live(None).satisfied is False
     finally:
@@ -1337,7 +1345,7 @@ def test_e2e_dry_state_plans_without_executing(schema_name, capsys, monkeypatch)
     ran = {"executed": False}
 
     @model_lifecycle
-    def run_model(model, data_conn, state_conn=None):
+    def run_model(run, data_conn, state_conn=None):
         ran["executed"] = True  # must not happen under DRY_STATE
 
     m = _orders_model(schema_name, name="orders", state=State(), staging=Staging())
@@ -1361,7 +1369,7 @@ def test_e2e_dry_state_plans_without_executing(schema_name, capsys, monkeypatch)
             is None
         )
         # but state WAS bootstrapped (so the plan could be resolved)
-        st = PostgresState(m, conn)._state_table()
+        st = PostgresState(m.model, conn)._state_table()
         assert (
             conn.execute(
                 "SELECT 1 FROM information_schema.tables "
@@ -1381,7 +1389,7 @@ def test_e2e_dry_state_cascade_shows_will_run_after(schema_name, capsys, monkeyp
     monkeypatch.setenv("DRY_STATE_EXTRA", "true")
 
     @model_lifecycle
-    def run_model(model, data_conn, state_conn=None):
+    def run_model(run, data_conn, state_conn=None):
         for _ in model.intervals:
             pass
 
