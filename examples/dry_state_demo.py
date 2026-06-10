@@ -48,12 +48,14 @@ from bollhav.model import (
     IntervalContract,
     Kind,
     Model,
+    ModelRun,
     Source,
     SourceModel,
     State,
     Target,
 )
 from bollhav.model.lifecycle import execute_lifecycle, model_lifecycle
+from bollhav.model.window import resolve_window
 from bollhav.postgres import PostgresColumn, PostgresType, write
 
 DSN = os.environ.setdefault(
@@ -69,8 +71,12 @@ def _cols():
     return [PostgresColumn(name="id", data_type=PostgresType.BIGINT, nullable=False)]
 
 
-def _model(name: str, *, upstream=None) -> Model:
-    m = Model(
+def _model(name: str, *, upstream=None) -> ModelRun:
+    # @load_models normally resolves the window from BACKFILL_* env vars and
+    # returns a ModelRun; this standalone demo pins it by hand.
+    batching = Batch(interval=IntervalChunks(expression="@daily"))
+    bounds = Bounds(begin=BEGIN, end=END)
+    model = Model(
         target=Target(
             name=name,
             schema=SCHEMA,
@@ -82,14 +88,13 @@ def _model(name: str, *, upstream=None) -> Model:
         ),
         kind=Kind.INTERVAL,
         state=State(),
-        batching=Batch(interval=IntervalChunks(expression="@daily")),
-        bounds=Bounds(begin=BEGIN, end=END),
+        batching=batching,
+        bounds=bounds,
         upstream=upstream or [],
     )
-    # @load_models normally sets these from BACKFILL_* env vars; pin them here.
-    m.directives.since = BEGIN
-    m.directives.until = END
-    return m
+    return ModelRun(
+        model=model, window=resolve_window(batching, bounds, since=BEGIN, until=END)
+    )
 
 
 orders = _model("orders")
@@ -105,16 +110,16 @@ MODELS = {"orders": orders, "summary": summary}
 
 
 @execute_lifecycle
-def run_interval(model, interval, data_conn, state_conn=None):
+def run_interval(run, interval, data_conn, state_conn=None):
     # Trivial "work": write one row so the interval has data and applies.
-    write(conn=data_conn, model=model, df_gen=iter([pl.DataFrame({"id": [1]})]))
+    write(conn=data_conn, run=run, df_gen=iter([pl.DataFrame({"id": [1]})]))
 
 
 @model_lifecycle
-def run_model(model, data_conn, state_conn=None):
+def run_model(run, data_conn, state_conn=None):
     # Under DRY_STATE this body never runs — bollhav prints the plan and skips it.
-    for interval in model.intervals:
-        run_interval(model, interval, data_conn, state_conn)
+    for interval in run.intervals:
+        run_interval(run, interval, data_conn, state_conn)
 
 
 def _reset():

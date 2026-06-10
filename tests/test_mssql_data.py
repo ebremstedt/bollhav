@@ -13,6 +13,8 @@ from __future__ import annotations
 import sys
 from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
+
+from bollhav.model.modelrun import ModelRun
 from uuid import UUID
 
 import polars as pl
@@ -111,7 +113,7 @@ class TestMssqlPostgresStateWiring:
         conn, _ = _conn()
         m = _model(state=State())
         with pytest.raises(ValueError, match="separate Postgres"):
-            _conns({"data_conn": conn, "model": m})
+            _conns({"data_conn": conn, "run": ModelRun(model=m)})
 
     def test_separate_state_conn_is_used(self):
         from bollhav.model.lifecycle import _conns
@@ -119,14 +121,16 @@ class TestMssqlPostgresStateWiring:
         data_conn, _ = _conn()
         state_conn = MagicMock()
         m = _model(state=State())
-        dc, sc = _conns({"data_conn": data_conn, "state_conn": state_conn, "model": m})
+        dc, sc = _conns(
+            {"data_conn": data_conn, "state_conn": state_conn, "run": ModelRun(model=m)}
+        )
         assert dc is data_conn and sc is state_conn
 
     def test_stateless_mssql_needs_no_state_conn(self):
         from bollhav.model.lifecycle import _conns
 
         conn, _ = _conn()
-        dc, sc = _conns({"data_conn": conn, "model": _model()})
+        dc, sc = _conns({"data_conn": conn, "run": ModelRun(model=_model())})
         assert dc is conn and sc is conn
 
 
@@ -241,7 +245,7 @@ class TestStagedWritePath:
             patch("bollhav.mssql.data.apply_atomically_to_target") as apply,
             patch("bollhav.mssql.data.drop_staging_table") as drop,
         ):
-            write(conn=conn, model=m, df_gen=iter(frames))
+            write(conn=conn, run=ModelRun(model=m), df_gen=iter(frames))
 
         assert land.call_count == 2  # one per chunk
         create.assert_not_called()  # lifecycle owns create
@@ -254,4 +258,8 @@ class TestStagedWritePath:
         conn, _ = _conn()
         m = _model(kind=Kind.VIEW)
         with pytest.raises(ValueError, match="VIEW"):
-            write(conn=conn, model=m, df_gen=iter([pl.DataFrame({"id": [1]})]))
+            write(
+                conn=conn,
+                run=ModelRun(model=m),
+                df_gen=iter([pl.DataFrame({"id": [1]})]),
+            )

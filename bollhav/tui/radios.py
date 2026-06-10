@@ -1,10 +1,3 @@
-"""Horizontal radio widgets for the config form.
-
-ChoiceRadio is a thin RadioSet that reads/writes one of a fixed set of string
-options. BoolRadio (true/false) and ModeRadio (backfill/latest) specialise it.
-A single radio is its own mutual-exclusion — exactly one option is ever picked.
-"""
-
 from __future__ import annotations
 
 from textual.widgets import RadioButton, RadioSet

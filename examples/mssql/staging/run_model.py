@@ -13,14 +13,14 @@ stateless model).
 
 from __future__ import annotations
 
-from bollhav.model import Model, model_lifecycle
+from bollhav.model import ModelRun, model_lifecycle
 from run_interval import run_interval
 
 
 @model_lifecycle
-def run_model(model: Model, data_conn, state_conn=None) -> None:
-    units = model.intervals
-    print(f"\n{model.target.full_name}  ({model.kind})  {len(units)} unit(s)")
+def run_model(run: ModelRun, data_conn, state_conn=None) -> None:
+    units = run.intervals
+    print(f"\n{run.model.target.full_name}  ({run.model.kind})  {len(units)} unit(s)")
     for interval in units:
         print(f"  {interval.since.date()} → {interval.until.date()}", flush=True)
-        run_interval(model, interval, data_conn, state_conn)
+        run_interval(run, interval, data_conn, state_conn)

@@ -60,9 +60,9 @@ def _model(
     model.target.truncate_table = False
     model.target.partitioned_by = None
     model.target.unique_columns = []
-    model._state_run_id = RUN_ID
-    model.run_id = RUN_ID
-    return model
+    from bollhav.model.modelrun import ModelRun
+
+    return ModelRun(model=model, run_id=RUN_ID)
 
 
 def _mock_conn():

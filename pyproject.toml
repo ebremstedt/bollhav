@@ -20,8 +20,8 @@ dev = ["pytest", "ruff", "time-machine"]
 tui = ["textual>=0.50"]
 
 [project.scripts]
-bollhav = "bollhav.tui.app:main"
-bollhav-tui = "bollhav.tui.app:main"
+bollhav = "bollhav._tui_entry:main"
+bollhav-tui = "bollhav._tui_entry:main"
 
 [project.urls]
 Homepage = "https://github.com/ebremstedt/bollhav"

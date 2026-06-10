@@ -1,22 +1,3 @@
-"""Schema helpers.
-
-The full target setup (CREATE SCHEMA / TABLE / INDEX / ADD UNIQUE /
-staging schema) lives on `PostgresData.ensure_assets()` — idempotent and
-non-destructive. (Destructive recreate/truncate are a once-per-run
-lifecycle concern, not part of `ensure_assets`.)
-
-This module exposes:
-  * `ensure_schema` — idempotent CREATE SCHEMA used by the state-
-    table bootstrap (which has to create `z_<schema>` ahead of the
-    target assets).
-  * `_col_ddl` — renders one column-definition line, used by the
-    staging table DDL.
-  * `ensure_schema_and_table` and `ensure_table` — public façades
-    over `PostgresData.ensure_assets()`. The two names are synonyms,
-    kept as verb-style entrypoints for callers who don't want to
-    construct `PostgresData` directly.
-"""
-
 from __future__ import annotations
 
 import logging

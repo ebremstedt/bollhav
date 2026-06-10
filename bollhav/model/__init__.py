@@ -1,11 +1,11 @@
 from bollhav.model.runtime import apply_runtime_overrides
 from bollhav.model.load_models import load_models
 from bollhav.model.database import Database, DatabaseColumn, DatabaseIndex
-from bollhav.model.directives import Directives
 from bollhav.model.intervals import TZInterval
 from bollhav.model.matching import match_models
 from bollhav.model.ordering import UpstreamMode
 from bollhav.model.model import Model
+from bollhav.model.modelrun import ModelRun
 from bollhav.model.kind import Kind
 from bollhav.model.column_sorting import sort_columns
 from bollhav.model.write_modes import WriteMode
@@ -38,11 +38,11 @@ __all__ = [
     "Database",
     "DatabaseColumn",
     "DatabaseIndex",
-    "Directives",
     "TZInterval",
     "match_models",
     "UpstreamMode",
     "Model",
+    "ModelRun",
     "Kind",
     "sort_columns",
     "Staging",

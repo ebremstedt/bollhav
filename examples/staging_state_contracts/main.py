@@ -24,7 +24,7 @@ import os
 import psycopg
 from roskarl import env_var_dsn
 
-from bollhav.model import Model, load_models
+from bollhav.model import ModelRun, load_models
 from run_model import run_model
 
 
@@ -36,7 +36,7 @@ def setup_logging(debug: bool) -> None:
 
 
 @load_models
-def main(models: list[Model], debug: bool) -> None:
+def main(runs: list[ModelRun], debug: bool) -> None:
     setup_logging(debug=debug)
 
     dsn = env_var_dsn("TARGET_DSN").connection_string
@@ -44,8 +44,8 @@ def main(models: list[Model], debug: bool) -> None:
         psycopg.connect(dsn, autocommit=True) as data_conn,
         psycopg.connect(dsn, autocommit=True) as state_conn,
     ):
-        for model in models:
-            run_model(model, data_conn, state_conn)
+        for run in runs:
+            run_model(run, data_conn, state_conn)
     print()
 
 

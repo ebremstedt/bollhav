@@ -29,6 +29,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "src", "models"))
 from sales import sales  # noqa: E402
 
 from bollhav.mssql import ensure_schema  # noqa: E402
+from bollhav.model import ModelRun  # noqa: E402
+from bollhav.model.window import compute_intervals, resolve_window  # noqa: E402
 
 from db import connect, ensure_database  # noqa: E402
 from run_model import run_model  # noqa: E402
@@ -63,14 +65,18 @@ def main() -> None:
     ensure_database("bollhav")
     _reset_target(sales)
 
-    # Reload mode → intervals span bounds.begin..bounds.end (the three
-    # days). A stateless model has no state bootstrap to fill them in, so
-    # compute them here and hand them to the lifecycle.
-    sales.directives.reload = True
-    sales.intervals = sales.compute_intervals()
+    # Reload mode → window spans bounds.begin..bounds.end (the three days). A
+    # stateless model has no state bootstrap to fill in intervals, so resolve
+    # the window into a ModelRun and split it here, then hand the run to the
+    # lifecycle. (`sales` itself is the immutable definition — never mutated.)
+    run = ModelRun(
+        model=sales,
+        window=resolve_window(sales.batching, sales.bounds, reload=True),
+    )
+    run.intervals = compute_intervals(run)
 
     with connect() as conn:
-        run_model(sales, conn)
+        run_model(run, conn)
 
     print(f"\n✓ {sales.target.full_name} now holds {_count_rows(sales)} rows\n")
 

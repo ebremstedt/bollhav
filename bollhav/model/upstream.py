@@ -1,27 +1,3 @@
-"""Upstream gating contracts.
-
-A model's inputs all live in one list: `upstream: list[Source]`. A `Source`
-that carries a `contract` is **gated** — the state machine waits for it
-before the downstream may run. The `Contract` is pure gating *policy*: it
-says how satisfaction is checked, by the upstream's shape. The upstream's
-identity (its name) lives on the `Source`, not the contract.
-
-The three contract kinds mirror the three model kinds:
-
-* `IntervalContract` — the upstream is an interval table; satisfied when
-  it has an applied state row covering the downstream's window.
-* `ViewContract` — the upstream is a view; satisfied when the view exists.
-* `MonolithicContract` — the upstream is a monolithic (whole-table)
-  model; satisfied when the whole table has been loaded.
-
-`kind` returns the string the state backend keys its satisfaction check
-on (`"interval"` | `"view"` | `"monolithic"`) — the same vocabulary as
-`Model.kind` and the library's `kind` column.
-
-A contract is only valid on a `SourceModel` (a relational input); files and
-APIs are never state-tracked, so they can't gate — see source.py.
-"""
-
 from __future__ import annotations
 
 from dataclasses import dataclass

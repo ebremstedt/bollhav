@@ -1,13 +1,3 @@
-"""Target-side (data) Postgres backend for one model.
-
-`PostgresData` is the data-connection counterpart to `PostgresState`
-(which owns the state connection): it runs the target-DB asset DDL for
-a model. Each method is one discrete operation (create schema, create
-table, truncate, …) — there is no runner that loops over an action
-list. The caller (the lifecycle hook) decides which to call and in what
-order.
-"""
-
 from __future__ import annotations
 
 import logging

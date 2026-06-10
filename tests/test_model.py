@@ -7,6 +7,8 @@ from bollhav.model.bounds import Bounds
 from bollhav.model.model import Model
 from bollhav.model.kind import Kind
 from bollhav.model.target import Target
+from bollhav.model.modelrun import ModelRun
+from bollhav.model.window import compute_intervals, resolve_window, split_window
 
 
 def make_model(**overrides) -> Model:
@@ -46,35 +48,32 @@ def test_batching_defaults_to_none_when_unspecified():
     A whole-table load with no batching is kind=MONOLITHIC."""
     m = Model(target=Target(name="orders"), kind=Kind.MONOLITHIC)
     assert m.batching is None
-    assert m.compute_intervals() == (None,)
+    assert compute_intervals(ModelRun(model=m)) == (None,)
 
 
-def test_intervals_reload_without_bounds_raises():
-    m = make_model()
-    m.directives.reload = True
+def test_reload_without_bounds_raises():
     with pytest.raises(ValueError, match="reload requires bounds.begin"):
-        m.compute_intervals()
+        resolve_window(Batch(), Bounds(), reload=True)
 
 
-def test_intervals_backfill_without_since_or_bounds_raises():
-    m = make_model()
+def test_backfill_without_since_or_bounds_raises():
     with pytest.raises(ValueError, match="backfill requires a since value"):
-        m.compute_intervals()
+        resolve_window(Batch(), Bounds())
 
 
-def test_intervals_backfill_falls_back_to_bounds_for_since_but_requires_until():
-    """`since` still falls back to `bounds.begin` when `directives.since`
-    is unset — that's been the contract since day one. `until` no
-    longer has a silent fallback in backfill mode; it must be set
-    via `directives.until` (i.e. `BACKFILL_UNTIL`)."""
-    m = make_model(bounds=Bounds(begin=datetime(2026, 1, 1, tzinfo=timezone.utc)))
+def test_backfill_falls_back_to_bounds_for_since_but_requires_until():
+    """`since` falls back to `bounds.begin` when no `since` is given — the
+    contract since day one. `until` has no silent fallback in backfill mode;
+    it must be supplied (i.e. `BACKFILL_UNTIL`)."""
+    bounds = Bounds(begin=datetime(2026, 1, 1, tzinfo=timezone.utc))
     with pytest.raises(ValueError, match="backfill requires an explicit until"):
-        _ = m.compute_intervals()
+        resolve_window(Batch(), bounds)
 
-    # Set until → backfill window resolves cleanly using bounds.begin
-    # for the since side and directives.until for the until side.
-    m.directives.until = datetime(2026, 1, 3, tzinfo=timezone.utc)
-    intervals = m.compute_intervals()
+    # Supply until → window resolves with bounds.begin as since.
+    window = resolve_window(
+        Batch(), bounds, until=datetime(2026, 1, 3, tzinfo=timezone.utc)
+    )
+    intervals = split_window(window, Batch().interval.expression)
     assert len(intervals) > 0
     assert intervals[0].since == datetime(2026, 1, 1, tzinfo=timezone.utc)
     assert intervals[-1].until == datetime(2026, 1, 3, tzinfo=timezone.utc)

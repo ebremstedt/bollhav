@@ -10,18 +10,17 @@ from bollhav.model.matching import _model_matches, match_models
 def make_model(*tags: str) -> MagicMock:
     model = MagicMock()
     model.tags = set(tags)
-    model.directives = MagicMock(reload=False)
     return model
 
 
-# --- _model_matches ---
+# --- _model_matches: returns (model, reload) or None, no mutation ---
 
 
 def test_model_matches_when_tag_matches():
     model = make_model("wee", "all")
-    result = _model_matches(model, parse_expression("[wee]"))
-    assert result is model
-    assert result.directives.reload is False
+    matched, reload = _model_matches(model, parse_expression("[wee]"))
+    assert matched is model
+    assert reload is False
 
 
 def test_model_does_not_match_when_tag_absent():
@@ -31,37 +30,37 @@ def test_model_does_not_match_when_tag_absent():
 
 def test_model_matches_with_reload_tag_level():
     model = make_model("sales")
-    result = _model_matches(model, parse_expression("[r:sales]"))
-    assert result is model
-    assert result.directives.reload is True
+    matched, reload = _model_matches(model, parse_expression("[r:sales]"))
+    assert matched is model
+    assert reload is True
 
 
 def test_model_matches_with_reload_group_level():
     model = make_model("sales")
-    result = _model_matches(model, parse_expression("r:[sales]"))
-    assert result is model
-    assert result.directives.reload is True
+    matched, reload = _model_matches(model, parse_expression("r:[sales]"))
+    assert matched is model
+    assert reload is True
 
 
 def test_model_matches_with_reload_paren_level():
     model = make_model("finance")
-    result = _model_matches(model, parse_expression("[r:(sales|finance)]"))
-    assert result is model
-    assert result.directives.reload is True
+    matched, reload = _model_matches(model, parse_expression("[r:(sales|finance)]"))
+    assert matched is model
+    assert reload is True
 
 
 def test_model_reload_true_if_any_matching_group_has_reload():
     model = make_model("sales")
-    result = _model_matches(model, parse_expression("[r:sales][other]"))
-    assert result is model
-    assert result.directives.reload is True
+    matched, reload = _model_matches(model, parse_expression("[r:sales][other]"))
+    assert matched is model
+    assert reload is True
 
 
 def test_model_no_reload_when_matched_group_has_no_reload():
     model = make_model("finance")
-    result = _model_matches(model, parse_expression("[r:sales][finance]"))
-    assert result is model
-    assert result.directives.reload is False
+    matched, reload = _model_matches(model, parse_expression("[r:sales][finance]"))
+    assert matched is model
+    assert reload is False
 
 
 def test_disabled_model_does_not_match():
@@ -72,8 +71,8 @@ def test_disabled_model_does_not_match():
 
 def test_model_matches_reload_word_alias_equivalent_to_r():
     model = make_model("foo")
-    result = _model_matches(model, parse_expression("[reload:foo]"))
-    assert result.directives.reload is True
+    _, reload = _model_matches(model, parse_expression("[reload:foo]"))
+    assert reload is True
 
 
 # --- match_models ---

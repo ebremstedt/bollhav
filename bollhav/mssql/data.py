@@ -1,11 +1,3 @@
-"""
-`MssqlData` is the MSSQL counterpart to `PostgresData`: it runs the
-target-DB asset DDL and drives the per-interval staging lifecycle for a
-model. Each method is one discrete operation; the lifecycle hook decides
-which to call and in what order — the same hook that drives
-`PostgresData`, so the two backends share one orchestration.
-"""
-
 from __future__ import annotations
 
 import logging

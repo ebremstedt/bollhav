@@ -1,25 +1,36 @@
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
+from time_machine import travel
+
 from bollhav.model.runtime import _apply_to_model
 from bollhav.model.batch import Batch, IntervalChunks
 from bollhav.model.bounds import Bounds
+from bollhav.model.intervals import TZInterval
 from bollhav.model.kind import Kind
 from bollhav.model.model import Model
 from bollhav.model.target import Target
+from bollhav.model.window import latest_complete_interval
 
 
 CET = ZoneInfo("Europe/Stockholm")
 UTC = timezone.utc
 
+# Default backfill window for `_apply` — deterministic, so tests that don't
+# care about the window still resolve one (interval models always need a
+# window now). Window-specific tests override these.
+_SINCE = datetime(2024, 1, 1, tzinfo=UTC)
+_UNTIL = datetime(2024, 2, 1, tzinfo=UTC)
+
 
 def _apply(
     model: Model,
     *,
+    reload: bool = False,
     schema_suffix: str = "dev",
     latest: bool = False,
-    backfill_since: datetime | None = None,
-    backfill_until: datetime | None = None,
+    backfill_since: datetime | None = _SINCE,
+    backfill_until: datetime | None = _UNTIL,
     interval_expression_override: str | None = None,
     window_expression_override: str | None = None,
     lookback_override: int | None = None,
@@ -27,6 +38,7 @@ def _apply(
 ) -> Model:
     return _apply_to_model(
         model,
+        reload=reload,
         schema_suffix=schema_suffix,
         latest=latest,
         backfill_since=backfill_since,
@@ -63,7 +75,7 @@ class TestApplyDoesNotMutate:
 
 class TestSchemaSuffix:
     def test_schema_suffix_baked_in(self) -> None:
-        m = _apply(_model(), schema_suffix="pr123")
+        m = _apply(_model(), schema_suffix="pr123").model
         assert m.target.schema_suffix == "pr123"
         # schema.name stays as the base; .resolved is the suffixed form.
         assert m.target.schema == "public"
@@ -75,52 +87,63 @@ class TestPipeOverrides:
         m = _apply(
             _model(expression="@daily"),
             interval_expression_override="0 * * * *",
-        )
+        ).model
         assert m.batching.interval.expression == "0 * * * *"
 
     def test_window_expression_override(self) -> None:
-        m = _apply(_model(), latest=True, window_expression_override="@daily")
+        m = _apply(_model(), latest=True, window_expression_override="@daily").model
         assert m.batching.interval.window_expression == "@daily"
 
     def test_lookback_override(self) -> None:
-        m = _apply(_model(lookback=2), lookback_override=5)
+        m = _apply(_model(lookback=2), lookback_override=5).model
         assert m.batching.interval.lookback == 5
 
     def test_lookback_override_zero_clears(self) -> None:
         # 0 is a valid explicit value: "no lookback", and must win over a
         # model-set non-None lookback.
-        m = _apply(_model(lookback=3), lookback_override=0)
+        m = _apply(_model(lookback=3), lookback_override=0).model
         assert m.batching.interval.lookback == 0
 
     def test_tz_override(self) -> None:
-        m = _apply(_model(tz=UTC), tz_override=CET)
+        m = _apply(_model(tz=UTC), tz_override=CET).model
         assert m.batching.interval.tz == CET
 
     def test_overrides_skipped_when_unset(self) -> None:
-        m = _apply(_model(expression="@daily", tz=CET, lookback=2))
+        m = _apply(_model(expression="@daily", tz=CET, lookback=2)).model
         assert m.batching.interval.expression == "@daily"
         assert m.batching.interval.tz == CET
         assert m.batching.interval.lookback == 2
 
 
-class TestDirectives:
-    def test_latest_set_from_arg(self) -> None:
+class TestWindowResolution:
+    """`_apply_to_model` resolves the run window from bounds + the run
+    instruction and bakes it onto the new model (no directives, no stamping)."""
+
+    @travel(datetime(2024, 6, 15, 14, 35, tzinfo=UTC))
+    def test_latest_resolves_latest_complete_window(self) -> None:
         m = _apply(_model(), latest=True)
-        assert m.directives.latest is True
+        assert m.window == latest_complete_interval("@hourly", UTC)
 
-    def test_latest_forced_off_when_reload(self) -> None:
-        m = _model()
-        m.directives.reload = True
-        out = _apply(m, latest=True)
-        assert out.directives.latest is False
-        assert out.directives.reload is True
+    @travel(datetime(2024, 6, 15, 14, 35, tzinfo=UTC))
+    def test_reload_beats_latest(self) -> None:
+        begin = datetime(2024, 1, 1, tzinfo=UTC)
+        m = Model(
+            target=Target(name="orders", schema="public", schema_suffix_appendix=None),
+            batching=Batch(interval=IntervalChunks(expression="@hourly", tz=UTC)),
+            bounds=Bounds(begin=begin),
+            kind=Kind.INTERVAL,
+        )
+        out = _apply(m, reload=True, latest=True)
+        # reload wins: window spans bounds.begin .. latest complete tick,
+        # not the single latest tick that `latest`-only would give.
+        assert out.window.since == begin
+        assert out.window.until == latest_complete_interval("@hourly", UTC).until
 
-    def test_since_and_until_from_args(self) -> None:
+    def test_backfill_window_from_args(self) -> None:
         since = datetime(2024, 1, 1, tzinfo=UTC)
         until = datetime(2024, 2, 1, tzinfo=UTC)
         m = _apply(_model(), backfill_since=since, backfill_until=until)
-        assert m.directives.since == since
-        assert m.directives.until == until
+        assert m.window == TZInterval(since, until)
 
 
 class TestBatchingCarryThrough:
@@ -134,12 +157,12 @@ class TestBatchingCarryThrough:
             bounds=Bounds(begin=datetime(2024, 1, 1, tzinfo=UTC)),
             kind=Kind.INTERVAL,
         )
-        out = _apply(m)
+        out = _apply(m).model
         assert out.batching.size == 5000
 
     def test_pipe_override_sets_interval_expression(self) -> None:
         m = _model(expression="@hourly")
-        out = _apply(m, interval_expression_override="*/15 * * * *")
+        out = _apply(m, interval_expression_override="*/15 * * * *").model
         assert out.batching.interval.expression == "*/15 * * * *"
 
 
@@ -149,7 +172,7 @@ class TestBatchingNone:
             target=Target(name="t", schema="", schema_suffix_appendix=None),
             kind=Kind.MONOLITHIC,
         )
-        out = _apply(m, interval_expression_override="@daily")
+        out = _apply(m, interval_expression_override="@daily").model
         assert out.batching is None
 
 
@@ -170,11 +193,11 @@ class TestStateAndStagingCarryThrough:
             state=s,
             kind=Kind.INTERVAL,
         )
-        out = _apply(m)
+        out = _apply(m).model
         assert out.state is s
 
     def test_state_None_stays_None(self) -> None:
-        out = _apply(_model())
+        out = _apply(_model()).model
         assert out.state is None
 
     def test_staging_carries_through(self) -> None:
@@ -195,7 +218,7 @@ class TestStateAndStagingCarryThrough:
             state=State(),  # staging requires state
             kind=Kind.INTERVAL,
         )
-        out = _apply(m)
+        out = _apply(m).model
         out_staging = out.target.staging
         assert out_staging is not None
         assert out_staging is staging_cfg
@@ -205,5 +228,5 @@ class TestStateAndStagingCarryThrough:
         assert out_staging.keep_after_apply is True
 
     def test_staging_None_stays_None(self) -> None:
-        out = _apply(_model())
+        out = _apply(_model()).model
         assert out.target.staging is None

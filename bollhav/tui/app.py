@@ -1,32 +1,3 @@
-"""bollhav-tui — a two-mode TUI for bollhav models.
-
-A SOURCE box at the top chooses the folder models are discovered from. Below it,
-two tabs (switch with ctrl+t):
-
-  • RUN     — set the run env (TARGET_DSN, backfill window, suffixes, …) in the
-              multi-column CONFIG box, then fire one of three escalating actions:
-                  DRY RUN   (ctrl+d, yellow)  → DRY_RUN=true    model-level, no DB
-                  DRY STATE (ctrl+e, orange)  → DRY_STATE=true  resolves state, no writes
-                  RUN       (ctrl+r, red)     → the real thing (asks to confirm)
-              Output streams into the RESULTS box below.
-
-  • EXPLORE — a JIRA-style board of every discovered model; run them one at a
-              time (enter/r) or all (a). Uses the same CONFIG as the RUN tab.
-
-Run:
-    bollhav-tui [FOLDER ...]
-    python -m bollhav.tui [FOLDER ...]
-
-Each FOLDER is browsed for models recursively. With no args it browses the
-current directory. Folders are remembered in
-~/.config/bollhav-tui/workspaces.json and offered in the SOURCE dropdown.
-$BOLLHAV_PROJECT is honoured as an extra folder.
-
-Config is saved per project in `.bollhav-tui.json` in the project folder and
-restored on the next launch. Running executes the nearest `main.py` at or above
-the browsed folder, with the Python given by $BOLLHAV_RUN_PYTHON.
-"""
-
 from __future__ import annotations
 
 import json

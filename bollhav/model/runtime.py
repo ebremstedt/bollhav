@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime, tzinfo
 
 from bollhav.model.batch import Batch, IntervalChunks
-from bollhav.model.directives import Directives
-from bollhav.model.matching import match_models
+from bollhav.model.window import resolve_window
+from bollhav.model.matching import matched_with_reload
 from bollhav.model.model import Model
+from bollhav.model.modelrun import ModelRun
 from bollhav.model.ordering import UpstreamMode
 from bollhav.model.target import Target
 
@@ -24,11 +26,13 @@ def apply_runtime_overrides(
     window_expression_override: str | None = None,
     lookback_override: int | None = None,
     tz_override: tzinfo | None = None,
-) -> list[Model]:
-    """Match models against the tag expression and return new Model objects
-    with all pipe- and tag-driven settings baked in.
+    state_disabled: bool = False,
+) -> list[ModelRun]:
+    """Match models against the tag expression and return one `ModelRun` per
+    match — a new (immutable) `Model` with all pipe-/tag-driven settings baked
+    in, paired with this run's resolved `window`.
 
-    Each returned model has:
+    Each run's `model` has:
         * `target.schema_suffix` set to `schema_suffix`.
         * `target.suffix` set to `table_suffix`.
         * `batching.interval.expression` overridden by
@@ -38,14 +42,16 @@ def apply_runtime_overrides(
         * `batching.interval.lookback` overridden by `lookback_override` when
           set.
         * `batching.interval.tz` overridden by `tz_override` when set.
-        * `directives.reload` preserved; tag-driven override fields cleared.
-        * `directives.latest`, `since`, `until` set from the pipe args.
+        * `state` / `target.staging` nulled when `state_disabled`.
+    And each run's `window` is resolved from bounds + the run instruction
+    (tag-driven `reload`, pipe `latest` / `backfill_since` / `backfill_until`).
 
     The discovered source models are not mutated."""
-    matched = match_models(folder=folder, tags=tags, upstream_mode=upstream_mode)
+    matched = matched_with_reload(folder=folder, tags=tags, upstream_mode=upstream_mode)
     return [
         _apply_to_model(
             m,
+            reload=reload,
             schema_suffix=schema_suffix,
             table_suffix=table_suffix,
             latest=latest,
@@ -55,14 +61,16 @@ def apply_runtime_overrides(
             window_expression_override=window_expression_override,
             lookback_override=lookback_override,
             tz_override=tz_override,
+            state_disabled=state_disabled,
         )
-        for m in matched
+        for m, reload in matched
     ]
 
 
 def _apply_to_model(
     model: Model,
     *,
+    reload: bool,
     schema_suffix: str,
     latest: bool,
     backfill_since: datetime | None,
@@ -72,36 +80,50 @@ def _apply_to_model(
     lookback_override: int | None,
     tz_override: tzinfo | None,
     table_suffix: str = "",
-) -> Model:
+    state_disabled: bool = False,
+) -> ModelRun:
+    """Build a `ModelRun` — a NEW (immutable) model with all pipe/tag-driven
+    settings baked in, paired with this run's resolved `window`. The discovered
+    source model is never mutated and the new one is born complete (nothing is
+    stamped on after construction)."""
+    batching = _batching_with_overrides(
+        model.batching,
+        interval_expression_override=interval_expression_override,
+        window_expression_override=window_expression_override,
+        lookback_override=lookback_override,
+        tz_override=tz_override,
+    )
+    # `reload` (from matching) and the pipe args together pick the window mode;
+    # `resolve_window` applies the precedence (reload > latest > backfill).
+    window = resolve_window(
+        batching,
+        model.bounds,
+        reload=reload,
+        latest=latest,
+        since=backfill_since,
+        until=backfill_until,
+        name=model.target.full_name,
+    )
+    # STATE_DISABLED forces no-state semantics — null `state` + `target.staging`
+    # at construction so the lifecycle hooks pass through and write() goes
+    # direct. Born-complete: never mutated onto the model after the fact.
+    target = _target_with_suffix(model.target, schema_suffix, table_suffix)
+    if state_disabled:
+        target = replace(target, staging=None)
     new_model = Model(
-        target=_target_with_suffix(model.target, schema_suffix, table_suffix),
+        target=target,
         bounds=model.bounds,
-        batching=_batching_with_overrides(
-            model.batching,
-            interval_expression_override=interval_expression_override,
-            window_expression_override=window_expression_override,
-            lookback_override=lookback_override,
-            tz_override=tz_override,
-        ),
+        batching=batching,
         kind=model.kind,
-        state=model.state,
+        state=None if state_disabled else model.state,
         enabled=model.enabled,
         debug=False,  # avoid re-printing pretty() on the copy
         description=model.description,
         upstream=list(model.upstream),
+        tags=set(model.tags),
         **model.extra,
     )
-    # Model.__init__ always installs fresh Directives and re-assembles tags
-    # from the raw name/schema args. Carry over the original's assembled tag
-    # set + transformed directives.
-    new_model.directives = _directives_with_pipe(
-        model.directives,
-        latest=latest,
-        backfill_since=backfill_since,
-        backfill_until=backfill_until,
-    )
-    new_model.tags = set(model.tags)
-    return new_model
+    return ModelRun(model=new_model, window=window)
 
 
 def _target_with_suffix(
@@ -158,19 +180,4 @@ def _batching_with_overrides(
         ),
         size=batching.size,
         retries=batching.retries,
-    )
-
-
-def _directives_with_pipe(
-    d: Directives,
-    *,
-    latest: bool,
-    backfill_since: datetime | None,
-    backfill_until: datetime | None,
-) -> Directives:
-    return Directives(
-        reload=d.reload,
-        latest=latest and not d.reload,
-        since=backfill_since,
-        until=backfill_until,
     )

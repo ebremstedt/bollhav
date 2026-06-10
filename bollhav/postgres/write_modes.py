@@ -6,6 +6,7 @@ from psycopg import Connection
 import polars as pl
 from bollhav.model.write_modes import WriteMode
 from bollhav.model.model import Model
+from bollhav.model.modelrun import ModelRun
 from bollhav.postgres.modes import (
     recreate_partition,
     upsert_no_delete,
@@ -71,7 +72,7 @@ def write_dataframes(
 
 def write(
     conn: Connection,
-    model: Model,
+    run: ModelRun,
     df_gen: Generator[pl.DataFrame, None, None] | None = None,
     since: datetime | None = None,
     until: datetime | None = None,
@@ -97,7 +98,8 @@ def write(
 
     Args:
         conn: Active psycopg connection.
-        model: Model describing the target and write behaviour.
+        run: ModelRun — `run.model` describes the target/write behaviour;
+            `run.run_id` keys the staging table.
         df_gen: Generator yielding DataFrames. Required for all non-VIEW modes.
         since: Start of the overwrite window (UTC). Required for
             RECREATE_PARTITION and for the staged path.
@@ -109,6 +111,7 @@ def write(
             write mode is VIEW (views are created by `@model_lifecycle`,
             not written here).
     """
+    model = run.model
     if model.is_view:
         raise ValueError(
             f"write() is for data, not views — {model.target.full_name!r} is "
@@ -130,7 +133,7 @@ def write(
         )
 
     if model.target.stage:
-        _write_staged(conn=conn, model=model, df_gen=df_gen)
+        _write_staged(conn=conn, run=run, df_gen=df_gen)
         return
 
     write_dataframes(
@@ -144,7 +147,7 @@ def write(
 
 def _write_staged(
     conn: Connection,
-    model: Model,
+    run: ModelRun,
     df_gen: Generator[pl.DataFrame, None, None],
 ) -> None:
     """Staged write — COPY each chunk into the per-interval staging table.
@@ -152,9 +155,9 @@ def _write_staged(
     Just lands rows; the staging table must already exist. Its lifecycle
     (create before the execute, merge into the target + drop after) is
     owned by `@execute_lifecycle` via `PostgresData`. Both sides key the
-    table on `model.run_id`, so they target the same one."""
-    postgres_data = PostgresData(model=model, conn=conn)
+    table on `run.run_id`, so they target the same one."""
+    postgres_data = PostgresData(model=run.model, conn=conn)
     for df in df_gen:
         if len(df) == 0:
             continue
-        postgres_data.write_to_staging(model.run_id, df)
+        postgres_data.write_to_staging(run.run_id, df)

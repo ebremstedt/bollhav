@@ -13,11 +13,11 @@ from typing import Generator
 
 import polars as pl
 
-from bollhav.model import Model
+from bollhav.model import ModelRun
 
 
-def read(model: Model, interval) -> Generator[pl.DataFrame, None, None]:
-    name = model.target.name
+def read(run: ModelRun, interval) -> Generator[pl.DataFrame, None, None]:
+    name = run.model.target.name
     if name == "orders":
         yield from _orders(interval)
     elif name == "app_config":

@@ -1,34 +1,3 @@
-"""Postgres staging: land sub-batches in a per-interval staging table,
-then atomically apply the staged content to the target.
-
-Use case: an interval produces more rows than fit in memory (or one
-transaction), but state granularity stays at `(since, until)`.
-Sub-batches COPY (or upsert) into staging; one transaction then applies
-staging → target so a crash mid-stream cannot leave a half-applied
-interval marked applied.
-
-Scope:
-  * Target write modes: APPEND, UPSERT_NO_DELETE, RECREATE_PARTITION
-  * Staging write modes: APPEND, UPSERT_NO_DELETE (chosen by
-    `Staging.write_mode`)
-  * State always co-locates with target — cross-DB state would break
-    the atomic apply.
-
-This module holds the staging primitives:
-  * `write_to_staging` — COPY / upsert one chunk into the staging table.
-  * `apply_atomically_to_target` — merge staging → target in one tx.
-  * `drop_staging_table` — tear the staging table down.
-
-The staging table's *lifecycle* is owned by the framework, not here:
-`@execute_lifecycle` creates the table, then merges and drops it around
-the user's execute, and `write()` lands the rows in between — all via
-`PostgresData`, which delegates to these primitives. Both sides key the
-table on `model.run_id`.
-
-Crash mid-stream: the staging table is left in place, state row stays
-pending. `PostgresData.gc_orphan_staging_tables` reaps it next run.
-"""
-
 from __future__ import annotations
 
 import logging

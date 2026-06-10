@@ -1,8 +1,3 @@
-"""The RUN tab: a multi-column CONFIG form on top, three escalating run buttons,
-and a RESULTS log below. Owns the `run` worker that executes main.py in one of
-the three modes (dry_run / dry_state / run).
-"""
-
 from __future__ import annotations
 
 import asyncio

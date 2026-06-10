@@ -1,24 +1,3 @@
-"""A model's inputs — one list, one class.
-
-Every input a model has is a `Source` in its `upstream` list. A `Source`
-answers two independent questions:
-
-* **what is it?** — its `type`: a `SourceModel` (relational: a managed
-  model, an external table, or a view), a `SourceFile`, or a `SourceApi`.
-  `type=None` is the sentinel for unknown provenance.
-* **is it gated?** — its `contract`: present ⇒ the state machine waits for
-  it before the downstream runs (a managed upstream); absent ⇒ ungated
-  (an external source that's assumed always present).
-
-A `contract` is only valid on a `SourceModel` — files and APIs aren't
-state-tracked, so they can never gate.
-
-Only a `SourceModel` is SQL-addressable: `model.ref(name)` resolves it into
-a `FROM`, suffix-aware when it's gated (a managed model that moves across
-dev / prod / PR) and literal when it isn't (an external table at a fixed
-location). Files and APIs are read by the read function, not in SQL.
-"""
-
 from __future__ import annotations
 
 from dataclasses import dataclass, field

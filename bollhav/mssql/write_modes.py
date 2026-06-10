@@ -4,6 +4,7 @@ import polars as pl
 from datetime import datetime
 from typing import Generator
 from bollhav.model.model import Model
+from bollhav.model.modelrun import ModelRun
 from bollhav.model.write_modes import WriteMode
 from bollhav.mssql.modes import append, merge
 
@@ -47,7 +48,7 @@ def write_dataframes(
 
 def write(
     conn: pyodbc.Connection,
-    model: Model,
+    run: ModelRun,
     df_gen: Generator[pl.DataFrame, None, None] | None = None,
     since: datetime | None = None,
     until: datetime | None = None,
@@ -77,6 +78,7 @@ def write(
     connection), so staging composes with state here just like it does for
     Postgres targets.
     """
+    model = run.model
     if model.is_view:
         raise ValueError(
             f"{model.target.full_name!r} is a VIEW — created by "
@@ -96,7 +98,7 @@ def write(
         )
 
     if model.target.stage:
-        _write_staged(conn=conn, model=model, df_gen=df_gen)
+        _write_staged(conn=conn, run=run, df_gen=df_gen)
         return
 
     write_dataframes(
@@ -109,13 +111,13 @@ def write(
 
 def _write_staged(
     conn: pyodbc.Connection,
-    model: Model,
+    run: ModelRun,
     df_gen: Generator[pl.DataFrame, None, None],
 ) -> None:
     from bollhav.mssql.data import MssqlData
 
-    data = MssqlData(model=model, conn=conn)
+    data = MssqlData(model=run.model, conn=conn)
     for df in df_gen:
         if len(df) == 0:
             continue
-        data.write_to_staging(model.run_id, df)
+        data.write_to_staging(run.run_id, df)
