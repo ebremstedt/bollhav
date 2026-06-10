@@ -176,6 +176,10 @@ class TestEnvReading:
         apm, _ = _run_decorator(upstream="ignore_views")
         assert apm["upstream_mode"] is UpstreamMode.IGNORE_VIEWS
 
+    def test_upstream_mode_is_case_insensitive(self) -> None:
+        apm, _ = _run_decorator(upstream="IGNORE_VIEWS")
+        assert apm["upstream_mode"] is UpstreamMode.IGNORE_VIEWS
+
     def test_lookback_override_passes_through(self) -> None:
         apm, _ = _run_decorator(lookback_override=5)
         assert apm["lookback_override"] == 5
