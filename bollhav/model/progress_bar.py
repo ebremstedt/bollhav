@@ -96,7 +96,9 @@ def _format_duration(secs: float) -> str:
 
 def _format_progress(current: int, total: int, width: int = 20) -> str:
     if total == 0:
-        return f"{'░' * width} {current}/???"
+        # No intervals to run (e.g. everything already applied) — a known zero,
+        # not an unknown count, so show a complete bar rather than "???".
+        return f"{'█' * width}   100% {current}/0"
     filled = int(width * current / total)
     bar = "█" * filled + "░" * (width - filled)
     pct = current / total * 100
