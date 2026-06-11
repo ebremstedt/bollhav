@@ -31,8 +31,8 @@ def _apply(
     latest: bool = False,
     backfill_since: datetime | None = _SINCE,
     backfill_until: datetime | None = _UNTIL,
-    interval_expression_override: str | None = None,
-    window_expression_override: str | None = None,
+    interval_override: str | None = None,
+    window_override: str | None = None,
     lookback_override: int | None = None,
     tz_override=None,
 ) -> Model:
@@ -43,8 +43,8 @@ def _apply(
         latest=latest,
         backfill_since=backfill_since,
         backfill_until=backfill_until,
-        interval_expression_override=interval_expression_override,
-        window_expression_override=window_expression_override,
+        interval_override=interval_override,
+        window_override=window_override,
         lookback_override=lookback_override,
         tz_override=tz_override,
     )
@@ -83,15 +83,15 @@ class TestSchemaSuffix:
 
 
 class TestPipeOverrides:
-    def test_interval_expression_override(self) -> None:
+    def test_interval_override(self) -> None:
         m = _apply(
             _model(chunk="@daily"),
-            interval_expression_override="0 * * * *",
+            interval_override="0 * * * *",
         ).model
         assert m.batching.time.chunk == "0 * * * *"
 
-    def test_window_expression_override(self) -> None:
-        m = _apply(_model(), latest=True, window_expression_override="@daily").model
+    def test_window_override(self) -> None:
+        m = _apply(_model(), latest=True, window_override="@daily").model
         assert m.batching.time.window == "@daily"
 
     def test_lookback_override(self) -> None:
@@ -162,7 +162,7 @@ class TestBatchingCarryThrough:
 
     def test_pipe_override_sets_interval_expression(self) -> None:
         m = _model(chunk="@hourly")
-        out = _apply(m, interval_expression_override="*/15 * * * *").model
+        out = _apply(m, interval_override="*/15 * * * *").model
         assert out.batching.time.chunk == "*/15 * * * *"
 
 
@@ -172,7 +172,7 @@ class TestBatchingNone:
             target=Target(name="t", schema="", schema_suffix_appendix=None),
             kind=Kind.MONOLITHIC,
         )
-        out = _apply(m, interval_expression_override="@daily").model
+        out = _apply(m, interval_override="@daily").model
         assert out.batching is None
 
 

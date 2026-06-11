@@ -15,7 +15,7 @@ CONFIG_FIELDS: list[tuple[str, str, str, str, str]] = [
     ("Window", "BACKFILL_UNTIL", "Backfill until", "", "date"),
     (
         "Window",
-        "WINDOW_EXPRESSION_OVERRIDE",
+        "WINDOW_OVERRIDE",
         "Window expression",
         "cron / @alias",
         "text",
@@ -26,7 +26,7 @@ CONFIG_FIELDS: list[tuple[str, str, str, str, str]] = [
     ("Suffix", "TABLE_SUFFIX", "", "value", "text"),
     (
         "Overrides",
-        "INTERVAL_EXPRESSION_OVERRIDE",
+        "INTERVAL_OVERRIDE",
         "Interval expr",
         "@daily / cron",
         "text",
@@ -42,9 +42,8 @@ CONFIG_FIELDS: list[tuple[str, str, str, str, str]] = [
 MODE_ONLY: dict[str, str] = {
     "BACKFILL_SINCE": "backfill",
     "BACKFILL_UNTIL": "backfill",
-    "WINDOW_EXPRESSION_OVERRIDE": "latest",
+    "WINDOW_OVERRIDE": "latest",
 }
-UPSTREAM_OPTS = ["enforce", "ignore_views", "ignore_completely"]
 
 # How the CONFIG sections are spread across columns on the RUN tab — one inner
 # list per column, left to right. Lets the form use horizontal space.

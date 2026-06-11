@@ -78,9 +78,14 @@ def _mssql_model(*, upstream=None):
     )
 
 
-def _gated(name, contract=None):
+def _gated(name, contract=None, assume_ok=False):
     """A gated upstream: a SourceModel carrying a contract."""
-    return Source(name, type=SourceModel(), contract=contract or IntervalContract())
+    return Source(
+        name,
+        type=SourceModel(),
+        contract=contract or IntervalContract(),
+        assume_ok=assume_ok,
+    )
 
 
 def _src(name):
@@ -97,18 +102,13 @@ class TestRefGated:
         m = _pg_model(suffix="pr123", upstream=[_gated("warehouse.orders")])
         assert m.ref("warehouse.orders") == '"warehouse_pr123"."orders"'
 
-    def test_suffix_false_forces_literal_even_when_gated(self) -> None:
-        # A gated upstream normally moves with the env suffix; suffix=False pins
-        # it to its literal, shared location across every environment.
-        m = _pg_model(suffix="pr123", upstream=[_gated("warehouse.orders")])
-        assert m.ref("warehouse.orders") == '"warehouse_pr123"."orders"'  # default
-        assert m.ref("warehouse.orders", suffix=False) == '"warehouse"."orders"'
-
-    def test_suffix_true_forces_suffix_even_when_ungated(self) -> None:
-        # Ungated refs are literal by default; suffix=True forces the env suffix.
-        m = _pg_model(suffix="pr123", upstream=[_src("raw.landing")])
-        assert m.ref("raw.landing") == '"raw"."landing"'  # default
-        assert m.ref("raw.landing", suffix=True) == '"raw_pr123"."landing"'
+    def test_assume_ok_resolves_literal_even_when_gated(self) -> None:
+        # A gated upstream normally moves with the env suffix; assume_ok=True
+        # pins it to its canonical (prod) location even in a suffixed run.
+        m = _pg_model(
+            suffix="pr123", upstream=[_gated("warehouse.orders", assume_ok=True)]
+        )
+        assert m.ref("warehouse.orders") == '"warehouse"."orders"'
 
     def test_undeclared_raises(self) -> None:
         m = _pg_model(upstream=[_gated("warehouse.orders")])

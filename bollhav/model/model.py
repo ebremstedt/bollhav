@@ -307,7 +307,7 @@ class Model:
                 return source
         return None
 
-    def ref(self, name: str, *, suffix: bool | None = None) -> str:
+    def ref(self, name: str) -> str:
         """Resolve a declared input to a quoted table identifier for embedding
         in a read query — **suffix-aware when it's gated**, literal when it's
         not:
@@ -327,12 +327,11 @@ class Model:
         gets the same suffix this run applied to the model's own target — so
         the query is portable across dev / prod / PR.
 
-        Override that with `suffix=`: `None` (default) suffixes iff the upstream
-        is gated; `suffix=False` forces the **literal** (unsuffixed) location even
-        for a gated upstream — a shared table fixed across every environment, not
-        a per-env copy; `suffix=True` forces the suffix on.
+        A gated source declared `assume_ok=True` is pinned to its canonical
+        (unsuffixed) location instead — a shared upstream read from prod even in
+        a dev run (where gating also assumes it's okay); see `Source.assume_ok`.
 
-            model.ref('shared.calendar', suffix=False)  -> "shared"."calendar"
+            model.ref('shared.calendar')  ->  "shared"."calendar"   # assume_ok=True source
         """
         src = self._find_source(name)
         if src is None:
@@ -350,8 +349,11 @@ class Model:
                 f"can't go in a FROM. Read it in your read function instead; "
                 f"ref() is only for SourceModel inputs."
             )
-        apply_suffix = src.gated if suffix is None else suffix
-        return self._resolve_relation(name, apply_suffix=apply_suffix)
+        # Gated upstreams move with the env suffix — unless `assume_ok` pins
+        # them to their canonical (prod) location.
+        return self._resolve_relation(
+            name, apply_suffix=src.gated and not src.assume_ok
+        )
 
     def _resolve_relation(self, name: str, *, apply_suffix: bool) -> str:
         """Resolve a dotted `[catalog.]schema.table` name to a quoted

@@ -4,7 +4,7 @@
 
 A model's inputs — **all of them** — live in one list: `upstream: list[Source]`. A `Source` is one input, described by two independent dials:
 
-- **`type`** — *what* it is, and its read config: a [`SourceModel`](SOURCETABLE.md) (relational — a managed model, an external table, or a view), a [`SourceFile`](SOURCEFILE.md), or a `SourceApi`.
+- **`type`** — *what* it is, and its read config: a [`SourceModel`](#sourcemodel) (relational — a managed model, an external table, or a view), a [`SourceFile`](#sourcefile), or a `SourceApi`.
 - **`contract`** — *whether it gates*. A `Source` carrying a contract is a **managed upstream** the state machine waits for (it must be `applied` before this model runs). No contract ⇒ **ungated** — an external input assumed always present, never blocking.
 
 That's the whole model: gated-vs-ungated is just "does this `Source` have a `contract`," not which list it's in.
@@ -59,14 +59,116 @@ f"... FROM {model.ref('raw.landing')}"   # -> "raw"."landing"
 
 A gated source is a managed model, so its schema moves with the suffix just like your own target — the query stays portable. An ungated source is external, at a fixed location in every environment, so it resolves literally. Referencing an undeclared name raises; `ref()` on a `SourceFile`/`SourceApi` raises (there's no `FROM` for a file or an API — read those in your read function).
 
+## Shared upstreams — dev against prod (`assume_ok`)
+
+In a [suffixed](TARGET.md#schema-vs-table-suffix) (dev / PR) run, a gated upstream resolves to *your env's* copy (`warehouse_pr123.orders`) and gates against your env's state. But some upstreams aren't rebuilt per environment — a shared table that lives only in prod. Set `assume_ok=True` on the `Source` to read it from prod and trust it — **only in a suffixed run**. It's inert without a suffix, so you declare it once and never flip it between dev and prod.
+
+```python
+Source("warehouse.orders", type=SourceModel(), contract=IntervalContract(), assume_ok=True)
+```
+
+The three cases and how to declare each:
+
+| Case | Declaration | `ref()` reads | Gating |
+|---|---|---|---|
+| **dev → prod table**, assume its state ok | `contract=…, assume_ok=True` | prod — `"warehouse"."orders"` | assumed okay (skipped) |
+| **dev → dev table**, check its state | `contract=…` (default) | dev copy — `"warehouse_pr123"."orders"` | checks the dev registration |
+| **prod → prod table** | *either of the above* | prod — `"warehouse"."orders"` | checks prod's registration |
+
+**Case 3 is automatic.** Prod has no suffix, so every gated upstream reads prod and gates prod regardless of `assume_ok` — the flag only does anything in a suffixed run. Different upstreams on one model can mix freely (`orders` pinned to prod, `customers` using your dev copy).
+
+To assume an upstream is okay in **every** environment, prod included, don't gate it at all — drop the contract (an [ungated source](#ungated-sources)), which is never checked anywhere.
+
+## SourceModel
+
+The `type` of a **relational** input — a database table, a view, or another bollhav-managed model. It carries the config to read it:
+
+```python
+upstream=[
+    Source("raw.orders", type=SourceModel(schema="raw", dsn_env_var="RAW_DSN")),
+]
+```
+
+`SourceModel` is the only **SQL-addressable** type — `model.ref("raw.orders")` resolves it into a `FROM`. It's also the only type that can be **gated**: attach a `contract` to make it a managed upstream. A [VIEW](KINDS.md) model's definition *is* a `SourceModel` with a `query` set, in its `upstream` list — that's what `CREATE OR REPLACE VIEW` runs.
+
+| Field | Type · Default | Purpose |
+|---|---|---|
+| `schema` | `str` · `None` | Source schema. |
+| `catalog` | `str` · `None` | Source catalog / database (3-part `catalog.schema.table` names). |
+| `dsn_env_var` | `str` · `None` | DSN env var for the source connection. |
+| `query` | `str` · `None` | Optional query override. On a [VIEW](KINDS.md) model's source it *is* the view definition; otherwise the loader may use this SQL instead of `SELECT * FROM <schema>.<name>`. |
+| `partitioned_by` | `str` · `None` | Partition column on the source, when relevant to the read. |
+| `infer_schema_length` | `int` · `None` | Passed to polars as `infer_schema_length` — max rows scanned to infer column types. `None` scans every row (slow on large sources). |
+| `extra` | `dict` · `{}` | Free-form config bag for read functions that need extra knobs. |
+
+## SourceFile
+
+The `type` of a **file** input — loads from a file (CSV, Parquet, JSON, …) rather than a database:
+
+```python
+upstream=[Source("orders.csv", type=SourceFile(path=Path("dropzone/orders.csv")))]
+```
+
+A `SourceFile` is **not** SQL-addressable (`ref()` on it raises — there's no `FROM` for a file) and can't be gated (no `contract`). Your `read()` function uses its config to load the data.
+
+| Field | Type · Default | Purpose |
+|---|---|---|
+| `path` | `Path` · *required* | Path to the source file. |
+| `encoding` | `str` · `None` | Character encoding. `None` lets polars autodetect. |
+| `separator` | `str` · `None` | Column separator (e.g. `","`, `"\t"`, `";"`). `None` lets polars infer. |
+| `infer_schema_length` | `int` · `None` | Rows polars scans when inferring column types. `None` scans every row (slow on large files). |
+| `remove_top_rows` | `int` · `0` | Strip N rows from the top before parsing — for files with cover sheets or extra header rows above the column row. |
+| `archive_folder` | `Path` · `None` | If set, the file is moved here after a successful load — prevents the same file being processed twice. |
+| `dateformat` | `str` · `None` | `strftime` format for date columns when polars can't autodetect (e.g. `"%d/%m/%Y"`). |
+| `file_ending` | `str` · `None` | File extension hint (e.g. `"csv"`, `"tsv"`). Only needed when `path` doesn't carry one. |
+
+## Ungated sources
+
+An **ungated source** is a `Source` in `upstream` with **no `contract`** — a raw landing table, a third-party API, a dropped file, a hand-made table. Assumed always present, it can never block a unit of work; declaring it just records where data enters the system and (for relational types) enables `ref()` resolution. You never *have* to declare one — you can always hardcode an external table in your SQL. Declaring is the opt-in that buys you [lineage](LINEAGE.md) and `ref()` resolution.
+
+| | gated upstream | ungated source |
+|---|---|---|
+| has a `contract` | yes | no |
+| refers to | a bollhav-managed model | an external, unmanaged input |
+| requires [state](STATE.md) | yes — gated by the state machine | no — never gated |
+| `type` allowed | `SourceModel` only | any (`SourceModel` / `SourceFile` / `SourceApi`) |
+| `ref()` resolution | suffix-aware (moves with env) | literal (fixed location) |
+| purpose | wait-for + lineage | lineage / boundary marker |
+
+Only a [`SourceModel`](#sourcemodel) is SQL-addressable — `ref()` on a `SourceFile`/`SourceApi` raises; read those in your read function, the declaration is still recorded for lineage.
+
 ## Unknown provenance
 
-A model that declares **nothing** (`upstream=[]`) gets a single auto-injected typeless `Source` — see [None](SOURCE_NONE.md). Its provenance is untracked; `model.inputs_known` is `False`.
+A model doesn't have to declare any inputs. Your `read()` function is what actually produces the data (it receives the model + the interval and returns DataFrames), so where the rows come from is the read function's business — hardcoded SQL, or anything else.
+
+```python
+Model(
+    target=Target(name="orders", ...),
+    kind=Kind.INTERVAL,
+    batching=Batch(...),
+    # no upstream — read() supplies the rows
+)
+```
+
+When a model declares an empty `upstream`, bollhav doesn't leave it empty — provenance is *total*. It auto-injects a single **typeless** `Source`:
+
+```python
+Source(name="unknown-<uuid>", type=None)
+```
+
+- `type=None` is the marker for unknown provenance. It's never SQL-addressable and never gated.
+- The name is uuid-suffixed so each unknown is a **distinct** node in the [lineage](LINEAGE.md) graph (two unknown-provenance models don't collapse into one).
+- It isn't counted as a declared input — `source_names` / `upstream_names` exclude it.
+
+Two computed fields surface this for a lineage audit:
+
+```python
+model.declared_inputs   # [] — nothing real declared (gated + ungated, by name, when present)
+model.inputs_known      # False — its only input is the unknown sentinel
+```
 
 ## See also
 
-- [SourceModel](SOURCETABLE.md) / [SourceFile](SOURCEFILE.md) — the relational and file input types.
-- [Sources](SOURCES.md) — the ungated case in depth, and gated-vs-ungated.
 - [State](STATE.md) — status values, rerun behaviour, errors, locks.
 - [Lineage](LINEAGE.md) — the dependency graph these feed.
 - [examples/staging_state_contracts/](https://github.com/ebremstedt/bollhav/tree/main/examples/staging_state_contracts) — a view, a monolith, an interval, and a fourth model gated on all three.

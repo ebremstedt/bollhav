@@ -20,14 +20,12 @@ from bollhav.model.errors import (
     ConflictingRunModeError,
     InvalidStateModeError,
     InvalidTimezoneError,
-    InvalidUpstreamModeError,
     MissingSchemaSuffixError,
     MissingTableSuffixError,
     NegativeLookbackError,
     WindowOverrideWithoutLatestError,
 )
 from bollhav.model.window import compute_intervals
-from bollhav.model.ordering import UpstreamMode
 from bollhav.model.progress_bar import get_progress_level, PROGRESS, ProgressLevel
 from bollhav.model.state import StateMode
 
@@ -42,13 +40,12 @@ class _RuntimeConfig:
 
     tags: str
     schema_suffix: str
-    upstream_mode: UpstreamMode
     latest: bool
     backfill_enabled: bool
     backfill_since: datetime | None
     backfill_until: datetime | None
-    interval_expression_override: str | None
-    window_expression_override: str | None
+    interval_override: str | None
+    window_override: str | None
     lookback_override: int | None
     tz_override: tzinfo | None
     dry_run: bool
@@ -107,10 +104,9 @@ def load_models(
         BACKFILL_ENABLED              default !LATEST_ENABLED
         BACKFILL_SINCE                ISO 8601 datetime
         BACKFILL_UNTIL                ISO 8601 datetime
-        INTERVAL_EXPRESSION_OVERRIDE  cron / @alias
-        WINDOW_EXPRESSION_OVERRIDE    cron / @alias (latest mode only)
+        INTERVAL_OVERRIDE  cron / @alias
+        WINDOW_OVERRIDE    cron / @alias (latest mode only)
         LOOKBACK_OVERRIDE             non-negative int (cron-ticks)
-        UPSTREAM                      enforce | ignore_views | ignore_completely
         DRY_RUN                       bool; when true, print a concise summary
                                       of matched models (cron, interval count)
                                       and exit without invoking the wrapped
@@ -145,12 +141,11 @@ def load_models(
                 tags=cfg.tags,
                 schema_suffix=cfg.schema_suffix,
                 table_suffix=cfg.table_suffix,
-                upstream_mode=cfg.upstream_mode,
                 latest=cfg.latest,
                 backfill_since=cfg.backfill_since,
                 backfill_until=cfg.backfill_until,
-                interval_expression_override=cfg.interval_expression_override,
-                window_expression_override=cfg.window_expression_override,
+                interval_override=cfg.interval_override,
+                window_override=cfg.window_override,
                 lookback_override=cfg.lookback_override,
                 tz_override=cfg.tz_override,
                 state_disabled=cfg.state_disabled,
@@ -215,13 +210,12 @@ def _read_env() -> _RuntimeConfig:
         tags=_resolve_tags(),
         schema_suffix=_resolve_schema_suffix(),
         table_suffix=_resolve_table_suffix(),
-        upstream_mode=_resolve_upstream_mode(),
         latest=latest,
         backfill_enabled=backfill_enabled,
         backfill_since=_backfill_dt("BACKFILL_SINCE", backfill_enabled, tz_override),
         backfill_until=_backfill_dt("BACKFILL_UNTIL", backfill_enabled, tz_override),
-        interval_expression_override=_resolve_interval_expression_override(),
-        window_expression_override=_resolve_window_expression_override(latest=latest),
+        interval_override=_resolve_interval_override(),
+        window_override=_resolve_window_override(latest=latest),
         lookback_override=_resolve_lookback_override(),
         tz_override=tz_override,
         dry_run=_resolve_dry_run(),
@@ -264,9 +258,9 @@ def _backfill_dt(
     return _apply_tz(dt, tz_override) if tz_override else dt
 
 
-def _resolve_interval_expression_override() -> str | None:
+def _resolve_interval_override() -> str | None:
     return env_var_interval_expression(
-        name="INTERVAL_EXPRESSION_OVERRIDE", should_print_unset=False
+        name="INTERVAL_OVERRIDE", should_print_unset=False
     )
 
 
@@ -318,11 +312,11 @@ def _resolve_table_suffix() -> str:
     return raw if use else ""
 
 
-def _resolve_window_expression_override(*, latest: bool) -> str | None:
-    """`WINDOW_EXPRESSION_OVERRIDE`, which only applies in latest mode. Raises
+def _resolve_window_override(*, latest: bool) -> str | None:
+    """`WINDOW_OVERRIDE`, which only applies in latest mode. Raises
     if set while not in latest mode (backfill pins since/until explicitly)."""
     override = env_var_interval_expression(
-        name="WINDOW_EXPRESSION_OVERRIDE", should_print_unset=False
+        name="WINDOW_OVERRIDE", should_print_unset=False
     )
     if override and not latest:
         raise WindowOverrideWithoutLatestError()
@@ -400,17 +394,6 @@ def _apply_tz(dt: datetime | None, tz: tzinfo) -> datetime | None:
     return dt.replace(tzinfo=tz)
 
 
-def _resolve_upstream_mode() -> UpstreamMode:
-    raw = env_var(name="UPSTREAM", should_print_unset=False)
-    if raw is None:
-        return UpstreamMode.ENFORCE
-    valid = {m.value: m for m in UpstreamMode}
-    mode = valid.get(raw.strip().lower())
-    if mode is None:
-        raise InvalidUpstreamModeError(raw, list(valid.keys()))
-    return mode
-
-
 def _print_summary(cfg: _RuntimeConfig, runs: list[ModelRun]) -> None:
     def _row(key: str, val: str) -> None:
         print(f"  {key:<18}{val}")
@@ -438,16 +421,14 @@ def _print_summary(cfg: _RuntimeConfig, runs: list[ModelRun]) -> None:
         _row("schema suffix", cfg.schema_suffix)
     if cfg.table_suffix:
         _row("table suffix", cfg.table_suffix)
-    if cfg.upstream_mode != UpstreamMode.ENFORCE:
-        _row("upstream", cfg.upstream_mode.value)
     if cfg.tz_override is not None:
         _row("tz override", str(cfg.tz_override))
-    if cfg.interval_expression_override:
-        _row("interval override", cfg.interval_expression_override)
+    if cfg.interval_override:
+        _row("interval override", cfg.interval_override)
     if cfg.lookback_override is not None:
         _row("lookback override", str(cfg.lookback_override))
-    if cfg.latest and cfg.window_expression_override:
-        _row("window override", cfg.window_expression_override)
+    if cfg.latest and cfg.window_override:
+        _row("window override", cfg.window_override)
     # Show STATE_MODE only when at least one matched model actually
     # has state — otherwise the env var is a no-op and listing it
     # would be misleading clutter (a staging-only model has no state

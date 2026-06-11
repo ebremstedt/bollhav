@@ -915,6 +915,14 @@ class PostgresState:
         conn = self._require_conn()
         blockers: list[str] = []
         for src in self.model.gated_upstreams:
+            if src.assume_ok and self.model.target.schema_suffix:
+                # Shared upstream (`Source(..., assume_ok=True)`) in a SUFFIXED
+                # (dev/PR) run: it lives in prod, not this env's library, so its
+                # state is assumed okay — never looked up or waited on. In a prod
+                # (unsuffixed) run schema_suffix is empty, so this is False and it
+                # gates normally below — the flag needs no flipping between
+                # environments.
+                continue
             name = src.name
             kind = src.contract.kind  # gated ⇒ contract is not None
             # Look the upstream up under THIS env's identity + library: a
@@ -962,6 +970,10 @@ class PostgresState:
         after: list[str] = []
         blocked: list[str] = []
         for src in self.model.gated_upstreams:
+            if src.assume_ok and self.model.target.schema_suffix:
+                # Suffixed run → shared prod upstream assumed okay (see
+                # is_upstream_satisfied_live). A prod run gates it normally.
+                continue
             name = src.name
             kind = src.contract.kind
             lookup = self._suffix_upstream_name(name)

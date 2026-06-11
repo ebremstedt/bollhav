@@ -8,7 +8,6 @@ from bollhav.model.window import resolve_window
 from bollhav.model.matching import matched_with_reload
 from bollhav.model.model import Model
 from bollhav.model.modelrun import ModelRun
-from bollhav.model.ordering import UpstreamMode
 from bollhav.model.target import Target
 
 
@@ -18,12 +17,11 @@ def apply_runtime_overrides(
     tags: str,
     schema_suffix: str = "",
     table_suffix: str = "",
-    upstream_mode: UpstreamMode = UpstreamMode.ENFORCE,
     latest: bool = False,
     backfill_since: datetime | None = None,
     backfill_until: datetime | None = None,
-    interval_expression_override: str | None = None,
-    window_expression_override: str | None = None,
+    interval_override: str | None = None,
+    window_override: str | None = None,
     lookback_override: int | None = None,
     tz_override: tzinfo | None = None,
     state_disabled: bool = False,
@@ -36,9 +34,9 @@ def apply_runtime_overrides(
         * `target.schema_suffix` set to `schema_suffix`.
         * `target.suffix` set to `table_suffix`.
         * `batching.time.chunk` overridden by
-          `interval_expression_override` (pipe) when set.
+          `interval_override` (pipe) when set.
         * `batching.time.window` overridden by
-          `window_expression_override` when set.
+          `window_override` when set.
         * `batching.time.lookback` overridden by `lookback_override` when
           set.
         * `batching.time.tz` overridden by `tz_override` when set.
@@ -47,7 +45,7 @@ def apply_runtime_overrides(
     (tag-driven `reload`, pipe `latest` / `backfill_since` / `backfill_until`).
 
     The discovered source models are not mutated."""
-    matched = matched_with_reload(folder=folder, tags=tags, upstream_mode=upstream_mode)
+    matched = matched_with_reload(folder=folder, tags=tags)
     return [
         _apply_to_model(
             m,
@@ -57,8 +55,8 @@ def apply_runtime_overrides(
             latest=latest,
             backfill_since=backfill_since,
             backfill_until=backfill_until,
-            interval_expression_override=interval_expression_override,
-            window_expression_override=window_expression_override,
+            interval_override=interval_override,
+            window_override=window_override,
             lookback_override=lookback_override,
             tz_override=tz_override,
             state_disabled=state_disabled,
@@ -75,8 +73,8 @@ def _apply_to_model(
     latest: bool,
     backfill_since: datetime | None,
     backfill_until: datetime | None,
-    interval_expression_override: str | None,
-    window_expression_override: str | None,
+    interval_override: str | None,
+    window_override: str | None,
     lookback_override: int | None,
     tz_override: tzinfo | None,
     table_suffix: str = "",
@@ -88,8 +86,8 @@ def _apply_to_model(
     stamped on after construction)."""
     batching = _batching_with_overrides(
         model.batching,
-        interval_expression_override=interval_expression_override,
-        window_expression_override=window_expression_override,
+        interval_override=interval_override,
+        window_override=window_override,
         lookback_override=lookback_override,
         tz_override=tz_override,
     )
@@ -162,16 +160,16 @@ def _target_with_suffix(
 def _batching_with_overrides(
     batching: Batch | None,
     *,
-    interval_expression_override: str | None,
-    window_expression_override: str | None,
+    interval_override: str | None,
+    window_override: str | None,
     lookback_override: int | None,
     tz_override: tzinfo | None,
 ) -> Batch | None:
     if batching is None:
         return None
     # Pipe-level override wins over the model's static interval expression.
-    expression = interval_expression_override or batching.time.chunk
-    window_expression = window_expression_override or batching.time.window
+    expression = interval_override or batching.time.chunk
+    window_expression = window_override or batching.time.window
     lookback = (
         lookback_override if lookback_override is not None else batching.time.lookback
     )

@@ -1,7 +1,7 @@
 from unittest.mock import MagicMock
 import pytest
 
-from bollhav.model.ordering import topological_sort, UpstreamMode
+from bollhav.model.ordering import topological_sort
 from bollhav.model.kind import Kind
 
 
@@ -22,9 +22,9 @@ def make_model(
     # bare names as the model's full set of inputs, so both resolve to it.
     model.upstream_names = upstream
     model.declared_inputs = upstream
-    # Views are identified by kind now; `_is_view` checks `model.is_view`
-    # (kind-based). Set both `kind` and the derived `is_view` so the mock
-    # matches the real Model's contract.
+    # Views are identified by kind now (`model.is_view` is kind-based). Set
+    # both `kind` and the derived `is_view` so the mock matches the real
+    # Model's contract.
     model.kind = kind
     model.is_view = kind is Kind.VIEW
     return model
@@ -117,50 +117,11 @@ def test_self_referencing_raises():
         topological_sort([a])
 
 
-# --- views skip upstream ---
+# --- views are ordered like any other model ---
 
 
-def test_view_ignores_upstream():
-    make_model("a")
-    v = make_model("v", upstream=["a"], kind=Kind.VIEW)
-    result = topological_sort([v], upstream_mode=UpstreamMode.IGNORE_VIEWS)
-    assert names(result) == ["v"]
-
-
-def test_view_does_not_require_upstream_in_matched_set():
-    v = make_model("v", upstream=["missing"], kind=Kind.VIEW)
-    result = topological_sort([v], upstream_mode=UpstreamMode.IGNORE_VIEWS)
-    assert names(result) == ["v"]
-
-
-def test_view_not_ordered_after_upstream():
+def test_view_ordered_after_upstream():
     a = make_model("a")
     v = make_model("v", upstream=["a"], kind=Kind.VIEW)
-    result = topological_sort([v, a], upstream_mode=UpstreamMode.IGNORE_VIEWS)
+    result = topological_sort([v, a])
     assert names(result) == ["a", "v"]
-
-
-# --- upstream_mode=enforce ---
-
-
-def test_enforce_mode_orders_views():
-    a = make_model("a")
-    v = make_model("v", upstream=["a"], kind=Kind.VIEW)
-    result = topological_sort([v, a], upstream_mode=UpstreamMode.ENFORCE)
-    assert names(result) == ["a", "v"]
-
-
-# --- upstream_mode=ignore ---
-
-
-def test_ignore_mode_skips_sorting():
-    b = make_model("b", upstream=["a"])
-    a = make_model("a")
-    result = topological_sort([b, a], upstream_mode=UpstreamMode.IGNORE_COMPLETELY)
-    assert names(result) == ["b", "a"]
-
-
-def test_ignore_mode_allows_missing_upstream():
-    b = make_model("b", upstream=["missing"])
-    result = topological_sort([b], upstream_mode=UpstreamMode.IGNORE_COMPLETELY)
-    assert names(result) == ["b"]

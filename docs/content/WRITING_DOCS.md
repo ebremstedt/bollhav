@@ -20,9 +20,6 @@ The canonical hierarchy:
 Home
 ├─ Model                      MODEL.md
 │  ├─ Target                  TARGET.md
-│  │  ├─ Staging              STAGING.md
-│  │  └─ Write modes          WRITEMODES.md
-│  ├─ SourceModel / SourceFile  SOURCETABLE.md / SOURCEFILE.md
 │  ├─ Bounds                  BOUNDS.md
 │  ├─ Batch                   BATCH.md
 │  ├─ Kind                    KINDS.md
@@ -30,12 +27,9 @@ Home
 │  ├─ Upstream                UPSTREAM.md
 │  └─ Tagging                 TAGGING.md
 ├─ Decorators                 DECORATORS.md
-│  ├─ @load_models            LOAD_MODELS.md
-│  ├─ Model lifecycle         MODEL_LIFECYCLE.md
-│  └─ Execute lifecycle       EXECUTE_LIFECYCLE.md
-├─ Concepts (Modes, Library, Chunking, Block codes)
-├─ Runtime (Runtime overrides, Suffixes, Progress bar)
-├─ Tags → Advanced tags → Matching
+├─ Concepts (Modes, Library, Chunking)
+├─ Runtime (Runtime overrides, Progress bar)
+├─ Tags                       TAGS.md
 ├─ Implementations (Postgres, MSSQL)
 └─ Env · About
 ```

@@ -30,7 +30,7 @@ class MissingTableSuffixError(RuntimeConfigError):
 class WindowOverrideWithoutLatestError(RuntimeConfigError):
     def __init__(self) -> None:
         super().__init__(
-            "WINDOW_EXPRESSION_OVERRIDE only applies when LATEST_ENABLED=True — "
+            "WINDOW_OVERRIDE only applies when LATEST_ENABLED=True — "
             "in backfill mode since/until are set explicitly and no window is inferred"
         )
 
@@ -50,11 +50,6 @@ class InvalidTimezoneError(RuntimeConfigError):
         super().__init__(f"TIMEZONE_OVERRIDE is not a valid IANA timezone: {value!r}")
 
 
-class InvalidUpstreamModeError(RuntimeConfigError):
-    def __init__(self, value: str, valid: list[str]) -> None:
-        super().__init__(f"UPSTREAM must be one of {valid}, got {value!r}")
-
-
 __all__ = [
     "RuntimeConfigError",
     "ConflictingRunModeError",
@@ -64,5 +59,4 @@ __all__ = [
     "NegativeLookbackError",
     "InvalidStateModeError",
     "InvalidTimezoneError",
-    "InvalidUpstreamModeError",
 ]

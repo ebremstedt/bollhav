@@ -6,7 +6,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from bollhav.model.tagexpr import PotentialTagGroup, parse_expression, group_matches
 from bollhav.model.model import Model
-from bollhav.model.ordering import topological_sort, UpstreamMode
+from bollhav.model.ordering import topological_sort
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +64,6 @@ def _with_sys_path(folder_path: Path):
 def matched_with_reload(
     folder: str = "src/models",
     tags: str | None = None,
-    upstream_mode: UpstreamMode = UpstreamMode.ENFORCE,
 ) -> list[tuple[Model, bool]]:
     """Like `match_models`, but pairs each matched model with its tag-driven
     `reload` flag (topologically sorted). `runtime` uses the flag to resolve
@@ -82,7 +81,7 @@ def matched_with_reload(
         r:[foo & bar]           match "foo" and "bar", reload=True for all
 
     Interval and chunk size are model config, not tag overrides. To change
-    the interval expression at runtime, use INTERVAL_EXPRESSION_OVERRIDE.
+    the interval expression at runtime, use INTERVAL_OVERRIDE.
 
     Raises:
         ValueError: If tags is not provided or the expression is invalid.
@@ -133,14 +132,13 @@ def matched_with_reload(
         )
     else:
         logger.debug("Found %d model(s) matching tags %r", len(results), tags)
-    ordered = topological_sort(results, upstream_mode=upstream_mode)
+    ordered = topological_sort(results)
     return [(m, reload_by_name[m.target.full_name]) for m in ordered]
 
 
 def match_models(
     folder: str = "src/models",
     tags: str | None = None,
-    upstream_mode: UpstreamMode = UpstreamMode.ENFORCE,
 ) -> list[Model]:
     """Scan a folder for Model instances and return those matching the tag
     expression, topologically sorted. See `matched_with_reload` for the tag
@@ -149,9 +147,4 @@ def match_models(
     Raises:
         ValueError: If tags is not provided or the expression is invalid.
     """
-    return [
-        model
-        for model, _ in matched_with_reload(
-            folder=folder, tags=tags, upstream_mode=upstream_mode
-        )
-    ]
+    return [model for model, _ in matched_with_reload(folder=folder, tags=tags)]

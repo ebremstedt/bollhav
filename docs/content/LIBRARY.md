@@ -41,7 +41,7 @@ When a downstream model declares an upstream that isn't in its own pipeline's ma
 
 If the upstream isn't in the library at all (i.e. lookup returns `None`), the downstream interval is blocked with `STATE_001: upstream … not registered`. If lookup returns an entry but the applied-row check fails, the block reason is `STATE_002` and names the upstream's `model_type` so an operator can tell at a glance which kind of upstream isn't ready.
 
-See [Block codes](BLOCK_CODES.md).
+See [Block codes](STATE.md#block-codes).
 
 ## Multi-image safety — only additive migrations
 
@@ -80,5 +80,5 @@ The library lives in `z_bollhav.library` **in the state DB**. For library-only m
 ## Related
 
 - [State](STATE.md) — how state machinery uses the library on every interval
-- [Staging](STAGING.md) — how staging models interact with the library (auto-register when state is set; opt-in via `library=True` when state-less)
-- [Block codes](BLOCK_CODES.md) — `STATE_001` / `STATE_002` block reasons that name the library entries
+- [Staging](TARGET.md#staging) — how staging models interact with the library (auto-register when state is set; opt-in via `library=True` when state-less)
+- [Block codes](STATE.md#block-codes) — `STATE_001` / `STATE_002` block reasons that name the library entries

@@ -3,7 +3,6 @@ from bollhav.model.load_models import load_models
 from bollhav.model.database import Database, DatabaseColumn, DatabaseIndex
 from bollhav.model.intervals import TZInterval
 from bollhav.model.matching import match_models
-from bollhav.model.ordering import UpstreamMode
 from bollhav.model.model import Model
 from bollhav.model.modelrun import ModelRun
 from bollhav.model.kind import Kind
@@ -41,7 +40,6 @@ __all__ = [
     "DatabaseIndex",
     "TZInterval",
     "match_models",
-    "UpstreamMode",
     "Model",
     "ModelRun",
     "Kind",

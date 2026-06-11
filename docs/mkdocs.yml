@@ -14,6 +14,7 @@ theme:
   favicon: favicon.png
   features:
     - navigation.tabs
+    - navigation.tabs.sticky
     - navigation.top
     - navigation.indexes
     - content.code.copy
@@ -65,39 +66,20 @@ nav:
       - Model:
           - Overview: MODEL.md
           - Kind: KINDS.md
-          - Target:
-              - Overview: TARGET.md
-              - Staging: STAGING.md
-          - Source:
-              - None: SOURCE_NONE.md
-              - SourceModel: SOURCETABLE.md
-              - SourceFile: SOURCEFILE.md
+          - Target: TARGET.md
           - Bounds: BOUNDS.md
           - Batch: BATCH.md
           - Curfew: CURFEW.md
-          - State:
-              - Overview: STATE.md
-              - Block codes: BLOCK_CODES.md
+          - State: STATE.md
           - Upstream: UPSTREAM.md
-          - Sources: SOURCES.md
           - Tagging: TAGGING.md
           - Modes: MODES.md
-          - Chunking: CHUNKING.md
           - Library: LIBRARY.md
-      - Env: ENV.md
-      - Decorators:
-          - Overview: DECORATORS.md
-          - "@load_models step by step": LOAD_MODELS.md
-          - Model lifecycle: MODEL_LIFECYCLE.md
-          - Execute lifecycle: EXECUTE_LIFECYCLE.md
-          - Runtime overrides: RUNTIME_OVERRIDES.md
-          - Schema vs table suffix: SUFFIXES.md
-          - Progress bar: PROGRESS_BAR.md
-      - Tags:
-          - Tags: TAGS.md
-          - Advanced tag prefixes: ADVANCED_TAGS.md
-          - Matching: MATCHING.md
-      - Write modes: WRITEMODES.md
+      - Environment: ENV.md
+      - Decorators: DECORATORS.md
+      - Tags: TAGS.md
+      - TUI: TUI.md
+      - GUI: GUI.md
   - Implementations:
       - Postgres: POSTGRES.md
       - MSSQL: MSSQL.md

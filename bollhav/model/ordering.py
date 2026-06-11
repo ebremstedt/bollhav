@@ -1,36 +1,17 @@
 from __future__ import annotations
 
 from collections import deque
-from enum import Enum
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from bollhav.model.model import Model
 
 
-class UpstreamMode(Enum):
-    ENFORCE = "enforce"
-    IGNORE_VIEWS = "ignore_views"
-    IGNORE_COMPLETELY = "ignore_completely"
-
-
-def _is_view(model: Model) -> bool:
-    return model.is_view
-
-
-def topological_sort(
-    results: list[Model],
-    upstream_mode: UpstreamMode = UpstreamMode.ENFORCE,
-) -> list[Model]:
-    if upstream_mode == UpstreamMode.IGNORE_COMPLETELY:
-        return results
-
+def topological_sort(results: list[Model]) -> list[Model]:
     by_name = {model.target.full_name: model for model in results}
     matched_names = set(by_name)
 
     def _upstream(model: Model) -> list[str]:
-        if upstream_mode == UpstreamMode.IGNORE_VIEWS and _is_view(model):
-            return []
         # Order on every declared intra-pipeline producer→consumer edge,
         # not just gated (contract) ones. Gating decides *runtime blocking*
         # and is contract-only; *ordering* must also respect ungated model
