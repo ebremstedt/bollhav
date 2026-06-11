@@ -55,7 +55,8 @@ When you call `main()`, the decorator runs the following steps **before** your f
     - `target.schema_suffix` set to `SCHEMA_SUFFIX`
     - `target.suffix` set to `TABLE_SUFFIX` (when `USE_TABLE_SUFFIX=true`) — see [Schema vs table suffix](TARGET.md#schema-vs-table-suffix)
     - `batching.time` (its `chunk` / `window` / `lookback` / `tz`) updated by `INTERVAL_OVERRIDE` / `WINDOW_OVERRIDE` / `LOOKBACK_OVERRIDE` / `TIMEZONE_OVERRIDE`
-    - `directives.latest` / `directives.since` / `directives.until` set from the chosen mode
+
+   The chosen mode does not land on the model — it resolves the run's `[since, until)` **window** (from the mode + [Bounds](BOUNDS.md)), which is carried on the returned `ModelRun` as `run.window`, with `run.is_reload` / `run.is_latest` / `run.is_backfill` recording which mode resolved it.
 7. **If `DRY_RUN` (or `DRY_RUN_EXTRA`):** print the matched-model summary and **return without calling your `main()`**.
 8. **Otherwise: call your function** as `main(models=<resolved list>, debug=<DEBUG>)`.
 
@@ -138,7 +139,7 @@ When `target.stage` (interval-only): create a fresh staging table → execute wr
 
 Models are static definitions of *where* and *how* data flows. At run time you can override a few of those settings — pick a tag set, switch on latest/backfill mode, force a different schema suffix, etc. — without editing the model files.
 
-The standard entry point is the `@load_models` decorator. It reads the env vars below, validates them, and hands you a list of models with the overrides already baked into `batching` / `target.schema` / `directives`.
+The standard entry point is the `@load_models` decorator. It reads the env vars below, validates them, and hands you a list of `ModelRun`s — each a matched model with the overrides already baked into its `batching` / `target`, paired with the run's resolved `window`.
 
 ```python
 from bollhav.model import Model, load_models
