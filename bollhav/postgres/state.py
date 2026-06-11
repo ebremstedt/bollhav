@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import re
+from collections.abc import Sequence
 from typing import TYPE_CHECKING, NamedTuple
 from uuid import UUID
 
@@ -1361,6 +1362,110 @@ class PostgresState:
         row = conn.execute(query, [since, until]).fetchone()
         return row is not None
 
+    def clear_state(self) -> None:
+        """Wipe this model's state with no trace — drop its state table and
+        delete its library registration + error rows (all keyed by `full_name`,
+        in this model's env schema `z_bollhav_<suffix>`). Unlike BULLDOZER
+        (which resets *existing* interval rows to `pending`, keeping the table,
+        history and registration), the next run's bootstrap rebuilds everything
+        from nothing and re-discovers every interval. Does NOT touch the model's
+        data — only its state.
+
+        Refuses unless the model carries a schema suffix: clearing prod state
+        (`z_bollhav`) is intentionally not offered — the suffix marks the
+        ephemeral environment this is meant for. Do it by hand if you must."""
+        if not self.model.target.schema_suffix:
+            raise ValueError(
+                f"clear_state refuses to run on {self.model.target.full_name!r}: "
+                f"it has no schema suffix, so its state lives in prod "
+                f"({LIBRARY_SCHEMA}). Clearing prod state isn't offered — set "
+                f"SCHEMA_SUFFIX for an ephemeral environment, or delete the rows "
+                f"by hand if you truly must."
+            )
+        conn = self._require_conn()
+        schema = self._library_schema()
+        full_name = self.model.target.full_name
+        with conn.transaction():
+            conn.execute(
+                sql.SQL("DROP TABLE IF EXISTS {schema}.{table}").format(
+                    schema=sql.Identifier(schema),
+                    table=sql.Identifier(self._state_table()),
+                )
+            )
+            # library + errors are shared tables keyed by full_name — delete
+            # only this model's rows, and only once the table actually exists.
+            for table in (LIBRARY_TABLE, ERRORS_TABLE):
+                present = conn.execute(
+                    "SELECT to_regclass(%s)", [f"{schema}.{table}"]
+                ).fetchone()
+                if present and present[0] is not None:
+                    conn.execute(
+                        sql.SQL(
+                            "DELETE FROM {schema}.{table} WHERE full_name = %s"
+                        ).format(
+                            schema=sql.Identifier(schema),
+                            table=sql.Identifier(table),
+                        ),
+                        [full_name],
+                    )
+        logger.info("state: cleared all state for %s (schema %s)", full_name, schema)
+
+
+def drop_environment(conn: psycopg.Connection, models: Sequence["Model"]) -> None:
+    """Tear down an ephemeral suffixed environment with no trace: each model's
+    suffixed target schema + its staging schema (`z_<target>`), plus the shared
+    per-suffix state/library/errors schema (`z_bollhav_<suffix>`). Drops DATA
+    too (the target schemas), so it's a full teardown, not a state reset.
+
+    Refuses unless the models carry a schema suffix — it must be structurally
+    impossible to drop prod's `z_bollhav` or an unsuffixed target schema. Models
+    without a suffix are skipped; if none have one, it raises rather than no-op
+    silently.
+
+    Note: schema names are recomputed from each model's suffix. With a *date*
+    `schema_suffix_appendix` the name embeds `now()`, so a later teardown can
+    miss the originally-created schema — for that case discover by
+    `LIKE 'z_bollhav_<suffix>%'` instead. Plain suffixes (the local-test case)
+    are exact."""
+    from bollhav.model.target import resolve_schema_name
+
+    suffixed = [m for m in models if m.target.schema_suffix]
+    if not suffixed:
+        raise ValueError(
+            "drop_environment refuses to run: no model carries a schema suffix, "
+            f"so it would target prod schemas ({LIBRARY_SCHEMA} + unsuffixed "
+            "targets). Set SCHEMA_SUFFIX for an ephemeral environment, or drop "
+            "prod schemas by hand if you must."
+        )
+    target_schemas: set[str] = set()
+    state_schemas: set[str] = set()
+    for m in suffixed:
+        target_schemas.add(m.target.schema_resolved)
+        state_schemas.add(
+            resolve_schema_name(
+                LIBRARY_SCHEMA,
+                m.target.schema_suffix,
+                m.target.schema_suffix_appendix,
+            )
+        )
+    with conn.transaction():
+        for s in sorted(target_schemas):
+            for schema in (s, f"z_{s}"):  # target + its staging schema
+                conn.execute(
+                    sql.SQL("DROP SCHEMA IF EXISTS {} CASCADE").format(
+                        sql.Identifier(schema)
+                    )
+                )
+        for s in sorted(state_schemas):
+            conn.execute(
+                sql.SQL("DROP SCHEMA IF EXISTS {} CASCADE").format(sql.Identifier(s))
+            )
+    logger.info(
+        "dropped environment: target schemas %s, state schemas %s",
+        sorted(target_schemas),
+        sorted(state_schemas),
+    )
+
 
 __all__ = [
     "PostgresState",
@@ -1369,4 +1474,5 @@ __all__ = [
     "LIBRARY_TABLE",
     "ERRORS_TABLE",
     "state_table_name",
+    "drop_environment",
 ]

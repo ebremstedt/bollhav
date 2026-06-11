@@ -2,7 +2,7 @@ import pytest
 
 from bollhav.model.batch import (
     Batch,
-    IntervalChunks,
+    TimeChunking,
     MAX_BATCH_SIZE,
     validate_batch_size,
 )
@@ -14,8 +14,8 @@ class TestBatchDefaults:
 
     def test_interval_defaults(self):
         b = Batch()
-        assert isinstance(b.interval, IntervalChunks)
-        assert b.interval.expression == "@daily"
+        assert isinstance(b.time, TimeChunking)
+        assert b.time.chunk == "@daily"
 
 
 class TestBatchSizeCap:

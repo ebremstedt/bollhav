@@ -32,7 +32,7 @@ ISO 8601 datetime, optional. Overrides each model's `bounds.end` for this run.
 
 ## INTERVAL_EXPRESSION_OVERRIDE
 
-Cron expression or `@alias`, optional. Replaces every matched model's `batching.interval_expression` for this run. Useful for forcing a coarser/finer cadence without editing model code.
+Cron expression or `@alias`, optional. Replaces every matched model's `batching.time.chunk` for this run. Useful for forcing a coarser/finer cadence without editing model code.
 
 ## WINDOW_EXPRESSION_OVERRIDE
 

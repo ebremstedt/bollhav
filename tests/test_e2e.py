@@ -34,7 +34,7 @@ from bollhav.model import (
     Batch,
     Bounds,
     Database,
-    IntervalChunks,
+    TimeChunking,
     IntervalContract,
     Kind,
     Model,
@@ -56,7 +56,12 @@ from bollhav.postgres import (
     write,
 )
 from bollhav.postgres.data import PostgresData
-from bollhav.postgres.state import LIBRARY_SCHEMA, PostgresState, state_table_name
+from bollhav.postgres.state import (
+    LIBRARY_SCHEMA,
+    PostgresState,
+    drop_environment,
+    state_table_name,
+)
 
 
 DEFAULT_DSN = "postgresql://postgres:postgres@localhost:5432/postgres"
@@ -197,11 +202,12 @@ def _orders_model(
     bounds_end: datetime = UNTIL,
     upstream: list[Source] | None = None,
     sources: list[Source] | None = None,
+    schema_suffix: str = "",
 ) -> ModelRun:
     # `apply_runtime_overrides` normally resolves the window from env vars and
     # returns a ModelRun. E2E tests call the bootstrap directly, so we build
     # the model + resolve the window by hand to the test's fixed window.
-    batching = Batch(interval=IntervalChunks(expression="@daily"))
+    batching = Batch(time=TimeChunking(chunk="@daily"))
     bounds = Bounds(begin=SINCE, end=bounds_end)
     model = Model(
         target=Target(
@@ -212,6 +218,10 @@ def _orders_model(
             write_mode=WriteMode.APPEND,
             dsn_env_var="TARGET_DSN",
             staging=staging,
+            # Suffix gives an isolated environment; pin the appendix off so the
+            # resolved schema names are deterministic (no date) for teardown.
+            schema_suffix=schema_suffix,
+            schema_suffix_appendix=None,
             columns=_orders_columns(),
         ),
         state=state,
@@ -1421,3 +1431,105 @@ def test_e2e_dry_state_cascade_shows_will_run_after(schema_name, capsys, monkeyp
     assert "blocked 0" not in out
     assert "applied 0" not in out
     assert "blocked:" not in out  # nothing actually blocked
+
+
+# ── 12. ephemeral-environment teardown (clear_state / drop_environment) ──
+
+
+def _has_schema(conn, schema: str) -> bool:
+    return (
+        conn.execute(
+            "SELECT 1 FROM information_schema.schemata WHERE schema_name = %s",
+            [schema],
+        ).fetchone()
+        is not None
+    )
+
+
+def _regclass(conn, schema: str, table: str):
+    return conn.execute("SELECT to_regclass(%s)", [f"{schema}.{table}"]).fetchone()[0]
+
+
+def _lib_rows(conn, schema: str, full_name: str) -> int:
+    return conn.execute(
+        f'SELECT count(*) FROM "{schema}".library WHERE full_name = %s', [full_name]
+    ).fetchone()[0]
+
+
+def _drop_suffix_env(suffix: str, target_resolved: str) -> None:
+    """Clean a suffixed environment's schemas in `finally`, so a failed teardown
+    test doesn't leak them — these names aren't covered by the `schema_name`
+    fixture (which only knows the unsuffixed schema)."""
+    with psycopg.connect(_dsn(), autocommit=True) as conn:
+        conn.execute(f'DROP SCHEMA IF EXISTS "{target_resolved}" CASCADE')
+        conn.execute(f'DROP SCHEMA IF EXISTS "z_{target_resolved}" CASCADE')
+        conn.execute(f'DROP SCHEMA IF EXISTS "z_bollhav_{suffix}" CASCADE')
+
+
+def test_e2e_clear_state_wipes_one_model(schema_name):
+    """`clear_state` on a suffixed model drops its state table and its library +
+    errors rows, but leaves the shared env schema intact. Unlike BULLDOZER
+    (resets rows to pending, keeps the table), the next bootstrap rebuilds from
+    nothing."""
+    suffix = "clearst"
+    run = _orders_model(schema_name, state=State(), schema_suffix=suffix)
+    m = run.model
+    try:
+        _bootstrap([run])
+        with psycopg.connect(_dsn(), autocommit=True) as conn:
+            st = PostgresState(model=m, conn=conn)
+            sch, tab = st._library_schema(), st._state_table()
+            # bootstrap created the state table + a library row; mark one applied
+            assert _regclass(conn, sch, tab) is not None
+            assert _lib_rows(conn, sch, m.target.full_name) == 1
+            st.mark_applied(run_id=run.run_id, interval=run.intervals[0])
+
+            st.clear_state()
+
+            assert _regclass(conn, sch, tab) is None  # state table gone
+            assert _lib_rows(conn, sch, m.target.full_name) == 0  # registration gone
+            assert _has_schema(conn, sch)  # the env schema itself stays
+    finally:
+        _drop_suffix_env(suffix, m.target.schema_resolved)
+
+
+def test_e2e_clear_state_refuses_prod(schema_name):
+    """Against a live DB: a model with no schema suffix keeps its state in prod
+    `z_bollhav`, so `clear_state` refuses (the guard isn't just a unit mock)."""
+    run = _orders_model(schema_name, state=State())  # no suffix → prod
+    with psycopg.connect(_dsn(), autocommit=True) as conn:
+        with pytest.raises(ValueError, match="no schema suffix"):
+            PostgresState(model=run.model, conn=conn).clear_state()
+
+
+def test_e2e_drop_environment_tears_down_schemas(schema_name):
+    """`drop_environment` removes a suffixed model's target schema, its staging
+    schema (`z_<target>`), and the shared `z_bollhav_<suffix>` state schema."""
+    suffix = "dropenv"
+    run = _orders_model(
+        schema_name, state=State(), staging=Staging(), schema_suffix=suffix
+    )
+    m = run.model
+    try:
+        _bootstrap([run])
+        with psycopg.connect(_dsn(), autocommit=True) as conn:
+            target = m.target.schema_resolved
+            state_schema = PostgresState(model=m, conn=conn)._library_schema()
+            assert _has_schema(conn, target)
+            assert _has_schema(conn, state_schema)
+
+            drop_environment(conn, [m])
+
+            assert not _has_schema(conn, target)  # data schema gone
+            assert not _has_schema(conn, f"z_{target}")  # staging schema gone
+            assert not _has_schema(conn, state_schema)  # state schema gone
+    finally:
+        _drop_suffix_env(suffix, m.target.schema_resolved)
+
+
+def test_e2e_drop_environment_refuses_without_suffix(schema_name):
+    """No suffix → would target prod schemas → refuse, even against a live DB."""
+    run = _orders_model(schema_name, state=State())
+    with psycopg.connect(_dsn(), autocommit=True) as conn:
+        with pytest.raises(ValueError, match="no model carries a schema suffix"):
+            drop_environment(conn, [run.model])

@@ -24,7 +24,7 @@ from bollhav.model import (
     Batch,
     Bounds,
     Database,
-    IntervalChunks,
+    TimeChunking,
     IntervalContract,
     Kind,
     Model,
@@ -64,7 +64,7 @@ daily_summary = Model(
     ),
     kind=Kind.INTERVAL,
     state=State(),
-    batching=Batch(interval=IntervalChunks(expression="@daily")),
+    batching=Batch(time=TimeChunking(chunk="@daily")),
     bounds=Bounds(
         begin=datetime(2024, 1, 1, tzinfo=timezone.utc),
         end=datetime(2024, 1, 4, tzinfo=timezone.utc),

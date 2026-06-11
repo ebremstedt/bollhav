@@ -30,14 +30,14 @@ When you call `main()`, the decorator runs the following steps **before** your f
 6. **Bake in the overrides.** Each matched model is **copied** (the source models are not mutated) with:
     - `target.schema_suffix` set to `SCHEMA_SUFFIX`
     - `target.suffix` set to `TABLE_SUFFIX` (when `USE_TABLE_SUFFIX=true`) — see [Schema vs table suffix](SUFFIXES.md)
-    - `batching.interval` updated by `INTERVAL_EXPRESSION_OVERRIDE` / `WINDOW_EXPRESSION_OVERRIDE` / `LOOKBACK_OVERRIDE` / `TIMEZONE_OVERRIDE`
+    - `batching.time` (its `chunk` / `window` / `lookback` / `tz`) updated by `INTERVAL_EXPRESSION_OVERRIDE` / `WINDOW_EXPRESSION_OVERRIDE` / `LOOKBACK_OVERRIDE` / `TIMEZONE_OVERRIDE`
     - `directives.latest` / `directives.since` / `directives.until` set from the chosen mode
 7. **If `DRY_RUN` (or `DRY_RUN_EXTRA`):** print the matched-model summary and **return without calling your `main()`**.
 8. **Otherwise: call your function** as `main(models=<resolved list>, debug=<DEBUG>)`.
 
 ## Calculating intervals
 
-`@load_models` doesn't pre-compute time chunks — it just bakes in the directives. `model.intervals` calculates them lazily on access: it resolves `[since, until)` from the directives + `batching.interval`, then splits it into `TZInterval` chunks. See [Chunking](CHUNKING.md) and [Modes](MODES.md).
+`@load_models` resolves each model's `[since, until)` window from the run mode + [Bounds](BOUNDS.md), then `compute_intervals(run)` splits it by `batching.time.chunk` into `TZInterval` chunks (held on `run.intervals`). See [Chunking](CHUNKING.md) and [Modes](MODES.md).
 
 ## Mental model
 

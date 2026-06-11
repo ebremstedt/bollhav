@@ -34,6 +34,7 @@ def _model(*, state=True, allow_concurrent=True, upstream=None, staging=False):
     m.target.full_name = "public.orders"
     m.target.database = None  # → Postgres data backend (the default)
     m.target.stage = staging
+    m.curfew = None  # real Models default to no curfew; mock must match
     m.upstream = list(upstream) if upstream else []
     if state:
         m.state = MagicMock()
@@ -205,6 +206,7 @@ class TestModelLifecycle:
         m.target.partitioned_by = None
         m.target.unique_columns = []
         m.target.stage = False
+        m.curfew = None
         m.upstream = []
         m.state = MagicMock()
         m.state.backend = StateBackend.POSTGRES
@@ -229,6 +231,7 @@ class TestModelLifecycle:
         m.target.partitioned_by = None
         m.target.unique_columns = []
         m.target.stage = False
+        m.curfew = None
         m.upstream = []
         m.state = None
         m.stateful = False
@@ -339,6 +342,7 @@ class TestBackendDispatch:
         m.target.partitioned_by = None
         m.target.unique_columns = []
         m.target.stage = stage
+        m.curfew = None
         m.upstream = []
         m.state = None
         m.stateful = False

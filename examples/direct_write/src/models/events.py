@@ -15,7 +15,7 @@ from bollhav.model import (
     Batch,
     Bounds,
     Database,
-    IntervalChunks,
+    TimeChunking,
     Kind,
     Model,
     State,
@@ -47,7 +47,7 @@ events = Model(
     ),
     kind=Kind.INTERVAL,
     state=State(),  # one state row per interval — gates reruns
-    batching=Batch(interval=IntervalChunks(expression="@daily")),
+    batching=Batch(time=TimeChunking(chunk="@daily")),
     bounds=Bounds(
         begin=datetime(2024, 1, 1, tzinfo=timezone.utc),
         end=datetime(2024, 1, 4, tzinfo=timezone.utc),

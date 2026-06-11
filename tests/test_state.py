@@ -71,11 +71,11 @@ class TestBlockCode:
 
 class TestModelStateField:
     def _kwargs(self):
-        from bollhav.model import Batch, IntervalChunks, Kind, Target
+        from bollhav.model import Batch, TimeChunking, Kind, Target
 
         return dict(
             target=Target(name="orders", schema="public"),
-            batching=Batch(interval=IntervalChunks(expression="@hourly")),
+            batching=Batch(time=TimeChunking(chunk="@hourly")),
             kind=Kind.INTERVAL,
         )
 
@@ -110,7 +110,7 @@ class TestModelStateField:
         crashed prior runs."""
         from bollhav.model import (
             Batch,
-            IntervalChunks,
+            TimeChunking,
             Kind,
             Model,
             Staging,
@@ -123,7 +123,7 @@ class TestModelStateField:
                 schema="public",
                 staging=Staging(),
             ),
-            batching=Batch(interval=IntervalChunks(expression="@hourly")),
+            batching=Batch(time=TimeChunking(chunk="@hourly")),
             kind=Kind.INTERVAL,
         )
         assert m.state is None
@@ -132,7 +132,7 @@ class TestModelStateField:
     def test_staging_with_state_ok(self) -> None:
         from bollhav.model import (
             Batch,
-            IntervalChunks,
+            TimeChunking,
             Kind,
             Model,
             Staging,
@@ -145,7 +145,7 @@ class TestModelStateField:
                 schema="public",
                 staging=Staging(),
             ),
-            batching=Batch(interval=IntervalChunks(expression="@hourly")),
+            batching=Batch(time=TimeChunking(chunk="@hourly")),
             state=State(),
             kind=Kind.INTERVAL,
         )
@@ -474,7 +474,7 @@ class TestModelIntervals:
     def test_assignment_holds(self) -> None:
         from bollhav.model import (
             Batch,
-            IntervalChunks,
+            TimeChunking,
             Kind,
             Model,
             ModelRun,
@@ -483,7 +483,7 @@ class TestModelIntervals:
 
         m = Model(
             target=Target(name="orders", schema="public"),
-            batching=Batch(interval=IntervalChunks(expression="@daily")),
+            batching=Batch(time=TimeChunking(chunk="@daily")),
             kind=Kind.INTERVAL,
         )
         run = ModelRun(model=m)
@@ -503,7 +503,7 @@ class TestModelIntervals:
         from bollhav.model import (
             Batch,
             Bounds,
-            IntervalChunks,
+            TimeChunking,
             Kind,
             Model,
             Target,
@@ -511,7 +511,7 @@ class TestModelIntervals:
         from bollhav.model.modelrun import ModelRun
         from bollhav.model.window import compute_intervals, resolve_window
 
-        batching = Batch(interval=IntervalChunks(expression="@daily"))
+        batching = Batch(time=TimeChunking(chunk="@daily"))
         bounds = Bounds(begin=datetime(2024, 1, 1, tzinfo=timezone.utc))
         m = Model(
             target=Target(name="orders", schema="public"),
@@ -529,3 +529,29 @@ class TestModelIntervals:
         run.intervals = ()
         assert run.intervals == ()
         assert len(compute_intervals(run)) > 0
+
+
+class TestClearStateGuard:
+    """`clear_state` wipes a model's state (table + library + error rows). It
+    refuses on a model with no schema suffix — that state lives in prod
+    `z_bollhav`, and clearing prod state isn't offered (do it by hand). The
+    refusal fires before any DB access, so no connection is needed here. The
+    actual wipe is covered against a real Postgres in test_e2e."""
+
+    def test_refuses_without_schema_suffix(self) -> None:
+        from bollhav.postgres.state import PostgresState
+
+        with pytest.raises(ValueError, match="no schema suffix"):
+            PostgresState(_pg_model(), conn=None).clear_state()
+
+
+class TestDropEnvironmentGuard:
+    """`drop_environment` tears down a suffixed environment's schemas. It
+    refuses unless at least one model carries a schema suffix — otherwise it
+    would target prod. The refusal fires before any DB access."""
+
+    def test_refuses_when_no_model_has_suffix(self) -> None:
+        from bollhav.postgres.state import drop_environment
+
+        with pytest.raises(ValueError, match="no model carries a schema suffix"):
+            drop_environment(MagicMock(), [_pg_model()])

@@ -32,9 +32,9 @@ if __name__ == "__main__":
 | **BACKFILL_ENABLED** | bool | no | Enables backfill mode, defaults to **True** when **LATEST_ENABLED** is unset. Cannot be `True` along with **LATEST_ENABLED** |
 | **BACKFILL_SINCE** | ISO 8601 datetime | yes (in backfill) | Start of backfill window |
 | **BACKFILL_UNTIL** | ISO 8601 datetime | no | End of backfill window. Defaults to the latest complete interval end |
-| **INTERVAL_EXPRESSION_OVERRIDE** | IntervalExpression | no | Overrides every model's `interval_expression` (chunk size, applies in all modes) |
-| **WINDOW_EXPRESSION_OVERRIDE** | IntervalExpression | no | Overrides every model's `window_expression` (latest-mode scope). Errors at startup if set without **LATEST_ENABLED** |
-| **LOOKBACK_OVERRIDE** | non-negative int | no | Overrides every model's `lookback`. Shifts each interval's `since` backwards by N cron-ticks of the (post-override) interval expression. Applies in latest, backfill, and reload modes |
+| **INTERVAL_EXPRESSION_OVERRIDE** | IntervalExpression | no | Overrides every model's `batching.time.chunk` (chunk size, applies in all modes) |
+| **WINDOW_EXPRESSION_OVERRIDE** | IntervalExpression | no | Overrides every model's `batching.time.window` (latest-mode scope). Errors at startup if set without **LATEST_ENABLED** |
+| **LOOKBACK_OVERRIDE** | non-negative int | no | Overrides every model's `batching.time.lookback`. Shifts each interval's `since` backwards by N cron-ticks of the (post-override) `chunk`. Applies in latest, backfill, and reload modes |
 | **UPSTREAM** | string | no | One of `enforce` (default), `ignore_views`, `ignore_completely`. Controls upstream-dependency enforcement |
 | **DRY_RUN** | bool | no | When `True`, `@load_models` prints a concise summary of matched models and exits without invoking the wrapped function |
 | **DRY_RUN_EXTRA** | bool | no | When `True`, same short-circuit but prints an exhaustive per-model block (schema, bounds, tags, source, upstream, …). Implies `DRY_RUN=true` |
@@ -45,14 +45,14 @@ Resolves the most recent **complete** interval, then chunks it.
 
 Two cron expressions matter here:
 
-- **`window_expression`** defines the *scope* — "one of what" counts as the latest complete unit. Falls back to `interval_expression` when unset.
-- **`interval_expression`** defines the *chunk size* — how the scope is split into `TZInterval`s.
+- **`window`** defines the *scope* — "one of what" counts as the latest complete unit. Falls back to `chunk` when unset.
+- **`chunk`** defines the *chunk size* — how the scope is split into `TZInterval`s.
 
 ### Examples (assume now = 2024-06-15 14:35 UTC)
 
-| `window_expression` | `interval_expression` | Result |
+| `window` | `chunk` | Result |
 |---|---|---|
-| unset (falls back to interval) | `@hourly` | 1 chunk: **13:00 → 14:00** (one hour, one chunk) |
+| unset (falls back to chunk) | `@hourly` | 1 chunk: **13:00 → 14:00** (one hour, one chunk) |
 | `@daily` | `@hourly` | 24 chunks covering **Jun 14 00:00 → Jun 15 00:00** |
 | `@daily` | `*/15 * * * *` | 96 fifteen-minute chunks covering **Jun 14 00:00 → Jun 15 00:00** |
 
@@ -60,11 +60,11 @@ The 14:00-15:00 hour (and Jun 15 day) is in progress and never included — "com
 
 ## Lookback
 
-`lookback` shifts each resolved interval's `since` **backwards by N cron-ticks of the (post-override) interval expression**. Units are *ticks of the interval expression*, not calendar days/hours — this is the most common footgun.
+`lookback` shifts each resolved interval's `since` **backwards by N cron-ticks of the (post-override) `chunk`**. Units are *ticks of `chunk`*, not calendar days/hours — this is the most common footgun.
 
 ### Examples
 
-| `interval_expression` | `lookback` | Effect on `since` |
+| `chunk` | `lookback` | Effect on `since` |
 |---|---|---|
 | `@daily` (`0 0 * * *`) | `5` | back 5 days |
 | `@hourly` (`0 * * * *`) | `5` | back 5 hours |
@@ -85,7 +85,7 @@ Uses an explicit time window, chunked by the interval expression. If `BACKFILL_U
 
 For each matched model, the summary shows:
 
-- `cron` — the effective `interval_expression` (post-overrides)
+- `cron` — the effective `chunk` (post-overrides)
 - `window` — first-since → last-until of the resolved intervals
 - `intervals` — how many will run
 
@@ -104,7 +104,7 @@ Models with `batching=None` show `batching: none (single unfiltered run)` instea
 
 ## Timezone
 
-Each model defines its own timezone via `Batch(tz=...)`, defaulting to UTC. The `TIMEZONE_OVERRIDE` env var replaces every model's timezone at runtime.
+Each model defines its own timezone via `Batch(time=TimeChunking(tz=...))`, defaulting to UTC. The `TIMEZONE_OVERRIDE` env var replaces every model's timezone at runtime.
 
 This affects:
 - **Latest mode** — which hour/day boundary counts as "now"

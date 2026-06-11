@@ -12,7 +12,8 @@ from bollhav.model.write_modes import WriteMode
 from bollhav.model.source import Source, SourceModel, SourceFile, SourceApi
 from bollhav.model.target import Target
 from bollhav.model.bounds import Bounds
-from bollhav.model.batch import Batch, IntervalChunks
+from bollhav.model.batch import Batch, TimeChunking
+from bollhav.model.curfew import Curfew
 from bollhav.model.staging import Staging
 from bollhav.model.lifecycle import execute_lifecycle, model_lifecycle
 from bollhav.model.state import (
@@ -59,7 +60,8 @@ __all__ = [
     "Target",
     "Bounds",
     "Batch",
-    "IntervalChunks",
+    "TimeChunking",
+    "Curfew",
     "Tags",
     "Contract",
     "IntervalContract",

@@ -63,7 +63,7 @@ def _name_and_mode(model) -> tuple[str, str]:
         return (name, "")
     # Strip the leading "@" from cron aliases for cleaner display
     # (`@hourly` -> `hourly`); raw crons pass through unchanged.
-    return (name, model.batching.interval.expression.lstrip("@"))
+    return (name, model.batching.time.chunk.lstrip("@"))
 
 
 @dataclass

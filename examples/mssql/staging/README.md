@@ -1,52 +1,66 @@
-# MSSQL staging
+# MSSQL staging + Postgres state
 
-Stage an MSSQL table through the **same lifecycle hooks as Postgres**.
-Each daily interval's chunks bulk-insert into a per-interval staging
-table; one transaction then MERGEs that staging table into the target
-and drops it — so a crash mid-stream never leaves partial rows in the
-target.
+A model whose **data** lives in MSSQL (staged through the same lifecycle
+hooks as Postgres) but whose **state** lives in **Postgres**. Each daily
+interval's chunks bulk-insert into a per-interval MSSQL staging table; one
+transaction MERGEs it into the target and drops it; and the state machine —
+on a separate Postgres connection — gates and records each interval.
 
 | | |
 |---|---|
-| backend | MSSQL (`Database.MSSQL`) |
+| data backend | MSSQL (`Database.MSSQL`) — `data_conn` (pyodbc) |
 | target write mode | `UPSERT_NO_DELETE` → apply step is a `MERGE` on the PK |
 | staging | `MssqlStaging()` → chunks land in staging, then one atomic apply |
-| state | none — MSSQL has no state coordination (setting `State()` is a hard error) |
+| state | **Postgres** — `State()` on the model, `state_conn` (psycopg) |
+
+State always lives in Postgres (the only backend). An MSSQL-data model is
+fully allowed to be state-tracked — it just keeps its state in Postgres, so
+the run opens **two connections** and passes both. `@model_lifecycle`'s
+`_conns` enforces it: pass only the MSSQL connection and you get a clear
+error, not a driver crash.
 
 ## How it's wired
 
 ```
-main.py          run_model(sales, conn)                      # bootstrap + compute intervals
-run_model.py       @model_lifecycle  run_model(model, data_conn)        # assets + staging schema (MssqlData)
-run_interval.py      @execute_lifecycle  run_interval(model, unit, data_conn)  # stage table → write → MERGE → drop
-mock_read.py         read(model, unit)                                  # per-interval rows in size-chunks
-src/models/sales.py  the Model definition
+main.py          run_model(run, data_conn, state_conn)               # opens BOTH connections
+run_model.py       @model_lifecycle  run_model(run, data_conn, state_conn)   # MSSQL assets + Postgres state bootstrap
+run_interval.py      @execute_lifecycle  run_interval(run, ival, data_conn, state_conn)  # gate (PG) → stage→write→MERGE→drop (MSSQL) → mark applied (PG)
+mock_read.py         read(run, ival)                                   # per-interval rows in size-chunks
+src/models/sales.py  the Model definition (Database.MSSQL + MssqlStaging + State)
 ```
 
 The lifecycle resolves the data backend from `model.target.database`:
 `Database.MSSQL` → `MssqlData`, which exposes the same staging methods as
-`PostgresData`, so one set of hooks drives both backends. `@execute_lifecycle`
-owns the staging table's lifecycle (create → write → apply → drop); the
-body in `run_interval.py` just `read()`s and `write()`s.
+`PostgresData`. The state machine always runs `PostgresState` on `state_conn`.
+So data/staging happen in MSSQL, gating/marking in Postgres, keyed by the
+model's full name.
 
 `bollhav.mssql.write` in staged mode **only lands chunks** — it keys the
-staging table on `model.run_id`, the same id the hook used to create it.
+staging table on `run.run_id`, the same id the hook used to create it.
 
 ## Run it
 
-Needs a reachable MSSQL with the ODBC DSN in `BOLLHAV_MSSQL_DSN`
-(see `../interval_batch/README.md` for a local Docker SQL Server + the
-DSN string).
+Needs a reachable MSSQL (`BOLLHAV_MSSQL_DSN`, ODBC) **and** a reachable
+Postgres (`STATE_DSN`). Easiest is the bundled stack:
+
+```bash
+docker compose up --build      # starts MSSQL + Postgres, then runs the example
+```
+
+Or against your own databases:
 
 ```bash
 export BOLLHAV_MSSQL_DSN='DRIVER={ODBC Driver 18 for SQL Server};SERVER=localhost,1433;DATABASE=bollhav;UID=sa;PWD=Your_password123;TrustServerCertificate=yes'
+export STATE_DSN='postgresql://postgres:postgres@localhost:5432/postgres'
 python main.py
 ```
 
 Three days, 5 000 rows each → `warehouse.sales` holds 15 000 rows. Each
 day streams as 2 000 + 2 000 + 1 000 (three staging inserts), then one
-MERGE. Re-running is idempotent — the MERGE folds the same `sale_id`
-keys instead of inserting duplicates.
+MERGE, then its Postgres state row flips to `applied`. **Re-running does
+nothing** now — the applied gate (in Postgres) skips every interval. `main.py`
+drops the Postgres `z_bollhav` state schema on each run so the demo always
+starts fresh; remove that reset to see the gate in action.
 
 ### Inspect
 
