@@ -307,7 +307,7 @@ class Model:
                 return source
         return None
 
-    def ref(self, name: str) -> str:
+    def ref(self, name: str, *, suffix: bool | None = None) -> str:
         """Resolve a declared input to a quoted table identifier for embedding
         in a read query — **suffix-aware when it's gated**, literal when it's
         not:
@@ -325,7 +325,15 @@ class Model:
 
         A gated source (one with a contract) is a managed model whose schema
         gets the same suffix this run applied to the model's own target — so
-        the query is portable across dev / prod / PR."""
+        the query is portable across dev / prod / PR.
+
+        Override that with `suffix=`: `None` (default) suffixes iff the upstream
+        is gated; `suffix=False` forces the **literal** (unsuffixed) location even
+        for a gated upstream — a shared table fixed across every environment, not
+        a per-env copy; `suffix=True` forces the suffix on.
+
+            model.ref('shared.calendar', suffix=False)  -> "shared"."calendar"
+        """
         src = self._find_source(name)
         if src is None:
             declared = sorted(
@@ -342,7 +350,8 @@ class Model:
                 f"can't go in a FROM. Read it in your read function instead; "
                 f"ref() is only for SourceModel inputs."
             )
-        return self._resolve_relation(name, apply_suffix=src.gated)
+        apply_suffix = src.gated if suffix is None else suffix
+        return self._resolve_relation(name, apply_suffix=apply_suffix)
 
     def _resolve_relation(self, name: str, *, apply_suffix: bool) -> str:
         """Resolve a dotted `[catalog.]schema.table` name to a quoted
