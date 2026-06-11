@@ -64,16 +64,16 @@ The curfew is checked twice, and a skipped unit gets **no state transition** —
 
 | Where | When | Effect |
 |---|---|---|
-| [Model lifecycle](MODEL_LIFECYCLE.md) | in effect as the model **starts** | early-out — no lock, no asset DDL, no state bootstrap |
-| [Execute lifecycle](EXECUTE_LIFECYCLE.md) | a clear run **crosses into** it mid-way | stops cleanly on the next interval |
+| [Model lifecycle](DECORATORS.md#model-lifecycle) | in effect as the model **starts** | early-out — no lock, no asset DDL, no state bootstrap |
+| [Execute lifecycle](DECORATORS.md#execute-lifecycle) | a clear run **crosses into** it mid-way | stops cleanly on the next interval |
 
 Nothing exits, errors, or waits. The process finishes normally having done no work for the skipped units; because the skip is *before* the [state machine](STATE.md) there's no `running` / `applied` / `blocked` / `error` write, and nothing is half-written. The held work runs on the **next invocation** after the window passes — a curfew skips an invocation, it does not pause-and-resume. (`blocked` is reserved for [upstream contracts](UPSTREAM.md); a curfew leaves the unit plain `pending`.)
 
 ## See also
 
 - [Bounds](BOUNDS.md) — the historical *range* a model walks, vs curfew's wall-clock *gate* on when it may run
-- [Chunking](CHUNKING.md) — the interval the curfew is re-checked per
+- [Chunking](BATCH.md#chunking) — the interval the curfew is re-checked per
 - [State](STATE.md) — why a skipped unit staying `pending` resumes cleanly next run
-- [Model lifecycle](MODEL_LIFECYCLE.md) · [Execute lifecycle](EXECUTE_LIFECYCLE.md) — where the two gates run
+- [Model lifecycle](DECORATORS.md#model-lifecycle) · [Execute lifecycle](DECORATORS.md#execute-lifecycle) — where the two gates run
 
 Source: [curfew.py](../../bollhav/model/curfew.py) · gates at [lifecycle.py:252](../../bollhav/model/lifecycle.py#L252) (model-level) and [lifecycle.py:390](../../bollhav/model/lifecycle.py#L390) (per interval).

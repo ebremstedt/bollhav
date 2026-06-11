@@ -7,13 +7,13 @@ Where a model's data comes from. Each model declares its inputs, so you can insp
 A model's inputs come in two flavours, both feeding the graph:
 
 - [**Upstream**](UPSTREAM.md) — managed, state-tracked models. Internal edges (model → model).
-- [**Sources**](SOURCES.md) — external, unmanaged inputs (raw tables, APIs, files). Boundary nodes where data enters the system.
+- [**Sources**](UPSTREAM.md#ungated-sources) — external, unmanaged inputs (raw tables, APIs, files). Boundary nodes where data enters the system.
 
 A model that declares neither has unknown provenance (`model.inputs_known is False`) — exactly the gap a lineage audit wants to flag.
 
 ## Inspect one model's lineage in code
 
-A `Model` can describe its **own** declared inputs without any database — useful for a quick look, a CI check, or feeding a diagram. Each input is typed: a gated [upstream](UPSTREAM.md) by its contract kind (`interval` / `view` / `monolithic`), an ungated [source](SOURCES.md) by its type (`model` / `file` / `api`).
+A `Model` can describe its **own** declared inputs without any database — useful for a quick look, a CI check, or feeding a diagram. Each input is typed: a gated [upstream](UPSTREAM.md) by its contract kind (`interval` / `view` / `monolithic`), an ungated [source](UPSTREAM.md#ungated-sources) by its type (`model` / `file` / `api`).
 
 `model.lineage_tree()` returns a little ASCII tree:
 
@@ -132,5 +132,5 @@ A **model-level, cross-pipeline, state-aware** lineage graph straight from `libr
 
 - [Library](LIBRARY.md) — the registry the graph is read from.
 - [Upstream](UPSTREAM.md) — managed edges and `ref()`.
-- [Sources](SOURCES.md) — ungated external boundary nodes; `ref()` resolution.
+- [Sources](UPSTREAM.md#ungated-sources) — ungated external boundary nodes; `ref()` resolution.
 - [State](STATE.md) · [Orchestration](ORCHESTRATION.md)

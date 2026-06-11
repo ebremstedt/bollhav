@@ -23,7 +23,6 @@ from bollhav.tui.constants import (
     MODE_ENV,
     MODE_ONLY,
     RUN_MODES,
-    UPSTREAM_OPTS,
 )
 from bollhav.tui.date_select import DateSelect
 from bollhav.tui.discovery import nearest_runner
@@ -178,10 +177,6 @@ class RunTab(Vertical):
             radio = BoolRadio(default=BOOL_DEFAULTS.get(env, False), id=f"cfg-{env}")
             radio.border_title = label
             yield radio
-        elif kind == "select":
-            select = Select([(o, o) for o in UPSTREAM_OPTS], id=f"cfg-{env}")
-            select.border_title = label
-            yield select
         else:
             # name on a line above the box (like the date fields) — clearer in
             # the narrow menu than a border title. Empty label → just the input
@@ -204,12 +199,6 @@ class RunTab(Vertical):
                 widget.set_value(mode)  # type: ignore[attr-defined]
             elif kind in ("date", "bool", "state"):
                 widget.set_value(settings.get(env, ""))  # type: ignore[attr-defined]
-            elif kind == "select":
-                val = settings.get(env, "")
-                if val in UPSTREAM_OPTS:
-                    widget.value = val
-                else:
-                    widget.clear()  # type: ignore[attr-defined]
             else:
                 widget.value = settings.get(env, "")
         self._apply_mode()
@@ -235,8 +224,6 @@ class RunTab(Vertical):
                 continue
             if kind in ("date", "bool", "state"):
                 value = widget.value  # type: ignore[attr-defined]
-            elif kind == "select":
-                value = str(widget.value) if widget.value in UPSTREAM_OPTS else ""
             else:
                 value = widget.value.strip()
             if key == "TAGS":

@@ -54,11 +54,21 @@ class Source:
 
     A `contract` requires `type` to be a `SourceModel` — files and APIs
     can't be state-gated. `type=None` marks unknown provenance (auto-injected
-    when a model declares nothing)."""
+    when a model declares nothing).
+
+    `assume_ok` (gated upstreams only) is a dev convenience: in a **suffixed**
+    (dev/PR) run, read this upstream from its canonical (prod) location and
+    assume its state is okay — don't wait on a copy in your dev env that you
+    never built. It has **no effect without a schema suffix**: a prod run reads
+    and gates it normally, so the flag never needs flipping between
+    environments. To assume a source is okay in *every* environment (prod
+    included), don't gate it at all — leave off the contract (an ungated
+    Source)."""
 
     name: str
     type: SourceModel | SourceFile | SourceApi | None = None
     contract: Contract | None = None
+    assume_ok: bool = False
 
     def __post_init__(self) -> None:
         if self.contract is not None and not isinstance(self.type, SourceModel):

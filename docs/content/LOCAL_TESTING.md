@@ -76,4 +76,4 @@ SELECT since, until, status FROM z_warehouse.daily_summary_state ORDER BY since;
 ## See also
 
 - [Orchestration](ORCHESTRATION.md) — the same state-vs-no-state fork, at the production level.
-- [State](STATE.md) · [Upstream](UPSTREAM.md) · [@load_models](LOAD_MODELS.md) · [Env](ENV.md)
+- [State](STATE.md) · [Upstream](UPSTREAM.md) · [@load_models](DECORATORS.md#load_models) · [Env](ENV.md)

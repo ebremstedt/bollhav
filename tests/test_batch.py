@@ -31,7 +31,7 @@ def _model(
     lookback=None,
     retries=None,
     bounds=None,
-    interval_expression_override=None,
+    interval_override=None,
     tz_override=None,
     since=None,
     until=None,
@@ -41,7 +41,7 @@ def _model(
     mirrors what `apply_runtime_overrides` produces. The window is resolved
     here (so an unsatisfiable backfill raises at construction, just like in
     runtime), and `compute_intervals` only splits it."""
-    effective_expr = interval_expression_override or interval_expression
+    effective_expr = interval_override or interval_expression
     effective_tz = tz_override or tz
     batching = Batch(
         time=TimeChunking(
@@ -186,7 +186,7 @@ class TestIntervalsTimezone:
         model = _model(
             interval_expression="@hourly",
             tz=CET,
-            interval_expression_override="0 * * * *",
+            interval_override="0 * * * *",
             latest=True,
         )
         intervals = list(compute_intervals(model))
@@ -198,7 +198,7 @@ class TestIntervalsTimezone:
     def test_latest_uses_utc_by_default(self) -> None:
         model = _model(
             interval_expression="@hourly",
-            interval_expression_override="0 * * * *",
+            interval_override="0 * * * *",
             latest=True,
         )
         intervals = list(compute_intervals(model))
@@ -211,7 +211,7 @@ class TestIntervalsTimezone:
         model = _model(
             interval_expression="@hourly",
             tz=CET,
-            interval_expression_override="0 * * * *",
+            interval_override="0 * * * *",
             tz_override=UTC,
             latest=True,
         )
@@ -225,7 +225,7 @@ class TestIntervalsTimezone:
         model = _model(
             interval_expression="@hourly",
             tz=CET,
-            interval_expression_override="0 * * * *",
+            interval_override="0 * * * *",
             tz_override=None,
             latest=True,
         )
@@ -241,7 +241,7 @@ class TestIntervalsLookback:
         model = _model(
             interval_expression="@hourly",
             lookback=3,
-            interval_expression_override="0 * * * *",
+            interval_override="0 * * * *",
             latest=True,
         )
         intervals = list(compute_intervals(model))
@@ -253,7 +253,7 @@ class TestIntervalsLookback:
         model = _model(
             interval_expression="@hourly",
             lookback=2,
-            interval_expression_override="0 * * * *",
+            interval_override="0 * * * *",
             since=datetime(2024, 6, 15, 12, 0, tzinfo=UTC),
             until=datetime(2024, 6, 15, 14, 0, tzinfo=UTC),
         )
@@ -265,7 +265,7 @@ class TestIntervalsLookback:
     def test_no_lookback(self) -> None:
         model = _model(
             interval_expression="@hourly",
-            interval_expression_override="0 * * * *",
+            interval_override="0 * * * *",
             since=datetime(2024, 6, 15, 12, 0, tzinfo=UTC),
             until=datetime(2024, 6, 15, 14, 0, tzinfo=UTC),
         )
@@ -285,7 +285,7 @@ class TestIntervalsNoneInputs:
         with pytest.raises(ValueError, match="backfill requires an explicit until"):
             _model(
                 interval_expression="@hourly",
-                interval_expression_override="0 * * * *",
+                interval_override="0 * * * *",
                 since=datetime(2024, 6, 15, 12, 0, tzinfo=UTC),
             )
 
@@ -295,7 +295,7 @@ class TestIntervalsNoneInputs:
         the caller asked for."""
         model = _model(
             interval_expression="@hourly",
-            interval_expression_override="0 * * * *",
+            interval_override="0 * * * *",
             since=datetime(2024, 6, 15, 12, 0, tzinfo=UTC),
             until=datetime(2024, 6, 15, 14, 0, tzinfo=UTC),
         )
@@ -310,7 +310,7 @@ class TestIntervalsNoneInputs:
         mode — which is what `LATEST_ENABLED=true` opts into."""
         model = _model(
             interval_expression="@hourly",
-            interval_expression_override="0 * * * *",
+            interval_override="0 * * * *",
             latest=True,
         )
         intervals = list(compute_intervals(model))
@@ -320,22 +320,20 @@ class TestIntervalsNoneInputs:
         with pytest.raises(ValueError, match="backfill requires a since value"):
             _model(
                 interval_expression="@hourly",
-                interval_expression_override="0 * * * *",
+                interval_override="0 * * * *",
                 until=datetime(2024, 6, 15, 14, 0, tzinfo=UTC),
             )
 
     @travel(datetime(2024, 6, 15, 14, 35, tzinfo=UTC))
     def test_both_none_without_latest_raises(self) -> None:
         with pytest.raises(ValueError, match="backfill requires a since value"):
-            _model(
-                interval_expression="@hourly", interval_expression_override="0 * * * *"
-            )
+            _model(interval_expression="@hourly", interval_override="0 * * * *")
 
     @travel(datetime(2024, 6, 15, 14, 35, tzinfo=UTC))
     def test_both_none_with_latest_resolves(self) -> None:
         model = _model(
             interval_expression="@hourly",
-            interval_expression_override="0 * * * *",
+            interval_override="0 * * * *",
             latest=True,
         )
         intervals = list(compute_intervals(model))

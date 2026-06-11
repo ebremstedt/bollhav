@@ -59,4 +59,4 @@ They compose: a thin cron/Airflow **trigger** on the outside, **state + contract
 ## See also
 
 - [State](STATE.md) · [Upstream](UPSTREAM.md) — the in-band dependency + resumability machinery.
-- [Model lifecycle](MODEL_LIFECYCLE.md) · [Execute lifecycle](EXECUTE_LIFECYCLE.md) — what each trigger actually runs.
+- [Model lifecycle](DECORATORS.md#model-lifecycle) · [Execute lifecycle](DECORATORS.md#execute-lifecycle) — what each trigger actually runs.

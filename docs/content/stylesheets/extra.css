@@ -2,3 +2,20 @@
 .md-tabs__list {
   justify-content: center;
 }
+
+/* Make the tabs bar a touch lighter than the (dark blue) header — an 8% white
+   overlay on top of the primary colour, so it tracks any palette change. */
+.md-tabs {
+  background-image: linear-gradient(
+    rgba(255, 255, 255, 0.08),
+    rgba(255, 255, 255, 0.08)
+  );
+}
+
+/* Slimmer tabs bar (default item height is 2.4rem, link margin-top .8rem). */
+.md-tabs__item {
+  height: 1.9rem;
+}
+.md-tabs__link {
+  margin-top: 0.5rem;
+}

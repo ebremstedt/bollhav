@@ -12,19 +12,17 @@ UNTIL = datetime(2024, 1, 2, tzinfo=timezone.utc)
 
 def _cfg(**overrides):
     from bollhav.model.load_models import _RuntimeConfig
-    from bollhav.model.ordering import UpstreamMode
     from bollhav.model.state import StateMode
 
     defaults = dict(
         tags="x",
         schema_suffix="",
-        upstream_mode=UpstreamMode.ENFORCE,
         latest=False,
         backfill_enabled=True,
         backfill_since=None,
         backfill_until=None,
-        interval_expression_override=None,
-        window_expression_override=None,
+        interval_override=None,
+        window_override=None,
         lookback_override=None,
         tz_override=None,
         dry_run=True,

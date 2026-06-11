@@ -555,3 +555,52 @@ class TestDropEnvironmentGuard:
 
         with pytest.raises(ValueError, match="no model carries a schema suffix"):
             drop_environment(MagicMock(), [_pg_model()])
+
+
+class TestAssumeOkUpstream:
+    """A gated upstream declared `assume_ok=True` is a shared/prod dependency.
+    In a SUFFIXED (dev/PR) run gating assumes its state is okay and never looks
+    it up; in a prod (unsuffixed) run it gates normally — so the flag needs no
+    flipping between environments. Read off the Source; nothing is mutated."""
+
+    def _src(self):
+        from bollhav.model import IntervalContract, Source, SourceModel
+
+        return Source(
+            "warehouse.orders",
+            type=SourceModel(),
+            contract=IntervalContract(),
+            assume_ok=True,
+        )
+
+    def test_suffixed_run_assumes_okay_and_skips_lookup(self) -> None:
+        from bollhav.postgres.state import PostgresState
+
+        model = MagicMock()
+        model.target.schema_suffix = "pr123"  # dev/PR env
+        model.gated_upstreams = [self._src()]
+        with patch.object(PostgresState, "lookup_model") as lookup:
+            check = PostgresState(model, conn=MagicMock()).is_upstream_satisfied_live(
+                None
+            )
+        assert check.satisfied is True  # not a blocker
+        lookup.assert_not_called()  # never consulted the library
+
+    def test_prod_run_gates_normally(self) -> None:
+        from bollhav.postgres.state import PostgresState
+
+        model = MagicMock()
+        model.target.schema_suffix = ""  # prod — no suffix
+        model.target.schema_suffix_appendix = None
+        model.gated_upstreams = [self._src()]
+        with (
+            patch.object(
+                PostgresState, "lookup_model", return_value=MagicMock()
+            ) as lookup,
+            patch.object(PostgresState, "is_satisfied", return_value=True),
+        ):
+            check = PostgresState(model, conn=MagicMock()).is_upstream_satisfied_live(
+                None
+            )
+        assert lookup.called  # gating engaged — the upstream IS looked up in prod
+        assert check.satisfied is True
