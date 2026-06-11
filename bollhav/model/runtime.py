@@ -116,6 +116,7 @@ def _apply_to_model(
         batching=batching,
         kind=model.kind,
         state=None if state_disabled else model.state,
+        curfew=model.curfew,
         enabled=model.enabled,
         debug=False,  # avoid re-printing pretty() on the copy
         description=model.description,
@@ -123,7 +124,15 @@ def _apply_to_model(
         tags=set(model.tags),
         **model.extra,
     )
-    return ModelRun(model=new_model, window=window)
+    # Record which mode resolved the window — same precedence resolve_window
+    # uses (reload > latest > backfill). Exactly one is True.
+    return ModelRun(
+        model=new_model,
+        window=window,
+        is_reload=reload,
+        is_latest=not reload and latest,
+        is_backfill=not reload and not latest,
+    )
 
 
 def _target_with_suffix(
