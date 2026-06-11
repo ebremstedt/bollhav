@@ -23,9 +23,11 @@ logger = logging.getLogger(__name__)
 #
 # Per-model STATE tables live in the one bollhav schema (`z_bollhav`, or
 # `z_bollhav_<suffix>` for a dev branch — see `_library_schema`), named by a
-# pure function of the model's `full_name`. ERRORS are NOT per-model: every
-# model logs to one shared `errors` table in the same schema, keyed by
-# `full_name`.
+# pure function of the model's `canonical_full_name` (base schema, no
+# suffix/appendix). The schema carries the suffix + weekly appendix; the table
+# name does not — so it stays stable across that rotation (one cleanly-named
+# table per model per schema). ERRORS are NOT per-model: every model logs to
+# one shared `errors` table in the same schema, keyed by `full_name`.
 
 _VOWELS = frozenset("aeiou")
 _SLUG_CAP = 44  # max slug chars; + "_" + 16-hex digest = ≤ 61 (under 63)
@@ -276,10 +278,14 @@ class PostgresState:
         return ".".join(parts)
 
     def _state_table(self) -> str:
-        """Deterministic state-table name (`state_table_name(full_name)`).
-        Computed from the model's full name, so any process recomputes it
-        without a lookup."""
-        return state_table_name(self.model.target.full_name)
+        """Deterministic state-table name
+        (`state_table_name(canonical_full_name)`). Computed from the model's
+        *canonical* name — base schema, no `schema_suffix`/appendix — so the
+        name is stable across the suffix+week rotation that the enclosing
+        schema (`z_bollhav_<suffix>_<week>_`) carries. One cleanly-named state
+        table per model inside each schema; any process recomputes it without
+        a lookup."""
+        return state_table_name(self.model.target.canonical_full_name)
 
     # ── DDL ──────────────────────────────────────────────────────────
 

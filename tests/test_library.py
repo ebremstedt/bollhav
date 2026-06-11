@@ -57,6 +57,8 @@ def _model(
     model = MagicMock()
     model.target.name = full_name.split(".")[-1]
     model.target.full_name = full_name
+    # no suffix in these mocks → canonical identity equals full_name
+    model.target.canonical_full_name = full_name
     model.target.schema_resolved = full_name.split(".")[0]
     model.target.schema_suffix = ""
     model.target.schema_suffix_appendix = None

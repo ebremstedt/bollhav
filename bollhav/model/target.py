@@ -81,6 +81,26 @@ class Target:
         return f"{self.catalog}.{base}" if self.catalog else base
 
     @property
+    def canonical_full_name(self) -> str:
+        """Stable identity used to NAME the state table — the *base* schema
+        (WITHOUT `schema_suffix` / `schema_suffix_appendix`) plus the resolved
+        table name.
+
+        The state SCHEMA still carries the suffix + date appendix
+        (`z_bollhav_<suffix>_<week>_`), so stripping them here keeps the table
+        *name* inside that schema stable across the rotation: one cleanly-named
+        state table per model (`…_orders_<digest>`), not a fresh
+        `…_<suffix>_<week>_orders_<digest>` name every week. Table-level
+        `suffix` is kept — a distinct physical table keeps distinct state.
+
+        Unlike `full_name` (which resolves the schema and so changes with every
+        suffix/appendix roll), this is the week-stable model identity."""
+        base = (
+            f"{self.schema}.{self.name_resolved}" if self.schema else self.name_resolved
+        )
+        return f"{self.catalog}.{base}" if self.catalog else base
+
+    @property
     def partitioned_by(self) -> str | None:
         """Name of the column marked `partition_on=True`, or `None`
         if no column is marked. Derived from `columns`."""
