@@ -230,3 +230,68 @@ class TestStateAndStagingCarryThrough:
     def test_staging_None_stays_None(self) -> None:
         out = _apply(_model()).model
         assert out.target.staging is None
+
+
+class TestRunMode:
+    """`is_reload` / `is_latest` / `is_backfill` on the ModelRun record which
+    mode resolved the window — exactly one True, precedence reload > latest >
+    backfill (matching resolve_window)."""
+
+    def _bounded(self) -> Model:
+        # reload needs bounds.begin; latest/backfill don't mind it being set.
+        return Model(
+            target=Target(name="orders", schema="public", schema_suffix_appendix=None),
+            batching=Batch(time=TimeChunking(chunk="@hourly", tz=UTC)),
+            bounds=Bounds(begin=_SINCE, end=_UNTIL),
+            kind=Kind.INTERVAL,
+        )
+
+    def test_backfill_is_the_default(self):
+        run = _apply(self._bounded())  # no reload, no latest; since/until present
+        assert (run.is_reload, run.is_latest, run.is_backfill) == (False, False, True)
+
+    def test_latest(self):
+        run = _apply(self._bounded(), latest=True)
+        assert (run.is_reload, run.is_latest, run.is_backfill) == (False, True, False)
+
+    def test_reload(self):
+        run = _apply(self._bounded(), reload=True)
+        assert (run.is_reload, run.is_latest, run.is_backfill) == (True, False, False)
+
+    def test_reload_wins_over_latest(self):
+        run = _apply(self._bounded(), reload=True, latest=True)
+        assert (run.is_reload, run.is_latest, run.is_backfill) == (True, False, False)
+
+    def test_exactly_one_is_true(self):
+        for kw in (
+            {},
+            {"latest": True},
+            {"reload": True},
+            {"reload": True, "latest": True},
+        ):
+            run = _apply(self._bounded(), **kw)
+            assert [run.is_reload, run.is_latest, run.is_backfill].count(True) == 1, kw
+
+    def test_bare_modelrun_has_all_false(self):
+        from bollhav.model.modelrun import ModelRun
+
+        run = ModelRun(model=self._bounded())
+        assert (run.is_reload, run.is_latest, run.is_backfill) == (False, False, False)
+
+
+class TestCurfewPreservedThroughOverrides:
+    def test_curfew_survives_the_runtime_copy(self):
+        from datetime import time
+
+        from bollhav.model import Curfew
+
+        m = Model(
+            target=Target(name="orders", schema="public", schema_suffix_appendix=None),
+            batching=Batch(time=TimeChunking(chunk="@hourly", tz=UTC)),
+            bounds=Bounds(begin=_SINCE, end=_UNTIL),
+            kind=Kind.INTERVAL,
+            curfew=Curfew.work_hours(),
+        )
+        run = _apply(m)
+        assert run.model.curfew is not None
+        assert run.model.curfew.windows == [(time(9), time(17))]

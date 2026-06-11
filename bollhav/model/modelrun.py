@@ -26,6 +26,12 @@ class ModelRun:
         run_id     — minted once here and shared across this run's state
                      transitions (insert / mark_running / mark_applied / …).
 
+    `is_reload` / `is_latest` / `is_backfill` record **which mode** resolved the
+    window — exactly one is `True` on a run built by `apply_runtime_overrides`
+    (precedence: reload > latest > backfill). Check them at runtime to branch on
+    the job kind, e.g. `if run.is_backfill: ...`. All `False` on a bare
+    `ModelRun()` (built directly, outside the runtime).
+
     `runtime.apply_runtime_overrides` mints one `ModelRun` per matched model;
     it's what flows through `@model_lifecycle` and the user's run loop. The
     definition is immutable; the run-state on this object is what evolves."""
@@ -34,6 +40,9 @@ class ModelRun:
     window: TZInterval | None = None
     intervals: tuple[TZInterval, ...] | tuple[None] = (None,)
     run_id: UUID = field(default_factory=uuid4)
+    is_reload: bool = False
+    is_latest: bool = False
+    is_backfill: bool = False
 
 
 __all__ = ["ModelRun"]
