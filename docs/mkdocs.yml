@@ -74,6 +74,7 @@ nav:
               - SourceFile: SOURCEFILE.md
           - Bounds: BOUNDS.md
           - Batch: BATCH.md
+          - Curfew: CURFEW.md
           - State:
               - Overview: STATE.md
               - Block codes: BLOCK_CODES.md

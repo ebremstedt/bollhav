@@ -64,8 +64,8 @@ def _mk_model(
     model.description = None
     if with_batching:
         model.batching = MagicMock()
-        model.batching.interval.expression = "@daily"
-        model.batching.interval.lookback = None
+        model.batching.time.chunk = "@daily"
+        model.batching.time.lookback = None
         model.batching.size = 10000
         # @load_models stashes the computed contract on `run.intervals`;
         # dry-run reads the attribute.

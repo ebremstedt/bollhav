@@ -90,15 +90,15 @@ def resolve_window(
     unfiltered. Three mutually-exclusive modes, in precedence order:
 
         reload   — `bounds.begin` .. (`bounds.end` or the latest complete tick)
-        latest   — the latest complete `window_expression` tick
+        latest   — the latest complete `window` tick
         backfill — `since` (or `bounds.begin`) .. `until` (required)
 
     Pure apart from the clock read in `latest` / open-ended `reload`."""
     if batching is None:
         return None
 
-    expr = batching.interval.expression
-    tz = batching.interval.tz
+    expr = batching.time.chunk
+    tz = batching.time.tz
 
     if reload:
         if bounds.begin is None:
@@ -108,7 +108,7 @@ def resolve_window(
         window_since = bounds.begin
         window_until = bounds.end or latest_complete_interval(expr, tz).until
     elif latest:
-        window_expr = batching.interval.window_expression or expr
+        window_expr = batching.time.window or expr
         interval = latest_complete_interval(window_expr, tz)
         window_since, window_until = interval.since, interval.until
     else:
@@ -127,9 +127,9 @@ def resolve_window(
             )
         window_until = until
 
-    if batching.interval.lookback:
+    if batching.time.lookback:
         window_since = _apply_lookback(
-            _resolve_cron(expr), window_since, batching.interval.lookback
+            _resolve_cron(expr), window_since, batching.time.lookback
         )
     return TZInterval(window_since, window_until)
 
@@ -155,7 +155,7 @@ def split_window(window: TZInterval, expression: str) -> list[TZInterval]:
 
 def compute_intervals(run: "ModelRun") -> tuple[TZInterval, ...] | tuple[None]:
     """Split a run's resolved `window` into its interval contract, splitting by
-    the model's `batching.interval.expression`. Assign the result to
+    the model's `batching.time.chunk`. Assign the result to
     `run.intervals`.
 
     `(None,)` when the run has no `batching`/`window` (monolithic / view — runs
@@ -164,4 +164,4 @@ def compute_intervals(run: "ModelRun") -> tuple[TZInterval, ...] | tuple[None]:
     model = run.model
     if model.batching is None or run.window is None:
         return (None,)
-    return tuple(split_window(run.window, model.batching.interval.expression))
+    return tuple(split_window(run.window, model.batching.time.chunk))

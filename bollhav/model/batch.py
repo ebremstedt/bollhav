@@ -1,7 +1,6 @@
 import logging
 from dataclasses import dataclass, field
 from datetime import timezone, tzinfo
-
 from roskarl import IntervalExpression, IntervalExpressionExtended
 
 logger = logging.getLogger(__name__)
@@ -19,17 +18,17 @@ def validate_batch_size(batch_size: int, source: str) -> None:
 
 
 @dataclass
-class IntervalChunks:
+class TimeChunking:
     """
-    Time-interval chunking config.
+    Time-chunking config.
 
-    `expression` is a cron expression that defines the chunk size. For example,
+    `chunk` is a cron expression that defines the chunk size. For example,
     "0 * * * *" means each chunk is one hour, "0 0 * * *" means one day.
     Can be overridden at runtime via the pipe's batch expression env var.
 
-    `window_expression` defines the scope to catch up on in `latest` mode —
-    i.e. "one of what" counts as the latest complete unit. Defaults to
-    `expression` when unset. Only consulted in `latest` mode.
+    `window` defines the scope to catch up on in `latest` mode — i.e.
+    "one of what" counts as the latest complete unit. Defaults to `chunk`
+    when unset. Only consulted in `latest` mode.
 
     `tz` is the timezone used for interval resolution. Defaults to UTC.
 
@@ -37,8 +36,8 @@ class IntervalChunks:
     useful for reprocessing recent history to account for late-arriving data.
     """
 
-    expression: IntervalExpression | IntervalExpressionExtended = "@daily"
-    window_expression: IntervalExpression | IntervalExpressionExtended | None = None
+    chunk: IntervalExpression | IntervalExpressionExtended = "@daily"
+    window: IntervalExpression | IntervalExpressionExtended | None = None
     tz: tzinfo = timezone.utc
     lookback: int | None = None
 
@@ -48,7 +47,7 @@ class Batch:
     """
     Controls how a model's work is chunked
 
-    `interval` holds the time-interval chunking config — the cron
+    `time` holds the time-chunking config (a `TimeChunking`) — the cron
     expression whose ticks define the `(since, until)` windows the model
     iterates. Always present.
 
@@ -60,7 +59,7 @@ class Batch:
     `retries` is the number of times a failed chunk should be retried.
     """
 
-    interval: IntervalChunks = field(default_factory=IntervalChunks)
+    time: TimeChunking = field(default_factory=TimeChunking)
     size: int = 20000
     retries: int | None = None
 

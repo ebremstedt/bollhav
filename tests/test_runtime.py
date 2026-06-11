@@ -4,7 +4,7 @@ from zoneinfo import ZoneInfo
 from time_machine import travel
 
 from bollhav.model.runtime import _apply_to_model
-from bollhav.model.batch import Batch, IntervalChunks
+from bollhav.model.batch import Batch, TimeChunking
 from bollhav.model.bounds import Bounds
 from bollhav.model.intervals import TZInterval
 from bollhav.model.kind import Kind
@@ -51,11 +51,11 @@ def _apply(
 
 
 def _model(**batch_kwargs) -> Model:
-    iv = {"expression": "@hourly", "tz": UTC}
+    iv = {"chunk": "@hourly", "tz": UTC}
     iv.update(batch_kwargs)
     return Model(
         target=Target(name="orders", schema="public", schema_suffix_appendix=None),
-        batching=Batch(interval=IntervalChunks(**iv)),
+        batching=Batch(time=TimeChunking(**iv)),
         kind=Kind.INTERVAL,
     )
 
@@ -85,34 +85,34 @@ class TestSchemaSuffix:
 class TestPipeOverrides:
     def test_interval_expression_override(self) -> None:
         m = _apply(
-            _model(expression="@daily"),
+            _model(chunk="@daily"),
             interval_expression_override="0 * * * *",
         ).model
-        assert m.batching.interval.expression == "0 * * * *"
+        assert m.batching.time.chunk == "0 * * * *"
 
     def test_window_expression_override(self) -> None:
         m = _apply(_model(), latest=True, window_expression_override="@daily").model
-        assert m.batching.interval.window_expression == "@daily"
+        assert m.batching.time.window == "@daily"
 
     def test_lookback_override(self) -> None:
         m = _apply(_model(lookback=2), lookback_override=5).model
-        assert m.batching.interval.lookback == 5
+        assert m.batching.time.lookback == 5
 
     def test_lookback_override_zero_clears(self) -> None:
         # 0 is a valid explicit value: "no lookback", and must win over a
         # model-set non-None lookback.
         m = _apply(_model(lookback=3), lookback_override=0).model
-        assert m.batching.interval.lookback == 0
+        assert m.batching.time.lookback == 0
 
     def test_tz_override(self) -> None:
         m = _apply(_model(tz=UTC), tz_override=CET).model
-        assert m.batching.interval.tz == CET
+        assert m.batching.time.tz == CET
 
     def test_overrides_skipped_when_unset(self) -> None:
-        m = _apply(_model(expression="@daily", tz=CET, lookback=2)).model
-        assert m.batching.interval.expression == "@daily"
-        assert m.batching.interval.tz == CET
-        assert m.batching.interval.lookback == 2
+        m = _apply(_model(chunk="@daily", tz=CET, lookback=2)).model
+        assert m.batching.time.chunk == "@daily"
+        assert m.batching.time.tz == CET
+        assert m.batching.time.lookback == 2
 
 
 class TestWindowResolution:
@@ -129,7 +129,7 @@ class TestWindowResolution:
         begin = datetime(2024, 1, 1, tzinfo=UTC)
         m = Model(
             target=Target(name="orders", schema="public", schema_suffix_appendix=None),
-            batching=Batch(interval=IntervalChunks(expression="@hourly", tz=UTC)),
+            batching=Batch(time=TimeChunking(chunk="@hourly", tz=UTC)),
             bounds=Bounds(begin=begin),
             kind=Kind.INTERVAL,
         )
@@ -151,7 +151,7 @@ class TestBatchingCarryThrough:
         m = Model(
             target=Target(name="events", schema="raw", schema_suffix_appendix=None),
             batching=Batch(
-                interval=IntervalChunks(expression="@hourly", tz=UTC),
+                time=TimeChunking(chunk="@hourly", tz=UTC),
                 size=5000,
             ),
             bounds=Bounds(begin=datetime(2024, 1, 1, tzinfo=UTC)),
@@ -161,9 +161,9 @@ class TestBatchingCarryThrough:
         assert out.batching.size == 5000
 
     def test_pipe_override_sets_interval_expression(self) -> None:
-        m = _model(expression="@hourly")
+        m = _model(chunk="@hourly")
         out = _apply(m, interval_expression_override="*/15 * * * *").model
-        assert out.batching.interval.expression == "*/15 * * * *"
+        assert out.batching.time.chunk == "*/15 * * * *"
 
 
 class TestBatchingNone:
@@ -189,7 +189,7 @@ class TestStateAndStagingCarryThrough:
         s = State()
         m = Model(
             target=Target(name="orders", schema="public", schema_suffix_appendix=None),
-            batching=Batch(interval=IntervalChunks(expression="@hourly", tz=UTC)),
+            batching=Batch(time=TimeChunking(chunk="@hourly", tz=UTC)),
             state=s,
             kind=Kind.INTERVAL,
         )
@@ -214,7 +214,7 @@ class TestStateAndStagingCarryThrough:
                 schema_suffix_appendix=None,
                 staging=staging_cfg,
             ),
-            batching=Batch(interval=IntervalChunks(expression="@hourly", tz=UTC)),
+            batching=Batch(time=TimeChunking(chunk="@hourly", tz=UTC)),
             state=State(),  # staging requires state
             kind=Kind.INTERVAL,
         )

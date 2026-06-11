@@ -53,3 +53,22 @@ Fresh start (drop the target schema **and** the state/library schema):
 ```bash
 python -c "import os,psycopg; c=psycopg.connect(os.environ['TARGET_DSN'],autocommit=True); c.execute('DROP SCHEMA IF EXISTS warehouse CASCADE'); c.execute('DROP SCHEMA IF EXISTS z_bollhav CASCADE')"
 ```
+
+### tear down a suffixed environment
+
+The manual `DROP SCHEMA` above is for the default (unsuffixed) prod-style run.
+For an **ephemeral** run — a local test or PR preview keyed by `SCHEMA_SUFFIX` —
+[`teardown.py`](teardown.py) reuses `@load_models` to find the same models and
+drops their whole environment in one call:
+
+```bash
+export USE_SCHEMA_SUFFIX=true SCHEMA_SUFFIX=pr123
+python main.py        # writes into warehouse_pr123_… + z_bollhav_pr123_…
+python teardown.py     # drops both, no trace
+```
+
+`drop_environment(conn, [run.model for run in runs])` **refuses without a
+schema suffix** — it must be impossible to wipe prod. For just one model's
+state (leaving its data + the env schema), use
+`PostgresState(model, conn).clear_state()`. Neither is a re-run knob — to
+re-process applied intervals without dropping anything, use `STATE_MODE=bulldozer`.

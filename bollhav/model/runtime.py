@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import replace
 from datetime import datetime, tzinfo
 
-from bollhav.model.batch import Batch, IntervalChunks
+from bollhav.model.batch import Batch, TimeChunking
 from bollhav.model.window import resolve_window
 from bollhav.model.matching import matched_with_reload
 from bollhav.model.model import Model
@@ -35,13 +35,13 @@ def apply_runtime_overrides(
     Each run's `model` has:
         * `target.schema_suffix` set to `schema_suffix`.
         * `target.suffix` set to `table_suffix`.
-        * `batching.interval.expression` overridden by
+        * `batching.time.chunk` overridden by
           `interval_expression_override` (pipe) when set.
-        * `batching.interval.window_expression` overridden by
+        * `batching.time.window` overridden by
           `window_expression_override` when set.
-        * `batching.interval.lookback` overridden by `lookback_override` when
+        * `batching.time.lookback` overridden by `lookback_override` when
           set.
-        * `batching.interval.tz` overridden by `tz_override` when set.
+        * `batching.time.tz` overridden by `tz_override` when set.
         * `state` / `target.staging` nulled when `state_disabled`.
     And each run's `window` is resolved from bounds + the run instruction
     (tag-driven `reload`, pipe `latest` / `backfill_since` / `backfill_until`).
@@ -161,20 +161,16 @@ def _batching_with_overrides(
     if batching is None:
         return None
     # Pipe-level override wins over the model's static interval expression.
-    expression = interval_expression_override or batching.interval.expression
-    window_expression = (
-        window_expression_override or batching.interval.window_expression
-    )
+    expression = interval_expression_override or batching.time.chunk
+    window_expression = window_expression_override or batching.time.window
     lookback = (
-        lookback_override
-        if lookback_override is not None
-        else batching.interval.lookback
+        lookback_override if lookback_override is not None else batching.time.lookback
     )
-    tz = tz_override or batching.interval.tz
+    tz = tz_override or batching.time.tz
     return Batch(
-        interval=IntervalChunks(
-            expression=expression,
-            window_expression=window_expression,
+        time=TimeChunking(
+            chunk=expression,
+            window=window_expression,
             tz=tz,
             lookback=lookback,
         ),

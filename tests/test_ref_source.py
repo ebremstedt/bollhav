@@ -17,7 +17,7 @@ sys.modules.setdefault("pyodbc", MagicMock())  # bollhav.mssql imports it native
 from bollhav.model import (  # noqa: E402
     Batch,
     Database,
-    IntervalChunks,
+    TimeChunking,
     IntervalContract,
     Kind,
     Model,
@@ -51,7 +51,7 @@ def _pg_model(*, schema="warehouse_clean", suffix="", upstream=None):
                 PostgresColumn(name="id", data_type=PostgresType.BIGINT, nullable=False)
             ],
         ),
-        batching=Batch(interval=IntervalChunks(expression="@daily")),
+        batching=Batch(time=TimeChunking(chunk="@daily")),
         kind=Kind.INTERVAL,
         # gated upstreams need state; ungated sources don't.
         state=State() if _has_gate(upstream) else None,
@@ -72,7 +72,7 @@ def _mssql_model(*, upstream=None):
                 MssqlColumn(name="id", data_type=MssqlType.BIGINT, nullable=False)
             ],
         ),
-        batching=Batch(interval=IntervalChunks(expression="@daily")),
+        batching=Batch(time=TimeChunking(chunk="@daily")),
         kind=Kind.INTERVAL,
         upstream=upstream,
     )

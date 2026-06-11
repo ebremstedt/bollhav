@@ -5,6 +5,7 @@ import logging
 import os
 import sys
 import traceback as _tb
+from datetime import datetime, timezone
 from functools import wraps
 from typing import Callable
 
@@ -239,6 +240,22 @@ def model_lifecycle(func: Callable) -> Callable:
         dry_state = _dry_state()
         postgres_state = None
 
+        # Curfew early-out (real runs only): if the curfew is in effect right
+        # now, skip the whole model — no lock, no asset DDL, no state bootstrap.
+        # Every interval would be skipped per-interval anyway, so this avoids the
+        # setup. A run that STARTS clear of the curfew but crosses into it mid-run
+        # is still caught per interval in @execute_lifecycle. DRY_STATE keeps
+        # planning the model (it does no expensive setup to skip).
+        if (
+            not dry_state
+            and model.curfew is not None
+            and model.curfew.blocks(datetime.now(timezone.utc))
+        ):
+            logger.info(
+                "curfew: skipping model %s (stays pending)", model.target.full_name
+            )
+            return None
+
         locked = False
         if (
             not dry_state
@@ -284,9 +301,11 @@ def model_lifecycle(func: Callable) -> Callable:
                         data.create_staging_schema()
                         data.gc_orphan_staging_tables()
 
-            # State coordination is Postgres-only; MSSQL models are never
-            # stateful (rejected at the staging boundary), so this block
-            # never runs for them.
+            # State always lives in Postgres (the only backend). An MSSQL-data
+            # model can be state-tracked too — its state rows live in Postgres,
+            # on the separate `state_conn` (`_conns` enforces that a distinct
+            # Postgres connection is passed). So this block runs for any
+            # stateful model regardless of its data backend.
             if model.stateful and model.state.backend == StateBackend.POSTGRES:
                 from bollhav.postgres.state import PostgresState
 
@@ -362,6 +381,19 @@ def execute_lifecycle(func: Callable) -> Callable:
         if run is None:
             raise ValueError("execute cannot be called if run is None")
         model = run.model
+
+        # Curfew: a wall-clock gate on *starting* this interval. When the curfew
+        # blocks now, skip the interval entirely — no execute, no staging, no
+        # state flip — so a stateful model's interval stays pending for a later
+        # (post-curfew) run. Checked per interval, so a run that crosses into a
+        # curfew window stops cleanly on the next interval rather than mid-write.
+        if model.curfew is not None and model.curfew.blocks(datetime.now(timezone.utc)):
+            logger.info(
+                "curfew: skipping %s for %s (stays pending)",
+                _fmt_window(interval),
+                model.target.full_name,
+            )
+            return None
 
         def staged_execute():
             """Run the user's execute bracketed by the staging lifecycle:

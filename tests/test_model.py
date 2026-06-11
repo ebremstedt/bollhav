@@ -73,7 +73,7 @@ def test_backfill_falls_back_to_bounds_for_since_but_requires_until():
     window = resolve_window(
         Batch(), bounds, until=datetime(2026, 1, 3, tzinfo=timezone.utc)
     )
-    intervals = split_window(window, Batch().interval.expression)
+    intervals = split_window(window, Batch().time.chunk)
     assert len(intervals) > 0
     assert intervals[0].since == datetime(2026, 1, 1, tzinfo=timezone.utc)
     assert intervals[-1].until == datetime(2026, 1, 3, tzinfo=timezone.utc)

@@ -11,6 +11,7 @@ from bollhav.model.kind import Kind
 from bollhav.model.state import State
 from bollhav.model.tags import Tags
 from bollhav.model.source import Source
+from bollhav.model.curfew import Curfew
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +27,7 @@ class Model:
         tagging: Tags | None = None,
         tags: set[str] | None = None,
         state: State | None = None,
+        curfew: Curfew | None = None,
         enabled: bool = True,
         debug: bool = False,
         description: str | None = None,
@@ -37,17 +39,11 @@ class Model:
         self.batching = batching
         self.kind = kind
         self.state = state
+        self.curfew = curfew
         self.enabled = enabled
         self.debug = debug
         self.description = description
-        # Every input — gated upstream or ungated source — is one Source in
-        # this list. Provenance is total: a model that declares nothing gets a
-        # single typeless UNKNOWN source (uuid-named so each unknown is a
-        # distinct lineage node). Carried through runtime copies untouched — a
-        # non-empty list never re-triggers this.
-        self.upstream: list[Source] = upstream or []
-        if not self.upstream:
-            self.upstream = [Source(name=f"unknown-{uuid4()}", type=None)]
+        self.upstream: list[Source] = upstream or [_unknown_source()]
         self.tags: set[str] = (
             tags
             if tags is not None
@@ -55,11 +51,7 @@ class Model:
                 self.target.name, self.target.schema, self.target.catalog
             )
         )
-
         self.extra = kwargs
-
-        # Validate the model is internally consistent at definition time, so a
-        # contradiction fails here rather than silently at run time.
         self._validate_kind_consistency()
         self._validate_upstream_requires_state()
 
@@ -69,8 +61,6 @@ class Model:
         if self.debug:
             self.pretty()
 
-        # Frozen after construction: a Model is an immutable *definition*. Any
-        # per-run state (window / intervals / run_id) lives on a `ModelRun`.
         object.__setattr__(self, "_frozen", True)
 
     def __setattr__(self, name: str, value: object) -> None:
@@ -172,8 +162,8 @@ class Model:
             lines += [
                 "",
                 "  batching:",
-                f"    interval:    expression={self.batching.interval.expression}, "
-                f"lookback={self.batching.interval.lookback}",
+                f"    chunk:       {self.batching.time.chunk}, "
+                f"lookback={self.batching.time.lookback}",
                 f"    size:        {self.batching.size}",
                 f"    retries:     {self.batching.retries}",
             ]
@@ -183,6 +173,18 @@ class Model:
             f"    begin:       {self.bounds.begin}",
             f"    end:         {self.bounds.end}",
         ]
+        if self.curfew is not None:
+            sense = "allow only" if self.curfew.allowed else "deny"
+            wins = (
+                ", ".join(f"{s:%H:%M}–{e:%H:%M}" for s, e in self.curfew.windows)
+                or "all day"
+            )
+            days = self.curfew.days
+            day_part = "" if days is None else f" on weekdays {sorted(days)}"
+            lines += [
+                "",
+                f"  curfew:        {sense} {wins}{day_part} ({self.curfew.tz})",
+            ]
         logger.debug("\n".join(lines))
 
     @property
@@ -440,3 +442,11 @@ class Model:
             return d
 
         return _norm(self) == _norm(other)
+
+
+def _unknown_source() -> Source:
+    """The fallback input for a model that declares none — provenance is total,
+    so even "declares nothing" is one typeless UNKNOWN source. The uuid name
+    makes each unknown a distinct lineage node. A non-empty `upstream` passes
+    through untouched, so runtime copies never re-trigger this."""
+    return Source(name=f"unknown-{uuid4()}", type=None)

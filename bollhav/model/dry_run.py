@@ -1,3 +1,6 @@
+from collections.abc import Sequence
+
+from bollhav.model.intervals import TZInterval
 from bollhav.model.load_models import _RuntimeConfig
 from bollhav.model.model import Model
 from bollhav.model.modelrun import ModelRun
@@ -89,7 +92,7 @@ def _concise_tail(run: ModelRun) -> str | None:
     if model.batching is None:
         return None
     count = _format_interval_count(run.intervals)
-    return f"{count} × {model.batching.interval.expression}"
+    return f"{count} × {model.batching.time.chunk}"
 
 
 # ── extra ────────────────────────────────────────────────────────────
@@ -105,12 +108,12 @@ def _print_model_extra(run: ModelRun) -> None:
 
     if model.batching is not None:
         intervals = run.intervals
-        print(f"    cron         : {model.batching.interval.expression}")
+        print(f"    cron         : {model.batching.time.chunk}")
         print(f"    window       : {_format_window(intervals)}")
         print(f"    intervals    : {_format_interval_count(intervals)}")
         print(f"    batch size   : {model.batching.size}")
-        if model.batching.interval.lookback:
-            print(f"    lookback     : {model.batching.interval.lookback}")
+        if model.batching.time.lookback:
+            print(f"    lookback     : {model.batching.time.lookback}")
 
     print(f"    bounds       : {_format_bounds(model)}")
     print(f"    tags         : {_format_tags(model)}")
@@ -147,12 +150,12 @@ def _format_sources(model: Model) -> str:
 # ── shared formatters ───────────────────────────────────────────────
 
 
-def _format_window(intervals: list) -> str:
+def _format_window(intervals: Sequence[TZInterval | None]) -> str:
     real = [iv for iv in intervals if iv is not None]
     if not real:
         return "(unfiltered)"
     return f"{real[0].since.isoformat()} → {real[-1].until.isoformat()}"
 
 
-def _format_interval_count(intervals: list) -> str:
+def _format_interval_count(intervals: Sequence[TZInterval | None]) -> str:
     return str(len([iv for iv in intervals if iv is not None]))

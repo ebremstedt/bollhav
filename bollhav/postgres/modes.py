@@ -148,7 +148,8 @@ def create_replace_view(
         ),
         None,
     )
-    if src is None:
+    source = src.type if src is not None else None
+    if not isinstance(source, SourceModel) or source.query is None:
         raise ValueError(
             f"create_replace_view requires a Source with a SourceModel type "
             f"whose .query is set, in upstream=[...] on "
@@ -161,6 +162,6 @@ def create_replace_view(
             sql.SQL("CREATE OR REPLACE VIEW {schema}.{view} AS {query}").format(
                 schema=sql.Identifier(model.target.schema_resolved),
                 view=sql.Identifier(model.target.name),
-                query=sql.SQL(cast(LiteralString, src.type.query)),
+                query=sql.SQL(cast(LiteralString, source.query)),
             )
         )

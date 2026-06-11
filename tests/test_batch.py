@@ -4,7 +4,7 @@ from zoneinfo import ZoneInfo
 import pytest
 from time_machine import travel
 
-from bollhav.model.batch import Batch, IntervalChunks
+from bollhav.model.batch import Batch, TimeChunking
 from bollhav.model.window import (
     _resolve_cron,
     _apply_lookback,
@@ -44,8 +44,8 @@ def _model(
     effective_expr = interval_expression_override or interval_expression
     effective_tz = tz_override or tz
     batching = Batch(
-        interval=IntervalChunks(
-            expression=effective_expr,
+        time=TimeChunking(
+            chunk=effective_expr,
             tz=effective_tz,
             lookback=lookback,
         ),

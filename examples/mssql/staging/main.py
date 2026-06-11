@@ -1,20 +1,20 @@
-"""Entry point — stage the `sales` model through its daily intervals.
+"""Entry point — stage the `sales` model (MSSQL data) with state in Postgres.
 
 Self-contained (no @load_models / TAGS needed):
 
-  1. ensure the `bollhav` database exists,
-  2. drop the target table so each run starts clean to count rows
-     (the MERGE makes reruns idempotent anyway — this just keeps the
-     printed count obvious),
-  3. compute the daily intervals (reload mode → bounds.begin..bounds.end),
-  4. run the model through `@model_lifecycle` / `@execute_lifecycle`,
-     which own the asset DDL and the per-interval staging lifecycle.
+  1. ensure the MSSQL `bollhav` database exists,
+  2. reset: drop the MSSQL target table AND the Postgres state (`z_bollhav`),
+     so the run starts clean and every interval is pending,
+  3. resolve the daily window (reload mode → bounds.begin..bounds.end),
+  4. run through `@model_lifecycle` / `@execute_lifecycle`, passing **two**
+     connections — MSSQL `data_conn` (pyodbc) for data + staging, and
+     Postgres `state_conn` (psycopg) for the state machine.
 
-One connection drives the whole run. `autocommit=False` so the
-per-interval apply (MERGE staging → target + DROP staging) commits as
-one atomic transaction.
+The MSSQL connection is `autocommit=False` (the staging apply commits its
+DELETE/INSERT/MERGE + DROP as one transaction); the Postgres state
+connection is `autocommit=True` (each state transition commits on its own).
 
-Run:  python main.py
+Run:  python main.py   (needs BOLLHAV_MSSQL_DSN + STATE_DSN — see README)
 """
 
 from __future__ import annotations
@@ -30,19 +30,26 @@ from sales import sales  # noqa: E402
 
 from bollhav.mssql import ensure_schema  # noqa: E402
 from bollhav.model import ModelRun  # noqa: E402
-from bollhav.model.window import compute_intervals, resolve_window  # noqa: E402
+from bollhav.model.window import resolve_window  # noqa: E402
 
-from db import connect, ensure_database  # noqa: E402
+from db import connect, ensure_database, state_connect  # noqa: E402
 from run_model import run_model  # noqa: E402
 
 
 def _reset_target(model) -> None:
-    """Fresh schema + dropped target so the printed row count is clean."""
+    """Fresh schema + dropped MSSQL target so the printed row count is clean."""
     schema = model.target.schema_resolved
     table = model.target.name
     with connect(autocommit=True) as conn:
         ensure_schema(conn, schema)
         conn.cursor().execute(f"DROP TABLE IF EXISTS [{schema}].[{table}]")
+
+
+def _reset_state() -> None:
+    """Drop the Postgres state/library schema so every interval is pending
+    again (otherwise the applied gate skips a re-run)."""
+    with state_connect() as conn:
+        conn.execute("DROP SCHEMA IF EXISTS z_bollhav CASCADE")
 
 
 def _count_rows(model) -> int:
@@ -64,19 +71,19 @@ def main() -> None:
 
     ensure_database("bollhav")
     _reset_target(sales)
+    _reset_state()
 
-    # Reload mode → window spans bounds.begin..bounds.end (the three days). A
-    # stateless model has no state bootstrap to fill in intervals, so resolve
-    # the window into a ModelRun and split it here, then hand the run to the
-    # lifecycle. (`sales` itself is the immutable definition — never mutated.)
+    # Reload mode → window spans bounds.begin..bounds.end. The @model_lifecycle
+    # state bootstrap (on state_conn) splits this window into pending interval
+    # rows in Postgres and narrows run.intervals to the actionable set.
     run = ModelRun(
         model=sales,
         window=resolve_window(sales.batching, sales.bounds, reload=True),
     )
-    run.intervals = compute_intervals(run)
 
-    with connect() as conn:
-        run_model(run, conn)
+    # Two connections: MSSQL for data/staging, Postgres for state.
+    with connect() as data_conn, state_connect() as state_conn:
+        run_model(run, data_conn, state_conn)
 
     print(f"\n✓ {sales.target.full_name} now holds {_count_rows(sales)} rows\n")
 

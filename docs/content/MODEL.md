@@ -27,6 +27,7 @@ The `Model` itself is the top-level container. Its sub-objects each have their o
 - [Staging](STAGING.md) — optional staging table on Target
 - [Bounds](BOUNDS.md) — historical envelope for backfill mode
 - [Batch](BATCH.md) — chunk size, lookback, retries
+- [Curfew](CURFEW.md) — wall-clock hours/days the model must not run
 - [State](STATE.md) — per-model state tracking
 - [Upstream](UPSTREAM.md) — the model's inputs (`list[Source]`): gated upstreams + ungated sources
 - [SourceModel](SOURCETABLE.md) / [SourceFile](SOURCEFILE.md) — input `type`s
@@ -38,7 +39,7 @@ The `Model` itself is the top-level container. Its sub-objects each have their o
 from datetime import datetime, timezone
 from bollhav.model import (
     Model, Kind, Target, Source, SourceModel,
-    Bounds, Batch, Database, WriteMode,
+    Bounds, Batch, TimeChunking, Database, WriteMode,
 )
 from bollhav.postgres import PostgresColumn, PostgresType
 
@@ -57,7 +58,7 @@ model = Model(
     ),
     upstream=[Source("raw.orders", type=SourceModel())],
     bounds=Bounds(begin=datetime(2024, 1, 1, tzinfo=timezone.utc)),
-    batching=Batch(interval_expression="0 * * * *"),
+    batching=Batch(time=TimeChunking(chunk="0 * * * *")),
     debug=True,
 )
 ```
@@ -93,6 +94,12 @@ Optional backfill begin/end bounds. See [Bounds](BOUNDS.md).
 Type: `Batch` · Default: `None`
 
 Controls chunk size and retries. When `None`, the model runs as a single unit — see [Chunking](CHUNKING.md). See [Batch](BATCH.md) for the field reference.
+
+### curfew
+
+Type: `Curfew` · Default: `None`
+
+Wall-clock hours and/or weekdays the model must not run. When `None` (default), the model runs whenever invoked. See [Curfew](CURFEW.md).
 
 ### tagging
 
