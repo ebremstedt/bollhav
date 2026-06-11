@@ -164,6 +164,7 @@ def _pg_model(*, state_cfg=None, target_dsn="TARGET_DSN"):
     model.state = state_cfg if state_cfg is not None else State()
     model.target.name = "orders"
     model.target.full_name = "public.orders"
+    model.target.canonical_full_name = "public.orders"
     model.target.schema_resolved = "public"
     model.target.schema_suffix = ""
     model.target.schema_suffix_appendix = None
