@@ -12,7 +12,7 @@ Run order matters: the view's SQL reads the orders table, and
 view → contract-bearing model), so we just iterate them — no hand-sort.
 Ordering follows every declared producer→consumer edge (including the
 view's ungated `SELECT … FROM orders` source); runtime gating is separate
-and contract-only.
+and contract-only
 
 **Connections must be autocommit** — the data write commits, then the
 state row flips (non-atomic data → state).
