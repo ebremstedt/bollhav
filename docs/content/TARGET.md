@@ -257,7 +257,7 @@ flowchart TD
     B --> C{state set?}
     C -- yes --> D[ensure state schema/table,<br>prefill pending rows,<br>filter intervals to non-applied]
     C -- no --> E[no filtering: user loop runs<br>every contract interval every time]
-    D --> F[user loop iterates model.intervals]
+    D --> F[user loop iterates run.intervals]
     E --> F
     F --> G[per interval: see per-interval flow<br>each interval drops its own staging table]
     G --> H{more intervals?}
@@ -354,8 +354,8 @@ You can opt out of dropping entirely with `Staging(keep_after_apply=True)` — t
 | Field | Default | Purpose |
 |---|---|---|
 | `write_mode` | `WriteMode.APPEND` | How chunks land in staging — APPEND or UPSERT_NO_DELETE. See "Staging.write_mode" above. |
-| `schema` | `None` | Override the default `z_<target_schema>` staging schema. |
-| `table_prefix` | `None` | Override the default `<target_name>_staging_` prefix. The `<run_id>` short-hex is always appended. |
+| `schema` | `None` | Override the default central `z_bollhav` (or `z_bollhav_<suffix>`) staging schema. |
+| `table_prefix` | `None` | Override the default `<devowelled-stem>_stg_` prefix (the stem is per-model, so GC scopes to one model in the shared schema). The `<run_id>` short-hex is always appended. |
 | `keep_after_apply` | `False` | When `True`, the apply tx skips its `DROP TABLE` (tables persist for audit). Also disables auto orphan-GC for the model. |
 
 #### Postgres-specific (`PostgresStaging`)
@@ -384,7 +384,7 @@ Target(staging=MssqlStaging(...))   # same fields as Staging for now
 
 When state is set, the staging schema **must** live in the same database as the state schema (and therefore the target). Atomicity depends on the apply tx and the state flip; a cross-database transaction is not supported. Setting `State(dsn_env_var=...)` together with staging raises `NotImplementedError`.
 
-Without state, the schema-and-target-must-share-a-DB constraint doesn't apply — but `Staging.schema` still defaults to `z_<target_schema>` for consistency.
+Without state, the schema-and-target-must-share-a-DB constraint doesn't apply — but `Staging.schema` still defaults to the central `z_bollhav` (or `z_bollhav_<suffix>`) for consistency.
 
 ### Limitations
 
@@ -433,16 +433,16 @@ Tag matching does **not** see the suffix — it stays bound to the base `name` s
 
 ### `SCHEMA_SUFFIX` isolates state, not just data
 
-`SCHEMA_SUFFIX` also moves bollhav's own bookkeeping into a per-branch namespace, so a dev/PR run never shares state with prod. Prod keeps two schemas — `z_bollhav_state` (per-model state tables) and `z_bollhav` (library + errors) — but a dev branch **consolidates everything into one** `z_bollhav_<suffix>`:
+`SCHEMA_SUFFIX` also moves bollhav's own bookkeeping into a per-branch namespace, so a dev/PR run never shares state with prod. All bollhav-owned tables — the per-model state tables, the `library`, and the `errors` table — share **one** schema, suffixed along with everything else:
 
-| | state tables | library + errors |
-|---|---|---|
-| **prod** (no suffix) | `z_bollhav_state` | `z_bollhav` |
-| **dev** (`SCHEMA_SUFFIX=pr123`) | `z_bollhav_pr123` | `z_bollhav_pr123` |
+| | bollhav-owned schema (state + library + errors) |
+|---|---|
+| **prod** (no suffix) | `z_bollhav` |
+| **dev** (`SCHEMA_SUFFIX=pr123`) | `z_bollhav_pr123` |
 
-(State tables are digest-named, so they never clash with the fixed `library` / `errors` tables sharing the dev schema.)
+(State tables are digest-named, so they never clash with the fixed `library` / `errors` tables sharing the schema.)
 
-A suffixed run registers, gates, and tracks state entirely within its own environment — its upstreams resolve against *its* library, so a dev branch must build the upstreams it depends on (it can't gate against prod's). Tear the whole branch down by dropping just two schema families: `warehouse_<suffix>` (data) and `z_bollhav_<suffix>` (all bollhav state). With no suffix (prod), the bare `z_bollhav_state` / `z_bollhav` are untouched.
+A suffixed run registers, gates, and tracks state entirely within its own environment — its upstreams resolve against *its* library, so a dev branch must build the upstreams it depends on (it can't gate against prod's). Tear the whole branch down by dropping just two schema families: `warehouse_<suffix>` (data) and `z_bollhav_<suffix>` (all bollhav state). With no suffix (prod), the bare `z_bollhav` is untouched.
 
 ### When to use which
 

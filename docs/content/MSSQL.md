@@ -28,6 +28,7 @@ MssqlColumn(
 | `DATE`             | `DATE`             |                                    |
 | `DATETIME`         | `DATETIME`         |                                    |
 | `DATETIME2`        | `DATETIME2(n)`     | Optional `scale` (0–7)             |
+| `DATETIMEOFFSET`   | `DATETIMEOFFSET`   | Timezone-aware datetime            |
 | `DECIMAL`          | `DECIMAL(p, s)`    | Requires `precision` and `scale`   |
 | `FLOAT`            | `FLOAT`            |                                    |
 | `INT`              | `INT`              |                                    |

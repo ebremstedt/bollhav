@@ -6,7 +6,7 @@ Per-model progress, tracked in a per-model state table. Opt in with `state=State
 
 ## Status values
 
-The `status` column on `<state_schema>.<target_name>_state` is one of:
+Each model's state lives in its own digest-named table in the one central bollhav schema — `z_bollhav` (prod) or `z_bollhav_<suffix>` (a suffixed run) — alongside the shared `library` and `errors` tables. The table name is a pure function of the model's canonical identity, so it never collides with the fixed `library` / `errors` names. The `status` column on it is one of:
 
 | Status | Meaning |
 |---|---|
@@ -14,7 +14,7 @@ The `status` column on `<state_schema>.<target_name>_state` is one of:
 | `running` | Currently being processed. Set by `@state` immediately before invoking your `execute`. Visible in live dashboards. |
 | `applied` | Completed successfully. Set by `@state` after a clean execute, or atomically by the staging flush. |
 | `blocked` | Cannot run: an out-of-pipeline upstream isn't fulfilled. See `blocked_reason` for the [BLOCK CODE](#block-codes). |
-| `error` | Execute raised. Full details (type, message, traceback) are in the sibling `_errors` table. Auto-retried on next run under `STATE_MODE=discover`. |
+| `error` | Execute raised. Full details (type, message, traceback) are in the shared central `errors` table (`z_bollhav.errors`), keyed by `full_name`. Auto-retried on next run under `STATE_MODE=discover`. |
 
 ## Re-evaluation on rerun
 
@@ -29,7 +29,7 @@ Under `STATE_MODE=bulldozer`, every row resets to the computed status regardless
 
 ## Concurrency: per-interval advisory locks
 
-`@state` takes a **per-interval** Postgres advisory lock keyed by `(model.full_name, since, until)` for every interval it processes. Two workers running on the same model but different intervals don't conflict; two workers racing on the same interval — only one wins, the other silently skips that interval and moves on.
+`@state` takes a **per-interval** Postgres advisory lock — keyed by a hash of the `(model.full_name, since, until)` triple — for every interval it processes. Two workers running on the same model but different intervals don't conflict; two workers racing on the same interval — only one wins, the other silently skips that interval and moves on.
 
 This means you can scale horizontally on the same model:
 
@@ -45,36 +45,38 @@ Both bootstraps see the same pending rows; both loops try the same intervals; th
 
 ### Optional model-wide lock
 
-The per-interval lock is the right default — two workers safely parallelize across different intervals of the same model. For stricter **"one whole-pipeline run at a time per model"** semantics (rare — usually only when interval ordering matters or your loop has cross-interval side effects), set `State(exclusive_run=True)` and wrap with `model_lock`:
+The per-interval lock is the right default — two workers safely parallelize across different intervals of the same model. For stricter **"one whole-pipeline run at a time per model"** semantics (rare — usually only when interval ordering matters or your loop has cross-interval side effects), set `State(allow_concurrent_runs=False)`:
 
 ```python
-from bollhav.model import Model, State, model_lock, ModelLockedError
+from bollhav.model import Model, State
 
-# In the model:
-Model(state=State(exclusive_run=True), ...)
+Model(state=State(allow_concurrent_runs=False), ...)
+```
 
-# In the loop:
-for model in models:
+You don't take the lock yourself — `@model_lifecycle` does it for you. When `allow_concurrent_runs=False`, it takes a Postgres advisory lock keyed by the model's `full_name` at the start of the model's run and holds it (released in a `finally`) until the run ends, preventing any parallel processing on that model. If another run already holds it, the hook raises `ModelLockedError` — catch it around your `run_model(...)` call to skip:
+
+```python
+from bollhav.model import ModelLockedError
+
+for run in runs:
     try:
-        with model_lock(model):
-            for interval in model.intervals:
-                execute(model=model, since=interval.since, until=interval.until)
+        run_model(run, conn)          # @model_lifecycle takes the lock
     except ModelLockedError:
-        logger.warning("%s is locked; skipping", model.target.full_name)
+        logger.warning("%s is locked; skipping", run.model.target.full_name)
         continue
 ```
 
-`model_lock` is a **no-op** when `state is None` or `exclusive_run is False` (the default) — safe to wrap any model preventively; the flag on `State` is what actually decides. When `exclusive_run=True`, it takes a Postgres advisory lock keyed by the model's `full_name` and holds it for the entire loop, preventing any parallel processing on that model.
+With the default `allow_concurrent_runs=True`, no model-wide lock is taken and only the per-interval locks apply.
 
 ## Errors
 
 When an execute raises, `@state` does three things atomically:
 
-1. Insert a row into `<state_schema>.<target_name>_errors` with `full_name`, `error_type`, `error_message`, `traceback`, `created_at`.
+1. Insert a row into the shared central errors table (`z_bollhav.errors`, or `z_bollhav_<suffix>.errors`) with `full_name`, `run_id`, `error_type`, `error_message`, `traceback`, `created_at`.
 2. Flip the state row's `status` to `error`.
 3. Re-raise the original exception so the caller sees it.
 
-The errors table keeps full history across runs — joinable with the state table on `(since, until)` for per-interval inspection or on `run_id` for per-invocation lookups. The `full_name` column lets you `UNION ALL` across every model's errors table for a global view.
+The errors table keeps full history across runs for every model — joinable with a model's state table on `(since, until)` for per-interval inspection or on `run_id` for per-invocation lookups. Because it's a single shared table, a global view is just `SELECT … FROM z_bollhav.errors` filtered (or grouped) by `full_name` — no `UNION` needed.
 
 The one exception: if the staging flush already set state to `applied` (data is in target) and post-stage user code raises, we log the error but **do not** downgrade state to `error`. The write succeeded; the post-write code didn't.
 

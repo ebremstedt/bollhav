@@ -21,11 +21,11 @@ Because the dependency graph is [upstream contracts](UPSTREAM.md) baked into the
 ```python
 # main.py — the whole pipeline, locally
 @load_models
-def main(models, debug):
-    for model in models:        # already ordered by upstream
-        dsn = os.environ[model.target.dsn_env_var]
+def main(runs, debug):
+    for run in runs:            # already ordered by upstream
+        dsn = os.environ[run.model.target.dsn_env_var]
         with psycopg.connect(dsn, autocommit=True) as conn:
-            run_model(model, conn)   # @model_lifecycle does setup + gating
+            run_model(run, conn)   # @model_lifecycle does setup + gating
 ```
 
 ```bash
@@ -67,11 +67,39 @@ All three see the same `pending` rows, race per interval, and converge. Scale up
 | `STATE_DISABLED=true` | run the write path with no state DB (quick smoke test on a fresh DB) |
 | `STATE_MODE=bulldozer` | reset every state row and recompute from scratch |
 
-Inspect state directly between runs:
+Inspect state directly between runs. State tables are digest-named and live in the central `z_bollhav` schema (`z_bollhav_<suffix>` for a suffixed run), so find a model's table via the `library` registry, then read it:
 
 ```sql
-SELECT since, until, status FROM z_warehouse.daily_summary_state ORDER BY since;
+-- which table holds a model's state?
+SELECT state_schema, state_table FROM z_bollhav.library
+WHERE full_name = 'demo.warehouse.daily_summary';
+
+-- then read it (substitute the name from above)
+SELECT since, until, status FROM z_bollhav.<state_table> ORDER BY since;
+
+-- errors are one shared table, keyed by full_name
+SELECT full_name, error_type, error_message, created_at FROM z_bollhav.errors
+ORDER BY created_at DESC;
 ```
+
+## Tearing a test environment down
+
+A suffixed run isolates all its data + state under a branch namespace, so you can reset cleanly without touching prod:
+
+- **`clear_state()`** — drop one model's state table and delete its `library` / `errors` rows, leaving the env schema and the model's data intact. The next run rebuilds state from scratch and re-discovers every interval. Refuses on an unsuffixed (prod) model.
+- **`drop_environment(conn, models)`** — full teardown of a suffixed environment: each model's data schema (`warehouse_<suffix>`), its staging schema, and the shared `z_bollhav_<suffix>` state/library/errors schema. Drops **data too**. Refuses unless the models carry a schema suffix, so it can't target prod.
+
+```python
+from bollhav.postgres.state import PostgresState, drop_environment
+
+# reset just one model's state (keeps its data)
+PostgresState(model, conn).clear_state()
+
+# nuke the whole suffixed environment (data + state)
+drop_environment(conn, [run.model for run in runs])
+```
+
+Both require `SCHEMA_SUFFIX` to be set — by design, clearing prod state is not offered.
 
 ## See also
 

@@ -18,7 +18,7 @@ from bollhav.model import Kind
 
 Because kind is explicit, a forgotten `batching` can't silently turn a table into a whole-table load: `Kind.INTERVAL` without `batching` raises, and `Kind.MONOLITHIC` with `batching` raises.
 
-`model.intervals` yields one window per unit for `Kind.INTERVAL` models, or a single `None` for `Kind.MONOLITHIC` / `Kind.VIEW` — so the same loop runs the unit of work the right number of times.
+`run.intervals` (on the `ModelRun` from `@load_models`) yields one window per unit for `Kind.INTERVAL` models, or a single `None` for `Kind.MONOLITHIC` / `Kind.VIEW` — so the same loop runs the unit of work the right number of times.
 
 ## See also
 

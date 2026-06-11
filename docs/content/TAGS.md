@@ -108,9 +108,9 @@ The prefixes can be combined, at tag-level and group-level:
 The standard entry point is `@load_models`. It reads runtime overrides from env vars (see [Runtime overrides](DECORATORS.md#runtime-overrides)), discovers models under `folder`, filters by `TAGS`, topologically sorts them, and bakes the overrides into each model's `batching` / `target`, pairing each with the run's resolved `window` on the returned `ModelRun`. The discovered source models are not mutated.
 
 ```python
-from bollhav.model import Model, load_models
+from bollhav.model import ModelRun, load_models
 
 @load_models
-def main(models: list[Model], debug: bool) -> None:
-    for model in models:
+def main(runs: list[ModelRun], debug: bool) -> None:
+    for run in runs:
 ```

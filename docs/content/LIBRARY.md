@@ -53,7 +53,7 @@ The library is the most-shared bollhav-owned table: multiple pipelines, multiple
 
 `ensure_library` enforces this on every bootstrap: it checks `information_schema` for the columns the current code knows about and applies any missing ALTERs in-place. Each step is sentinel-gated so the migration runs at most once and is safe to retry.
 
-The same rule applies going forward to every bollhav-owned table that more than one pipeline touches (`z_<schema>_state`, `_errors`, the staging schema). If you need a destructive change, deprecate the old column over a release and remove it only after every deployed image has the new code.
+The same rule applies going forward to every bollhav-owned table that more than one pipeline touches — all of which live in the one central `z_bollhav` schema (`z_bollhav_<suffix>` for a suffixed run): the per-model digest-named state tables, the shared `errors` table, and the staging tables. If you need a destructive change, deprecate the old column over a release and remove it only after every deployed image has the new code.
 
 ## Opt-in summary
 

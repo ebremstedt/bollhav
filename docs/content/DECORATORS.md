@@ -16,7 +16,7 @@ Wraps your `main(models, debug)` entry-point. Reads every bollhav env var ([Env]
 
 ## `@model_lifecycle`
 
-Brackets one model's run: sets up assets and state, calls your function (which loops `model.intervals`), then tears down. Details: [Model lifecycle](#model-lifecycle).
+Brackets one model's run: sets up assets and state, calls your function (which loops `run.intervals`), then tears down. Details: [Model lifecycle](#model-lifecycle).
 
 ## `@execute_lifecycle`
 
@@ -26,16 +26,16 @@ State is **not** a decorator. It is opt-in per model via `state=State(...)` on t
 
 ## @load_models
 
-`@load_models` is the standard entry point — it wraps your `main(models, debug)` function and does everything needed to hand you a ready-to-run list of models.
+`@load_models` is the standard entry point — it wraps your `main(runs, debug)` function and does everything needed to hand you a ready-to-run list of `ModelRun`s.
 
 ```python
-from bollhav.model import Model, load_models
+from bollhav.model import ModelRun, load_models
 
 @load_models
-def main(models: list[Model], debug: bool) -> None:
-    for model in models:
-        for interval in model.intervals:
-            execute(model, interval, ...)
+def main(runs: list[ModelRun], debug: bool) -> None:
+    for run in runs:
+        for interval in run.intervals:
+            execute(run, interval, ...)
 
 
 if __name__ == "__main__":
@@ -58,7 +58,7 @@ When you call `main()`, the decorator runs the following steps **before** your f
 
    The chosen mode does not land on the model — it resolves the run's `[since, until)` **window** (from the mode + [Bounds](BOUNDS.md)), which is carried on the returned `ModelRun` as `run.window`, with `run.is_reload` / `run.is_latest` / `run.is_backfill` recording which mode resolved it.
 7. **If `DRY_RUN` (or `DRY_RUN_EXTRA`):** print the matched-model summary and **return without calling your `main()`**.
-8. **Otherwise: call your function** as `main(models=<resolved list>, debug=<DEBUG>)`.
+8. **Otherwise: call your function** as `main(runs=<resolved list>, debug=<DEBUG>)`.
 
 ### Calculating intervals
 
@@ -66,31 +66,31 @@ When you call `main()`, the decorator runs the following steps **before** your f
 
 ### Mental model
 
-> Env vars in → matched-and-overridden model list out → your code runs.
+> Env vars in → matched-and-overridden `ModelRun` list out → your code runs.
 
 You write models declaratively and a plain `main()` that loops over them. `@load_models` is the glue that turns the env into a concrete plan and gives it to you.
 
 ## Model lifecycle
 
-`@model_lifecycle` brackets **one model's run**: it sets up the assets and state, calls your function (which loops the units of work), then tears down. Wrap the function that loops `model.intervals`.
+`@model_lifecycle` brackets **one model's run**: it sets up the assets and state, calls your function (which loops the units of work), then tears down. Wrap the function that loops `run.intervals`.
 
 ```python
 @model_lifecycle
-def run_model(model, data_conn, state_conn=None):
-    for interval in model.intervals:
-        run_interval(model, interval, data_conn, state_conn)
+def run_model(run, data_conn, state_conn=None):
+    for interval in run.intervals:
+        run_interval(run, interval, data_conn, state_conn)
 ```
 
 `data_conn` is required (autocommit). `state_conn` defaults to `data_conn` — pass a separate one only for cross-DB state.
 
 ### What it does, in order
 
-1. **Model lock** — if stateful with `exclusive_run`, acquire it (released in a `finally`).
+1. **Model lock** — if stateful and `State(allow_concurrent_runs=False)`, acquire the model-wide advisory lock (released in a `finally`); raises `ModelLockedError` if another run holds it.
 2. **Assets** on `data_conn`:
    - `view` → `CREATE OR REPLACE VIEW` (that *is* the asset; no table DDL).
    - otherwise → create schema + table, then optional recreate / truncate / indexes / unique constraint / staging schema + orphan GC.
 3. **State** on `state_conn`, when stateful: ensure the library + state tables, register the model, then seed rows — one singleton for `monolithic` / `view`, one per window for `interval`.
-4. **Filter** — `model.intervals` is set to the *actionable* units only (skips already-`applied`), so your loop runs just the outstanding work.
+4. **Filter** — `run.intervals` is set to the *actionable* units only (skips already-`applied`), so your loop runs just the outstanding work.
 5. **Run** your function.
 6. **POST actions** on a clean return; **release** the model lock.
 
@@ -102,9 +102,9 @@ A stateless model skips steps 1, 3, 4 — just asset DDL, then your function.
 
 ```python
 @execute_lifecycle
-def run_interval(model, interval, data_conn, state_conn=None):
-    rows = read(model, interval)
-    write(model, rows, conn=data_conn, interval=interval)
+def run_interval(run, interval, data_conn, state_conn=None):
+    rows = read(run, interval)
+    write(run.model, rows, conn=data_conn, interval=interval)
 ```
 
 `interval` is a window for an `interval` model, or `None` for `monolithic` / `view`.
@@ -142,11 +142,11 @@ Models are static definitions of *where* and *how* data flows. At run time you c
 The standard entry point is the `@load_models` decorator. It reads the env vars below, validates them, and hands you a list of `ModelRun`s — each a matched model with the overrides already baked into its `batching` / `target`, paired with the run's resolved `window`.
 
 ```python
-from bollhav.model import Model, load_models
+from bollhav.model import ModelRun, load_models
 
 @load_models
-def main(models: list[Model], debug: bool) -> None:
-    for model in models:
+def main(runs: list[ModelRun], debug: bool) -> None:
+    for run in runs:
         ...
 
 if __name__ == "__main__":

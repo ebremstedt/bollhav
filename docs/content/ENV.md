@@ -64,7 +64,7 @@ One of `minimal` / `model` / `batch`, default `model`. Controls the verbosity of
 
 ## SCHEMA_SUFFIX
 
-String, optional. Overrides every model's `schema_suffix` for this run — typically used in dev (`SCHEMA_SUFFIX=$USER`) to isolate writes per developer.
+String, **required when `USE_SCHEMA_SUFFIX=true`** (the default) — an empty value then raises `MissingSchemaSuffixError`; set `USE_SCHEMA_SUFFIX=false` (prod) to make it optional and ignored. Overrides every model's `schema_suffix` for this run — typically used in dev (`SCHEMA_SUFFIX=$USER`) to isolate writes per developer.
 
 ## STATE_DISABLED
 
