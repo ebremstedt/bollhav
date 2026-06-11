@@ -97,6 +97,19 @@ class TestRefGated:
         m = _pg_model(suffix="pr123", upstream=[_gated("warehouse.orders")])
         assert m.ref("warehouse.orders") == '"warehouse_pr123"."orders"'
 
+    def test_suffix_false_forces_literal_even_when_gated(self) -> None:
+        # A gated upstream normally moves with the env suffix; suffix=False pins
+        # it to its literal, shared location across every environment.
+        m = _pg_model(suffix="pr123", upstream=[_gated("warehouse.orders")])
+        assert m.ref("warehouse.orders") == '"warehouse_pr123"."orders"'  # default
+        assert m.ref("warehouse.orders", suffix=False) == '"warehouse"."orders"'
+
+    def test_suffix_true_forces_suffix_even_when_ungated(self) -> None:
+        # Ungated refs are literal by default; suffix=True forces the env suffix.
+        m = _pg_model(suffix="pr123", upstream=[_src("raw.landing")])
+        assert m.ref("raw.landing") == '"raw"."landing"'  # default
+        assert m.ref("raw.landing", suffix=True) == '"raw_pr123"."landing"'
+
     def test_undeclared_raises(self) -> None:
         m = _pg_model(upstream=[_gated("warehouse.orders")])
         with pytest.raises(ValueError, match="not a declared input"):
