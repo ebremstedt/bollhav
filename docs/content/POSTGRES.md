@@ -7,7 +7,7 @@ Column definitions for Postgres targets.
 ## Usage
 
 ```python
-from bollhav import PostgresColumn, PostgresType
+from bollhav.postgres import PostgresColumn, PostgresType
 
 PostgresColumn(
     name="amount",

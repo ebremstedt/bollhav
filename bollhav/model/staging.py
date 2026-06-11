@@ -16,12 +16,15 @@ class Staging:
     isinstance-checks for its own fields.
 
     `schema` — override the default staging schema. When unset (the
-        normal case), staging tables live in `z_<target.schema_resolved>`
-        so bollhav-owned tables stay out of the user's schemas. Override
-        if your team has a different convention (e.g. everything in `ops`).
-    `table_prefix` — override the default `<target.name>_staging_`
-        prefix. Each run still appends its short `run_id` to disambiguate
-        concurrent or successive runs.
+        normal case), staging tables live in the central bollhav schema
+        (`z_bollhav`, or `z_bollhav_<suffix>` under a SCHEMA_SUFFIX run —
+        same as state/library/errors), so bollhav-owned tables stay out of
+        the user's schemas. Override if your team has a different
+        convention (e.g. everything in `ops`).
+    `table_prefix` — override the default `<per-model stem>_stg_` prefix
+        (a devowelled catalog/schema/name stem + full-name digest, so GC
+        scopes to one model in the shared schema). Each run still appends
+        its short `run_id` to disambiguate concurrent or successive runs.
     `keep_after_apply` — when False (default), each interval's staging
         table is dropped inside the flush transaction, so staging always
         self-cleans on the write connection. Set True to keep tables
