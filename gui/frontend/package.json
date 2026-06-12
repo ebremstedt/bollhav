@@ -1,0 +1,17 @@
+{
+  "name": "bollhav-lineage-frontend",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@dagrejs/dagre": "^3.0.0",
+    "@sveltejs/vite-plugin-svelte": "^7.1.2",
+    "@xyflow/svelte": "^1.6.0",
+    "svelte": "^5.56.2",
+    "vite": "^8.0.16"
+  }
+}
