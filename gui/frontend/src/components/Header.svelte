@@ -15,7 +15,7 @@
 
 <header>
   <strong>Lineage</strong>
-  <span class="hint">colour = kind · click a model for runs &amp; errors</span>
+  <span class="hint">click a model for runs &amp; errors</span>
   <input
     class="search"
     list="model-list"
@@ -34,7 +34,20 @@
   {#if view.focused}
     <button class="clear" onclick={clearFocus}>✕ show all</button>
   {/if}
-  <button class="toggle" onclick={refresh} title="reload the graph">⟳ refresh</button>
+  <span
+    class="tip-wrap"
+    data-tip="Reload the graph. Limited to once every 5 seconds."
+  >
+    <button class="toggle" onclick={refresh} disabled={!view.canRefresh}>
+      {#if view.refreshing}
+        <span class="ico spin">⟳</span> refreshing…
+      {:else}
+        <span class="ico">⟳</span> refresh{view.cooldown > 0
+          ? ` (${view.cooldown})`
+          : ""}
+      {/if}
+    </button>
+  </span>
   <button class="toggle" onclick={() => (dark = !dark)}>
     {dark ? "☀ light" : "☾ dark"}
   </button>
@@ -63,6 +76,54 @@
     background: var(--control-bg);
     color: var(--control-fg);
     cursor: pointer;
+  }
+  .toggle:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+  }
+  /* custom hover tooltip, dropped below the button (native title is flaky and
+     never shows while the button is disabled during the cooldown) */
+  .tip-wrap {
+    position: relative;
+    display: inline-flex;
+  }
+  .tip-wrap:hover::after {
+    content: attr(data-tip);
+    position: absolute;
+    top: calc(100% + 9px);
+    right: 0;
+    width: 230px;
+    white-space: normal;
+    background: #222;
+    color: #fff;
+    font-size: 12px;
+    line-height: 1.35;
+    padding: 7px 9px;
+    border-radius: 6px;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3);
+    z-index: 50;
+    pointer-events: none;
+  }
+  .tip-wrap:hover::before {
+    content: "";
+    position: absolute;
+    top: calc(100% + 3px);
+    right: 14px;
+    border: 6px solid transparent;
+    border-bottom-color: #222;
+    z-index: 50;
+    pointer-events: none;
+  }
+  .ico {
+    display: inline-block;
+  }
+  .ico.spin {
+    animation: spin 0.7s linear infinite;
+  }
+  @keyframes spin {
+    to {
+      transform: rotate(360deg);
+    }
   }
   .search {
     margin-left: auto;
