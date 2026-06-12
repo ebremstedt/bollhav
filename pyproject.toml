@@ -26,3 +26,13 @@ bollhav-tui = "bollhav._tui_entry:main"
 [project.urls]
 Homepage = "https://github.com/ebremstedt/bollhav"
 Issues = "https://github.com/ebremstedt/bollhav/issues"
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+# Only the bollhav library is the package. The repo also holds gui/, tests/,
+# docs/, examples/ at the top level — without this, setuptools' flat-layout
+# auto-discovery sees multiple top-level packages (gui + bollhav) and aborts.
+[tool.setuptools.packages.find]
+include = ["bollhav*"]
