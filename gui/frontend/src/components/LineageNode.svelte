@@ -1,9 +1,22 @@
 <script>
   import { Handle, Position } from "@xyflow/svelte";
-  import { selection } from "../lib/selection.svelte.js";
+  import { selection, info } from "../lib/selection.svelte.js";
+  import { view } from "../lib/view.svelte.js";
   import { KIND_COLOR, SRC_COLOR } from "../lib/constants.js";
 
   let { data } = $props();
+
+  // Site-wide name presentation. "thicken" stacks a dotted `catalog.schema.table`
+  // name one segment per line (each non-final segment keeps its trailing dot);
+  // "lengthen" leaves it on one line. Rendered with `white-space: pre-line`.
+  let displayName = $derived(
+    view.nameStyle === "thicken"
+      ? data.name
+          .split(".")
+          .map((seg, i, arr) => (i < arr.length - 1 ? seg + "." : seg))
+          .join("\n")
+      : data.name,
+  );
 
   // readable text colour (dark/white) for a solid label background — keeps the
   // light-green and yellow labels legible.
@@ -20,6 +33,13 @@
   let accent = $derived(
     isModel ? KIND_COLOR[data.kind] || "#888" : SRC_COLOR[data.kind] || "#888",
   );
+
+  // Open the LEFT metadata panel for this model (the ⓘ badge). Stop the click
+  // bubbling so it doesn't also trigger the card's open() / right panel.
+  function openInfo(e) {
+    e?.stopPropagation();
+    info.name = data.name;
+  }
 
   function open() {
     if (isModel) show("state");
@@ -46,16 +66,26 @@
   tabindex="0"
   onkeydown={(e) => e.key === "Enter" && open()}
 >
-  <span class="kind-label" style="background:{accent};color:{textOn(accent)}">
-    {data.kind}
-  </span>
+  <div class="tag-row">
+    <span class="kind-label" style="background:{accent};color:{textOn(accent)}">
+      {data.kind}
+    </span>
+    {#if isModel}
+      <button
+        class="info"
+        aria-label="model details"
+        title="model details"
+        onclick={openInfo}
+      >i</button>
+    {/if}
+  </div>
   {#if data.hasError}
     <span class="err-dot" title="unresolved error on a recent run"></span>
   {/if}
   {#if data.running}
     <span class="run-dot" title="a run is in progress"></span>
   {/if}
-  <div class="name">{data.name}</div>
+  <div class="name">{displayName}</div>
   {#if isModel}
     <div class="actions">
       <button class="mini runs" onclick={(e) => show("state", e)}>runs</button>
@@ -77,17 +107,44 @@
     box-shadow: var(--node-shadow);
     font-family: system-ui, sans-serif;
   }
-  /* kind tag, popped out of the top-left corner (mirrors the err-dot) */
-  .kind-label {
+  /* kind tag + info badge, popped out of the top-left corner */
+  .tag-row {
     position: absolute;
     top: -9px;
     left: -6px;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    z-index: 2;
+  }
+  .kind-label {
     font-size: 10px;
     font-weight: 600;
     padding: 1px 7px;
     border-radius: 10px;
     box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
     white-space: nowrap;
+  }
+  /* circled "i" sitting just to the right of the kind pill */
+  .info {
+    width: 15px;
+    height: 15px;
+    padding: 0;
+    line-height: 13px;
+    font-size: 10px;
+    font-weight: 700;
+    font-style: italic;
+    font-family: Georgia, "Times New Roman", serif;
+    color: var(--node-fg);
+    background: var(--node-bg);
+    border: 1px solid var(--control-border);
+    border-radius: 50%;
+    cursor: help;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+  }
+  .info:hover {
+    border-color: #2f8fff;
+    color: #2f8fff;
   }
   .err-dot {
     position: absolute;
@@ -169,6 +226,8 @@
     font-weight: 600;
     color: var(--node-fg);
     margin-bottom: 5px;
+    white-space: pre-line;
+    line-height: 1.25;
   }
   .actions {
     display: flex;

@@ -59,6 +59,15 @@ def graph():
         return registry.get_graph(c)
 
 
+@app.get("/model/{full_name}")
+def model(full_name: str):
+    with _conn() as c:
+        result = registry.get_model_metadata(c, full_name)
+    if result is None:
+        raise HTTPException(status_code=404, detail=f"{full_name!r} is not registered")
+    return result
+
+
 @app.get("/errors")
 def errors(full_name: str | None = None, limit: int = 100):
     with _conn() as c:

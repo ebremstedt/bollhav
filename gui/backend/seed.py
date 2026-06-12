@@ -1,36 +1,39 @@
-"""Seed a realistic raw -> clean -> consume analytics DAG into the bollhav
-library so the lineage GUI has something true-to-life to show.
+"""Seed a generic clean -> consume DAG into the bollhav library so the lineage
+GUI shows true-to-life, deliberately long 3-part `catalog.schema.table` names
+(good for exercising the name presentation toggle).
 
-Three schema layers (raw -> clean -> consume), a mix of contract kinds
-(interval / view / monolithic) and source kinds (api / file / model),
-plus per-model run history and a few historic errors sprinkled in.
-Wipes z_bollhav first for a clean graph.
+Managed models live in `AnalyticsLakehouse.curated_clean_entities` /
+`AnalyticsLakehouse.consumption_reporting_marts` and read from unmanaged
+`UpstreamSourceWarehouse.raw_operational_datamart.*` source tables. A mix of
+contract kinds (interval / monolithic / view), per-model run history, and a few
+historic errors. All names are invented placeholders. Wipes z_bollhav first.
 """
 
 import os
 import uuid
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 
 import psycopg
 from psycopg import sql
 
 from bollhav.model import (
     Batch,
+    Bounds,
+    Database,
     IntervalContract,
     Kind,
     MonolithicContract,
     Model,
     Source,
-    SourceApi,
-    SourceFile,
     SourceModel,
     State,
     Target,
     TimeChunking,
     ViewContract,
+    WriteMode,
 )
 from bollhav.model.intervals import TZInterval  # noqa: E402
+from bollhav.postgres import PostgresColumn, PostgresType  # noqa: E402
 from bollhav.postgres.state import (  # noqa: E402
     ERRORS_TABLE,
     LIBRARY_SCHEMA,
@@ -42,78 +45,131 @@ DSN = os.environ.get(
 )
 NOW = datetime.now(tz=timezone.utc)
 
-# bollhav 3.0 source kinds are api / file / model. The old DATABASE kind is
-# now a SourceModel (an external relational table read as a source), and the
-# STREAM kind was dropped — we render the kafka source as an api below.
-API, DB, FILE, STREAM = "api", "db", "file", "stream"
+# Demo namespaces — deliberately long, generic placeholders. Managed models
+# live in the analytics lakehouse; their unmanaged source tables live in an
+# upstream source warehouse.
+SRC_CATALOG, SRC_SCHEMA = "UpstreamSourceWarehouse", "raw_operational_datamart"
+DW_CATALOG = "AnalyticsLakehouse"
+CLEAN, CONSUME = "curated_clean_entities", "consumption_reporting_marts"
 
 
-def _source(name, tag):
-    """Build an ungated Source (external input) from a demo tag."""
-    if tag in (API, STREAM):
-        return Source(name, type=SourceApi())
-    if tag == DB:
-        return Source(name, type=SourceModel(schema=name.split(".", 1)[0]))
-    if tag == FILE:
-        return Source(name, type=SourceFile(path=Path(name)))
-    raise ValueError(f"unknown source tag {tag!r}")
+def clean(t: str) -> str:
+    return f"{DW_CATALOG}.{CLEAN}.{t}"
 
 
-# (full_name, kind, [upstream full_names], [(source_name, source_kind)])
+def consume(t: str) -> str:
+    return f"{DW_CATALOG}.{CONSUME}.{t}"
+
+
+def cha(t: str) -> str:
+    return f"{SRC_CATALOG}.{SRC_SCHEMA}.{t}"
+
+
+def _split3(full: str) -> tuple[str | None, str | None, str]:
+    """catalog, schema, table from a dotted name (catalog optional)."""
+    parts = full.split(".")
+    if len(parts) >= 3:
+        return parts[0], parts[1], ".".join(parts[2:])
+    if len(parts) == 2:
+        return None, parts[0], parts[1]
+    return None, None, parts[0]
+
+
+# (full_name, kind, [managed upstream full_names], [unmanaged source full_names])
+# Every clean model reads its same-named CentricityDW.Datamart01 table; consume
+# models derive from clean / consume models. Sources are unmanaged relational
+# tables (the 'model' source kind — yellow).
 SPEC = [
-    # RAW — ingest from external sources
-    ("raw.orders", Kind.INTERVAL, [], [("shopify.orders", API)]),
-    ("raw.payments", Kind.INTERVAL, [], [("stripe.charges", API)]),
-    ("raw.customers", Kind.INTERVAL, [], [("app_db.customers", DB)]),
-    ("raw.events", Kind.INTERVAL, [], [("kafka.clickstream", STREAM)]),
-    ("raw.marketing", Kind.INTERVAL, [], [("files/marketing_spend.csv", FILE)]),
-    # CLEAN — typed / deduped
-    ("clean.orders", Kind.INTERVAL, ["raw.orders"], []),
-    ("clean.payments", Kind.INTERVAL, ["raw.payments"], []),
-    ("clean.customers", Kind.INTERVAL, ["raw.customers"], []),
-    ("clean.events", Kind.INTERVAL, ["raw.events"], []),
-    ("clean.marketing", Kind.INTERVAL, ["raw.marketing"], []),
-    # CONSUME — facts, dimensions, reporting, metrics
+    # CLEAN — one managed model per upstream source table
     (
-        "consume.fct_orders",
+        clean("CustomerInteractionEngagementEventFact"),
         Kind.INTERVAL,
-        ["clean.orders", "clean.payments", "clean.events"],
+        [],
+        [cha("CustomerInteractionEngagementEventFact")],
+    ),
+    (
+        clean("SubscriptionBillingLifecycleCycleFact"),
+        Kind.INTERVAL,
+        [],
+        [cha("SubscriptionBillingLifecycleCycleFact")],
+    ),
+    (
+        clean("OrderFulfilmentShipmentMovementFact"),
+        Kind.INTERVAL,
+        [],
+        [cha("OrderFulfilmentShipmentMovementFact")],
+    ),
+    (
+        clean("ProductCatalogReferenceHierarchyDimension"),
+        Kind.MONOLITHIC,
+        [],
+        [cha("ProductCatalogReferenceHierarchyDimension")],
+    ),
+    (
+        clean("GeographicRegionTerritoryHierarchyDimension"),
+        Kind.MONOLITHIC,
+        [],
+        [cha("GeographicRegionTerritoryHierarchyDimension")],
+    ),
+    (
+        clean("MarketingCampaignChannelBridgeMapping"),
+        Kind.MONOLITHIC,
+        [],
+        [cha("MarketingCampaignChannelBridgeMapping")],
+    ),
+    # CONSUME — derived from the clean layer
+    (
+        consume("DailyConsolidatedRevenueAggregateFact"),
+        Kind.INTERVAL,
+        [
+            clean("CustomerInteractionEngagementEventFact"),
+            clean("SubscriptionBillingLifecycleCycleFact"),
+            clean("MarketingCampaignChannelBridgeMapping"),
+        ],
         [],
     ),
-    ("consume.dim_customers", Kind.MONOLITHIC, ["clean.customers"], []),
     (
-        "consume.exec_dashboard",
+        consume("CustomerThreeSixtyEnrichedProfileDimension"),
+        Kind.MONOLITHIC,
+        [
+            clean("ProductCatalogReferenceHierarchyDimension"),
+            clean("GeographicRegionTerritoryHierarchyDimension"),
+        ],
+        [],
+    ),
+    (
+        consume("ExecutivePerformanceOverviewSummaryView"),
         Kind.VIEW,
-        ["consume.fct_orders", "consume.dim_customers", "clean.marketing"],
+        [
+            consume("DailyConsolidatedRevenueAggregateFact"),
+            consume("CustomerThreeSixtyEnrichedProfileDimension"),
+        ],
         [],
-    ),
-    (
-        "consume.kpi_summary",
-        Kind.INTERVAL,
-        ["consume.exec_dashboard", "consume.fct_orders"],
-        [("files/sales_targets.csv", FILE)],
     ),
 ]
 
-# Historic (already-resolved) errors to sprinkle in — these landed in the
-# errors log but the interval later succeeded, so they DON'T light the red
-# dot (state is applied). consume.kpi_summary gets a separate *unresolved*
-# error in _seed_runs to demo the dot.
+# Historic (already-resolved) errors — logged, but the interval later
+# succeeded, so they DON'T light the red dot. DailyConsolidatedRevenueAggregateFact
+# gets a separate *unresolved* error in _seed_runs to demo the dot.
 # (full_name, error_type, message, days_ago)
 ERRORS = [
-    ("raw.events", "ConnectionResetError", "kafka consumer dropped mid-batch", 11),
     (
-        "raw.marketing",
-        "FileNotFoundError",
-        "marketing_spend.csv missing for that day",
+        clean("ProductCatalogReferenceHierarchyDimension"),
+        "ConnectionResetError",
+        "source connection dropped mid-read",
+        11,
+    ),
+    (
+        clean("OrderFulfilmentShipmentMovementFact"),
+        "ValueError",
+        "null fulfilment key after join",
         8,
     ),
-    ("clean.customers", "ValueError", "null personal number after pseudonymisation", 5),
     (
-        "consume.fct_orders",
+        clean("SubscriptionBillingLifecycleCycleFact"),
         "OperationalError",
         "deadlock detected; interval retried",
-        2,
+        5,
     ),
 ]
 
@@ -125,25 +181,84 @@ _CONTRACT = {
 }
 
 
-def _build(name, kind, upstream_names, sources):
-    schema, table = name.split(".", 1)
-    # Lineage demo: a bare target (no database/columns) keeps full_name a
-    # consistent `schema.table` for every model. A database-backed target in
-    # bollhav 3.0 requires a catalog and so gets a 3-part `catalog.schema.table`
-    # name — which would desync the table vs. view nodes in the graph.
-    target = Target(name=table, schema=schema, dsn_env_var="TARGET_DSN")
-    # bollhav 3.0: upstreams and sources share one `upstream` list of Sources.
-    # A managed upstream model is a gated SourceModel carrying a contract (its
-    # kind picks how satisfaction is resolved); an external input is an ungated
-    # Source typed by its provenance (api / file / model).
+# A generic, deliberately wordy column set so the ⓘ tooltip has real columns
+# (with PK / UQ markers and the "+N more" cap) to show.
+def _demo_columns():
+    return [
+        PostgresColumn(
+            name="surrogate_warehouse_key_id",
+            data_type=PostgresType.BIGINT,
+            nullable=False,
+            primary_key=True,
+        ),
+        PostgresColumn(
+            name="business_natural_identifier_code",
+            data_type=PostgresType.TEXT,
+            nullable=False,
+            unique=True,
+        ),
+        PostgresColumn(
+            name="effective_valid_from_timestamp",
+            data_type=PostgresType.TIMESTAMPTZ,
+            nullable=False,
+        ),
+        PostgresColumn(
+            name="effective_valid_until_timestamp", data_type=PostgresType.TIMESTAMPTZ
+        ),
+        PostgresColumn(
+            name="recorded_measure_amount_value", data_type=PostgresType.NUMERIC
+        ),
+        PostgresColumn(name="source_system_origin_label", data_type=PostgresType.TEXT),
+        PostgresColumn(
+            name="ingestion_batch_sequence_number", data_type=PostgresType.BIGINT
+        ),
+        PostgresColumn(
+            name="is_current_active_record_flag", data_type=PostgresType.BOOLEAN
+        ),
+        PostgresColumn(
+            name="data_quality_assessment_score", data_type=PostgresType.NUMERIC
+        ),
+        PostgresColumn(
+            name="last_modified_audit_timestamp", data_type=PostgresType.TIMESTAMPTZ
+        ),
+    ]
+
+
+def _build(full_name, kind, upstream_names, source_names):
+    cat, schema, table = _split3(full_name)
+    layer = "consumption reporting" if schema == CONSUME else "curated clean"
+    description = f"{kind.value.title()} model in the {layer} layer (demo)."
+    # A view has no columns/write_mode; tables carry the demo columns so the
+    # tooltip can show them. A bare/database target both keep a catalog, so
+    # full_name stays a 3-part catalog.schema.table for every node.
+    if kind is Kind.VIEW:
+        target = Target(
+            name=table, schema=schema, catalog=cat, dsn_env_var="TARGET_DSN"
+        )
+    else:
+        target = Target(
+            name=table,
+            schema=schema,
+            catalog=cat,
+            database=Database.POSTGRES,
+            dsn_env_var="TARGET_DSN",
+            write_mode=WriteMode.UPSERT_NO_DELETE,
+            columns=_demo_columns(),
+        )
+    # Managed upstream models are gated SourceModels carrying a contract (kind
+    # decides satisfaction); unmanaged tables are ungated relational
+    # SourceModels (the 'model' source kind).
     upstream = [
         Source(
             u,
-            type=SourceModel(schema=u.split(".", 1)[0]),
+            type=SourceModel(catalog=_split3(u)[0], schema=_split3(u)[1]),
             contract=_CONTRACT[_KINDS[u]](),
         )
         for u in upstream_names
-    ] + [_source(n, tag) for n, tag in sources]
+    ] + [
+        Source(s, type=SourceModel(catalog=_split3(s)[0], schema=_split3(s)[1]))
+        for s in source_names
+    ]
     return Model(
         target=target,
         kind=kind,
@@ -152,6 +267,10 @@ def _build(name, kind, upstream_names, sources):
         ),
         state=State(),
         upstream=upstream,
+        description=description,
+        bounds=(
+            Bounds(begin=NOW - timedelta(days=60)) if kind is Kind.INTERVAL else None
+        ),
     )
 
 
@@ -184,7 +303,7 @@ def _seed_runs(model, conn, *, error_latest=False, running_latest=False):
                 run_id=rid,
                 interval=ivs[-1],
                 error_type="AssertionError",
-                error_message="revenue total below sanity threshold",
+                error_message="case count below sanity threshold",
                 traceback_text="Traceback ...\nAssertionError: below threshold",
                 update_state=True,
             )
@@ -237,13 +356,15 @@ def main() -> None:
             _seed_runs(
                 model,
                 conn,
-                error_latest=(name == "consume.kpi_summary"),
-                running_latest=(name == "clean.orders"),
+                error_latest=(name == consume("DailyConsolidatedRevenueAggregateFact")),
+                running_latest=(
+                    name == clean("CustomerInteractionEngagementEventFact")
+                ),
             )
         _seed_errors(conn)
         conn.commit()
     print(
-        f"seeded {len(SPEC)} models (raw -> clean -> consume) "
+        f"seeded {len(SPEC)} models (clean -> consume) "
         f"with run history and {len(ERRORS)} historic errors"
     )
 

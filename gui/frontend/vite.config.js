@@ -19,6 +19,7 @@ export default defineConfig({
       "/lineage": API,
       "/state": API,
       "/models": API,
+      "/model": API,
       "/downstreams": API,
       "/errors": API,
     },

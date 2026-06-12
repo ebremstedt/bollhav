@@ -1,5 +1,11 @@
 <script>
-  import { view, applyFilter, clearFocus, refresh } from "../lib/view.svelte.js";
+  import {
+    view,
+    applyFilter,
+    clearFocus,
+    refresh,
+    setNameStyle,
+  } from "../lib/view.svelte.js";
 
   let { dark = $bindable() } = $props();
 
@@ -46,6 +52,18 @@
           ? ` (${view.cooldown})`
           : ""}
       {/if}
+    </button>
+  </span>
+  <span
+    class="tip-wrap"
+    data-tip="How model & source names are shown: Lengthen (one line) or Thicken (one dotted segment per line)."
+  >
+    <button
+      class="toggle"
+      onclick={() =>
+        setNameStyle(view.nameStyle === "thicken" ? "lengthen" : "thicken")}
+    >
+      {view.nameStyle === "thicken" ? "⤢ Lengthen" : "≣ Thicken"}
     </button>
   </span>
   <button class="toggle" onclick={() => (dark = !dark)}>

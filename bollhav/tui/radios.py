@@ -87,3 +87,20 @@ class StateRadio(ChoiceRadio):
 
     def __init__(self, default: str = "discover", id: str | None = None) -> None:
         super().__init__(default, id=id)
+
+
+class NameStyleRadio(ChoiceRadio):
+    """Site-wide presentation of dotted model / upstream names:
+
+    * `lengthen` — one line: `catalog.schema.table` (the default).
+    * `thicken`  — stacked, one dotted segment per line (taller rows):
+                       catalog.
+                       schema.
+                       table
+    """
+
+    _OPTIONS = ["lengthen", "thicken"]
+    _LABELS = ["Lengthen", "Thicken"]
+
+    def __init__(self, default: str = "lengthen", id: str | None = None) -> None:
+        super().__init__(default, id=id)

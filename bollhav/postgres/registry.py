@@ -238,7 +238,8 @@ def get_graph(conn: "psycopg.Connection") -> dict:
     rows = conn.execute(
         sql.SQL(
             "SELECT full_name, kind, model_type, upstream, sources, "
-            "state_schema, state_table FROM {schema}.{table} ORDER BY full_name"
+            "state_schema, state_table, last_seen FROM {schema}.{table} "
+            "ORDER BY full_name"
         ).format(
             schema=sql.Identifier(LIBRARY_SCHEMA),
             table=sql.Identifier(LIBRARY_TABLE),
@@ -247,12 +248,27 @@ def get_graph(conn: "psycopg.Connection") -> dict:
 
     nodes: dict[str, dict] = {}
     edges: list[dict] = []
-    for full_name, kind, model_type, upstream, sources, st_schema, st_table in rows:
+    for (
+        full_name,
+        kind,
+        model_type,
+        upstream,
+        sources,
+        st_schema,
+        st_table,
+        last_seen,
+    ) in rows:
         nodes[full_name] = {
             "name": full_name,
             "type": "model",
             "kind": kind,
             "model_type": model_type,
+            # lineage inputs (also encoded as edges) — exposed per-node so the
+            # GUI can show them in a metadata tooltip without re-deriving from
+            # the edge list.
+            "upstream": list(upstream),
+            "sources": sources or [],
+            "last_seen": last_seen.isoformat() if last_seen is not None else None,
             # current (unresolved) failure: a state row still in 'error'.
             # A successful rerun flips that row to 'applied', clearing this.
             "has_error": _has_status(conn, st_schema, st_table, "error"),
@@ -268,6 +284,23 @@ def get_graph(conn: "psycopg.Connection") -> dict:
                 {"from": name, "to": full_name, "relation": "source", "kind": src_kind}
             )
     return {"nodes": list(nodes.values()), "edges": edges}
+
+
+def get_model_metadata(conn: "psycopg.Connection", full_name: str) -> dict | None:
+    """The model's stored property bag (`library.metadata`) — write_mode,
+    tags, description, bounds, batching, columns, … — or `None` when the model
+    isn't registered. The bag is `{}` for rows written by a bollhav old enough
+    to predate the `metadata` column (re-running that pipeline backfills it)."""
+    if not _table_exists(conn, LIBRARY_SCHEMA, LIBRARY_TABLE):
+        return None
+    row = conn.execute(
+        sql.SQL("SELECT metadata FROM {schema}.{table} WHERE full_name = %s").format(
+            schema=sql.Identifier(LIBRARY_SCHEMA),
+            table=sql.Identifier(LIBRARY_TABLE),
+        ),
+        [full_name],
+    ).fetchone()
+    return row[0] if row is not None else None
 
 
 def get_errors(
