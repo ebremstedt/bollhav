@@ -181,6 +181,7 @@ CREATE TABLE IF NOT EXISTS {schema}.{table} (
     state_schema   TEXT,
     state_table    TEXT,
     kind           TEXT NOT NULL DEFAULT 'interval',
+    metadata       JSONB NOT NULL DEFAULT '{{}}'::jsonb,
     last_seen      TIMESTAMPTZ NOT NULL DEFAULT now()
 )
 """
@@ -205,6 +206,7 @@ class LibraryEntry(NamedTuple):
     state_table: str | None
     kind: str
     sources: list[dict] = []
+    metadata: dict = {}
 
 
 class PostgresState:
@@ -1152,6 +1154,19 @@ class PostgresState:
                 table=sql.Identifier(LIBRARY_TABLE),
             )
         )
+        # `metadata` — a flexible JSON bag of model properties (write_mode,
+        # tags, description, bounds, batching, columns, …). JSON so new
+        # properties can be added later without another schema migration.
+        # Additive, safe default so older images keep registering.
+        conn.execute(
+            sql.SQL(
+                "ALTER TABLE {schema}.{table} "
+                "ADD COLUMN IF NOT EXISTS metadata JSONB NOT NULL DEFAULT '{{}}'::jsonb"
+            ).format(
+                schema=sql.Identifier(self._library_schema()),
+                table=sql.Identifier(LIBRARY_TABLE),
+            )
+        )
         has_model_type = conn.execute(
             "SELECT 1 FROM information_schema.columns "
             "WHERE table_schema = %s AND table_name = %s "
@@ -1223,6 +1238,59 @@ class PostgresState:
                     col,
                 )
 
+    @staticmethod
+    def _build_metadata(model: "Model") -> dict:
+        """A JSON-serialisable bag of the model's properties for the library
+        `metadata` column. Stored as JSON so new keys can be added later
+        without another schema migration. Everything here is derived from the
+        immutable `Model` definition (not run state)."""
+        t = model.target
+
+        def _col(c) -> dict:
+            dt = getattr(c, "data_type", None)
+            return {
+                "name": c.name,
+                "type": getattr(dt, "value", None) or getattr(dt, "name", None),
+                "nullable": getattr(c, "nullable", None),
+                "primary_key": getattr(c, "primary_key", False),
+                "unique": getattr(c, "unique", False),
+                "length": getattr(c, "length", None),
+                "precision": getattr(c, "precision", None),
+                "scale": getattr(c, "scale", None),
+            }
+
+        bounds = model.bounds
+        batching = model.batching
+        return {
+            "write_mode": getattr(t.write_mode, "value", None),
+            "enabled": model.enabled,
+            "description": model.description,
+            "dsn_env_var": t.dsn_env_var,
+            "catalog": t.catalog,
+            "schema": t.schema,
+            "table": t.name,
+            "tags": sorted(model.tags),
+            "partitioned_by": t.partitioned_by,
+            "staging": t.stage,
+            "primary_key": [c.name for c in t.primary_key_columns],
+            "unique_columns": [c.name for c in t.unique_columns],
+            "columns": [_col(c) for c in t.columns],
+            "bounds": {
+                "begin": bounds.begin.isoformat() if bounds and bounds.begin else None,
+                "end": bounds.end.isoformat() if bounds and bounds.end else None,
+            },
+            "batching": (
+                {
+                    "chunk": batching.time.chunk,
+                    "window": batching.time.window,
+                    "lookback": batching.time.lookback,
+                    "size": batching.size,
+                }
+                if batching is not None
+                else None
+            ),
+        }
+
     def register_model(self) -> None:
         """Upsert this model's library row. Overwrites every field
         except `full_name` (the PK) and `last_seen` (always `now()`).
@@ -1243,8 +1311,8 @@ class PostgresState:
         upsert = sql.SQL(
             "INSERT INTO {schema}.{table} "
             "(full_name, upstream, model_type, state_schema, state_table, kind, "
-            "sources, last_seen) "
-            "VALUES (%s, %s, %s, %s, %s, %s, %s, now()) "
+            "sources, metadata, last_seen) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, now()) "
             "ON CONFLICT (full_name) DO UPDATE SET "
             "upstream = EXCLUDED.upstream, "
             "model_type = EXCLUDED.model_type, "
@@ -1252,6 +1320,7 @@ class PostgresState:
             "state_table = EXCLUDED.state_table, "
             "kind = EXCLUDED.kind, "
             "sources = EXCLUDED.sources, "
+            "metadata = EXCLUDED.metadata, "
             "last_seen = EXCLUDED.last_seen"
         ).format(
             schema=sql.Identifier(self._library_schema()),
@@ -1268,6 +1337,7 @@ class PostgresState:
                     state_table,
                     model.kind.value,
                     Jsonb(model.source_specs),
+                    Jsonb(self._build_metadata(model)),
                 ],
             )
         logger.debug(

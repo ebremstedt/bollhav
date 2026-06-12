@@ -18,6 +18,16 @@ if TYPE_CHECKING:
     from bollhav.tui.app import BollhavApp
 
 
+def present_name(name: str, style: str) -> str:
+    """Present a dotted `catalog.schema.table` name per the site-wide style.
+
+    `lengthen` keeps it on one line; `thicken` stacks one dotted segment per
+    line (each non-final segment keeps its trailing dot)."""
+    if style == "thicken":
+        return ".\n".join(name.split("."))
+    return name
+
+
 class ExploreTab(Vertical):
     """Board + detail pane (top) and an output log (bottom)."""
 
@@ -105,16 +115,19 @@ class ExploreTab(Vertical):
         table = self.query_one("#board", DataTable)
         table.clear()  # rows only; columns kept
         self.row_keys = []
+        style = getattr(self.app, "name_style", "lengthen")
         for i, m in enumerate(self.board.models, start=1):
             key = f"BOL-{i}"
             self.row_keys.append(key)
             state = self.status.setdefault(key, "todo")
+            name = present_name(m.target.full_name, style)
             table.add_row(
                 Text(key, style="bold cyan"),
-                Text(m.target.full_name),
+                Text(name),
                 Text(TYPE_ICON.get(m.kind.name, m.kind.name)),
                 pill(state),
                 key=key,
+                height=name.count("\n") + 1,
             )
 
     # ── selection → detail pane ─────────────────────────────────────────
@@ -125,7 +138,10 @@ class ExploreTab(Vertical):
     def _show_detail(self, row: int) -> None:
         m = self.board.models[row]
         t = m.target
+        style = getattr(self.app, "name_style", "lengthen")
         up = [s.name for s in m.upstream if not s.name.startswith("unknown-")]
+        sep = "\n" if style == "thicken" else ", "
+        up_str = sep.join(present_name(n, style) for n in up) if up else "—"
         b = m.bounds
         bounds = (
             f"{b.begin:%Y-%m-%d} → {b.end:%Y-%m-%d}"
@@ -134,14 +150,14 @@ class ExploreTab(Vertical):
         )
         wm = getattr(t.write_mode, "name", str(getattr(t, "write_mode", "—")))
         lines = [
-            f"[b bright_red]{self.row_keys[row]}[/]  [b red]{t.full_name}[/]",
+            f"[b bright_red]{self.row_keys[row]}[/]  [b red]{present_name(t.full_name, style)}[/]",
             "",
             f"[b bright_red]Type[/]       [red]{TYPE_ICON.get(m.kind.name, m.kind.name)}[/]",
             f"[b bright_red]Schema[/]     [red]{t.schema}[/]",
             f"[b bright_red]Catalog[/]    [red]{t.catalog}[/]",
             f"[b bright_red]Write mode[/] [red]{wm}[/]",
             f"[b bright_red]Bounds[/]     [red]{bounds}[/]",
-            f"[b bright_red]Upstream[/]   [red]{', '.join(up) if up else '—'}[/]",
+            f"[b bright_red]Upstream[/]   [red]{up_str}[/]",
             f"[b bright_red]Status[/]     [red]{STATUS[self.status[self.row_keys[row]]][0]}[/]",
             "",
             f"[red]{m.description or 'no description'}[/]",

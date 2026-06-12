@@ -24,6 +24,7 @@ from bollhav.tui.discovery import (
 )
 from bollhav.tui.explore_tab import ExploreTab
 from bollhav.tui.modals import ConfirmRun
+from bollhav.tui.radios import NameStyleRadio
 from bollhav.tui.run_tab import RunTab
 
 # Per-project config lives in this dotfile in the project folder.
@@ -45,6 +46,7 @@ class BollhavApp(App):
     }
     #source Select { width: 45%; margin: 0 1 0 0; }
     #source Input { width: 1fr; }
+    #source #name-style { width: auto; margin: 0 0 0 1; }
 
     /* hacker mode — bright light-blue borders everywhere (ctrl+g) */
     Screen.hacker #source,
@@ -88,6 +90,10 @@ class BollhavApp(App):
         self.models: list = []
         self.settings_path = self.project / SETTINGS_FILENAME
         self.settings: dict[str, str] = {}
+        # Site-wide name presentation: "lengthen" (catalog.schema.table on one
+        # line) or "thicken" (one dotted segment per line). Toggled by the
+        # NameStyleRadio in the top bar; read by ExploreTab when it renders.
+        self.name_style: str = "lengthen"
 
     # ── shared services used by both tabs ────────────────────────────────
     def _safe_discover(self, folder: Path) -> tuple[list, list[str]]:
@@ -129,6 +135,9 @@ class BollhavApp(App):
             )
             open_path.border_title = "Open path"
             yield open_path
+            name_style = NameStyleRadio(default=self.name_style, id="name-style")
+            name_style.border_title = "Names"
+            yield name_style
         with TabbedContent(initial="tab-run", id="tabs"):
             with TabPane("Run", id="tab-run"):
                 yield RunTab()
@@ -194,6 +203,14 @@ class BollhavApp(App):
     def on_input_submitted(self, event: Input.Submitted) -> None:
         if event.input.id == "source-input" and event.value.strip():
             self._load_folder(event.value.strip())
+
+    def on_radio_set_changed(self, event) -> None:
+        # Only the top-bar name-style radio is global; config radios live in the
+        # Run tab and read their own values, so ignore everything else.
+        if getattr(event.radio_set, "id", None) != "name-style":
+            return
+        self.name_style = event.radio_set.value
+        self.query_one(ExploreTab)._rebuild_board()
 
     # ── global actions ────────────────────────────────────────────────────
     def action_toggle_mode(self) -> None:
