@@ -25,10 +25,11 @@ def _iso(value) -> str | None:
     return value.isoformat() if value is not None else None
 
 
-def _has_error_state(conn, state_schema, state_table) -> bool:
-    """True if the model currently has any state row in 'error' — an
-    unresolved failure. A successful rerun of that interval flips it to
-    'applied', so this clears itself once the model recovers."""
+def _has_status(conn, state_schema, state_table, status: str) -> bool:
+    """True if the model currently has any state row in `status`.
+
+    Drives the live graph badges: 'error' (an unresolved failure — clears
+    once that interval reruns to 'applied') and 'running' (a run in flight)."""
     if (
         not state_schema
         or not state_table
@@ -37,12 +38,11 @@ def _has_error_state(conn, state_schema, state_table) -> bool:
         return False
     return (
         conn.execute(
-            sql.SQL(
-                "SELECT 1 FROM {schema}.{table} WHERE status = 'error' LIMIT 1"
-            ).format(
+            sql.SQL("SELECT 1 FROM {schema}.{table} WHERE status = %s LIMIT 1").format(
                 schema=sql.Identifier(state_schema),
                 table=sql.Identifier(state_table),
-            )
+            ),
+            [status],
         ).fetchone()
         is not None
     )
@@ -255,7 +255,9 @@ def get_graph(conn: "psycopg.Connection") -> dict:
             "model_type": model_type,
             # current (unresolved) failure: a state row still in 'error'.
             # A successful rerun flips that row to 'applied', clearing this.
-            "has_error": _has_error_state(conn, st_schema, st_table),
+            "has_error": _has_status(conn, st_schema, st_table, "error"),
+            # a run is in flight right now: a state row still in 'running'.
+            "has_running": _has_status(conn, st_schema, st_table, "running"),
         }
         for up in upstream:
             edges.append({"from": up, "to": full_name, "relation": "upstream"})
