@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import timedelta
 from enum import Enum
 
 
@@ -60,6 +61,45 @@ class UpstreamContract(str, Enum):
     WHOLE = "whole"
 
 
+class FreshnessScope(str, Enum):
+    """Which of the upstream's relevant applied rows must be recent.
+
+    The contract level (``WINDOW`` / ``THROUGH`` / ``WHOLE`` / ``timeless``)
+    already selects *which* rows count as "the data I read"; the scope then says
+    *how much of that selection* has to be fresh:
+
+    ``LATEST``
+        The most recently applied row in the selection is within the age. "Has
+        the upstream been refreshed recently / is it keeping up at the head?" —
+        the natural choice for a continuously-growing table.
+
+    ``ALL``
+        *Every* applied row in the selection is within the age (the oldest one
+        is). "Was the whole thing rebuilt recently?" — for full snapshots /
+        reference tables that should be wholly re-derived each load.
+    """
+
+    LATEST = "latest"
+    ALL = "all"
+
+
+@dataclass(frozen=True)
+class Freshness:
+    """A consumer-declared freshness policy on a gated `Source`.
+
+    Orthogonal to the `UpstreamContract` *level* (which decides completeness):
+    freshness adds a recency bound on top, checked only once the level's
+    completeness is satisfied. `within` is the maximum age; `scope` picks
+    `LATEST` (newest applied row recent) vs `ALL` (every relevant applied row
+    recent). The age is measured against the upstream's `applied_at` — a
+    producer-side, shared timestamp — so different consumers can demand
+    different freshness off the same upstream load. Not valid with `EXISTS`
+    (which never inspects state)."""
+
+    within: timedelta
+    scope: FreshnessScope = FreshnessScope.LATEST
+
+
 @dataclass(frozen=True)
 class UpstreamCheck:
     """The verdict of checking a model's gated upstreams for one unit of work.
@@ -92,4 +132,6 @@ class UpstreamCheck:
 __all__ = [
     "UpstreamContract",
     "UpstreamCheck",
+    "Freshness",
+    "FreshnessScope",
 ]

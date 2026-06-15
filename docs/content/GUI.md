@@ -23,7 +23,7 @@ flowchart TD
 
 **Reading it:**
 
-1. **Pipelines define models.** Each pipeline's `main.py` is wrapped by `@load_models`, which discovers `Model`s (their `Target`, `Kind`, `State`, and upstream contracts), matches them by `TAGS`, and hands back `ModelRun`s with the run window resolved.
+1. **Pipelines define models.** Each pipeline's `main.py` is wrapped by `@load_models`, which discovers `Model`s (their `Target`, `Temporality`, `State`, and upstream contracts), matches them by `TAGS`, and hands back `ModelRun`s with the run window resolved.
 2. **Running them writes the bookkeeping.** The lifecycle hooks register each model into the shared `library`, seed and flip its **state** rows (`pending → running → applied / blocked`) as units of work run, and log any failure to the shared `errors` table — all in the one central `z_bollhav` schema. State is also read *back* at the start of a run to skip already-`applied` units.
 3. **The TUI drives the same pipelines.** It just runs the nearest `main.py` with the env you pick — so a TUI-triggered run flows through the identical lifecycle into the same library/state. (See [TUI](TUI.md).)
 4. **The API reads, read-only.** The FastAPI backend is a thin adapter over `bollhav.postgres.registry` — every endpoint is one `SELECT` against `library` / state / `errors`. It never writes.

@@ -114,31 +114,31 @@ class Rows(_PostgresStateBase):
     ) -> None:
         """Bring an older state table up to the current shape without breaking
         concurrent old-image writers. Runs inside the caller's transaction.
-        Additive only (per the shared-table rule): add the `kind` and
+        Additive only (per the shared-table rule): add the `temporality` and
         `model_name` columns, and relax `since`/`until` to nullable so
         monolithic / view rows carry a NULL window. Each step checks
         information_schema first, so it's idempotent."""
         conn = self._require_conn()
 
-        has_kind = conn.execute(
+        has_temporality = conn.execute(
             "SELECT 1 FROM information_schema.columns "
             "WHERE table_schema = %s AND table_name = %s "
-            "  AND column_name = 'kind' LIMIT 1",
+            "  AND column_name = 'temporality' LIMIT 1",
             [state_schema, state_table],
         ).fetchone()
-        if not has_kind:
+        if not has_temporality:
             conn.execute(
                 sql.SQL(
                     "ALTER TABLE {schema}.{table} "
-                    "ADD COLUMN kind TEXT NOT NULL DEFAULT 'interval'"
+                    "ADD COLUMN temporality TEXT NOT NULL DEFAULT 'temporal'"
                 ).format(
                     schema=sql.Identifier(state_schema),
                     table=sql.Identifier(state_table),
                 )
             )
             logger.info(
-                "state: migrated %s.%s — added kind column (default "
-                "'interval' so older images keep writing interval rows)",
+                "state: migrated %s.%s — added temporality column (default "
+                "'temporal' so older images keep writing temporal rows)",
                 state_schema,
                 state_table,
             )
@@ -274,7 +274,7 @@ class Rows(_PostgresStateBase):
         """Prefill the single NULL-window row for a model with no window to
         track — a timeless model, or a temporal one with no declared range.
         The counterpart to `insert_intervals`. The row carries
-        `kind = model.kind.value` and a NULL `since`/`until`; the partial
+        `temporality = model.temporality.value` and a NULL `since`/`until`; the partial
         unique index keeps it unique.
 
         Same DISCOVER / BULLDOZER semantics as interval prefill: DISCOVER
@@ -309,7 +309,7 @@ class Rows(_PostgresStateBase):
 
         insert = sql.SQL(
             "INSERT INTO {schema}.{table} "
-            "(model_name, run_id, since, until, status, blocked_reason, kind) "
+            "(model_name, run_id, since, until, status, blocked_reason, temporality) "
             "VALUES (%s, %s, NULL, NULL, 'pending', NULL, %s) {on_conflict}"
         ).format(
             schema=sql.Identifier(schema),
@@ -320,11 +320,11 @@ class Rows(_PostgresStateBase):
         conn = self._require_conn()
         with conn.transaction():
             conn.execute(
-                insert, [model.target.full_name, str(run_id), model.kind.value]
+                insert, [model.target.full_name, str(run_id), model.temporality.value]
             )
         logger.debug(
             "state: prefilled %s oneshot row for %s (mode=%s)",
-            model.kind.value,
+            model.temporality.value,
             model.target.full_name,
             model.state.mode.value,
         )

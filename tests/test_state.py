@@ -71,12 +71,12 @@ class TestBlockCode:
 
 class TestModelStateField:
     def _kwargs(self):
-        from bollhav.model import Batch, TimeChunking, Kind, Target
+        from bollhav.model import Batch, TimeChunking, Temporality, Target
 
         return dict(
             target=Target(name="orders", schema="public"),
             batching=Batch(time=TimeChunking(chunk="@hourly")),
-            kind=Kind.TEMPORAL,
+            temporality=Temporality.TEMPORAL,
         )
 
     def test_state_defaults_to_none(self) -> None:
@@ -95,12 +95,12 @@ class TestModelStateField:
     def test_state_without_batching_is_allowed(self) -> None:
         # A temporal model may be unbatched (whole [begin, end] in one run); a
         # stateful unbatched model just gets a single (oneshot) state row.
-        from bollhav.model import Kind, Model, Target
+        from bollhav.model import Temporality, Model, Target
 
         m = Model(
             target=Target(name="orders", schema="public"),
             state=State(),
-            kind=Kind.TEMPORAL,
+            temporality=Temporality.TEMPORAL,
         )
         assert m.batching is None
 
@@ -113,7 +113,7 @@ class TestModelStateField:
         from bollhav.model import (
             Batch,
             TimeChunking,
-            Kind,
+            Temporality,
             Model,
             Staging,
             Target,
@@ -126,7 +126,7 @@ class TestModelStateField:
                 staging=Staging(),
             ),
             batching=Batch(time=TimeChunking(chunk="@hourly")),
-            kind=Kind.TEMPORAL,
+            temporality=Temporality.TEMPORAL,
         )
         assert m.state is None
         assert m.target.staging is not None
@@ -135,7 +135,7 @@ class TestModelStateField:
         from bollhav.model import (
             Batch,
             TimeChunking,
-            Kind,
+            Temporality,
             Model,
             Staging,
             Target,
@@ -149,7 +149,7 @@ class TestModelStateField:
             ),
             batching=Batch(time=TimeChunking(chunk="@hourly")),
             state=State(),
-            kind=Kind.TEMPORAL,
+            temporality=Temporality.TEMPORAL,
         )
         assert m.target.staging is not None
         assert m.state is not None
@@ -478,7 +478,7 @@ class TestModelIntervals:
         from bollhav.model import (
             Batch,
             TimeChunking,
-            Kind,
+            Temporality,
             Model,
             ModelRun,
             Target,
@@ -487,16 +487,19 @@ class TestModelIntervals:
         m = Model(
             target=Target(name="orders", schema="public"),
             batching=Batch(time=TimeChunking(chunk="@daily")),
-            kind=Kind.TEMPORAL,
+            temporality=Temporality.TEMPORAL,
         )
         run = ModelRun(model=m)
         run.intervals = ("fake1", "fake2")
         assert run.intervals == ("fake1", "fake2")
 
     def test_model_is_frozen(self) -> None:
-        from bollhav.model import Kind, Model, Target
+        from bollhav.model import Temporality, Model, Target
 
-        m = Model(target=Target(name="orders", schema="public"), kind=Kind.TIMELESS)
+        m = Model(
+            target=Target(name="orders", schema="public"),
+            temporality=Temporality.TIMELESS,
+        )
         with pytest.raises(AttributeError, match="frozen"):
             m.state = None  # type: ignore[misc]
 
@@ -507,7 +510,7 @@ class TestModelIntervals:
             Batch,
             Contract,
             TimeChunking,
-            Kind,
+            Temporality,
             Model,
             Target,
         )
@@ -520,7 +523,7 @@ class TestModelIntervals:
             target=Target(name="orders", schema="public"),
             batching=batching,
             contract=contract,
-            kind=Kind.TEMPORAL,
+            temporality=Temporality.TEMPORAL,
         )
         run = ModelRun(
             model=m,

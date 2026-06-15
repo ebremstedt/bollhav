@@ -22,7 +22,7 @@ from bollhav.model.model import Model  # noqa: E402
 from bollhav.model.source import Source, SourceModel  # noqa: E402
 from bollhav.model.target import Target  # noqa: E402
 from bollhav.model.write_modes import WriteMode  # noqa: E402
-from bollhav.model.kind import Kind  # noqa: E402
+from bollhav.model.temporality import Temporality  # noqa: E402
 from bollhav.model.batch import Batch  # noqa: E402
 
 
@@ -71,7 +71,7 @@ def _model(
             truncate_table=truncate_table,
         ),
         batching=Batch(),
-        kind=Kind.TEMPORAL,
+        temporality=Temporality.TEMPORAL,
     )
 
 
@@ -285,7 +285,7 @@ class TestUpdateInsert:
                 write_mode=WriteMode.UPSERT_NO_DELETE,
             ),
             batching=Batch(),
-            kind=Kind.TEMPORAL,
+            temporality=Temporality.TEMPORAL,
         )
         df = pl.DataFrame({"id": [1], "val": ["a"]})
         copy_mock = MagicMock()

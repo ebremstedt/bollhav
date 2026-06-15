@@ -18,7 +18,7 @@ from bollhav.model import (  # noqa: E402
     Batch,
     Database,
     TimeChunking,
-    Kind,
+    Temporality,
     Model,
     Source,
     SourceApi,
@@ -50,7 +50,7 @@ def _pg_model(*, schema="warehouse_clean", suffix="", upstream=None):
             ],
         ),
         batching=Batch(time=TimeChunking(chunk="@daily")),
-        kind=Kind.TEMPORAL,
+        temporality=Temporality.TEMPORAL,
         # gated upstreams need state; ungated sources don't.
         state=State() if _has_gate(upstream) else None,
         upstream=upstream,
@@ -71,7 +71,7 @@ def _mssql_model(*, upstream=None):
             ],
         ),
         batching=Batch(time=TimeChunking(chunk="@daily")),
-        kind=Kind.TEMPORAL,
+        temporality=Temporality.TEMPORAL,
         upstream=upstream,
     )
 

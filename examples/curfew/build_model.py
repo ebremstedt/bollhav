@@ -15,7 +15,7 @@ from bollhav.model import (
     Contract,
     Curfew,
     Database,
-    Kind,
+    Temporality,
     Model,
     State,
     Tags,
@@ -49,7 +49,7 @@ def events_model(curfew: Curfew) -> Model:
                 ),
             ],
         ),
-        kind=Kind.TEMPORAL,
+        temporality=Temporality.TEMPORAL,
         state=State(),  # stateful → curfew-skipped intervals stay pending
         curfew=curfew,
         batching=Batch(time=TimeChunking(chunk="@daily")),

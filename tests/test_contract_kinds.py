@@ -25,7 +25,7 @@ import pytest
 from psycopg import sql
 
 from bollhav.model import (
-    Kind,
+    Temporality,
     Model,
     Source,
     SourceModel,
@@ -111,13 +111,13 @@ def _table(conn, rows, name: str = "upstream_state") -> str:
     return table
 
 
-def _entry(table: str, kind: str) -> LibraryEntry:
+def _entry(table: str, temporality: str) -> LibraryEntry:
     return LibraryEntry(
         upstream=[],
         model_type="TABLE",
         state_schema=SCHEMA,
         state_table=table,
-        kind=kind,
+        temporality=temporality,
         sources=[],
         metadata={},
     )
@@ -125,7 +125,7 @@ def _entry(table: str, kind: str) -> LibraryEntry:
 
 def _ok(conn, table, kind, *, contract, interval) -> bool:
     return PostgresState.is_satisfied(
-        conn, entry=_entry(table, kind), interval=interval, kind=contract
+        conn, entry=_entry(table, kind), interval=interval, level=contract
     )
 
 
@@ -233,14 +233,14 @@ class TestTimeless:
         loaded = _table(conn, _timeless(loaded=True), name="up_loaded")
         assert (
             PostgresState.is_satisfied(
-                conn, entry=_entry(loaded, self.KIND), interval=None, kind=None
+                conn, entry=_entry(loaded, self.KIND), interval=None, level=None
             )
             is True
         )
         pending = _table(conn, _timeless(loaded=False), name="up_pending")
         assert (
             PostgresState.is_satisfied(
-                conn, entry=_entry(pending, self.KIND), interval=None, kind=None
+                conn, entry=_entry(pending, self.KIND), interval=None, level=None
             )
             is False
         )
@@ -258,7 +258,7 @@ class TestTimeless:
 SUFFIX = "ck_raise"  # isolates the library to z_bollhav_<suffix>
 
 
-def _model(name, *, kind, upstream=None):
+def _model(name, *, temporality, upstream=None):
     return Model(
         target=Target(
             name=name,
@@ -272,7 +272,7 @@ def _model(name, *, kind, upstream=None):
                 PostgresColumn(name="id", data_type=PostgresType.BIGINT, nullable=False)
             ],
         ),
-        kind=kind,
+        temporality=temporality,
         state=State(),
         upstream=upstream or [],
     )
@@ -290,7 +290,7 @@ class TestWindowOnTimelessRaises:
             )
             try:
                 # register a TIMELESS upstream in the isolated env library
-                up = PostgresState(_model("up", kind=Kind.TIMELESS), c)
+                up = PostgresState(_model("up", temporality=Temporality.TIMELESS), c)
                 up.ensure_library()
                 up.ensure_tables()
                 up.register_model()
@@ -308,7 +308,7 @@ class TestWindowOnTimelessRaises:
     def test_raises(self, env, level):
         down = _model(
             "down",
-            kind=Kind.TEMPORAL,
+            temporality=Temporality.TEMPORAL,
             upstream=[Source("ckcat.ck.up", type=SourceModel(), contract=level)],
         )
         ds = PostgresState(down, env)
@@ -322,7 +322,7 @@ class TestWindowOnTimelessRaises:
         # WHOLE → blocked until the upstream's one row is applied).
         down = _model(
             "down",
-            kind=Kind.TEMPORAL,
+            temporality=Temporality.TEMPORAL,
             upstream=[Source("ckcat.ck.up", type=SourceModel(), contract=level)],
         )
         ds = PostgresState(down, env)

@@ -8,13 +8,13 @@ gets a single existence row that flips to `applied` once the view is in
 place. That row is what a downstream's `WINDOW` contract resolves to for a
 view upstream (its existence row applied).
 
-`kind=Kind.TIMELESS, view=True` is what marks it a view; `write_mode` is irrelevant for
+`temporality=Temporality.TIMELESS, view=True` is what marks it a view; `write_mode` is irrelevant for
 views (it's a data-write strategy) and is left at its default.
 """
 
 from bollhav.model import (
     Database,
-    Kind,
+    Temporality,
     Model,
     Source,
     SourceModel,
@@ -26,7 +26,7 @@ from bollhav.postgres import PostgresColumn, PostgresType
 
 
 customers = Model(
-    kind=Kind.TIMELESS,
+    temporality=Temporality.TIMELESS,
     view=True,
     target=Target(
         name="customers",

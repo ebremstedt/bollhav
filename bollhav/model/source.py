@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from bollhav.model.upstream import UpstreamContract
+from bollhav.model.upstream import Freshness, UpstreamContract
 
 
 @dataclass
@@ -68,6 +68,7 @@ class Source:
     name: str
     type: SourceModel | SourceFile | SourceApi | None = None
     contract: UpstreamContract | None = None
+    freshness: Freshness | None = None
     deactivate_for_dev: bool = False
 
     def __post_init__(self) -> None:
@@ -78,6 +79,22 @@ class Source:
                 f"(files / APIs aren't state-tracked). Drop the contract or make "
                 f"it a SourceModel."
             )
+        if self.freshness is not None:
+            # Freshness reads the upstream's applied_at, so it needs a gated
+            # upstream with state — and EXISTS never inspects state at all.
+            if self.contract is None:
+                raise ValueError(
+                    f"source {self.name!r} sets `freshness` but has no contract "
+                    f"— freshness is a recency bound on a gated upstream's state. "
+                    f"Add a contract (WINDOW / THROUGH / WHOLE) or drop freshness."
+                )
+            if self.contract is UpstreamContract.EXISTS:
+                raise ValueError(
+                    f"source {self.name!r} sets `freshness` with contract=EXISTS, "
+                    f"but EXISTS never inspects state (registration is the whole "
+                    f"gate) — there's no applied_at to age. Use WINDOW / THROUGH / "
+                    f"WHOLE, or drop freshness."
+                )
 
     @property
     def gated(self) -> bool:

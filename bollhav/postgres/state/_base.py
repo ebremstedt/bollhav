@@ -12,14 +12,14 @@ if TYPE_CHECKING:
 
 
 class LibraryEntry(NamedTuple):
-    """A row read from the library. `kind` (`temporal` | `timeless`) drives
+    """A row read from the library. `temporality` (`temporal` | `timeless`) drives
     how an upstream's satisfaction is checked. Every state-tracked model now
     has a state table, so `state_schema` /
     `state_table` are set for all of them; they are None only for
     library-only rows written by older bollhav images.
 
     `upstream` is managed-model edges (names; the edge's type is the upstream
-    model's own `kind`, joinable). `sources` is external boundary inputs,
+    model's own `temporality`, joinable). `sources` is external boundary inputs,
     each `{"name", "kind"}` — typed here because a source isn't a model and
     so has no row of its own to carry its kind. Together they're the model's
     typed lineage inputs."""
@@ -28,7 +28,7 @@ class LibraryEntry(NamedTuple):
     model_type: str
     state_schema: str | None
     state_table: str | None
-    kind: str
+    temporality: str
     sources: list[dict] = []
     metadata: dict = {}
 

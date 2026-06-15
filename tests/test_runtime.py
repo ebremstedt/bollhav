@@ -7,7 +7,7 @@ from bollhav.model.runtime import _apply_to_model
 from bollhav.model.batch import Batch, TimeChunking
 from bollhav.model.contract import Contract
 from bollhav.model.intervals import TZInterval
-from bollhav.model.kind import Kind
+from bollhav.model.temporality import Temporality
 from bollhav.model.model import Model
 from bollhav.model.target import Target
 from bollhav.model.window import latest_complete_interval
@@ -56,7 +56,7 @@ def _model(**batch_kwargs) -> Model:
     return Model(
         target=Target(name="orders", schema="public", schema_suffix_appendix=None),
         batching=Batch(time=TimeChunking(**iv)),
-        kind=Kind.TEMPORAL,
+        temporality=Temporality.TEMPORAL,
     )
 
 
@@ -131,7 +131,7 @@ class TestWindowResolution:
             target=Target(name="orders", schema="public", schema_suffix_appendix=None),
             batching=Batch(time=TimeChunking(chunk="@hourly", tz=UTC)),
             contract=Contract(begin=begin),
-            kind=Kind.TEMPORAL,
+            temporality=Temporality.TEMPORAL,
         )
         out = _apply(m, reload=True, latest=True)
         # reload wins: window spans contract.begin .. latest complete tick,
@@ -155,7 +155,7 @@ class TestBatchingCarryThrough:
                 size=5000,
             ),
             contract=Contract(begin=datetime(2024, 1, 1, tzinfo=UTC)),
-            kind=Kind.TEMPORAL,
+            temporality=Temporality.TEMPORAL,
         )
         out = _apply(m).model
         assert out.batching.size == 5000
@@ -170,7 +170,7 @@ class TestBatchingNone:
     def test_no_batching_skips_interval_baking(self) -> None:
         m = Model(
             target=Target(name="t", schema="", schema_suffix_appendix=None),
-            kind=Kind.TIMELESS,
+            temporality=Temporality.TIMELESS,
         )
         out = _apply(m, interval_override="@daily").model
         assert out.batching is None
@@ -191,7 +191,7 @@ class TestStateAndStagingCarryThrough:
             target=Target(name="orders", schema="public", schema_suffix_appendix=None),
             batching=Batch(time=TimeChunking(chunk="@hourly", tz=UTC)),
             state=s,
-            kind=Kind.TEMPORAL,
+            temporality=Temporality.TEMPORAL,
         )
         out = _apply(m).model
         assert out.state is s
@@ -216,7 +216,7 @@ class TestStateAndStagingCarryThrough:
             ),
             batching=Batch(time=TimeChunking(chunk="@hourly", tz=UTC)),
             state=State(),  # staging requires state
-            kind=Kind.TEMPORAL,
+            temporality=Temporality.TEMPORAL,
         )
         out = _apply(m).model
         out_staging = out.target.staging
@@ -243,7 +243,7 @@ class TestRunMode:
             target=Target(name="orders", schema="public", schema_suffix_appendix=None),
             batching=Batch(time=TimeChunking(chunk="@hourly", tz=UTC)),
             contract=Contract(begin=_SINCE, end=_UNTIL),
-            kind=Kind.TEMPORAL,
+            temporality=Temporality.TEMPORAL,
         )
 
     def test_backfill_is_the_default(self):
@@ -289,7 +289,7 @@ class TestCurfewPreservedThroughOverrides:
             target=Target(name="orders", schema="public", schema_suffix_appendix=None),
             batching=Batch(time=TimeChunking(chunk="@hourly", tz=UTC)),
             contract=Contract(begin=_SINCE, end=_UNTIL),
-            kind=Kind.TEMPORAL,
+            temporality=Temporality.TEMPORAL,
             curfew=Curfew.work_hours(),
         )
         run = _apply(m)

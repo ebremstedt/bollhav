@@ -24,7 +24,7 @@ sys.modules.setdefault("pyodbc", MagicMock())
 
 from bollhav.model.batch import Batch
 from bollhav.model.database import Database
-from bollhav.model.kind import Kind
+from bollhav.model.temporality import Temporality
 from bollhav.model.intervals import TZInterval
 from bollhav.model.staging import Staging
 from bollhav.model.state import State
@@ -46,7 +46,7 @@ def _model(
     recreate_table=False,
     truncate_table=False,
     cols=None,
-    kind=Kind.TEMPORAL,
+    temporality=Temporality.TEMPORAL,
     view=False,
 ):
     from bollhav.model.model import Model
@@ -57,7 +57,7 @@ def _model(
             MssqlColumn(name="val", data_type=MssqlType.NVARCHAR, length=50),
         ]
     # A TIMELESS model (incl. a view) has no batching; a TEMPORAL one is batched.
-    batching = None if kind is Kind.TIMELESS else Batch()
+    batching = None if temporality is Temporality.TIMELESS else Batch()
     return Model(
         target=Target(
             name="events",
@@ -73,7 +73,7 @@ def _model(
         ),
         state=state,
         batching=batching,
-        kind=kind,
+        temporality=temporality,
         view=view,
     )
 
@@ -258,7 +258,7 @@ class TestStagedWritePath:
         from bollhav.mssql.write_modes import write
 
         conn, _ = _conn()
-        m = _model(kind=Kind.TIMELESS, view=True)
+        m = _model(temporality=Temporality.TIMELESS, view=True)
         with pytest.raises(ValueError, match="VIEW"):
             write(
                 conn=conn,

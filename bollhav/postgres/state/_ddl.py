@@ -5,7 +5,7 @@ from __future__ import annotations
 
 # `since`/`until` are nullable: a temporal (batched) row carries its window,
 # while a timeless or one-shot row carries a NULL window — the unit of work is
-# "the whole thing" / "the view exists", not a time slice. `kind` is the
+# "the whole thing" / "the view exists", not a time slice. `temporality` is the
 # model's `temporal` | `timeless` value. The table UNIQUE keeps one row per
 # window; the partial index below keeps exactly one NULL-window (oneshot) row.
 _STATE_DDL = """
@@ -18,7 +18,7 @@ CREATE TABLE IF NOT EXISTS {schema}.{table} (
     status          TEXT NOT NULL,
     blocked_reason  TEXT,
     applied_at      TIMESTAMPTZ,
-    kind            TEXT NOT NULL DEFAULT 'temporal',
+    temporality     TEXT NOT NULL DEFAULT 'temporal',
     UNIQUE (since, until)
 )
 """
@@ -29,7 +29,7 @@ CREATE INDEX IF NOT EXISTS {index} ON {schema}.{table} (status)
 
 # Exactly one NULL-window (oneshot) row per state table. Indexing the
 # expression `(since IS NULL)` — always TRUE for matching rows — makes the
-# uniqueness independent of `kind`, so a table can't hold two NULL-window
+# uniqueness independent of `temporality`, so a table can't hold two NULL-window
 # rows. `ON CONFLICT ((since IS NULL)) WHERE since IS NULL` upserts it.
 _STATE_ONESHOT_INDEX_DDL = """
 CREATE UNIQUE INDEX IF NOT EXISTS {index} ON {schema}.{table} ((since IS NULL)) WHERE since IS NULL
@@ -85,7 +85,7 @@ CREATE TABLE IF NOT EXISTS {schema}.{table} (
     model_type     TEXT NOT NULL,
     state_schema   TEXT,
     state_table    TEXT,
-    kind           TEXT NOT NULL DEFAULT 'temporal',
+    temporality    TEXT NOT NULL DEFAULT 'temporal',
     metadata       JSONB NOT NULL DEFAULT '{{}}'::jsonb,
     last_seen      TIMESTAMPTZ NOT NULL DEFAULT now()
 )
