@@ -48,6 +48,51 @@ def _has_status(conn, state_schema, state_table, status: str) -> bool:
     )
 
 
+def _blocked_kinds(conn, state_schema, state_table) -> tuple[bool, bool]:
+    """Inspect the model's `blocked` state rows and split them into the two
+    badge classes: `(has_blocked, has_stale)`.
+
+      * `has_stale`   — blocked because an upstream is present but too old (its
+                        reason carries the `stale` tag from a freshness gate).
+      * `has_blocked` — blocked on completeness (an upstream simply hasn't
+                        produced the data yet) — i.e. a non-stale block.
+
+    A row tagged `stale` counts only as stale, so the yellow and orange badges
+    never both light for the same blocker."""
+    if (
+        not state_schema
+        or not state_table
+        or not _table_exists(conn, state_schema, state_table)
+    ):
+        return (False, False)
+    has_stale = (
+        conn.execute(
+            sql.SQL(
+                "SELECT 1 FROM {schema}.{table} "
+                "WHERE status = 'blocked' AND blocked_reason LIKE '%%stale%%' LIMIT 1"
+            ).format(
+                schema=sql.Identifier(state_schema),
+                table=sql.Identifier(state_table),
+            )
+        ).fetchone()
+        is not None
+    )
+    has_blocked = (
+        conn.execute(
+            sql.SQL(
+                "SELECT 1 FROM {schema}.{table} WHERE status = 'blocked' "
+                "AND (blocked_reason IS NULL OR blocked_reason NOT LIKE '%%stale%%') "
+                "LIMIT 1"
+            ).format(
+                schema=sql.Identifier(state_schema),
+                table=sql.Identifier(state_table),
+            )
+        ).fetchone()
+        is not None
+    )
+    return (has_blocked, has_stale)
+
+
 def _node(
     full_name, kind, model_type, upstream, sources, state_schema, state_table, last_seen
 ) -> dict:
@@ -238,7 +283,7 @@ def get_graph(conn: "psycopg.Connection") -> dict:
     rows = conn.execute(
         sql.SQL(
             "SELECT full_name, temporality, model_type, upstream, sources, "
-            "state_schema, state_table, last_seen FROM {schema}.{table} "
+            "state_schema, state_table, last_seen, metadata FROM {schema}.{table} "
             "ORDER BY full_name"
         ).format(
             schema=sql.Identifier(LIBRARY_SCHEMA),
@@ -257,7 +302,14 @@ def get_graph(conn: "psycopg.Connection") -> dict:
         st_schema,
         st_table,
         last_seen,
+        metadata,
     ) in rows:
+        # Per-upstream contract details (level + freshness), keyed by name, so
+        # each upstream edge can carry the gating policy it represents.
+        contracts = {
+            u["name"]: u for u in (metadata or {}).get("upstreams", []) if u.get("name")
+        }
+        has_blocked, has_stale = _blocked_kinds(conn, st_schema, st_table)
         nodes[full_name] = {
             "name": full_name,
             "type": "model",
@@ -274,9 +326,24 @@ def get_graph(conn: "psycopg.Connection") -> dict:
             "has_error": _has_status(conn, st_schema, st_table, "error"),
             # a run is in flight right now: a state row still in 'running'.
             "has_running": _has_status(conn, st_schema, st_table, "running"),
+            # blocked on completeness (an upstream hasn't produced data yet).
+            "has_blocked": has_blocked,
+            # blocked because an upstream is present but too old (freshness gate).
+            "has_stale": has_stale,
         }
         for up in upstream:
-            edges.append({"from": up, "to": full_name, "relation": "upstream"})
+            c = contracts.get(up, {})
+            edges.append(
+                {
+                    "from": up,
+                    "to": full_name,
+                    "relation": "upstream",
+                    # the gating policy this edge enforces (None on older rows
+                    # written before contracts were persisted in metadata).
+                    "contract": c.get("contract"),
+                    "freshness": c.get("freshness"),
+                }
+            )
         for src in sources or []:
             name, src_kind = src["name"], src.get("kind")
             nodes.setdefault(name, {"name": name, "type": "external", "kind": src_kind})

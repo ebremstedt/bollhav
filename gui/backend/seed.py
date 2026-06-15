@@ -16,13 +16,19 @@ from datetime import datetime, timedelta, timezone
 import psycopg
 from psycopg import sql
 
+from pathlib import Path
+
 from bollhav.model import (
     Batch,
     Contract,
     Database,
+    Freshness,
+    FreshnessScope,
     Temporality,
     Model,
     Source,
+    SourceApi,
+    SourceFile,
     SourceModel,
     State,
     Target,
@@ -63,6 +69,23 @@ def cha(t: str) -> str:
     return f"{SRC_CATALOG}.{SRC_SCHEMA}.{t}"
 
 
+def api(t: str) -> str:
+    return f"ExternalVendorGateway.rest_ingest.{t}"
+
+
+def filesrc(t: str) -> str:
+    return f"ManualDropZone.csv_inbox.{t}"
+
+
+# Freshness shorthands for the demo upstream contracts.
+def fresh_latest(days: int) -> Freshness:
+    return Freshness(within=timedelta(days=days), scope=FreshnessScope.LATEST)
+
+
+def fresh_all(days: int) -> Freshness:
+    return Freshness(within=timedelta(days=days), scope=FreshnessScope.ALL)
+
+
 def _split3(full: str) -> tuple[str | None, str | None, str]:
     """catalog, schema, table from a dotted name (catalog optional)."""
     parts = full.split(".")
@@ -73,74 +96,156 @@ def _split3(full: str) -> tuple[str | None, str | None, str]:
     return None, None, parts[0]
 
 
-# (full_name, kind, [managed upstream full_names], [unmanaged source full_names])
-# Every clean model reads its same-named CentricityDW.Datamart01 table; consume
-# models derive from clean / consume models. Sources are unmanaged relational
-# tables (the 'model' source kind — yellow).
+# (full_name, temporality, [upstream_spec], [source_spec])
+#   upstream_spec = (full_name, UpstreamContract, Freshness | None)   — managed, gated
+#   source_spec   = (full_name, "model" | "api" | "file")            — unmanaged
+#
+# The demo deliberately exercises every corner: unmanaged sources of all three
+# kinds (model / api / file) feed CLEAN models of every temporality; CONSUME
+# models then gate on the clean layer with every contract level (exists / window
+# / through / whole) and a mix of freshness bounds (latest / all). Views appear
+# in both temporalities. All names are invented placeholders.
 SPEC = [
-    # CLEAN — one managed model per upstream source table
+    # ── CLEAN — managed models reading UNMANAGED sources of every kind ──
     (
         clean("CustomerInteractionEngagementEventFact"),
         Temporality.TEMPORAL,
         [],
-        [cha("CustomerInteractionEngagementEventFact")],
+        [(cha("CustomerInteractionEngagementEventFact"), "model")],
     ),
     (
         clean("SubscriptionBillingLifecycleCycleFact"),
         Temporality.TEMPORAL,
         [],
-        [cha("SubscriptionBillingLifecycleCycleFact")],
+        [(cha("SubscriptionBillingLifecycleCycleFact"), "model")],
     ),
     (
         clean("OrderFulfilmentShipmentMovementFact"),
         Temporality.TEMPORAL,
         [],
-        [cha("OrderFulfilmentShipmentMovementFact")],
+        [(cha("OrderFulfilmentShipmentMovementFact"), "model")],
     ),
     (
         clean("ProductCatalogReferenceHierarchyDimension"),
         Temporality.TIMELESS,
         [],
-        [cha("ProductCatalogReferenceHierarchyDimension")],
+        [(cha("ProductCatalogReferenceHierarchyDimension"), "model")],
     ),
     (
         clean("GeographicRegionTerritoryHierarchyDimension"),
         Temporality.TIMELESS,
         [],
-        [cha("GeographicRegionTerritoryHierarchyDimension")],
+        [(cha("GeographicRegionTerritoryHierarchyDimension"), "model")],
     ),
+    # an API source -> a timeless reference table
     (
         clean("MarketingCampaignChannelBridgeMapping"),
         Temporality.TIMELESS,
         [],
-        [cha("MarketingCampaignChannelBridgeMapping")],
+        [(api("MarketingCampaignChannelSpendFeed"), "api")],
     ),
-    # CONSUME — derived from the clean layer
+    # a FILE source -> a timeless reference table
+    (
+        clean("QuarterlySalesTargetReferenceTable"),
+        Temporality.TIMELESS,
+        [],
+        [(filesrc("QuarterlySalesTargetWorkbook"), "file")],
+    ),
+    # ── CONSUME — managed models gating the clean layer (every contract) ──
+    # temporal table: WINDOW (per-window) + WHOLE on a timeless dim, with freshness
     (
         consume("DailyConsolidatedRevenueAggregateFact"),
         Temporality.TEMPORAL,
         [
-            clean("CustomerInteractionEngagementEventFact"),
-            clean("SubscriptionBillingLifecycleCycleFact"),
-            clean("MarketingCampaignChannelBridgeMapping"),
+            (
+                clean("CustomerInteractionEngagementEventFact"),
+                UpstreamContract.WINDOW,
+                fresh_latest(1),
+            ),
+            (
+                clean("SubscriptionBillingLifecycleCycleFact"),
+                UpstreamContract.WINDOW,
+                None,
+            ),
+            (
+                clean("MarketingCampaignChannelBridgeMapping"),
+                UpstreamContract.WHOLE,
+                fresh_all(7),
+            ),
         ],
         [],
     ),
+    # timeless table: WHOLE on dims (one with freshness), EXISTS on a temporal
+    # upstream (a windowless consumer depending on it without waiting per-window)
     (
         consume("CustomerThreeSixtyEnrichedProfileDimension"),
         Temporality.TIMELESS,
         [
-            clean("ProductCatalogReferenceHierarchyDimension"),
-            clean("GeographicRegionTerritoryHierarchyDimension"),
+            (
+                clean("ProductCatalogReferenceHierarchyDimension"),
+                UpstreamContract.WHOLE,
+                None,
+            ),
+            (
+                clean("GeographicRegionTerritoryHierarchyDimension"),
+                UpstreamContract.WHOLE,
+                fresh_latest(30),
+            ),
+            (
+                clean("CustomerInteractionEngagementEventFact"),
+                UpstreamContract.EXISTS,
+                None,
+            ),
         ],
         [],
     ),
+    # temporal VIEW: THROUGH (cumulative prefix) with freshness
+    (
+        consume("RollingThirtyDayEngagementTrendView"),
+        Temporality.TEMPORAL,
+        [
+            (
+                clean("CustomerInteractionEngagementEventFact"),
+                UpstreamContract.THROUGH,
+                fresh_latest(2),
+            ),
+        ],
+        [],
+    ),
+    # temporal table: WINDOW on two clean facts — used to demo the orange
+    # 'blocked' light (an upstream window hasn't landed yet).
+    (
+        consume("WeeklyChannelAttributionRollupFact"),
+        Temporality.TEMPORAL,
+        [
+            (
+                clean("CustomerInteractionEngagementEventFact"),
+                UpstreamContract.WINDOW,
+                None,
+            ),
+            (
+                clean("OrderFulfilmentShipmentMovementFact"),
+                UpstreamContract.WINDOW,
+                fresh_latest(3),
+            ),
+        ],
+        [],
+    ),
+    # timeless VIEW: WHOLE on a temporal aggregate + EXISTS on a dim
     (
         consume("ExecutivePerformanceOverviewSummaryView"),
         Temporality.TIMELESS,
         [
-            consume("DailyConsolidatedRevenueAggregateFact"),
-            consume("CustomerThreeSixtyEnrichedProfileDimension"),
+            (
+                consume("DailyConsolidatedRevenueAggregateFact"),
+                UpstreamContract.WHOLE,
+                fresh_latest(1),
+            ),
+            (
+                consume("CustomerThreeSixtyEnrichedProfileDimension"),
+                UpstreamContract.EXISTS,
+                None,
+            ),
         ],
         [],
     ),
@@ -170,14 +275,6 @@ ERRORS = [
         5,
     ),
 ]
-
-_KINDS = {name: kind for name, kind, _, _ in SPEC}
-# Temporal upstreams gate per-window; timeless upstreams (no window to match)
-# are waited on WHOLE (loaded).
-_CONTRACT = {
-    Temporality.TEMPORAL: UpstreamContract.WINDOW,
-    Temporality.TIMELESS: UpstreamContract.WHOLE,
-}
 
 
 # A generic, deliberately wordy column set so the ⓘ tooltip has real columns
@@ -223,10 +320,21 @@ def _demo_columns():
     ]
 
 
-def _build(full_name, kind, upstream_names, source_names):
+def _unmanaged_source(name: str, src_kind: str) -> Source:
+    """An ungated (unmanaged) input of the given kind — model / api / file."""
+    if src_kind == "api":
+        return Source(name, type=SourceApi(base_url="https://vendor.example/api"))
+    if src_kind == "file":
+        return Source(name, type=SourceFile(path=Path(f"/dropzone/{name}.csv")))
+    cat, schema, _ = _split3(name)
+    return Source(name, type=SourceModel(catalog=cat, schema=schema))
+
+
+def _build(full_name, kind, upstream_specs, source_specs):
     cat, schema, table = _split3(full_name)
     layer = "consumption reporting" if schema == CONSUME else "curated clean"
-    # A view is a TIMELESS model whose name ends in "View" (demo convention).
+    # A view is any model whose name ends in "View" (demo convention) — it can
+    # be temporal or timeless.
     view = table.endswith("View")
     description = f"{kind.value.title()} model in the {layer} layer (demo)."
     # A view has no columns/write_mode; tables carry the demo columns so the
@@ -246,29 +354,25 @@ def _build(full_name, kind, upstream_names, source_names):
             write_mode=WriteMode.UPSERT_NO_DELETE,
             columns=_demo_columns(),
         )
-    # Managed upstream models are gated SourceModels carrying a contract (kind
-    # decides satisfaction); unmanaged tables are ungated relational
-    # SourceModels (the 'model' source kind).
+    # Managed upstreams are gated SourceModels carrying an explicit contract
+    # (and optional freshness); unmanaged inputs are ungated sources of any kind.
     upstream = [
         Source(
-            u,
-            type=SourceModel(catalog=_split3(u)[0], schema=_split3(u)[1]),
-            contract=_CONTRACT[_KINDS[u]],
+            name,
+            type=SourceModel(catalog=_split3(name)[0], schema=_split3(name)[1]),
+            contract=contract,
+            freshness=freshness,
         )
-        for u in upstream_names
-    ] + [
-        Source(s, type=SourceModel(catalog=_split3(s)[0], schema=_split3(s)[1]))
-        for s in source_names
-    ]
+        for name, contract, freshness in upstream_specs
+    ] + [_unmanaged_source(name, src_kind) for name, src_kind in source_specs]
+    # A view is never batched (it's one CREATE VIEW, not materialised per
+    # window); only a temporal TABLE gets batching.
+    batched = kind is Temporality.TEMPORAL and not view
     return Model(
         target=target,
         temporality=kind,
         view=view,
-        batching=(
-            Batch(time=TimeChunking(chunk="@daily"))
-            if kind is Temporality.TEMPORAL
-            else None
-        ),
+        batching=Batch(time=TimeChunking(chunk="@daily")) if batched else None,
         state=State(),
         upstream=upstream,
         description=description,
@@ -280,14 +384,23 @@ def _build(full_name, kind, upstream_names, source_names):
     )
 
 
-def _seed_runs(model, conn, *, error_latest=False, running_latest=False):
+def _seed_runs(
+    model,
+    conn,
+    *,
+    error_latest=False,
+    running_latest=False,
+    stale_latest=False,
+    blocked_latest=False,
+):
     """Give the model a little run history via the real state API: 6 daily
     intervals, the rest applied. By default the newest is left pending; with
     `error_latest` the newest interval is recorded as a failure (state row
     -> 'error'), so it shows as an unresolved error (the red dot). A later
     successful rerun would flip it back to applied and clear that. With
     `running_latest` the newest interval is left in 'running' (a run in
-    flight), which lights the blue dot.
+    flight), which lights the blue dot. With `stale_latest` the newest interval
+    is left `blocked` with a freshness-stale reason, which lights the yellow dot.
 
     Monolithic/view models get one applied whole-table row."""
     st = PostgresState(model=model, conn=conn)
@@ -315,9 +428,26 @@ def _seed_runs(model, conn, *, error_latest=False, running_latest=False):
             )
         elif running_latest:
             st.mark_running(run_id=rid, interval=ivs[-1])
+        elif stale_latest:
+            # newest interval blocked because an upstream is present but too old
+            # (freshness gate) — the descriptor carries the `stale` tag the
+            # blue 'stale' badge keys on.
+            reason = (
+                "STATE_002: upstream "
+                f"'{clean('CustomerInteractionEngagementEventFact')}' (through, stale)"
+            )
+            st.insert_intervals(run_id=rid, intervals=((ivs[-1], "blocked", reason),))
+        elif blocked_latest:
+            # newest interval blocked on completeness — an upstream simply hasn't
+            # produced the data yet (no `stale` tag → orange 'blocked' badge).
+            reason = (
+                "STATE_002: upstream "
+                f"'{clean('CustomerInteractionEngagementEventFact')}' (window)"
+            )
+            st.insert_intervals(run_id=rid, intervals=((ivs[-1], "blocked", reason),))
         # else: newest stays pending
     else:
-        st.insert_singleton(run_id=rid)
+        st.insert_oneshot(run_id=rid)
         st.mark_applied(run_id=rid, interval=None)
 
 
@@ -366,6 +496,8 @@ def main() -> None:
                 running_latest=(
                     name == clean("CustomerInteractionEngagementEventFact")
                 ),
+                stale_latest=(name == consume("RollingThirtyDayEngagementTrendView")),
+                blocked_latest=(name == consume("WeeklyChannelAttributionRollupFact")),
             )
         _seed_errors(conn)
         conn.commit()

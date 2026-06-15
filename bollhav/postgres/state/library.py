@@ -203,9 +203,29 @@ class Library(_PostgresStateBase):
                 "scale": getattr(c, "scale", None),
             }
 
+        def _freshness(f) -> dict | None:
+            if f is None:
+                return None
+            return {
+                "within_seconds": f.within.total_seconds(),
+                "scope": getattr(f.scope, "value", str(f.scope)),
+            }
+
         contract = model.contract
         batching = model.batching
         return {
+            # Gated upstreams with their declared contract level + freshness —
+            # the GUI reads this to label edges and the detail panel. (The bare
+            # names also live in the typed `upstream` column for graph edges.)
+            "upstreams": [
+                {
+                    "name": s.name,
+                    "contract": s.contract.value if s.contract else None,
+                    "freshness": _freshness(s.freshness),
+                    "deactivate_for_dev": s.deactivate_for_dev,
+                }
+                for s in model.gated_upstreams
+            ],
             "write_mode": getattr(t.write_mode, "value", None),
             "enabled": model.enabled,
             "description": model.description,

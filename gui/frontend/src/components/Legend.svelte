@@ -3,7 +3,11 @@
 </script>
 
 <footer class="legend">
-  <span class="grp">Models</span>
+  <span
+    class="grp"
+    data-tip="Managed models are state-tracked and gated. Drawn with a yellow outline; the pill reads `model`, with a second pill for its temporality."
+    >Models (managed)</span
+  >
   {#each LEGEND_KINDS as k}
     <span class="item" data-tip={k.tip}>
       <span class="sw" style="background:{k.c}"></span>{k.label}
@@ -33,12 +37,30 @@
   </span>
   <span
     class="item"
+    data-tip="Each upstream edge is labelled with the contract it enforces: the completeness level (exists / window / through / whole) and, when set, a freshness bound (❄ ≤age, latest or all)."
+  >
+    <span class="edge"></span>contract · ❄ freshness
+  </span>
+  <span
+    class="item"
     data-tip="A recent run failed and has not yet succeeded on a rerun. Clears once that interval reruns without error."
   >
-    <span class="sw dot"></span>unresolved error
+    <span class="sw dot"></span>error
   </span>
   <span class="item" data-tip="A run is currently in progress for this model.">
     <span class="sw dot running"></span>running
+  </span>
+  <span
+    class="item"
+    data-tip="Blocked on completeness: an upstream model this depends on hasn't produced the data yet."
+  >
+    <span class="sw dot blocked"></span>blocked
+  </span>
+  <span
+    class="item"
+    data-tip="Blocked on freshness: an upstream is present but too old for this model's freshness contract (present-but-stale)."
+  >
+    <span class="sw dot stale"></span>stale
   </span>
 
   <span class="legend-hint">hover any item for an explanation</span>
@@ -122,6 +144,12 @@
     background: #e5202e;
   }
   .sw.dot.running {
+    background: #4ade80;
+  }
+  .sw.dot.blocked {
+    background: #f58518;
+  }
+  .sw.dot.stale {
     background: #2f8fff;
   }
   .edge {

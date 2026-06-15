@@ -6,11 +6,13 @@
     MiniMap,
   } from "@xyflow/svelte";
   import LineageNode from "./LineageNode.svelte";
+  import ContractEdge from "./ContractEdge.svelte";
   import { view } from "../lib/view.svelte.js";
 
   let { dark } = $props();
 
   const nodeTypes = { model: LineageNode, external: LineageNode };
+  const edgeTypes = { contract: ContractEdge };
 </script>
 
 <div class="flow">
@@ -20,6 +22,7 @@
       bind:nodes={view.nodes}
       bind:edges={view.edges}
       {nodeTypes}
+      {edgeTypes}
       colorMode={dark ? "dark" : "light"}
       fitView
     >
