@@ -50,7 +50,7 @@ def _model(
     """Build a mock Model. `is_view=True` flips the target to a view
     (no staging, no state); `has_staging=False` produces a plain
     library-only table (no state pointers written by register)."""
-    from bollhav.model.kind import Kind
+    from bollhav.model.temporality import Temporality
     from bollhav.model.staging import Staging
     from bollhav.model.state import State
 
@@ -64,7 +64,7 @@ def _model(
     model.target.schema_suffix_appendix = None
     # `register_model` keys off the Model-level `is_view` flag and the
     # `kind` enum (it writes `'VIEW' if model.is_view else 'TABLE'` into
-    # model_type and `model.kind.value` into kind).
+    # model_type and `model.temporality.value` into kind).
     model.is_view = is_view
     upstream_list = list(upstream) if upstream is not None else []
     # Each declared name becomes a gated upstream (a SourceModel + contract);
@@ -83,15 +83,15 @@ def _model(
     if is_view:
         model.target.staging = None
         model.state = None
-        model.kind = Kind.TIMELESS
+        model.temporality = Temporality.TIMELESS
     elif not has_staging:
         model.target.staging = None
         model.state = None
-        model.kind = Kind.TEMPORAL
+        model.temporality = Temporality.TEMPORAL
     else:
         model.target.staging = Staging()
         model.state = State()
-        model.kind = Kind.TEMPORAL
+        model.temporality = Temporality.TEMPORAL
     return model
 
 
@@ -225,7 +225,7 @@ class TestLookup:
         assert result.model_type == "TABLE"
         assert result.state_schema == "z_warehouse"
         assert result.state_table == "orders_state"
-        assert result.kind == "temporal"
+        assert result.temporality == "temporal"
         assert result.sources == [{"name": "raw.landing", "kind": "database"}]
 
     def test_returns_entry_for_view_with_null_state_pointers(self) -> None:
@@ -237,13 +237,15 @@ class TestLookup:
         assert result.state_schema is None
         assert result.state_table is None
         assert result.sources == []
-        assert result.kind == "timeless"
+        assert result.temporality == "timeless"
 
 
 # ── is_satisfied ─────────────────────────────────────────────────────
 
 
-def _entry(*, model_type="TABLE", state_schema=None, state_table=None, kind="interval"):
+def _entry(
+    *, model_type="TABLE", state_schema=None, state_table=None, temporality="temporal"
+):
     from bollhav.postgres.state import LibraryEntry
 
     return LibraryEntry(
@@ -251,7 +253,7 @@ def _entry(*, model_type="TABLE", state_schema=None, state_table=None, kind="int
         model_type=model_type,
         state_schema=state_schema,
         state_table=state_table,
-        kind=kind,
+        temporality=temporality,
     )
 
 
@@ -262,7 +264,7 @@ class TestIsSatisfied:
         from bollhav.postgres.state import PostgresState
 
         conn = _mock_conn()
-        entry = _entry(model_type="VIEW", kind="view")
+        entry = _entry(model_type="VIEW", temporality="timeless")
         assert PostgresState.is_satisfied(conn, entry=entry, interval=INTERVAL)
         # No SQL was issued — short-circuit at the entry level.
         assert conn.execute.call_count == 0

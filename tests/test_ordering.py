@@ -2,11 +2,14 @@ from unittest.mock import MagicMock
 import pytest
 
 from bollhav.model.ordering import topological_sort
-from bollhav.model.kind import Kind
+from bollhav.model.temporality import Temporality
 
 
 def make_model(
-    name: str, upstream: list[str] | None = None, kind=Kind.TEMPORAL, view=False
+    name: str,
+    upstream: list[str] | None = None,
+    temporality=Temporality.TEMPORAL,
+    view=False,
 ) -> MagicMock:
     model = MagicMock()
     model.name = name
@@ -24,7 +27,7 @@ def make_model(
     model.declared_inputs = upstream
     # Views are a separate flag now (`model.view`), independent of the time
     # axis. Set both `kind` and `is_view` so the mock matches the real Model.
-    model.kind = kind
+    model.temporality = temporality
     model.is_view = view
     return model
 
@@ -121,6 +124,6 @@ def test_self_referencing_raises():
 
 def test_view_ordered_after_upstream():
     a = make_model("a")
-    v = make_model("v", upstream=["a"], kind=Kind.TIMELESS, view=True)
+    v = make_model("v", upstream=["a"], temporality=Temporality.TIMELESS, view=True)
     result = topological_sort([v, a])
     assert names(result) == ["a", "v"]

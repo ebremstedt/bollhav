@@ -20,7 +20,7 @@ from bollhav.model import (
     Batch,
     Contract,
     Database,
-    Kind,
+    Temporality,
     Model,
     Source,
     SourceModel,
@@ -81,44 +81,44 @@ SPEC = [
     # CLEAN — one managed model per upstream source table
     (
         clean("CustomerInteractionEngagementEventFact"),
-        Kind.TEMPORAL,
+        Temporality.TEMPORAL,
         [],
         [cha("CustomerInteractionEngagementEventFact")],
     ),
     (
         clean("SubscriptionBillingLifecycleCycleFact"),
-        Kind.TEMPORAL,
+        Temporality.TEMPORAL,
         [],
         [cha("SubscriptionBillingLifecycleCycleFact")],
     ),
     (
         clean("OrderFulfilmentShipmentMovementFact"),
-        Kind.TEMPORAL,
+        Temporality.TEMPORAL,
         [],
         [cha("OrderFulfilmentShipmentMovementFact")],
     ),
     (
         clean("ProductCatalogReferenceHierarchyDimension"),
-        Kind.TIMELESS,
+        Temporality.TIMELESS,
         [],
         [cha("ProductCatalogReferenceHierarchyDimension")],
     ),
     (
         clean("GeographicRegionTerritoryHierarchyDimension"),
-        Kind.TIMELESS,
+        Temporality.TIMELESS,
         [],
         [cha("GeographicRegionTerritoryHierarchyDimension")],
     ),
     (
         clean("MarketingCampaignChannelBridgeMapping"),
-        Kind.TIMELESS,
+        Temporality.TIMELESS,
         [],
         [cha("MarketingCampaignChannelBridgeMapping")],
     ),
     # CONSUME — derived from the clean layer
     (
         consume("DailyConsolidatedRevenueAggregateFact"),
-        Kind.TEMPORAL,
+        Temporality.TEMPORAL,
         [
             clean("CustomerInteractionEngagementEventFact"),
             clean("SubscriptionBillingLifecycleCycleFact"),
@@ -128,7 +128,7 @@ SPEC = [
     ),
     (
         consume("CustomerThreeSixtyEnrichedProfileDimension"),
-        Kind.TIMELESS,
+        Temporality.TIMELESS,
         [
             clean("ProductCatalogReferenceHierarchyDimension"),
             clean("GeographicRegionTerritoryHierarchyDimension"),
@@ -137,7 +137,7 @@ SPEC = [
     ),
     (
         consume("ExecutivePerformanceOverviewSummaryView"),
-        Kind.TIMELESS,
+        Temporality.TIMELESS,
         [
             consume("DailyConsolidatedRevenueAggregateFact"),
             consume("CustomerThreeSixtyEnrichedProfileDimension"),
@@ -175,8 +175,8 @@ _KINDS = {name: kind for name, kind, _, _ in SPEC}
 # Temporal upstreams gate per-window; timeless upstreams (no window to match)
 # are waited on WHOLE (loaded).
 _CONTRACT = {
-    Kind.TEMPORAL: UpstreamContract.WINDOW,
-    Kind.TIMELESS: UpstreamContract.WHOLE,
+    Temporality.TEMPORAL: UpstreamContract.WINDOW,
+    Temporality.TIMELESS: UpstreamContract.WHOLE,
 }
 
 
@@ -262,16 +262,20 @@ def _build(full_name, kind, upstream_names, source_names):
     ]
     return Model(
         target=target,
-        kind=kind,
+        temporality=kind,
         view=view,
         batching=(
-            Batch(time=TimeChunking(chunk="@daily")) if kind is Kind.TEMPORAL else None
+            Batch(time=TimeChunking(chunk="@daily"))
+            if kind is Temporality.TEMPORAL
+            else None
         ),
         state=State(),
         upstream=upstream,
         description=description,
         contract=(
-            Contract(begin=NOW - timedelta(days=60)) if kind is Kind.TEMPORAL else None
+            Contract(begin=NOW - timedelta(days=60))
+            if kind is Temporality.TEMPORAL
+            else None
         ),
     )
 
@@ -289,7 +293,7 @@ def _seed_runs(model, conn, *, error_latest=False, running_latest=False):
     st = PostgresState(model=model, conn=conn)
     st.ensure_tables()
     rid = uuid.uuid4()  # bollhav 3.0: run_id lives on ModelRun, mint one per run
-    if model.kind is Kind.TEMPORAL:
+    if model.temporality is Temporality.TEMPORAL:
         base = (NOW - timedelta(days=6)).replace(
             hour=0, minute=0, second=0, microsecond=0
         )

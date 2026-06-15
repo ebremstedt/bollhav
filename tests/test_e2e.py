@@ -34,9 +34,11 @@ from bollhav.model import (
     Batch,
     Contract,
     Database,
+    Freshness,
+    FreshnessScope,
     TimeChunking,
     UpstreamContract,
-    Kind,
+    Temporality,
     Model,
     ModelRun,
     Source,
@@ -226,7 +228,7 @@ def _orders_model(
         ),
         state=state,
         batching=batching,
-        kind=Kind.TEMPORAL,
+        temporality=Temporality.TEMPORAL,
         contract=contract,
         # Gated upstreams and ungated sources are one list now.
         upstream=(upstream or []) + (sources or []),
@@ -509,7 +511,7 @@ def test_e2e_view_as_upstream_does_not_block_downstream(schema_name):
                 catalog=CAT,
                 dsn_env_var="TARGET_DSN",
             ),
-            kind=Kind.TIMELESS,
+            temporality=Temporality.TIMELESS,
             view=True,
         )
     )
@@ -1285,7 +1287,7 @@ def test_e2e_schema_suffix_isolates_state_and_library(schema_name):
                     dsn_env_var="TARGET_DSN",
                     columns=_orders_columns(),
                 ),
-                kind=Kind.TIMELESS,
+                temporality=Temporality.TIMELESS,
                 state=State(),
                 upstream=upstream or [],
             )
@@ -1767,3 +1769,112 @@ def test_e2e_contract_check_emits_debug_log(schema_name, caplog):
     # And each check logged a per-window verdict summary.
     assert any("is SATISFIED (all gates open)" in m for m in msgs)
     assert any("is BLOCKED by" in m for m in msgs)
+
+
+# ── 17. freshness: a recency bound on top of the contract ────────────
+#
+# Freshness is a second gate layered on a contract level: even a fully applied
+# upstream is BLOCKED if its relevant rows are too old. The age is measured
+# against the upstream's `applied_at` (a producer-side, shared timestamp); the
+# threshold + scope are declared per-consumer on the Source. Two scopes:
+#   LATEST — the newest applied row must be within the age (keeping up at head)
+#   ALL    — every relevant applied row must be (whole table recently rebuilt)
+#
+# These tests age `applied_at` directly to simulate the passage of time, so
+# they're deterministic and fast. Run with `-s --log-cli-level=DEBUG` to watch
+# the STALE verdict and the `freshness …≤…` annotation in the gate log.
+
+
+def _orders_state_table(schema_name):
+    return state_table_name(f"{CAT}.{schema_name}.orders")
+
+
+def _age_applied(state_table, *, age, only_latest=False):
+    """Backdate `applied_at` on orders' state rows to simulate staleness.
+    `only_latest` ages every row EXCEPT the newest window (so LATEST stays
+    fresh while ALL goes stale)."""
+    where = ""
+    if only_latest:
+        where = f' WHERE since < (SELECT max(since) FROM "{LIBRARY_SCHEMA}"."{state_table}")'
+    with psycopg.connect(_dsn(), autocommit=True) as c:
+        c.execute(
+            f'UPDATE "{LIBRARY_SCHEMA}"."{state_table}" '
+            f"SET applied_at = now() - %s WHERE status = 'applied'"
+            + (where.replace(" WHERE ", " AND ") if where else ""),
+            [age],
+        )
+
+
+def _whole_ds(schema_name, scope, within):
+    return _orders_model(
+        schema_name,
+        name="summary",
+        state=State(),
+        staging=Staging(),
+        upstream=[
+            Source(
+                f"{CAT}.{schema_name}.orders",
+                type=SourceModel(),
+                contract=UpstreamContract.WHOLE,
+                freshness=Freshness(within=within, scope=scope),
+            )
+        ],
+    )
+
+
+def test_e2e_contract_freshness_blocks_when_stale(schema_name):
+    """A WHOLE gate with freshness: fully applied + freshly loaded → open;
+    after the load ages past the threshold → BLOCKED as stale (a distinct
+    blocker descriptor, not 'missing')."""
+    orders = _orders_model(schema_name, state=State(), staging=Staging())
+    _bootstrap_orders_partial(orders, applied_idx=[0, 1, 2])  # all applied, just now
+    st = _orders_state_table(schema_name)
+
+    # Just loaded → fresh under a 1-hour bound.
+    assert _gate(
+        _whole_ds(schema_name, FreshnessScope.LATEST, timedelta(hours=1)), None
+    ).satisfied
+
+    # Age the whole load to 2 days ago → stale under a 1-day bound.
+    _age_applied(st, age=timedelta(days=2))
+    verdict = _gate(
+        _whole_ds(schema_name, FreshnessScope.LATEST, timedelta(days=1)), None
+    )
+    assert verdict.satisfied is False
+    assert any("stale" in b for b in verdict.blockers)
+
+
+def test_e2e_contract_freshness_latest_vs_all_scope(schema_name):
+    """LATEST vs ALL diverge: age every window except the newest. The newest
+    load is recent (LATEST satisfied) but the oldest is stale (ALL blocked)."""
+    orders = _orders_model(schema_name, state=State(), staging=Staging())
+    _bootstrap_orders_partial(orders, applied_idx=[0, 1, 2])
+    st = _orders_state_table(schema_name)
+
+    # Backdate all but the most recent window by 2 days.
+    _age_applied(st, age=timedelta(days=2), only_latest=True)
+
+    within = timedelta(days=1)
+    # LATEST only cares about the newest applied row → still fresh.
+    assert (
+        _gate(_whole_ds(schema_name, FreshnessScope.LATEST, within), None).satisfied
+        is True
+    )
+    # ALL requires the oldest relevant row to be fresh too → stale → blocked.
+    assert (
+        _gate(_whole_ds(schema_name, FreshnessScope.ALL, within), None).satisfied
+        is False
+    )
+
+
+def test_e2e_contract_freshness_requires_contract():
+    """Definition-time guards: freshness needs a non-EXISTS contract."""
+    with pytest.raises(ValueError, match="freshness.*no contract"):
+        Source("x.y", type=SourceModel(), freshness=Freshness(within=timedelta(days=1)))
+    with pytest.raises(ValueError, match="EXISTS never inspects state"):
+        Source(
+            "x.y",
+            type=SourceModel(),
+            contract=UpstreamContract.EXISTS,
+            freshness=Freshness(within=timedelta(days=1)),
+        )

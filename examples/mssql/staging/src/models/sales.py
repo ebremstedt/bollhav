@@ -27,7 +27,7 @@ from bollhav.model import (
     Contract,
     Database,
     TimeChunking,
-    Kind,
+    Temporality,
     Model,
     State,
     Tags,
@@ -68,7 +68,7 @@ sales = Model(
             ),
         ],
     ),
-    kind=Kind.TEMPORAL,
+    temporality=Temporality.TEMPORAL,
     state=State(),  # tracked/gated; state rows live in Postgres (separate conn)
     # Two independent knobs: daily interval windows + rows per read chunk.
     batching=Batch(

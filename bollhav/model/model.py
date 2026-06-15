@@ -7,7 +7,7 @@ from uuid import uuid4
 from bollhav.model.target import Target
 from bollhav.model.contract import Contract
 from bollhav.model.batch import Batch
-from bollhav.model.kind import Kind
+from bollhav.model.temporality import Temporality
 from bollhav.model.state import State
 from bollhav.model.tags import Tags
 from bollhav.model.source import Source
@@ -23,7 +23,7 @@ class Model:
         contract: Contract | None = None,
         batching: Batch | None = None,
         *,
-        kind: Kind = Kind.TEMPORAL,
+        temporality: Temporality = Temporality.TEMPORAL,
         view: bool = False,
         tagging: Tags | None = None,
         tags: set[str] | None = None,
@@ -38,7 +38,7 @@ class Model:
         self.target = target
         self.contract = contract or Contract()
         self.batching = batching
-        self.kind = kind
+        self.temporality = temporality
         self.view = view
         self.state = state
         self.curfew = curfew
@@ -90,18 +90,18 @@ class Model:
             (existence only). It also has no staging or recreate/truncate.
         """
         name = self.target.name
-        if self.kind is Kind.TIMELESS:
+        if self.temporality is Temporality.TIMELESS:
             if self.batching is not None:
                 raise ValueError(
-                    f"model {name!r} is kind=TIMELESS but has batching — a "
+                    f"model {name!r} is temporality=TIMELESS but has batching — a "
                     f"timeless model is one whole unit, not windowed. "
-                    f"Drop `batching` (or pick kind=TEMPORAL)."
+                    f"Drop `batching` (or pick temporality=TEMPORAL)."
                 )
             if self.contract.begin is not None or self.contract.end is not None:
                 raise ValueError(
-                    f"model {name!r} is kind=TIMELESS but its contract has "
+                    f"model {name!r} is temporality=TIMELESS but its contract has "
                     f"begin/end — a timeless model has no time axis to bound. "
-                    f"Drop the contract window (or pick kind=TEMPORAL)."
+                    f"Drop the contract window (or pick temporality=TEMPORAL)."
                 )
         if self.view:
             if self.batching is not None:
@@ -158,7 +158,7 @@ class Model:
                 else []
             ),
             f"    write_mode:  {self.target.write_mode.value}",
-            f"    kind:        {self.kind.value}",
+            f"    temporality: {self.temporality.value}",
             f"    partitioned: {self.target.partitioned_by}",
             f"    columns ({len(cols)}): {col_summary}",
         ]
@@ -264,7 +264,7 @@ class Model:
         sentinel is present."""
         return {
             "model": self.target.full_name,
-            "kind": self.kind.value,
+            "kind": self.temporality.value,
             "upstream": self.upstream_specs,
             "sources": self.source_specs,
             "inputs_known": self.inputs_known,
@@ -421,14 +421,14 @@ class Model:
 
     @property
     def is_temporal(self) -> bool:
-        """True when `kind=Kind.TEMPORAL` — batched, one state row per window."""
-        return self.kind is Kind.TEMPORAL
+        """True when `temporality=Temporality.TEMPORAL` — batched, one state row per window."""
+        return self.temporality is Temporality.TEMPORAL
 
     @property
     def is_timeless(self) -> bool:
-        """True when `kind=Kind.TIMELESS` — one whole/existence state row, no
+        """True when `temporality=Temporality.TIMELESS` — one whole/existence state row, no
         time axis."""
-        return self.kind is Kind.TIMELESS
+        return self.temporality is Temporality.TIMELESS
 
     def __repr__(self) -> str:
         return (

@@ -1,13 +1,13 @@
 from enum import Enum
 
 
-class Kind(Enum):
+class Temporality(Enum):
     """A model's kind — whether its unit of work has a time axis. Defaults to
     `TEMPORAL` (the common case) on a `Model`; it's the single source of truth
     that the state layer and upstream contracts key on.
 
     The values are the strings the state backend / library use (`kind`
-    column), so `model.kind.value` is the on-the-wire form. A downstream's
+    column), so `model.temporality.value` is the on-the-wire form. A downstream's
     `UpstreamContract` level (WINDOW / THROUGH / …) is resolved against this
     kind at check time.
 

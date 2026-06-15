@@ -27,7 +27,7 @@ A **contract is only valid on a `SourceModel`** — files and APIs aren't state-
 
 ## Contracts (gating)
 
-A contract is the gating **level** — *how much* of the upstream must be ready before this model runs — chosen from the `UpstreamContract` ladder (weak → strong). The upstream's *shape* (its [kind](KINDS.md)) is read from the library at check time, so you only state the level:
+A contract is the gating **level** — *how much* of the upstream must be ready before this model runs — chosen from the `UpstreamContract` ladder (weak → strong). The upstream's *shape* (its [temporality](KINDS.md)) is read from the library at check time, so you only state the level:
 
 | `UpstreamContract` | Satisfied when |
 |---|---|
@@ -50,6 +50,37 @@ Before each unit, every **gated** upstream is checked (no short-circuit):
 - any unsatisfied → unit is `blocked`; `blocked_reason` names each missing upstream.
 
 On the next run, blocked units re-evaluate — they go `pending` once upstreams catch up. A gated upstream naming an unregistered model is a hard error, not a skip. Ungated sources are never checked.
+
+## Freshness (recency)
+
+A contract *level* says **how much** of an upstream must be applied. **Freshness** adds a second, orthogonal gate: **how recently** it was loaded. Attach a `Freshness` to a gated `Source` and — once the level's completeness is satisfied — the upstream is still **blocked as stale** if its relevant rows are too old.
+
+```python
+from datetime import timedelta
+from bollhav.model import Freshness, FreshnessScope
+
+Source(
+    "warehouse.orders", type=SourceModel(),
+    contract=UpstreamContract.WHOLE,
+    freshness=Freshness(within=timedelta(days=1), scope=FreshnessScope.LATEST),
+)
+```
+
+The age is measured against the upstream's `applied_at` — when bollhav *loaded* each row (a producer-side, shared timestamp), **not** the source's own event time. The threshold and scope are **per-consumer**: different downstreams can demand different freshness off the same upstream load. The rows checked are exactly the ones the contract level selects (`WHOLE` → all; `WINDOW` → the matching window; `THROUGH` → the prefix; timeless → the existence row).
+
+| `FreshnessScope` | Fresh when |
+|---|---|
+| `LATEST` | the **newest** applied row in the selection is within `within` (`max(applied_at)`). "Is it keeping up at the head?" — for append-only / growing tables. |
+| `ALL` | **every** applied row in the selection is — i.e. the **oldest** one (`min(applied_at)`). "Was the whole thing rebuilt recently?" — for full-refresh snapshots / reference tables. |
+
+The scope only differs on a **multi-row** selection (`WHOLE` / `THROUGH` over several windows). For a single-row selection (`WINDOW`, or a timeless upstream) `LATEST` and `ALL` are identical.
+
+- **`LATEST`** catches a *stalled* pipeline (nothing new landing) but ignores immutable history — right for append-only tables, where `ALL` would be permanently stale (it'd demand re-loading ancient partitions).
+- **`ALL`** catches a *frozen partition* (one window silently stopped refreshing) that `LATEST` misses — right when a stale slice means wrong answers.
+
+A stale upstream blocks like an unmet contract; its `blocked_reason` marks it `(<level>, stale)` — present-but-old, not missing.
+
+**Rules.** `freshness` requires a `contract`, and is **not** valid with `EXISTS` (which never inspects state — there's no `applied_at` to age). Both are definition-time errors.
 
 ## Referencing an input in SQL
 
@@ -151,7 +182,7 @@ A model doesn't have to declare any inputs. Your `read()` function is what actua
 ```python
 Model(
     target=Target(name="orders", ...),
-    kind=Kind.TEMPORAL,
+    temporality=Temporality.TEMPORAL,
     batching=Batch(...),
     # no upstream — read() supplies the rows
 )

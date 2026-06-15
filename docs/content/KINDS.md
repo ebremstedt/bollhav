@@ -1,19 +1,19 @@
-[Home](index.md) › [Model](MODEL.md) › **Kind**
+[Home](index.md) › [Model](MODEL.md) › **Temporality**
 
-# Kinds
+# Temporality
 
-A model's kind is whether its unit of work has a **time axis**: `TEMPORAL` or `TIMELESS`. The kind decides its unit of work, how many state rows it has, and how a downstream [contract](UPSTREAM.md) checks it.
+A model's temporality is whether its unit of work has a **time axis**: `TEMPORAL` or `TIMELESS`. The temporality decides its unit of work, how many state rows it has, and how a downstream [contract](UPSTREAM.md) checks it.
 
-`kind` defaults to `Kind.TEMPORAL` (the common case). Set it explicitly from the `Kind` enum when a model is timeless.
+`temporality` defaults to `Temporality.TEMPORAL` (the common case). Set it explicitly from the `Temporality` enum when a model is timeless.
 
 ```python
-from bollhav.model import Kind
+from bollhav.model import Temporality
 ```
 
-| kind | unit of work | state rows |
+| temporality | unit of work | state rows |
 |---|---|---|
-| `Kind.TEMPORAL` | a time window — or, unbatched, the whole `[begin, end]` range | one per window (batched) · one (unbatched) |
-| `Kind.TIMELESS` | the whole thing | one |
+| `Temporality.TEMPORAL` | a time window — or, unbatched, the whole `[begin, end]` range | one per window (batched) · one (unbatched) |
+| `Temporality.TIMELESS` | the whole thing | one |
 
 A **`TEMPORAL`** model has a [`Contract`](CONTRACT.md) time window. With `batching` it splits that window into chunks (one state row per window); without `batching` it loads its whole `[begin, end]` range in one run (one state row spanning the range). A **`TIMELESS`** model has no time axis — no `batching`, and no `begin`/`end`.
 
@@ -22,21 +22,21 @@ A **`TEMPORAL`** model has a [`Contract`](CONTRACT.md) time window. With `batchi
 Materialization is a **separate** flag from the time axis. By default a model produces a materialized table; `view=True` makes it a SQL view (`CREATE OR REPLACE VIEW` from its defining `SourceModel(query=…)`).
 
 ```python
-Model(kind=Kind.TEMPORAL, batching=Batch(...), ...)  # a windowed table
-Model(kind=Kind.TIMELESS, ...)                       # a whole-table load
-Model(kind=Kind.TIMELESS, view=True, ...)            # a timeless view
-Model(kind=Kind.TEMPORAL, view=True,                 # a temporal view —
+Model(temporality=Temporality.TEMPORAL, batching=Batch(...), ...)  # a windowed table
+Model(temporality=Temporality.TIMELESS, ...)                       # a whole-table load
+Model(temporality=Temporality.TIMELESS, view=True, ...)            # a timeless view
+Model(temporality=Temporality.TEMPORAL, view=True,                 # a temporal view —
       contract=Contract(begin=..., end=...), ...)    #   its Contract is the range it covers
 ```
 
-A view **can't be batched** — it's one `CREATE VIEW`, not materialized per-window. Its kind is otherwise free: `TEMPORAL`, where its [`Contract`](CONTRACT.md) `begin`/`end` declares the range it covers (recorded as a single state row a downstream can gate `WINDOW` against), or `TIMELESS` (existence only).
+A view **can't be batched** — it's one `CREATE VIEW`, not materialized per-window. Its temporality is otherwise free: `TEMPORAL`, where its [`Contract`](CONTRACT.md) `begin`/`end` declares the range it covers (recorded as a single state row a downstream can gate `WINDOW` against), or `TIMELESS` (existence only).
 
 ## Validation
 
-The kind and its companions must agree, caught at construction:
+The temporality and its companions must agree, caught at construction:
 
-- `Kind.TIMELESS` **with** `batching` raises — a timeless model isn't windowed.
-- `Kind.TIMELESS` **with** a `Contract` `begin`/`end` raises — no time to bound.
+- `Temporality.TIMELESS` **with** `batching` raises — a timeless model isn't windowed.
+- `Temporality.TIMELESS` **with** a `Contract` `begin`/`end` raises — no time to bound.
 - `view=True` **with** `batching` raises — a view isn't materialized per-window.
 
 ## Units per run
@@ -51,8 +51,8 @@ Two independent questions decide a model's shape — *has a time axis?* (`TEMPOR
 flowchart TD
     Start([New model]) --> Q1{Does its work<br/>reference time?}
 
-    Q1 -->|no| TL[kind = TIMELESS]
-    Q1 -->|yes| TP[kind = TEMPORAL]
+    Q1 -->|no| TL[temporality = TIMELESS]
+    Q1 -->|yes| TP[temporality = TEMPORAL]
 
     TL --> Q2{Materialized?}
     Q2 -->|table| T1["Timeless table<br/>1 whole-table row"]
@@ -74,11 +74,11 @@ flowchart TD
 
 | Combo | Declare | State | Gate it with | Use when |
 |---|---|---|---|---|
-| **Temporal batched table** | `kind=TEMPORAL, batching=Batch(...)` | one row **per window** | `WINDOW` / `THROUGH` / `WHOLE` / `EXISTS` | The default for incremental fact/event tables — daily/hourly loads, backfills, anything processed and resumed per time window. |
-| **Temporal one-shot table** | `kind=TEMPORAL, contract=Contract(begin,end)` (no batching) | one row spanning **[begin,end]** | `WINDOW` (window ⊆ range) / `WHOLE` / `EXISTS` | A time-bounded table loaded in a single pass — small enough not to chunk, or the source only does a whole-range read — but downstreams still ask "is my window covered." |
-| **Timeless table** | `kind=TIMELESS` | one **whole-table** row | `WHOLE` / `EXISTS` (not `WINDOW`) | Dimensions, reference / lookup tables, config — no time axis, reloaded wholesale. The only question is "is it loaded." |
-| **Temporal view** | `kind=TEMPORAL, view=True, contract=Contract(begin,end)` | one row spanning **[begin,end]** (no data) | `WINDOW` (window ⊆ range) / `WHOLE` / `EXISTS` | A SQL view over time-ranged data where consumers care "is this view current through my window." Declare the range; enforce it by gating the view's own source `WINDOW`. |
-| **Timeless view** | `kind=TIMELESS, view=True` | one **existence** row (no data) | `WHOLE` / `EXISTS` | A plain view — renames, joins, projections, lookups — where the only question is "does it exist." |
+| **Temporal batched table** | `temporality=TEMPORAL, batching=Batch(...)` | one row **per window** | `WINDOW` / `THROUGH` / `WHOLE` / `EXISTS` | The default for incremental fact/event tables — daily/hourly loads, backfills, anything processed and resumed per time window. |
+| **Temporal one-shot table** | `temporality=TEMPORAL, contract=Contract(begin,end)` (no batching) | one row spanning **[begin,end]** | `WINDOW` (window ⊆ range) / `WHOLE` / `EXISTS` | A time-bounded table loaded in a single pass — small enough not to chunk, or the source only does a whole-range read — but downstreams still ask "is my window covered." |
+| **Timeless table** | `temporality=TIMELESS` | one **whole-table** row | `WHOLE` / `EXISTS` (not `WINDOW`) | Dimensions, reference / lookup tables, config — no time axis, reloaded wholesale. The only question is "is it loaded." |
+| **Temporal view** | `temporality=TEMPORAL, view=True, contract=Contract(begin,end)` | one row spanning **[begin,end]** (no data) | `WINDOW` (window ⊆ range) / `WHOLE` / `EXISTS` | A SQL view over time-ranged data where consumers care "is this view current through my window." Declare the range; enforce it by gating the view's own source `WINDOW`. |
+| **Timeless view** | `temporality=TIMELESS, view=True` | one **existence** row (no data) | `WHOLE` / `EXISTS` | A plain view — renames, joins, projections, lookups — where the only question is "does it exist." |
 
 The two rejected corners each follow from one rule: **timeless can't batch** (batching chops a *time window*, and there's no time axis), and **a view can't batch** (batching is per-window *materialization*, and a view materializes nothing — its only way to carry time is the one-shot `[begin, end]` row).
 
@@ -86,4 +86,4 @@ The two rejected corners each follow from one rule: **timeless can't batch** (ba
 
 - [Contract](CONTRACT.md) — a temporal model's `begin`/`end` window.
 - [Upstream](UPSTREAM.md) — depending on another model, and the contract levels.
-- [State](STATE.md) — the rows each kind records.
+- [State](STATE.md) — the rows each temporality records.

@@ -22,7 +22,7 @@ Home
 │  ├─ Target                  TARGET.md
 │  ├─ Contract                CONTRACT.md
 │  ├─ Batch                   BATCH.md
-│  ├─ Kind                    KINDS.md
+│  ├─ Temporality             KINDS.md
 │  ├─ State                   STATE.md
 │  ├─ Upstream                UPSTREAM.md
 │  └─ Tagging                 TAGGING.md

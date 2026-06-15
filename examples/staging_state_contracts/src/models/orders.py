@@ -15,7 +15,7 @@ from bollhav.model import (
     Contract,
     Database,
     TimeChunking,
-    Kind,
+    Temporality,
     Model,
     Staging,
     State,
@@ -50,7 +50,7 @@ orders = Model(
             ),
         ],
     ),
-    kind=Kind.TEMPORAL,
+    temporality=Temporality.TEMPORAL,
     state=State(),  # required for staging; tracks one row per interval
     batching=Batch(time=TimeChunking(chunk="@daily")),
     contract=Contract(

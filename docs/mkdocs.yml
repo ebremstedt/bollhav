@@ -65,7 +65,7 @@ nav:
   - Concepts:
       - Model:
           - Overview: MODEL.md
-          - Kind: KINDS.md
+          - Temporality: KINDS.md
           - Target: TARGET.md
           - Contract: CONTRACT.md
           - Batch: BATCH.md

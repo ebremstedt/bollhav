@@ -134,25 +134,25 @@ class Library(_PostgresStateBase):
                 LIBRARY_TABLE,
             )
 
-        has_kind = conn.execute(
+        has_temporality = conn.execute(
             "SELECT 1 FROM information_schema.columns "
             "WHERE table_schema = %s AND table_name = %s "
-            "  AND column_name = 'kind' LIMIT 1",
+            "  AND column_name = 'temporality' LIMIT 1",
             [self._library_schema(), LIBRARY_TABLE],
         ).fetchone()
-        if not has_kind:
+        if not has_temporality:
             conn.execute(
                 sql.SQL(
                     "ALTER TABLE {schema}.{table} "
-                    "ADD COLUMN kind TEXT NOT NULL DEFAULT 'interval'"
+                    "ADD COLUMN temporality TEXT NOT NULL DEFAULT 'temporal'"
                 ).format(
                     schema=sql.Identifier(self._library_schema()),
                     table=sql.Identifier(LIBRARY_TABLE),
                 )
             )
             logger.info(
-                "library: migrated %s.%s — added kind column (default "
-                "'interval' so older images keep registering interval models)",
+                "library: migrated %s.%s — added temporality column (default "
+                "'temporal' so older images keep registering temporal models)",
                 self._library_schema(),
                 LIBRARY_TABLE,
             )
@@ -245,7 +245,7 @@ class Library(_PostgresStateBase):
 
         Every state-tracked model — interval, monolithic, or view — now has
         a state table, so all of them write `state_schema` / `state_table`
-        and a `kind`. `kind` drives how an upstream's satisfaction is
+        and a `temporality`. `temporality` drives how an upstream's satisfaction is
         resolved (`is_satisfied`): interval covers a window, monolithic /
         view check the single existence row."""
         model = self.model
@@ -256,7 +256,7 @@ class Library(_PostgresStateBase):
         model_type = "VIEW" if model.is_view else "TABLE"
         upsert = sql.SQL(
             "INSERT INTO {schema}.{table} "
-            "(full_name, upstream, model_type, state_schema, state_table, kind, "
+            "(full_name, upstream, model_type, state_schema, state_table, temporality, "
             "sources, metadata, last_seen) "
             "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, now()) "
             "ON CONFLICT (full_name) DO UPDATE SET "
@@ -264,7 +264,7 @@ class Library(_PostgresStateBase):
             "model_type = EXCLUDED.model_type, "
             "state_schema = EXCLUDED.state_schema, "
             "state_table = EXCLUDED.state_table, "
-            "kind = EXCLUDED.kind, "
+            "temporality = EXCLUDED.temporality, "
             "sources = EXCLUDED.sources, "
             "metadata = EXCLUDED.metadata, "
             "last_seen = EXCLUDED.last_seen"
@@ -281,16 +281,16 @@ class Library(_PostgresStateBase):
                     model_type,
                     state_schema,
                     state_table,
-                    model.kind.value,
+                    model.temporality.value,
                     Jsonb(model.source_specs),
                     Jsonb(self._build_metadata(model)),
                 ],
             )
         logger.debug(
-            "library: registered %s (model_type=%s, kind=%s, upstream=%s, sources=%s)",
+            "library: registered %s (model_type=%s, temporality=%s, upstream=%s, sources=%s)",
             model.target.full_name,
             model_type,
-            model.kind.value,
+            model.temporality.value,
             model.upstream_names,
             model.source_names,
         )
@@ -310,7 +310,7 @@ class Library(_PostgresStateBase):
         to the prod `z_bollhav`."""
         row = conn.execute(
             sql.SQL(
-                "SELECT upstream, model_type, state_schema, state_table, kind, sources "
+                "SELECT upstream, model_type, state_schema, state_table, temporality, sources "
                 "FROM {schema}.{table} WHERE full_name = %s"
             ).format(
                 schema=sql.Identifier(library_schema),
@@ -320,12 +320,12 @@ class Library(_PostgresStateBase):
         ).fetchone()
         if row is None:
             return None
-        upstream, model_type, state_schema, state_table, kind, sources = row
+        upstream, model_type, state_schema, state_table, temporality, sources = row
         return LibraryEntry(
             upstream=list(upstream),
             model_type=model_type,
             state_schema=state_schema,
             state_table=state_table,
-            kind=kind,
+            temporality=temporality,
             sources=list(sources) if sources else [],
         )

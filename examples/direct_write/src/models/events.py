@@ -16,7 +16,7 @@ from bollhav.model import (
     Contract,
     Database,
     TimeChunking,
-    Kind,
+    Temporality,
     Model,
     State,
     Tags,
@@ -45,7 +45,7 @@ events = Model(
             ),
         ],
     ),
-    kind=Kind.TEMPORAL,
+    temporality=Temporality.TEMPORAL,
     state=State(),  # one state row per interval — gates reruns
     batching=Batch(time=TimeChunking(chunk="@daily")),
     contract=Contract(

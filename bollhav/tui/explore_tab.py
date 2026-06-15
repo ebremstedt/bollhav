@@ -124,7 +124,7 @@ class ExploreTab(Vertical):
             table.add_row(
                 Text(key, style="bold cyan"),
                 Text(name),
-                Text(TYPE_ICON.get(m.kind.name, m.kind.name)),
+                Text(TYPE_ICON.get(m.temporality.name, m.temporality.name)),
                 pill(state),
                 key=key,
                 height=name.count("\n") + 1,
@@ -152,7 +152,7 @@ class ExploreTab(Vertical):
         lines = [
             f"[b bright_red]{self.row_keys[row]}[/]  [b red]{present_name(t.full_name, style)}[/]",
             "",
-            f"[b bright_red]Type[/]       [red]{TYPE_ICON.get(m.kind.name, m.kind.name)}[/]",
+            f"[b bright_red]Type[/]       [red]{TYPE_ICON.get(m.temporality.name, m.temporality.name)}[/]",
             f"[b bright_red]Schema[/]     [red]{t.schema}[/]",
             f"[b bright_red]Catalog[/]    [red]{t.catalog}[/]",
             f"[b bright_red]Write mode[/] [red]{wm}[/]",

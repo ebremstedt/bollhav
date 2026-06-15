@@ -27,7 +27,7 @@ from bollhav.model import (
     Contract,
     Database,
     TimeChunking,
-    Kind,
+    Temporality,
     Model,
     Source,
     SourceModel,
@@ -62,7 +62,7 @@ daily_summary = Model(
             ),
         ],
     ),
-    kind=Kind.TEMPORAL,
+    temporality=Temporality.TEMPORAL,
     state=State(),
     batching=Batch(time=TimeChunking(chunk="@daily")),
     contract=Contract(

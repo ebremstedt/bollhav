@@ -15,7 +15,7 @@ from bollhav.model.window import (
 )
 from bollhav.model.contract import Contract
 from bollhav.model.intervals import TZInterval
-from bollhav.model.kind import Kind
+from bollhav.model.temporality import Temporality
 from bollhav.model.model import Model
 from bollhav.model.modelrun import ModelRun
 from bollhav.model.target import Target
@@ -59,7 +59,7 @@ def _model(
         target=Target(name="test"),
         batching=batching,
         contract=contract,
-        kind=Kind.TEMPORAL,
+        temporality=Temporality.TEMPORAL,
     )
     return ModelRun(model=model, window=window)
 

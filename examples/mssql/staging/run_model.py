@@ -19,7 +19,9 @@ from run_interval import run_interval
 @model_lifecycle
 def run_model(run: ModelRun, data_conn, state_conn=None) -> None:
     units = run.intervals
-    print(f"\n{run.model.target.full_name}  ({run.model.kind})  {len(units)} unit(s)")
+    print(
+        f"\n{run.model.target.full_name}  ({run.model.temporality})  {len(units)} unit(s)"
+    )
     for interval in units:
         print(f"  {interval.since.date()} → {interval.until.date()}", flush=True)
         run_interval(run, interval, data_conn, state_conn)

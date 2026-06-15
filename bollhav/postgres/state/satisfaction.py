@@ -16,15 +16,15 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def _overlay_covers(windows, kind: str, interval) -> bool:
+def _overlay_covers(windows, level: str, interval) -> bool:
     """The `DRY_STATE` cascade rule: True when an upstream's would-run
-    `windows` cover this downstream `interval` for the given contract `kind`.
+    `windows` cover this downstream `interval` for the given contract `level`.
     A timeless upstream (or a whole-table `None` window) covers any downstream
     window; a temporal upstream needs a would-run window that contains the
     downstream's."""
     if not windows:
         return False
-    if kind in ("timeless", "exists", "whole") or interval is None:
+    if level in ("timeless", "exists", "whole") or interval is None:
         return True
     for w in windows:
         if w is None:
@@ -46,7 +46,7 @@ class Satisfaction(_PostgresStateBase):
         in the library and check satisfaction by the contract's level
         (interval → window cover; view / monolithic → existence row
         applied). A bare-string upstream has no declared level, so it falls
-        back to the upstream's own registered `kind`. `interval` is the
+        back to the upstream's own registered `temporality`. `interval` is the
         downstream's window, or None for a monolithic / view downstream
         (whole-table / existence work).
 
@@ -55,7 +55,7 @@ class Satisfaction(_PostgresStateBase):
         bare-string upstream that isn't registered is documentation and
         does not block.
 
-        Each blocker is a short `upstream 'name' (kind)` descriptor;
+        Each blocker is a short `upstream 'name' (level)` descriptor;
         `UpstreamCheck.reason` composes them into the single concise
         `blocked_reason` the row stores, and `read_status_summary` parses
         each back out so the banner can list every missing upstream."""
@@ -82,7 +82,7 @@ class Satisfaction(_PostgresStateBase):
                 continue
             name = src.name
             assert src.contract is not None  # gated ⇒ contract is not None
-            kind = src.contract.value
+            level = src.contract.value
             # Look the upstream up under THIS env's identity + library: a
             # suffixed run resolves against its own env, never prod's.
             match = self.lookup_model(
@@ -94,37 +94,59 @@ class Satisfaction(_PostgresStateBase):
                 # upstream was never deployed / run). (An ungated source isn't
                 # checked here at all — it's never iterated.)
                 raise ValueError(
-                    f"upstream contract {name!r} ({kind}) on "
+                    f"upstream contract {name!r} ({level}) on "
                     f"{self.model.target.full_name!r} is not registered in "
                     f"the library — it has never run. A gated upstream demands "
                     f"the upstream exists; fix the name or run the upstream "
                     f"first. (An ungated source would not block.)"
                 )
-            if kind in ("window", "through") and match.kind == "timeless":
+            if level in ("window", "through") and match.temporality == "timeless":
                 # WINDOW / THROUGH gate on a per-window match, but a TIMELESS
                 # upstream has no window to match. Make it a definition error,
                 # not a silent never-satisfied: the author must say WHOLE
                 # (loaded) or EXISTS (registered) instead.
                 raise ValueError(
-                    f"upstream contract {name!r} ({kind}) on "
+                    f"upstream contract {name!r} ({level}) on "
                     f"{self.model.target.full_name!r} targets a TIMELESS "
                     f"upstream, which has no window to match. Use WHOLE "
                     f"(loaded) or EXISTS (registered) instead."
                 )
             satisfied = self.is_satisfied(
-                conn, entry=match, interval=interval, kind=kind
+                conn, entry=match, interval=interval, level=level
             )
+            # Freshness is a second gate on top of completeness: even a fully
+            # applied upstream is BLOCKED if its relevant rows are too old.
+            stale = False
+            if satisfied and src.freshness is not None:
+                if not self.is_fresh(
+                    conn,
+                    entry=match,
+                    interval=interval,
+                    level=level,
+                    freshness=src.freshness,
+                ):
+                    satisfied = False
+                    stale = True
             logger.debug(
-                "contract: %s upstream %r (%s, upstream kind=%s) for %s window %s",
-                "SATISFIED" if satisfied else "BLOCKED",
+                "contract: %s upstream %r (%s%s, upstream temporality=%s) for %s window %s",
+                "SATISFIED" if satisfied else ("STALE" if stale else "BLOCKED"),
                 name,
-                kind,
-                match.kind,
+                level,
+                f", freshness {src.freshness.scope.value}≤{src.freshness.within}"
+                if src.freshness is not None
+                else "",
+                match.temporality,
                 downstream,
                 interval,
             )
             if not satisfied:
-                blockers.append(f"upstream {name!r} ({kind})")
+                # Distinct descriptor so the banner / status summary shows that
+                # the upstream is present-but-stale, not missing.
+                blockers.append(
+                    f"upstream {name!r} ({level}, stale)"
+                    if stale
+                    else f"upstream {name!r} ({level})"
+                )
         if blockers:
             logger.debug(
                 "contract: %s for window %s is BLOCKED by %s",
@@ -168,19 +190,19 @@ class Satisfaction(_PostgresStateBase):
                 continue
             name = src.name
             assert src.contract is not None  # gated ⇒ contract is not None
-            kind = src.contract.value
+            level = src.contract.value
             lookup = self._suffix_upstream_name(name)
             if assume_applied and _overlay_covers(
-                assume_applied.get(lookup), kind, interval
+                assume_applied.get(lookup), level, interval
             ):
-                after.append(f"{name} ({kind})")
+                after.append(f"{name} ({level})")
                 continue
             match = self.lookup_model(conn, lookup, self._library_schema())
             if match is not None and self.is_satisfied(
-                conn, entry=match, interval=interval, kind=kind
+                conn, entry=match, interval=interval, level=level
             ):
                 continue  # already applied
-            blocked.append(f"{name} ({kind})")
+            blocked.append(f"{name} ({level})")
         if blocked:
             return ("blocked", blocked)
         if after:
@@ -193,24 +215,24 @@ class Satisfaction(_PostgresStateBase):
         *,
         entry: "LibraryEntry",
         interval: "TZInterval | None",
-        kind: str | None = None,
+        level: str | None = None,
     ) -> bool:
         """Is the upstream satisfied for `interval` (the downstream's
         window, or None for whole-table / existence work)?
 
-        The check is keyed by `kind`. When the downstream declared an
-        `UpstreamContract`, `kind` is the contract's level value (the
+        The check is keyed by `level`. When the downstream declared an
+        `UpstreamContract`, `level` is the contract's level value (the
         downstream's explicit expectation); otherwise it falls back to the
-        upstream's own registered `entry.kind`. Either way:
+        upstream's own registered `entry.temporality`. Either way:
 
         * library-only rows (`state_schema` / `state_table` NULL — older
           images, or models registered without state tracking): presence
           in the library is the proof. Always satisfied.
-        * `kind == 'temporal'` / `'window'` / `'through'`:
+        * `level == 'temporal'` / `'window'` / `'through'`:
           look for an `applied` row whose window matches or fully
           encapsulates `interval`. A daily-cadence upstream thus covers an
           hourly downstream without coordination.
-        * `kind == 'timeless'`: the upstream has a single NULL-window
+        * `level == 'timeless'`: the upstream has a single NULL-window
           existence row — satisfied iff that row is `applied` (the view
           exists / the whole table has been loaded). The downstream window
           is irrelevant.
@@ -221,13 +243,13 @@ class Satisfaction(_PostgresStateBase):
 
         If the upstream's state table doesn't exist yet (registered but
         never bootstrapped), returns False."""
-        kind = kind or entry.kind
+        level = level or entry.temporality
 
         # 'exists' (UpstreamContract.EXISTS): reaching here means the upstream
         # was found in the library — that registration is all this gate
         # requires, regardless of state. A windowless way to depend on a
         # temporal model.
-        if kind == "exists":
+        if level == "exists":
             return True
 
         if entry.state_schema is None or entry.state_table is None:
@@ -248,7 +270,7 @@ class Satisfaction(_PostgresStateBase):
         # including the latest complete one — has run. Windowless, so a
         # timeless downstream can wait for full load where the single-window
         # interval coverage check can't express it.
-        if kind == "whole":
+        if level == "whole":
             query = sql.SQL(
                 "SELECT 1 WHERE EXISTS ("
                 "  SELECT 1 FROM {schema}.{table} WHERE status = 'applied'"
@@ -261,7 +283,7 @@ class Satisfaction(_PostgresStateBase):
             )
             return conn.execute(query).fetchone() is not None
 
-        if kind == "timeless":
+        if level == "timeless":
             query = sql.SQL(
                 "SELECT 1 FROM {schema}.{table} "
                 "WHERE status = 'applied' AND since IS NULL AND until IS NULL "
@@ -279,7 +301,7 @@ class Satisfaction(_PostgresStateBase):
         # over-waits. Anchored to my window's `until`, so intervals the upstream
         # grows *past* me don't block it (unlike WHOLE). A windowless downstream
         # (interval is None) has no anchor, so it degenerates to WHOLE.
-        if kind == "through":
+        if level == "through":
             bound = sql.SQL(" AND until <= %s") if interval is not None else sql.SQL("")
             params = [interval.until] if interval is not None else []
             query = sql.SQL(
@@ -308,3 +330,58 @@ class Satisfaction(_PostgresStateBase):
         )
         row = conn.execute(query, [since, until]).fetchone()
         return row is not None
+
+    @staticmethod
+    def is_fresh(
+        conn: psycopg.Connection,
+        *,
+        entry: "LibraryEntry",
+        interval: "TZInterval | None",
+        level: str | None,
+        freshness,
+    ) -> bool:
+        """Recency gate, applied AFTER `is_satisfied` confirms completeness.
+
+        `freshness` is a `Freshness(within, scope)`. The relevant applied rows
+        — selected exactly the way `is_satisfied` selects them for `level` —
+        must be recent: `scope=LATEST` requires the newest applied row to be
+        within `within` of now; `scope=ALL` requires every relevant applied
+        row to be (i.e. the oldest one). The age is computed in SQL against the
+        DB clock — `applied_at` is stamped with `now()`, so there's no
+        client/server skew.
+
+        EXISTS, and library-only rows with no state table, have no `applied_at`
+        to age, so freshness is vacuously satisfied (the same shapes
+        `is_satisfied` short-circuits on)."""
+        from bollhav.model.upstream import FreshnessScope
+
+        level = level or entry.temporality
+        if level == "exists" or entry.state_schema is None or entry.state_table is None:
+            return True
+
+        # Select the same applied rows the level treats as "the data I read".
+        if level == "timeless":
+            bound, params = sql.SQL(" AND since IS NULL AND until IS NULL"), []
+        elif level == "whole" or interval is None:
+            bound, params = sql.SQL(""), []
+        elif level == "through":
+            bound, params = sql.SQL(" AND until <= %s"), [interval.until]
+        else:  # window contract, or a bare temporal upstream → per-window cover
+            bound = sql.SQL(" AND since <= %s AND until >= %s")
+            params = [interval.since, interval.until]
+
+        agg = (
+            sql.SQL("min") if freshness.scope is FreshnessScope.ALL else sql.SQL("max")
+        )
+        query = sql.SQL(
+            "SELECT {agg}(applied_at) >= now() - %s "
+            "FROM {schema}.{table} WHERE status = 'applied'{bound}"
+        ).format(
+            agg=agg,
+            schema=sql.Identifier(entry.state_schema),
+            table=sql.Identifier(entry.state_table),
+            bound=bound,
+        )
+        row = conn.execute(query, [freshness.within, *params]).fetchone()
+        # No applied rows → aggregate is NULL → row[0] is None → not fresh.
+        return bool(row and row[0])

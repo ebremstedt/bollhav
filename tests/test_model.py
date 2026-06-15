@@ -5,7 +5,7 @@ import pytest
 from bollhav.model.batch import Batch
 from bollhav.model.contract import Contract
 from bollhav.model.model import Model
-from bollhav.model.kind import Kind
+from bollhav.model.temporality import Temporality
 from bollhav.model.target import Target
 from bollhav.model.modelrun import ModelRun
 from bollhav.model.window import compute_intervals, resolve_window, split_window
@@ -16,8 +16,8 @@ def make_model(**overrides) -> Model:
     # tests exercise the time-chunking path (None would short-circuit to
     # [None]). INTERVAL requires batching, so default that too — unless a
     # test overrides kind, in which case respect it.
-    overrides.setdefault("kind", Kind.TEMPORAL)
-    if overrides["kind"] is Kind.TEMPORAL:
+    overrides.setdefault("temporality", Temporality.TEMPORAL)
+    if overrides["temporality"] is Temporality.TEMPORAL:
         overrides.setdefault("batching", Batch())
     return Model(
         target=overrides.pop("target", Target(name="orders")),
@@ -46,7 +46,7 @@ def test_model_exposes_sub_configs():
 def test_batching_defaults_to_none_when_unspecified():
     """No batching kwarg = no chunking. model.intervals returns [None].
     A whole-table load with no batching is kind=MONOLITHIC."""
-    m = Model(target=Target(name="orders"), kind=Kind.TIMELESS)
+    m = Model(target=Target(name="orders"), temporality=Temporality.TIMELESS)
     assert m.batching is None
     assert compute_intervals(ModelRun(model=m)) == (None,)
 
@@ -80,32 +80,34 @@ def test_backfill_falls_back_to_bounds_for_since_but_requires_until():
 
 
 class TestModelKind:
-    """`Model.kind` (a `Kind` enum: INTERVAL | MONOLITHIC | VIEW) is the
+    """`Model.kind` (a `Temporality` enum: INTERVAL | MONOLITHIC | VIEW) is the
     single source of truth for a model's unit of work — how many state
     rows it has and how an upstream contract checks it. It defaults to
     TEMPORAL and the is_* bools derive from it."""
 
     def test_temporal_model_kind(self):
         m = make_model()  # make_model defaults to kind=TEMPORAL + Batch()
-        assert m.kind is Kind.TEMPORAL
-        assert m.kind.value == "temporal"
+        assert m.temporality is Temporality.TEMPORAL
+        assert m.temporality.value == "temporal"
         assert m.is_temporal is True
         assert m.is_table is True
         assert m.is_view is False
         assert m.is_timeless is False
 
     def test_timeless_model_kind(self):
-        m = Model(target=Target(name="app_config"), kind=Kind.TIMELESS)
-        assert m.kind is Kind.TIMELESS
-        assert m.kind.value == "timeless"
+        m = Model(target=Target(name="app_config"), temporality=Temporality.TIMELESS)
+        assert m.temporality is Temporality.TIMELESS
+        assert m.temporality.value == "timeless"
         assert m.is_timeless is True
         assert m.is_table is True
         assert m.is_view is False
 
     def test_view_model_kind(self):
-        m = Model(target=Target(name="customers"), kind=Kind.TIMELESS, view=True)
-        assert m.kind is Kind.TIMELESS
-        assert m.kind.value == "timeless"
+        m = Model(
+            target=Target(name="customers"), temporality=Temporality.TIMELESS, view=True
+        )
+        assert m.temporality is Temporality.TIMELESS
+        assert m.temporality.value == "timeless"
         assert m.is_view is True
         assert m.is_timeless is True
         assert m.is_table is False
@@ -113,12 +115,12 @@ class TestModelKind:
     def test_kind_defaults_to_temporal(self):
         # `kind` is keyword-only and defaults to TEMPORAL (the common case).
         m = Model(target=Target(name="orders"))
-        assert m.kind is Kind.TEMPORAL
+        assert m.temporality is Temporality.TEMPORAL
 
     def test_temporal_without_batching_is_allowed(self):
         # A temporal model has a time axis but need not be batched — it can
         # load its whole [begin, end] range in a single run.
-        m = Model(target=Target(name="orders"), kind=Kind.TEMPORAL)
+        m = Model(target=Target(name="orders"), temporality=Temporality.TEMPORAL)
         assert m.batching is None
         assert m.is_temporal is True
 
@@ -127,7 +129,7 @@ class TestModelKind:
         with pytest.raises(ValueError, match="has batching"):
             Model(
                 target=Target(name="app_config"),
-                kind=Kind.TIMELESS,
+                temporality=Temporality.TIMELESS,
                 batching=Batch(),
             )
 
@@ -140,7 +142,7 @@ class TestModelKind:
         with pytest.raises(ValueError, match="begin/end"):
             Model(
                 target=Target(name="app_config"),
-                kind=Kind.TIMELESS,
+                temporality=Temporality.TIMELESS,
                 contract=Contract(begin=datetime(2024, 1, 1, tzinfo=timezone.utc)),
             )
 
@@ -162,7 +164,7 @@ class TestModelKind:
 
         m = Model(
             target=Target(name="customers"),
-            kind=Kind.TEMPORAL,
+            temporality=Temporality.TEMPORAL,
             view=True,
             contract=Contract(
                 begin=datetime(2024, 1, 1, tzinfo=timezone.utc),
@@ -175,7 +177,9 @@ class TestModelKind:
 
     def test_timeless_view_is_allowed(self):
         # A view may also be TIMELESS — existence only, no range.
-        m = Model(target=Target(name="customers"), kind=Kind.TIMELESS, view=True)
+        m = Model(
+            target=Target(name="customers"), temporality=Temporality.TIMELESS, view=True
+        )
         assert m.is_view is True
         assert m.is_timeless is True
 

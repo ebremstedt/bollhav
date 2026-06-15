@@ -123,7 +123,7 @@ def _print_state_plan(run, postgres_state) -> None:
     extra = _dry_state_extra()
     name = run.model.target.full_name  # raw — used as the `_DRY_STATE_RUNS` key
     display = _gradient_name(name)  # colorized for output only
-    kind = run.model.kind.value
+    kind = run.model.temporality.value
     if postgres_state is None:
         pending = _lgreen(f"pending {len(run.intervals)} unit(s)")
         print(f"  {display} ({kind})  ·  stateless → {pending}")

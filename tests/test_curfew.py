@@ -6,7 +6,7 @@ from datetime import datetime, time, timezone
 from unittest.mock import MagicMock, patch
 from zoneinfo import ZoneInfo
 
-from bollhav.model import Batch, Curfew, Kind, Model, Target
+from bollhav.model import Batch, Curfew, Temporality, Model, Target
 from bollhav.model.lifecycle import execute_lifecycle, model_lifecycle
 from bollhav.model.modelrun import ModelRun
 
@@ -159,13 +159,16 @@ class TestTimezone:
 
 class TestModelField:
     def test_defaults_to_none(self):
-        m = Model(target=Target(name="x"), kind=Kind.TIMELESS)
+        m = Model(target=Target(name="x"), temporality=Temporality.TIMELESS)
         assert m.curfew is None
 
     def test_stored_on_model(self):
         c = Curfew(windows=[(time(22), time(6))])
         m = Model(
-            target=Target(name="x"), kind=Kind.TEMPORAL, batching=Batch(), curfew=c
+            target=Target(name="x"),
+            temporality=Temporality.TEMPORAL,
+            batching=Batch(),
+            curfew=c,
         )
         assert m.curfew is c
 

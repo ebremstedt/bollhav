@@ -67,7 +67,7 @@ def _node(
 
 
 _SELECT_NODE = (
-    "SELECT full_name, kind, model_type, upstream, sources, "
+    "SELECT full_name, temporality, model_type, upstream, sources, "
     "state_schema, state_table, last_seen FROM {schema}.{table}"
 )
 
@@ -118,7 +118,7 @@ def get_lineage(conn: "psycopg.Connection", full_name: str) -> dict | None:
     if upstream_names:
         rows = conn.execute(
             sql.SQL(
-                "SELECT full_name, kind FROM {schema}.{table} WHERE full_name = ANY(%s)"
+                "SELECT full_name, temporality FROM {schema}.{table} WHERE full_name = ANY(%s)"
             ).format(
                 schema=sql.Identifier(LIBRARY_SCHEMA),
                 table=sql.Identifier(LIBRARY_TABLE),
@@ -185,7 +185,7 @@ def get_recent_state(
         return []
     rows = conn.execute(
         sql.SQL(
-            "SELECT status, since, until, applied_at, run_id, kind, blocked_reason "
+            "SELECT status, since, until, applied_at, run_id, temporality, blocked_reason "
             "FROM {schema}.{table} "
             "ORDER BY applied_at DESC NULLS LAST, since DESC NULLS LAST LIMIT %s"
         ).format(
@@ -237,7 +237,7 @@ def get_graph(conn: "psycopg.Connection") -> dict:
         return {"nodes": [], "edges": []}
     rows = conn.execute(
         sql.SQL(
-            "SELECT full_name, kind, model_type, upstream, sources, "
+            "SELECT full_name, temporality, model_type, upstream, sources, "
             "state_schema, state_table, last_seen FROM {schema}.{table} "
             "ORDER BY full_name"
         ).format(

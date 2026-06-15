@@ -5,7 +5,7 @@ from bollhav.model.intervals import TZInterval
 from bollhav.model.matching import match_models
 from bollhav.model.model import Model
 from bollhav.model.modelrun import ModelRun
-from bollhav.model.kind import Kind
+from bollhav.model.temporality import Temporality
 from bollhav.model.column_sorting import sort_columns
 from bollhav.model.write_modes import WriteMode
 from bollhav.model.source import Source, SourceModel, SourceFile, SourceApi
@@ -23,6 +23,8 @@ from bollhav.model.state import (
 )
 from bollhav.model.tags import Tags
 from bollhav.model.upstream import (
+    Freshness,
+    FreshnessScope,
     UpstreamContract,
     UpstreamCheck,
 )
@@ -39,7 +41,7 @@ __all__ = [
     "match_models",
     "Model",
     "ModelRun",
-    "Kind",
+    "Temporality",
     "sort_columns",
     "Staging",
     "State",
@@ -59,6 +61,8 @@ __all__ = [
     "Curfew",
     "Tags",
     "UpstreamContract",
+    "Freshness",
+    "FreshnessScope",
     "UpstreamCheck",
     "progress_bar",
     "ProgressLevel",
