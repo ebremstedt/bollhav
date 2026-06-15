@@ -13,7 +13,7 @@ Models default to **no curfew** (`curfew=None`).
 | `windows` | `list[(time, time)]` | `[]` | Time-of-day `(start, end)` windows. Unioned; `start > end` wraps midnight. **Empty = the whole day.** |
 | `days` | `set[int]` | `None` | Weekdays it applies to, Mon=0…Sun=6 (as `datetime.weekday()` / `calendar.MONDAY`). `None` = every day. |
 | `tz` | `tzinfo` | `timezone.utc` | The wall clock `windows` / `days` are read in — `"22:00"` is meaningless without one. |
-| `allowed` | `bool` | `False` | `False` = **deny** when in effect; `True` = **allow only** when in effect. |
+| `allowed` | `bool` | `False` | `False` = **deny** when in effect; `True` = **allow only** when in effect |
 
 ## In effect
 
