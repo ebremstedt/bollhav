@@ -2,7 +2,12 @@
   import { Handle, Position } from "@xyflow/svelte";
   import { selection, info } from "../lib/selection.svelte.js";
   import { view } from "../lib/view.svelte.js";
-  import { KIND_COLOR, SRC_COLOR } from "../lib/constants.js";
+  import {
+    MODEL_YELLOW,
+    UNMANAGED_YELLOW,
+    MATERIALIZATION_COLOR,
+    SRC_COLOR,
+  } from "../lib/constants.js";
 
   let { data } = $props();
 
@@ -30,9 +35,13 @@
   }
 
   let isModel = $derived(data.nodeType === "model");
-  let accent = $derived(
-    isModel ? KIND_COLOR[data.kind] || "#888" : SRC_COLOR[data.kind] || "#888",
-  );
+  // An unmanaged source's second pill colour reflects its kind (model/api/file).
+  let kindColor = $derived(SRC_COLOR[data.kind] || "#888");
+  // Outline: a solid yellow frame for a managed model; for an unmanaged source
+  // the (dashed) border colour reflects WHICH kind of source it is.
+  let accent = $derived(isModel ? MODEL_YELLOW : kindColor);
+  // Materialization pill (table / view) — only when the library knows it.
+  let matColor = $derived(MATERIALIZATION_COLOR[data.modelType] || null);
 
   // Open the LEFT metadata panel for this model (the ⓘ badge). Stop the click
   // bubbling so it doesn't also trigger the card's open() / right panel.
@@ -67,24 +76,62 @@
   onkeydown={(e) => e.key === "Enter" && open()}
 >
   <div class="tag-row">
-    <span class="kind-label" style="background:{accent};color:{textOn(accent)}">
-      {data.kind}
-    </span>
     {#if isModel}
+      <span
+        class="kind-label"
+        style="background:{MODEL_YELLOW};color:{textOn(MODEL_YELLOW)}"
+        title="managed model · {data.kind}">model</span
+      >
+      {#if matColor}
+        <span
+          class="kind-label"
+          style="background:{matColor};color:{textOn(matColor)}"
+          title="materialization — a stored table or a SQL view"
+          >{data.modelType.toLowerCase()}</span
+        >
+      {/if}
       <button
         class="info"
         aria-label="model details"
         title="model details"
         onclick={openInfo}
       >i</button>
+    {:else}
+      <span
+        class="kind-label"
+        style="background:{UNMANAGED_YELLOW};color:{textOn(UNMANAGED_YELLOW)}"
+        title="not managed by bollhav — external input">unmanaged</span
+      >
+      <span
+        class="kind-label"
+        style="background:{kindColor};color:{textOn(kindColor)}"
+        title="source kind">{data.kind}</span
+      >
     {/if}
   </div>
-  {#if data.hasError}
-    <span class="err-dot" title="unresolved error on a recent run"></span>
-  {/if}
-  {#if data.running}
-    <span class="run-dot" title="a run is in progress"></span>
-  {/if}
+  <!-- status lights: a fixed strip anchored top-right, filling right→left, so
+       a single light always sits at the same spot. Order here is the fill
+       order (rightmost first). -->
+  <div class="dots">
+    {#if data.hasError}
+      <span class="dot err" title="error on a recent run"></span>
+    {/if}
+    {#if data.running}
+      <span class="dot run" title="a run is in progress"></span>
+    {/if}
+    {#if data.blocked}
+      <span
+        class="dot block"
+        title="blocked: an upstream model hasn't produced the data yet"
+      ></span>
+    {/if}
+    {#if data.stale}
+      <span
+        class="dot stale"
+        title="blocked: an upstream is present but too old (freshness gate not met)"
+      ></span>
+    {/if}
+  </div>
   <div class="name">{displayName}</div>
   {#if isModel}
     <div class="actions">
@@ -146,71 +193,68 @@
     border-color: #2f8fff;
     color: #2f8fff;
   }
-  .err-dot {
+  /* status-light strip: anchored at the top-right, filling right→left
+     (row-reverse), so one light sits at the same anchor as four. */
+  .dots {
     position: absolute;
-    top: -5px;
-    right: -5px;
+    top: -6px;
+    right: -6px;
+    display: flex;
+    flex-direction: row-reverse;
+    gap: 4px;
+    z-index: 3;
+  }
+  .dot {
     width: 11px;
     height: 11px;
     border-radius: 50%;
+    border: 2px solid var(--node-dot-border);
+    animation: dot-pulse 1.4s ease-in-out infinite;
+  }
+  .dot.err {
     background: #ff2d3a;
-    border: 2px solid var(--node-dot-border);
-    box-shadow:
-      0 0 6px 2px rgba(229, 32, 46, 0.9),
-      0 0 14px 4px rgba(229, 32, 46, 0.55);
-    animation: err-pulse 1.4s ease-in-out infinite;
+    --glow: 229, 32, 46;
   }
-  @keyframes err-pulse {
-    0%,
-    100% {
-      box-shadow:
-        0 0 6px 2px rgba(229, 32, 46, 0.9),
-        0 0 14px 4px rgba(229, 32, 46, 0.5);
-    }
-    50% {
-      box-shadow:
-        0 0 10px 3px rgba(229, 32, 46, 1),
-        0 0 26px 8px rgba(229, 32, 46, 0.7);
-    }
+  .dot.run {
+    background: #4ade80;
+    --glow: 74, 222, 128;
   }
-  .run-dot {
-    position: absolute;
-    bottom: -5px;
-    right: -5px;
-    width: 11px;
-    height: 11px;
-    border-radius: 50%;
+  .dot.block {
+    background: #f58518;
+    --glow: 245, 133, 24;
+  }
+  .dot.stale {
     background: #2f8fff;
-    border: 2px solid var(--node-dot-border);
-    box-shadow:
-      0 0 6px 2px rgba(47, 143, 255, 0.9),
-      0 0 14px 4px rgba(47, 143, 255, 0.55);
-    animation: run-pulse 1.4s ease-in-out infinite;
+    --glow: 47, 143, 255;
   }
-  @keyframes run-pulse {
+  /* one glow animation, tinted per-dot via the --glow RGB custom property */
+  @keyframes dot-pulse {
     0%,
     100% {
       box-shadow:
-        0 0 6px 2px rgba(47, 143, 255, 0.9),
-        0 0 14px 4px rgba(47, 143, 255, 0.5);
+        0 0 6px 2px rgba(var(--glow), 0.9),
+        0 0 14px 4px rgba(var(--glow), 0.5);
     }
     50% {
       box-shadow:
-        0 0 10px 3px rgba(47, 143, 255, 1),
-        0 0 26px 8px rgba(47, 143, 255, 0.7);
+        0 0 10px 3px rgba(var(--glow), 1),
+        0 0 26px 8px rgba(var(--glow), 0.7);
     }
   }
   /* respect users who ask for less motion — keep the strong glow, drop the pulse */
   @media (prefers-reduced-motion: reduce) {
-    .err-dot,
-    .run-dot {
+    .dot {
       animation: none;
+      box-shadow:
+        0 0 6px 2px rgba(var(--glow), 0.9),
+        0 0 14px 4px rgba(var(--glow), 0.55);
     }
   }
   .card.model {
     border-radius: 6px;
   }
-  /* non-managed external sources: diagonal striped fill + dashed border */
+  /* non-managed external sources: diagonal striped fill + a DASHED border
+     whose colour (set inline) reflects the source kind (api / file / model). */
   .card.ext {
     background: repeating-linear-gradient(
       45deg,
@@ -220,6 +264,11 @@
       var(--node-stripe) 14px
     );
     border-style: dashed;
+  }
+  /* managed models: a touch heavier golden frame so they read as the
+     first-class thing on the canvas. */
+  .card.model {
+    border-width: 2.5px;
   }
   .name {
     font-size: 13px;

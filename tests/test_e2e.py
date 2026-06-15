@@ -1161,10 +1161,15 @@ def test_e2e_registry_list_and_downstreams_and_graph(schema_name):
         "type": "external",
         "kind": "api",
     } in graph["nodes"]
-    # edges: upstream (orders→summary) and source (raw.landing→summary)
-    assert {"from": orders_fqn, "to": summary_fqn, "relation": "upstream"} in graph[
-        "edges"
-    ]
+    # edges: upstream (orders→summary) and source (raw.landing→summary).
+    # Upstream edges now carry the gating policy (contract level + freshness).
+    assert {
+        "from": orders_fqn,
+        "to": summary_fqn,
+        "relation": "upstream",
+        "contract": "window",
+        "freshness": None,
+    } in graph["edges"]
     assert {
         "from": "raw.landing",
         "to": summary_fqn,

@@ -49,8 +49,27 @@
   let cols = $derived(meta?.columns ?? []);
   let metaTags = $derived(meta?.tags ?? []);
   let hasMeta = $derived(meta && Object.keys(meta).length > 0);
+  // Prefer the typed upstream specs (name + contract + freshness) from the
+  // metadata bag; fall back to bare names off the graph node.
+  let upstreamSpecs = $derived(meta?.upstreams ?? null);
   let upstream = $derived(node?.upstream ?? []);
   let sources = $derived(node?.sources ?? []);
+
+  // seconds -> "1d" / "6h" / "30m" for a freshness window
+  function fmtDur(secs) {
+    if (secs == null) return "";
+    const d = secs / 86400;
+    if (d >= 1) return `${+d.toFixed(d % 1 ? 1 : 0)}d`;
+    const h = secs / 3600;
+    if (h >= 1) return `${+h.toFixed(h % 1 ? 1 : 0)}h`;
+    const m = secs / 60;
+    if (m >= 1) return `${+m.toFixed(0)}m`;
+    return `${secs}s`;
+  }
+  function freshLabel(f) {
+    if (!f) return "";
+    return `❄ ≤${fmtDur(f.within_seconds)} ${f.scope}`;
+  }
 </script>
 
 <aside class="meta-panel">
@@ -70,7 +89,7 @@
   {/if}
 
   <div class="row">
-    <span>kind</span>
+    <span>temporality</span>
     <b>{node?.kind ?? "—"}{node?.model_type ? ` · ${node.model_type}` : ""}</b>
   </div>
 
@@ -85,10 +104,10 @@
         <b>{meta.batching.chunk} · {meta.batching.size} rows</b>
       </div>
     {/if}
-    {#if meta.bounds && (meta.bounds.begin || meta.bounds.end)}
+    {#if meta.contract && (meta.contract.begin || meta.contract.end)}
       <div class="row">
-        <span>bounds</span>
-        <b>{fmtTs(meta.bounds.begin)} → {fmtTs(meta.bounds.end)}</b>
+        <span>contract</span>
+        <b>{fmtTs(meta.contract.begin)} → {fmtTs(meta.contract.end)}</b>
       </div>
     {/if}
     {#if meta.partitioned_by}
@@ -101,8 +120,21 @@
 
   <div class="row"><span>last seen</span><b>{fmtTs(node?.last_seen)}</b></div>
 
-  <div class="sec">upstream ({upstream.length})</div>
-  {#if upstream.length}
+  <div class="sec">
+    upstream ({upstreamSpecs ? upstreamSpecs.length : upstream.length})
+  </div>
+  {#if upstreamSpecs && upstreamSpecs.length}
+    <ul class="list">
+      {#each upstreamSpecs as u}
+        <li>
+          {u.name}
+          <span class="contract">{u.contract}</span>
+          {#if u.freshness}<span class="fresh">{freshLabel(u.freshness)}</span>{/if}
+          {#if u.deactivate_for_dev}<em class="devoff">dev→prod</em>{/if}
+        </li>
+      {/each}
+    </ul>
+  {:else if upstream.length}
     <ul class="list">
       {#each upstream as u}<li>{u}</li>{/each}
     </ul>
@@ -216,6 +248,33 @@
   .list em {
     color: var(--muted, #888);
     font-style: normal;
+  }
+  /* contract level + freshness chips on each upstream */
+  .contract {
+    font-size: 9px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+    padding: 1px 5px;
+    border-radius: 8px;
+    background: #2b2f36;
+    color: #ffd23f;
+    margin-left: 4px;
+  }
+  .fresh {
+    font-size: 9px;
+    font-weight: 600;
+    padding: 1px 5px;
+    border-radius: 8px;
+    background: #16313a;
+    color: #4aa3ff;
+    margin-left: 4px;
+    white-space: nowrap;
+  }
+  .devoff {
+    font-size: 9px;
+    color: var(--muted, #888);
+    margin-left: 4px;
   }
   .cols li {
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
