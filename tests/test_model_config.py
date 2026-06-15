@@ -4,7 +4,7 @@ import pytest
 from bollhav.model.kind import Kind
 from bollhav.model.model import Model
 from bollhav.model.target import Target
-from bollhav.model.bounds import Bounds
+from bollhav.model.contract import Contract
 from bollhav.model.tags import Tags
 from bollhav.model.write_modes import WriteMode
 
@@ -35,7 +35,7 @@ def make_db() -> MagicMock:
 def make_model(**overrides) -> Model:
     # These config/tag tests build whole-table models with no batching, so
     # default kind=MONOLITHIC (a kind is now required on every Model).
-    overrides.setdefault("kind", Kind.MONOLITHIC)
+    overrides.setdefault("kind", Kind.TIMELESS)
     return Model(
         target=overrides.pop("target", Target(name="test_table")),
         **overrides,
@@ -46,7 +46,7 @@ def make_model(**overrides) -> Model:
 #
 # The old `ModelType.VIEW <-> WriteMode.VIEW` coupling tests were removed:
 # `WriteMode.VIEW` no longer exists, and `ModelType` is gone entirely. A view
-# is now identified solely by `Model(kind=Kind.VIEW)`; the Target no longer
+# is now identified solely by `Model(kind=Kind.TIMELESS, view=True)`; the Target no longer
 # carries a model_type, so there is no write-mode/model-type pairing to
 # validate.
 
@@ -54,7 +54,7 @@ def make_model(**overrides) -> Model:
 def test_view_kind_has_no_write_mode_coupling():
     # A VIEW with the default (APPEND) write mode on its target is accepted —
     # the write mode is simply irrelevant for a view, so no error is raised.
-    m = make_model(target=Target(name="test_table"), kind=Kind.VIEW)
+    m = make_model(target=Target(name="test_table"), kind=Kind.TIMELESS, view=True)
     assert m.is_view is True
 
 
@@ -131,13 +131,13 @@ def test_merge_key_columns_falls_back_to_unique():
     assert [c.name for c in t.merge_key_columns] == ["id"]
 
 
-# --- Bounds ---
+# --- Contract ---
 
 
 def test_bounds_stores_begin_end():
     begin = datetime(2024, 1, 1, tzinfo=UTC)
     end = datetime(2024, 12, 31, tzinfo=UTC)
-    b = Bounds(begin=begin, end=end)
+    b = Contract(begin=begin, end=end)
     assert b.begin == begin
     assert b.end == end
 

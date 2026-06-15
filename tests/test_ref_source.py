@@ -18,17 +18,15 @@ from bollhav.model import (  # noqa: E402
     Batch,
     Database,
     TimeChunking,
-    IntervalContract,
     Kind,
     Model,
-    MonolithicContract,
     Source,
     SourceApi,
     SourceFile,
     SourceModel,
     State,
     Target,
-    ViewContract,
+    UpstreamContract,
 )
 from bollhav.mssql.columns import MssqlColumn, MssqlType  # noqa: E402
 from bollhav.postgres.columns import PostgresColumn, PostgresType  # noqa: E402
@@ -52,7 +50,7 @@ def _pg_model(*, schema="warehouse_clean", suffix="", upstream=None):
             ],
         ),
         batching=Batch(time=TimeChunking(chunk="@daily")),
-        kind=Kind.INTERVAL,
+        kind=Kind.TEMPORAL,
         # gated upstreams need state; ungated sources don't.
         state=State() if _has_gate(upstream) else None,
         upstream=upstream,
@@ -73,18 +71,18 @@ def _mssql_model(*, upstream=None):
             ],
         ),
         batching=Batch(time=TimeChunking(chunk="@daily")),
-        kind=Kind.INTERVAL,
+        kind=Kind.TEMPORAL,
         upstream=upstream,
     )
 
 
-def _gated(name, contract=None, assume_ok=False):
+def _gated(name, contract=None, deactivate_for_dev=False):
     """A gated upstream: a SourceModel carrying a contract."""
     return Source(
         name,
         type=SourceModel(),
-        contract=contract or IntervalContract(),
-        assume_ok=assume_ok,
+        contract=contract or UpstreamContract.WINDOW,
+        deactivate_for_dev=deactivate_for_dev,
     )
 
 
@@ -102,11 +100,12 @@ class TestRefGated:
         m = _pg_model(suffix="pr123", upstream=[_gated("warehouse.orders")])
         assert m.ref("warehouse.orders") == '"warehouse_pr123"."orders"'
 
-    def test_assume_ok_resolves_literal_even_when_gated(self) -> None:
-        # A gated upstream normally moves with the env suffix; assume_ok=True
+    def test_deactivate_for_dev_resolves_literal_even_when_gated(self) -> None:
+        # A gated upstream normally moves with the env suffix; deactivate_for_dev=True
         # pins it to its canonical (prod) location even in a suffixed run.
         m = _pg_model(
-            suffix="pr123", upstream=[_gated("warehouse.orders", assume_ok=True)]
+            suffix="pr123",
+            upstream=[_gated("warehouse.orders", deactivate_for_dev=True)],
         )
         assert m.ref("warehouse.orders") == '"warehouse"."orders"'
 
@@ -157,12 +156,14 @@ class TestRefAddressability:
 class TestContractValidation:
     def test_contract_only_valid_on_source_model(self) -> None:
         with pytest.raises(ValueError, match="only a SourceModel can be gated"):
-            Source("x", type=SourceApi(), contract=IntervalContract())
+            Source("x", type=SourceApi(), contract=UpstreamContract.WINDOW)
 
     def test_contract_on_model_is_ok(self) -> None:
-        s = Source("warehouse.orders", type=SourceModel(), contract=ViewContract())
+        s = Source(
+            "warehouse.orders", type=SourceModel(), contract=UpstreamContract.WINDOW
+        )
         assert s.gated is True
-        assert s.contract.kind == "view"
+        assert s.contract.value == "window"
 
 
 class TestDeclaredInputs:
@@ -219,15 +220,19 @@ class TestLineage:
         return _pg_model(
             upstream=[
                 Source(
-                    "warehouse.orders", type=SourceModel(), contract=IntervalContract()
+                    "warehouse.orders",
+                    type=SourceModel(),
+                    contract=UpstreamContract.WINDOW,
                 ),
                 Source(
-                    "warehouse.customers", type=SourceModel(), contract=ViewContract()
+                    "warehouse.customers",
+                    type=SourceModel(),
+                    contract=UpstreamContract.WHOLE,
                 ),
                 Source(
                     "warehouse.app_config",
                     type=SourceModel(),
-                    contract=MonolithicContract(),
+                    contract=UpstreamContract.EXISTS,
                 ),
                 Source("raw.landing", type=SourceModel()),
                 Source("vendor.orders", type=SourceApi()),
@@ -236,15 +241,15 @@ class TestLineage:
 
     def test_lineage_dict_is_typed(self) -> None:
         lin = self._model().lineage()
-        assert lin["kind"] == "interval"
+        assert lin["kind"] == "temporal"
         assert lin["inputs_known"] is True
-        assert {"name": "warehouse.customers", "kind": "view"} in lin["upstream"]
+        assert {"name": "warehouse.customers", "kind": "whole"} in lin["upstream"]
         assert {"name": "vendor.orders", "kind": "api"} in lin["sources"]
         assert {"name": "raw.landing", "kind": "model"} in lin["sources"]
 
-    def test_upstream_specs_use_contract_kind(self) -> None:
-        m = _pg_model(upstream=[_gated("warehouse.orders", IntervalContract())])
-        assert m.upstream_specs == [{"name": "warehouse.orders", "kind": "interval"}]
+    def test_upstream_specs_use_contract_level(self) -> None:
+        m = _pg_model(upstream=[_gated("warehouse.orders", UpstreamContract.WINDOW)])
+        assert m.upstream_specs == [{"name": "warehouse.orders", "kind": "window"}]
 
     def test_lineage_json_roundtrips(self) -> None:
         import json
@@ -256,9 +261,9 @@ class TestLineage:
         tree = self._model().lineage_tree()
         assert "├─ upstream" in tree
         assert "└─ sources" in tree
-        assert "warehouse.orders (interval)" in tree
-        assert "warehouse.customers (view)" in tree
-        assert "warehouse.app_config (monolithic)" in tree
+        assert "warehouse.orders (window)" in tree
+        assert "warehouse.customers (whole)" in tree
+        assert "warehouse.app_config (exists)" in tree
         assert "vendor.orders (api)" in tree
 
     def test_lineage_tree_unknown_when_nothing_declared(self) -> None:

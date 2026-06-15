@@ -5,7 +5,7 @@ import logging
 from uuid import uuid4
 
 from bollhav.model.target import Target
-from bollhav.model.bounds import Bounds
+from bollhav.model.contract import Contract
 from bollhav.model.batch import Batch
 from bollhav.model.kind import Kind
 from bollhav.model.state import State
@@ -20,10 +20,11 @@ class Model:
     def __init__(
         self,
         target: Target,
-        bounds: Bounds | None = None,
+        contract: Contract | None = None,
         batching: Batch | None = None,
         *,
-        kind: Kind,
+        kind: Kind = Kind.TEMPORAL,
+        view: bool = False,
         tagging: Tags | None = None,
         tags: set[str] | None = None,
         state: State | None = None,
@@ -35,9 +36,10 @@ class Model:
         **kwargs,
     ):
         self.target = target
-        self.bounds = bounds or Bounds()
+        self.contract = contract or Contract()
         self.batching = batching
         self.kind = kind
+        self.view = view
         self.state = state
         self.curfew = curfew
         self.enabled = enabled
@@ -76,40 +78,47 @@ class Model:
 
     def _validate_kind_consistency(self) -> None:
         """`kind` is the single source of truth for the unit of work, so
-        batching and the view-only knobs must agree with it:
+        batching, the time window, and the view-only knobs must agree with it:
 
-          * INTERVAL needs batching (its unit is a time window).
-          * MONOLITHIC must not have batching (one whole-table unit).
-          * VIEW has no batching, staging, or recreate/truncate.
+          * TEMPORAL has a time axis; batching is optional (windowed in
+            chunks, or the whole `[begin, end]` range in one run).
+          * TIMELESS must not have batching, and carries no time window
+            (`contract.begin` / `contract.end` must be unset).
+          * a view (`view=True`) isn't materialized per-window, so it can't be
+            batched — its kind may be TEMPORAL (its `Contract` `begin`/`end`
+            declares the range it covers, recorded as one state row) or TIMELESS
+            (existence only). It also has no staging or recreate/truncate.
         """
         name = self.target.name
-        if self.kind is Kind.INTERVAL and self.batching is None:
-            raise ValueError(
-                f"model {name!r} is kind=INTERVAL but has no batching — an "
-                f"interval model's unit of work is a time window. Add "
-                f"`batching=Batch(...)` (or pick kind=MONOLITHIC for a "
-                f"whole-table load)."
-            )
-        if self.kind is Kind.MONOLITHIC and self.batching is not None:
-            raise ValueError(
-                f"model {name!r} is kind=MONOLITHIC but has batching — a "
-                f"monolithic model is one whole-table unit, not windowed. "
-                f"Drop `batching` (or pick kind=INTERVAL)."
-            )
-        if self.kind is Kind.VIEW:
+        if self.kind is Kind.TIMELESS:
             if self.batching is not None:
                 raise ValueError(
-                    f"model {name!r} is kind=VIEW but has batching — a view "
-                    f"isn't windowed. Drop `batching`."
+                    f"model {name!r} is kind=TIMELESS but has batching — a "
+                    f"timeless model is one whole unit, not windowed. "
+                    f"Drop `batching` (or pick kind=TEMPORAL)."
+                )
+            if self.contract.begin is not None or self.contract.end is not None:
+                raise ValueError(
+                    f"model {name!r} is kind=TIMELESS but its contract has "
+                    f"begin/end — a timeless model has no time axis to bound. "
+                    f"Drop the contract window (or pick kind=TEMPORAL)."
+                )
+        if self.view:
+            if self.batching is not None:
+                raise ValueError(
+                    f"model {name!r} is a view but has batching — a view isn't "
+                    f"materialized per-window (it's one CREATE VIEW). Drop "
+                    f"`batching`. A temporal view declares the range it covers "
+                    f"via its Contract begin/end instead."
                 )
             if self.target.staging is not None:
                 raise ValueError(
-                    f"model {name!r} is kind=VIEW but has staging — a view has "
+                    f"model {name!r} is a view but has staging — a view has "
                     f"nothing to stage. Drop `staging`."
                 )
             if self.target.recreate_table or self.target.truncate_table:
                 raise ValueError(
-                    f"model {name!r} is kind=VIEW — recreate_table / "
+                    f"model {name!r} is a view — recreate_table / "
                     f"truncate_table don't apply to views."
                 )
 
@@ -169,9 +178,9 @@ class Model:
             ]
         lines += [
             "",
-            "  bounds:",
-            f"    begin:       {self.bounds.begin}",
-            f"    end:         {self.bounds.end}",
+            "  contract:",
+            f"    begin:       {self.contract.begin}",
+            f"    end:         {self.contract.end}",
         ]
         if self.curfew is not None:
             sense = "allow only" if self.curfew.allowed else "deny"
@@ -238,10 +247,11 @@ class Model:
     @property
     def upstream_specs(self) -> list[dict]:
         """Typed gated upstreams as `[{"name", "kind"}]`. `kind` is the
-        contract kind (`interval` / `view` / `monolithic`). Symmetric with
-        `source_specs`; together they're the model's typed lineage inputs."""
+        upstream contract level (`exists` / `window` / `through` / `whole`).
+        Symmetric with `source_specs`;
+        together they're the model's typed lineage inputs."""
         return [
-            {"name": source.name, "kind": source.contract.kind}
+            {"name": source.name, "kind": source.contract.value}
             for source in self.upstream
             if source.contract is not None
         ]
@@ -327,11 +337,11 @@ class Model:
         gets the same suffix this run applied to the model's own target — so
         the query is portable across dev / prod / PR.
 
-        A gated source declared `assume_ok=True` is pinned to its canonical
+        A gated source declared `deactivate_for_dev=True` is pinned to its canonical
         (unsuffixed) location instead — a shared upstream read from prod even in
-        a dev run (where gating also assumes it's okay); see `Source.assume_ok`.
+        a dev run (where gating also assumes it's okay); see `Source.deactivate_for_dev`.
 
-            model.ref('shared.calendar')  ->  "shared"."calendar"   # assume_ok=True source
+            model.ref('shared.calendar')  ->  "shared"."calendar"   # deactivate_for_dev=True source
         """
         src = self._find_source(name)
         if src is None:
@@ -349,10 +359,10 @@ class Model:
                 f"can't go in a FROM. Read it in your read function instead; "
                 f"ref() is only for SourceModel inputs."
             )
-        # Gated upstreams move with the env suffix — unless `assume_ok` pins
+        # Gated upstreams move with the env suffix — unless `deactivate_for_dev` pins
         # them to their canonical (prod) location.
         return self._resolve_relation(
-            name, apply_suffix=src.gated and not src.assume_ok
+            name, apply_suffix=src.gated and not src.deactivate_for_dev
         )
 
     def _resolve_relation(self, name: str, *, apply_suffix: bool) -> str:
@@ -396,41 +406,36 @@ class Model:
 
     @property
     def is_table(self) -> bool:
-        """True when this model produces a TABLE — any non-view kind
-        (`INTERVAL` or `MONOLITHIC`). For asset-side decisions that only
-        care about table-vs-view."""
-        return self.kind is not Kind.VIEW
+        """True when this model produces a materialized TABLE (not a view).
+        For asset-side decisions that only care about table-vs-view."""
+        return not self.view
 
     @property
     def is_view(self) -> bool:
-        """True when this model produces a VIEW. Its state is a single
-        existence row; an upstream is satisfied when that row says the view
-        exists."""
-        return self.kind is Kind.VIEW
+        """True when this model produces a VIEW (`view=True`). Its state is a
+        single existence row; an upstream is satisfied when that row says the
+        view exists."""
+        return self.view
 
-    # ── exact kind ────────────────────────────────────────────────────
-
-    @property
-    def is_kind_interval(self) -> bool:
-        """True when `kind=Kind.INTERVAL` — batched, one state row per window."""
-        return self.kind is Kind.INTERVAL
+    # ── time axis ─────────────────────────────────────────────────────
 
     @property
-    def is_kind_monolithic(self) -> bool:
-        """True when `kind=Kind.MONOLITHIC` — whole-table load, one state row."""
-        return self.kind is Kind.MONOLITHIC
+    def is_temporal(self) -> bool:
+        """True when `kind=Kind.TEMPORAL` — batched, one state row per window."""
+        return self.kind is Kind.TEMPORAL
 
     @property
-    def is_kind_view(self) -> bool:
-        """True when `kind=Kind.VIEW` — a view, one existence state row."""
-        return self.kind is Kind.VIEW
+    def is_timeless(self) -> bool:
+        """True when `kind=Kind.TIMELESS` — one whole/existence state row, no
+        time axis."""
+        return self.kind is Kind.TIMELESS
 
     def __repr__(self) -> str:
         return (
             f"Model("
             f"name={self.target.full_name!r}, "
             f"target={self.target!r}, "
-            f"bounds={self.bounds!r}, "
+            f"contract={self.contract!r}, "
             f"batching={self.batching!r}, "
             f"tags={self.tags!r}, "
             f"enabled={self.enabled}, "

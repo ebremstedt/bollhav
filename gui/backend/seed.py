@@ -18,18 +18,16 @@ from psycopg import sql
 
 from bollhav.model import (
     Batch,
-    Bounds,
+    Contract,
     Database,
-    IntervalContract,
     Kind,
-    MonolithicContract,
     Model,
     Source,
     SourceModel,
     State,
     Target,
     TimeChunking,
-    ViewContract,
+    UpstreamContract,
     WriteMode,
 )
 from bollhav.model.intervals import TZInterval  # noqa: E402
@@ -83,44 +81,44 @@ SPEC = [
     # CLEAN — one managed model per upstream source table
     (
         clean("CustomerInteractionEngagementEventFact"),
-        Kind.INTERVAL,
+        Kind.TEMPORAL,
         [],
         [cha("CustomerInteractionEngagementEventFact")],
     ),
     (
         clean("SubscriptionBillingLifecycleCycleFact"),
-        Kind.INTERVAL,
+        Kind.TEMPORAL,
         [],
         [cha("SubscriptionBillingLifecycleCycleFact")],
     ),
     (
         clean("OrderFulfilmentShipmentMovementFact"),
-        Kind.INTERVAL,
+        Kind.TEMPORAL,
         [],
         [cha("OrderFulfilmentShipmentMovementFact")],
     ),
     (
         clean("ProductCatalogReferenceHierarchyDimension"),
-        Kind.MONOLITHIC,
+        Kind.TIMELESS,
         [],
         [cha("ProductCatalogReferenceHierarchyDimension")],
     ),
     (
         clean("GeographicRegionTerritoryHierarchyDimension"),
-        Kind.MONOLITHIC,
+        Kind.TIMELESS,
         [],
         [cha("GeographicRegionTerritoryHierarchyDimension")],
     ),
     (
         clean("MarketingCampaignChannelBridgeMapping"),
-        Kind.MONOLITHIC,
+        Kind.TIMELESS,
         [],
         [cha("MarketingCampaignChannelBridgeMapping")],
     ),
     # CONSUME — derived from the clean layer
     (
         consume("DailyConsolidatedRevenueAggregateFact"),
-        Kind.INTERVAL,
+        Kind.TEMPORAL,
         [
             clean("CustomerInteractionEngagementEventFact"),
             clean("SubscriptionBillingLifecycleCycleFact"),
@@ -130,7 +128,7 @@ SPEC = [
     ),
     (
         consume("CustomerThreeSixtyEnrichedProfileDimension"),
-        Kind.MONOLITHIC,
+        Kind.TIMELESS,
         [
             clean("ProductCatalogReferenceHierarchyDimension"),
             clean("GeographicRegionTerritoryHierarchyDimension"),
@@ -139,7 +137,7 @@ SPEC = [
     ),
     (
         consume("ExecutivePerformanceOverviewSummaryView"),
-        Kind.VIEW,
+        Kind.TIMELESS,
         [
             consume("DailyConsolidatedRevenueAggregateFact"),
             consume("CustomerThreeSixtyEnrichedProfileDimension"),
@@ -174,10 +172,11 @@ ERRORS = [
 ]
 
 _KINDS = {name: kind for name, kind, _, _ in SPEC}
+# Temporal upstreams gate per-window; timeless upstreams (no window to match)
+# are waited on WHOLE (loaded).
 _CONTRACT = {
-    Kind.INTERVAL: IntervalContract,
-    Kind.VIEW: ViewContract,
-    Kind.MONOLITHIC: MonolithicContract,
+    Kind.TEMPORAL: UpstreamContract.WINDOW,
+    Kind.TIMELESS: UpstreamContract.WHOLE,
 }
 
 
@@ -227,11 +226,13 @@ def _demo_columns():
 def _build(full_name, kind, upstream_names, source_names):
     cat, schema, table = _split3(full_name)
     layer = "consumption reporting" if schema == CONSUME else "curated clean"
+    # A view is a TIMELESS model whose name ends in "View" (demo convention).
+    view = table.endswith("View")
     description = f"{kind.value.title()} model in the {layer} layer (demo)."
     # A view has no columns/write_mode; tables carry the demo columns so the
     # tooltip can show them. A bare/database target both keep a catalog, so
     # full_name stays a 3-part catalog.schema.table for every node.
-    if kind is Kind.VIEW:
+    if view:
         target = Target(
             name=table, schema=schema, catalog=cat, dsn_env_var="TARGET_DSN"
         )
@@ -252,7 +253,7 @@ def _build(full_name, kind, upstream_names, source_names):
         Source(
             u,
             type=SourceModel(catalog=_split3(u)[0], schema=_split3(u)[1]),
-            contract=_CONTRACT[_KINDS[u]](),
+            contract=_CONTRACT[_KINDS[u]],
         )
         for u in upstream_names
     ] + [
@@ -262,14 +263,15 @@ def _build(full_name, kind, upstream_names, source_names):
     return Model(
         target=target,
         kind=kind,
+        view=view,
         batching=(
-            Batch(time=TimeChunking(chunk="@daily")) if kind is Kind.INTERVAL else None
+            Batch(time=TimeChunking(chunk="@daily")) if kind is Kind.TEMPORAL else None
         ),
         state=State(),
         upstream=upstream,
         description=description,
-        bounds=(
-            Bounds(begin=NOW - timedelta(days=60)) if kind is Kind.INTERVAL else None
+        contract=(
+            Contract(begin=NOW - timedelta(days=60)) if kind is Kind.TEMPORAL else None
         ),
     )
 
@@ -287,7 +289,7 @@ def _seed_runs(model, conn, *, error_latest=False, running_latest=False):
     st = PostgresState(model=model, conn=conn)
     st.ensure_tables()
     rid = uuid.uuid4()  # bollhav 3.0: run_id lives on ModelRun, mint one per run
-    if model.kind is Kind.INTERVAL:
+    if model.kind is Kind.TEMPORAL:
         base = (NOW - timedelta(days=6)).replace(
             hour=0, minute=0, second=0, microsecond=0
         )

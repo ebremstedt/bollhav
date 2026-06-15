@@ -61,7 +61,7 @@ Column definitions. Required if `database` is set.
 
 Type: `WriteMode` · Default: `APPEND`
 
-How to write data. See [Write modes](#write-modes) for the full list and trade-offs. (Whether a model is a table or a view is `kind=Kind.VIEW` on the [Model](KINDS.md), not a Target field.)
+How to write data. See [Write modes](#write-modes) for the full list and trade-offs. (Whether a model is a table or a view is `view=True` on the [Model](KINDS.md), not a Target field.)
 
 ## dsn_env_var
 
@@ -75,7 +75,7 @@ A derived `@property` — set `partition_on=True` on the column you want to part
 
 ## Write modes
 
-`write_mode` is a property of [Target](TARGET.md) (`WriteMode`, default `APPEND`). A practical guide to picking the right one: `APPEND`, `UPSERT_NO_DELETE`, or `RECREATE_PARTITION`. Views are not a write mode — a view is `kind=Kind.VIEW` on the [Model](KINDS.md).
+`write_mode` is a property of [Target](TARGET.md) (`WriteMode`, default `APPEND`). A practical guide to picking the right one: `APPEND`, `UPSERT_NO_DELETE`, or `RECREATE_PARTITION`. Views are not a write mode — a view is `view=True` on the [Model](KINDS.md).
 
 ### Pre-load table flags
 
@@ -206,7 +206,7 @@ Typical recipes:
 
 Per-target opt-in for memory-bounded chunked writes plus atomic per-interval finalization. Set `Target(staging=Staging(...))` and the staging-table lifecycle (create → write chunks → apply → drop) is owned by [`@execute_lifecycle`](DECORATORS.md#execute-lifecycle) via `PostgresData` / `MssqlData`: sub-batches land in a staging table keyed on `model.run_id`, then one transaction applies the staged content to the target. With state, the apply and the `applied` flip commit together.
 
-A `kind=Kind.VIEW` model can't have staging — a view has nothing to stage, so `Model(...)` rejects `staging` on a VIEW.
+A `view=True` model can't have staging — a view has nothing to stage, so `Model(...)` rejects `staging` on a view.
 
 Supported on both backends:
 

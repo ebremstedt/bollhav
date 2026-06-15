@@ -56,13 +56,13 @@ When you call `main()`, the decorator runs the following steps **before** your f
     - `target.suffix` set to `TABLE_SUFFIX` (when `USE_TABLE_SUFFIX=true`) — see [Schema vs table suffix](TARGET.md#schema-vs-table-suffix)
     - `batching.time` (its `chunk` / `window` / `lookback` / `tz`) updated by `INTERVAL_OVERRIDE` / `WINDOW_OVERRIDE` / `LOOKBACK_OVERRIDE` / `TIMEZONE_OVERRIDE`
 
-   The chosen mode does not land on the model — it resolves the run's `[since, until)` **window** (from the mode + [Bounds](BOUNDS.md)), which is carried on the returned `ModelRun` as `run.window`, with `run.is_reload` / `run.is_latest` / `run.is_backfill` recording which mode resolved it.
+   The chosen mode does not land on the model — it resolves the run's `[since, until)` **window** (from the mode + [Contract](CONTRACT.md)), which is carried on the returned `ModelRun` as `run.window`, with `run.is_reload` / `run.is_latest` / `run.is_backfill` recording which mode resolved it.
 7. **If `DRY_RUN` (or `DRY_RUN_EXTRA`):** print the matched-model summary and **return without calling your `main()`**.
 8. **Otherwise: call your function** as `main(runs=<resolved list>, debug=<DEBUG>)`.
 
 ### Calculating intervals
 
-`@load_models` resolves each model's `[since, until)` window from the run mode + [Bounds](BOUNDS.md), then `compute_intervals(run)` splits it by `batching.time.chunk` into `TZInterval` chunks (held on `run.intervals`). See [Chunking](BATCH.md#chunking) and [Modes](MODES.md).
+`@load_models` resolves each model's `[since, until)` window from the run mode + [Contract](CONTRACT.md), then `compute_intervals(run)` splits it by `batching.time.chunk` into `TZInterval` chunks (held on `run.intervals`). See [Chunking](BATCH.md#chunking) and [Modes](MODES.md).
 
 ### Mental model
 
@@ -89,7 +89,7 @@ def run_model(run, data_conn, state_conn=None):
 2. **Assets** on `data_conn`:
    - `view` → `CREATE OR REPLACE VIEW` (that *is* the asset; no table DDL).
    - otherwise → create schema + table, then optional recreate / truncate / indexes / unique constraint / staging schema + orphan GC.
-3. **State** on `state_conn`, when stateful: ensure the library + state tables, register the model, then seed rows — one singleton for `monolithic` / `view`, one per window for `interval`.
+3. **State** on `state_conn`, when stateful: ensure the library + state tables, register the model, then seed rows — one one-shot row for a `timeless` (or unbatched `temporal`) model, one per window for a batched `temporal` one.
 4. **Filter** — `run.intervals` is set to the *actionable* units only (skips already-`applied`), so your loop runs just the outstanding work.
 5. **Run** your function.
 6. **POST actions** on a clean return; **release** the model lock.
@@ -107,7 +107,7 @@ def run_interval(run, interval, data_conn, state_conn=None):
     write(run.model, rows, conn=data_conn, interval=interval)
 ```
 
-`interval` is a window for an `interval` model, or `None` for `monolithic` / `view`.
+`interval` is a window for a batched `temporal` model, or `None` for a `timeless` one (or an unbatched `temporal` model with no range).
 
 ### Two switches
 
@@ -171,7 +171,7 @@ if __name__ == "__main__":
 | **WINDOW_OVERRIDE** | IntervalExpression | no | Overrides every model's `batching.time.window` (latest-mode scope). Errors at startup if set without **LATEST_ENABLED** |
 | **LOOKBACK_OVERRIDE** | non-negative int | no | Overrides every model's `batching.time.lookback`. Shifts each interval's `since` backwards by N cron-ticks of the (post-override) `chunk`. Applies in latest, backfill, and reload modes |
 | **DRY_RUN** | bool | no | When `True`, `@load_models` prints a concise summary of matched models and exits without invoking the wrapped function |
-| **DRY_RUN_EXTRA** | bool | no | When `True`, same short-circuit but prints an exhaustive per-model block (schema, bounds, tags, source, upstream, …). Implies `DRY_RUN=true` |
+| **DRY_RUN_EXTRA** | bool | no | When `True`, same short-circuit but prints an exhaustive per-model block (schema, contract, tags, source, upstream, …). Implies `DRY_RUN=true` |
 
 ### Latest mode
 

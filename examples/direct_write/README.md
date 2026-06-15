@@ -1,4 +1,4 @@
-# direct_write — interval models written without staging
+# direct_write — temporal models written without staging
 
 The counterpart to [`staging_state_contracts`](../staging_state_contracts):
 two state-tracked INTERVAL models whose rows go **straight to the target** —

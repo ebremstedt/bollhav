@@ -5,7 +5,7 @@ from time_machine import travel
 
 from bollhav.model.runtime import _apply_to_model
 from bollhav.model.batch import Batch, TimeChunking
-from bollhav.model.bounds import Bounds
+from bollhav.model.contract import Contract
 from bollhav.model.intervals import TZInterval
 from bollhav.model.kind import Kind
 from bollhav.model.model import Model
@@ -56,7 +56,7 @@ def _model(**batch_kwargs) -> Model:
     return Model(
         target=Target(name="orders", schema="public", schema_suffix_appendix=None),
         batching=Batch(time=TimeChunking(**iv)),
-        kind=Kind.INTERVAL,
+        kind=Kind.TEMPORAL,
     )
 
 
@@ -116,7 +116,7 @@ class TestPipeOverrides:
 
 
 class TestWindowResolution:
-    """`_apply_to_model` resolves the run window from bounds + the run
+    """`_apply_to_model` resolves the run window from contract + the run
     instruction and bakes it onto the new model (no directives, no stamping)."""
 
     @travel(datetime(2024, 6, 15, 14, 35, tzinfo=UTC))
@@ -130,11 +130,11 @@ class TestWindowResolution:
         m = Model(
             target=Target(name="orders", schema="public", schema_suffix_appendix=None),
             batching=Batch(time=TimeChunking(chunk="@hourly", tz=UTC)),
-            bounds=Bounds(begin=begin),
-            kind=Kind.INTERVAL,
+            contract=Contract(begin=begin),
+            kind=Kind.TEMPORAL,
         )
         out = _apply(m, reload=True, latest=True)
-        # reload wins: window spans bounds.begin .. latest complete tick,
+        # reload wins: window spans contract.begin .. latest complete tick,
         # not the single latest tick that `latest`-only would give.
         assert out.window.since == begin
         assert out.window.until == latest_complete_interval("@hourly", UTC).until
@@ -154,8 +154,8 @@ class TestBatchingCarryThrough:
                 time=TimeChunking(chunk="@hourly", tz=UTC),
                 size=5000,
             ),
-            bounds=Bounds(begin=datetime(2024, 1, 1, tzinfo=UTC)),
-            kind=Kind.INTERVAL,
+            contract=Contract(begin=datetime(2024, 1, 1, tzinfo=UTC)),
+            kind=Kind.TEMPORAL,
         )
         out = _apply(m).model
         assert out.batching.size == 5000
@@ -170,7 +170,7 @@ class TestBatchingNone:
     def test_no_batching_skips_interval_baking(self) -> None:
         m = Model(
             target=Target(name="t", schema="", schema_suffix_appendix=None),
-            kind=Kind.MONOLITHIC,
+            kind=Kind.TIMELESS,
         )
         out = _apply(m, interval_override="@daily").model
         assert out.batching is None
@@ -191,7 +191,7 @@ class TestStateAndStagingCarryThrough:
             target=Target(name="orders", schema="public", schema_suffix_appendix=None),
             batching=Batch(time=TimeChunking(chunk="@hourly", tz=UTC)),
             state=s,
-            kind=Kind.INTERVAL,
+            kind=Kind.TEMPORAL,
         )
         out = _apply(m).model
         assert out.state is s
@@ -216,7 +216,7 @@ class TestStateAndStagingCarryThrough:
             ),
             batching=Batch(time=TimeChunking(chunk="@hourly", tz=UTC)),
             state=State(),  # staging requires state
-            kind=Kind.INTERVAL,
+            kind=Kind.TEMPORAL,
         )
         out = _apply(m).model
         out_staging = out.target.staging
@@ -238,12 +238,12 @@ class TestRunMode:
     backfill (matching resolve_window)."""
 
     def _bounded(self) -> Model:
-        # reload needs bounds.begin; latest/backfill don't mind it being set.
+        # reload needs contract.begin; latest/backfill don't mind it being set.
         return Model(
             target=Target(name="orders", schema="public", schema_suffix_appendix=None),
             batching=Batch(time=TimeChunking(chunk="@hourly", tz=UTC)),
-            bounds=Bounds(begin=_SINCE, end=_UNTIL),
-            kind=Kind.INTERVAL,
+            contract=Contract(begin=_SINCE, end=_UNTIL),
+            kind=Kind.TEMPORAL,
         )
 
     def test_backfill_is_the_default(self):
@@ -288,8 +288,8 @@ class TestCurfewPreservedThroughOverrides:
         m = Model(
             target=Target(name="orders", schema="public", schema_suffix_appendix=None),
             batching=Batch(time=TimeChunking(chunk="@hourly", tz=UTC)),
-            bounds=Bounds(begin=_SINCE, end=_UNTIL),
-            kind=Kind.INTERVAL,
+            contract=Contract(begin=_SINCE, end=_UNTIL),
+            kind=Kind.TEMPORAL,
             curfew=Curfew.work_hours(),
         )
         run = _apply(m)

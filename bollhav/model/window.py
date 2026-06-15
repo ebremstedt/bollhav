@@ -3,7 +3,7 @@
 Two responsibilities, both pure (apart from the clock read in `latest` /
 open-ended `reload` modes):
 
-* `resolve_window` — turn a model's `bounds` + the run instruction
+* `resolve_window` — turn a model's `contract` + the run instruction
   (reload / latest / backfill) into the single `(since, until)` window a run
   targets, lookback already applied.
 * `split_window` — chop one resolved window into cron-tick-sized
@@ -24,7 +24,7 @@ from roskarl.cron import INTERVAL_EXPRESSION_SHORTCUTS
 
 if TYPE_CHECKING:
     from bollhav.model.batch import Batch
-    from bollhav.model.bounds import Bounds
+    from bollhav.model.contract import Contract
     from bollhav.model.modelrun import ModelRun
 
 _CRON_ALIASES = INTERVAL_EXPRESSION_SHORTCUTS
@@ -74,7 +74,7 @@ def _apply_lookback(expression: str, since: datetime, lookback: int) -> datetime
 
 def resolve_window(
     batching: "Batch | None",
-    bounds: "Bounds",
+    contract: "Contract",
     *,
     latest: bool = False,
     reload: bool = False,
@@ -83,46 +83,53 @@ def resolve_window(
     name: str = "",
 ) -> TZInterval | None:
     """Resolve the single time window a run targets, from the model's
-    `batching` + `bounds` and the run instruction. The result already accounts
-    for `lookback`, so the caller only has to `split_window` it.
+    `batching` + `contract` and the run instruction. The result already
+    accounts for `lookback`, so the caller only has to `split_window` it.
 
     Returns `None` when there is no `batching` — the model runs once,
     unfiltered. Three mutually-exclusive modes, in precedence order:
 
-        reload   — `bounds.begin` .. (`bounds.end` or the latest complete tick)
+        reload   — `contract.begin` .. (`contract.end` or the latest complete tick)
         latest   — the latest complete `window` tick
-        backfill — `since` (or `bounds.begin`) .. `until` (required)
+        backfill — `since` (or `contract.begin`) .. `until` (required)
 
     Pure apart from the clock read in `latest` / open-ended `reload`."""
     if batching is None:
+        # Unbatched: the model runs once over its whole declared range. A
+        # temporal model with a closed contract window [begin, end] records a
+        # single state row spanning it, so a downstream can gate WINDOW on it
+        # (its window must fall inside the range). A timeless / range-less model
+        # has no window → None → a NULL-window one-shot row.
+        if contract.begin is not None and contract.end is not None:
+            return TZInterval(contract.begin, contract.end)
         return None
 
     expr = batching.time.chunk
     tz = batching.time.tz
 
     if reload:
-        if bounds.begin is None:
+        if contract.begin is None:
             raise ValueError(
-                f"reload requires bounds.begin to be set on model {name!r}"
+                f"reload requires contract.begin to be set on model {name!r}"
             )
-        window_since = bounds.begin
-        window_until = bounds.end or latest_complete_interval(expr, tz).until
+        window_since = contract.begin
+        window_until = contract.end or latest_complete_interval(expr, tz).until
     elif latest:
         window_expr = batching.time.window or expr
         interval = latest_complete_interval(window_expr, tz)
         window_since, window_until = interval.since, interval.until
     else:
-        window_since = since or bounds.begin
+        window_since = since or contract.begin
         if window_since is None:
             raise ValueError(
-                f"backfill requires a since value — set bounds.begin on model "
+                f"backfill requires a since value — set contract.begin on model "
                 f"{name!r} or pass --since at runtime"
             )
         if until is None:
             raise ValueError(
                 f"backfill requires an explicit until on model {name!r} — set "
                 f'BACKFILL_UNTIL. Backfill means a specific window; for "to the '
-                f'latest complete tick" use latest mode, for "to bounds.end" use '
+                f'latest complete tick" use latest mode, for "to contract.end" use '
                 f"reload mode."
             )
         window_until = until
@@ -158,10 +165,13 @@ def compute_intervals(run: "ModelRun") -> tuple[TZInterval, ...] | tuple[None]:
     the model's `batching.time.chunk`. Assign the result to
     `run.intervals`.
 
-    `(None,)` when the run has no `batching`/`window` (monolithic / view — runs
-    once, unfiltered). A batched model always has a `window`, since `runtime`
-    resolves one for every interval model it builds."""
+    `(None,)` when the run has no `window` (a timeless model, or a temporal one
+    with no declared range — runs once, unfiltered, one NULL-window row). An
+    unbatched temporal run with a resolved `[begin, end]` window yields that
+    single window unsplit; a batched run splits its window into chunks."""
     model = run.model
-    if model.batching is None or run.window is None:
+    if run.window is None:
         return (None,)
+    if model.batching is None:
+        return (run.window,)
     return tuple(split_window(run.window, model.batching.time.chunk))

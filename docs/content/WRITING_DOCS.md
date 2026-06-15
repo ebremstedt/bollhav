@@ -20,7 +20,7 @@ The canonical hierarchy:
 Home
 ├─ Model                      MODEL.md
 │  ├─ Target                  TARGET.md
-│  ├─ Bounds                  BOUNDS.md
+│  ├─ Contract                CONTRACT.md
 │  ├─ Batch                   BATCH.md
 │  ├─ Kind                    KINDS.md
 │  ├─ State                   STATE.md

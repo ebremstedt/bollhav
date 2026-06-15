@@ -76,7 +76,7 @@ class TestModelStateField:
         return dict(
             target=Target(name="orders", schema="public"),
             batching=Batch(time=TimeChunking(chunk="@hourly")),
-            kind=Kind.INTERVAL,
+            kind=Kind.TEMPORAL,
         )
 
     def test_state_defaults_to_none(self) -> None:
@@ -92,15 +92,17 @@ class TestModelStateField:
         m = Model(state=s, **self._kwargs())
         assert m.state is s
 
-    def test_state_without_batching_raises(self) -> None:
+    def test_state_without_batching_is_allowed(self) -> None:
+        # A temporal model may be unbatched (whole [begin, end] in one run); a
+        # stateful unbatched model just gets a single (oneshot) state row.
         from bollhav.model import Kind, Model, Target
 
-        with pytest.raises(ValueError, match="has no batching"):
-            Model(
-                target=Target(name="orders", schema="public"),
-                state=State(),
-                kind=Kind.INTERVAL,
-            )
+        m = Model(
+            target=Target(name="orders", schema="public"),
+            state=State(),
+            kind=Kind.TEMPORAL,
+        )
+        assert m.batching is None
 
     def test_staging_without_state_is_allowed(self) -> None:
         """Staging without state is a supported combo: memory-bounded
@@ -124,7 +126,7 @@ class TestModelStateField:
                 staging=Staging(),
             ),
             batching=Batch(time=TimeChunking(chunk="@hourly")),
-            kind=Kind.INTERVAL,
+            kind=Kind.TEMPORAL,
         )
         assert m.state is None
         assert m.target.staging is not None
@@ -147,7 +149,7 @@ class TestModelStateField:
             ),
             batching=Batch(time=TimeChunking(chunk="@hourly")),
             state=State(),
-            kind=Kind.INTERVAL,
+            kind=Kind.TEMPORAL,
         )
         assert m.target.staging is not None
         assert m.state is not None
@@ -485,7 +487,7 @@ class TestModelIntervals:
         m = Model(
             target=Target(name="orders", schema="public"),
             batching=Batch(time=TimeChunking(chunk="@daily")),
-            kind=Kind.INTERVAL,
+            kind=Kind.TEMPORAL,
         )
         run = ModelRun(model=m)
         run.intervals = ("fake1", "fake2")
@@ -494,7 +496,7 @@ class TestModelIntervals:
     def test_model_is_frozen(self) -> None:
         from bollhav.model import Kind, Model, Target
 
-        m = Model(target=Target(name="orders", schema="public"), kind=Kind.MONOLITHIC)
+        m = Model(target=Target(name="orders", schema="public"), kind=Kind.TIMELESS)
         with pytest.raises(AttributeError, match="frozen"):
             m.state = None  # type: ignore[misc]
 
@@ -503,7 +505,7 @@ class TestModelIntervals:
 
         from bollhav.model import (
             Batch,
-            Bounds,
+            Contract,
             TimeChunking,
             Kind,
             Model,
@@ -513,17 +515,17 @@ class TestModelIntervals:
         from bollhav.model.window import compute_intervals, resolve_window
 
         batching = Batch(time=TimeChunking(chunk="@daily"))
-        bounds = Bounds(begin=datetime(2024, 1, 1, tzinfo=timezone.utc))
+        contract = Contract(begin=datetime(2024, 1, 1, tzinfo=timezone.utc))
         m = Model(
             target=Target(name="orders", schema="public"),
             batching=batching,
-            bounds=bounds,
-            kind=Kind.INTERVAL,
+            contract=contract,
+            kind=Kind.TEMPORAL,
         )
         run = ModelRun(
             model=m,
             window=resolve_window(
-                batching, bounds, until=datetime(2024, 1, 3, tzinfo=timezone.utc)
+                batching, contract, until=datetime(2024, 1, 3, tzinfo=timezone.utc)
             ),
         )
         # Assigning the attribute doesn't perturb the pure computation.
@@ -559,19 +561,19 @@ class TestDropEnvironmentGuard:
 
 
 class TestAssumeOkUpstream:
-    """A gated upstream declared `assume_ok=True` is a shared/prod dependency.
+    """A gated upstream declared `deactivate_for_dev=True` is a shared/prod dependency.
     In a SUFFIXED (dev/PR) run gating assumes its state is okay and never looks
     it up; in a prod (unsuffixed) run it gates normally — so the flag needs no
     flipping between environments. Read off the Source; nothing is mutated."""
 
     def _src(self):
-        from bollhav.model import IntervalContract, Source, SourceModel
+        from bollhav.model import UpstreamContract, Source, SourceModel
 
         return Source(
             "warehouse.orders",
             type=SourceModel(),
-            contract=IntervalContract(),
-            assume_ok=True,
+            contract=UpstreamContract.WINDOW,
+            deactivate_for_dev=True,
         )
 
     def test_suffixed_run_assumes_okay_and_skips_lookup(self) -> None:

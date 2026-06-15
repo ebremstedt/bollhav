@@ -2,23 +2,29 @@ from enum import Enum
 
 
 class Kind(Enum):
-    """A model's kind — its unit of work, how many state rows it has, and
-    how a downstream contract checks it. Set explicitly on every `Model`
-    (there is no default): the kind is the single source of truth that the
-    state layer and upstream contracts key on, so it must be unambiguous.
+    """A model's kind — whether its unit of work has a time axis. Defaults to
+    `TEMPORAL` (the common case) on a `Model`; it's the single source of truth
+    that the state layer and upstream contracts key on.
 
-    The values are the strings the state backend / library / contracts use
-    (`kind` column, `IntervalContract`/`ViewContract`/`MonolithicContract`),
-    so `model.kind.value` is the on-the-wire form.
+    The values are the strings the state backend / library use (`kind`
+    column), so `model.kind.value` is the on-the-wire form. A downstream's
+    `UpstreamContract` level (WINDOW / THROUGH / …) is resolved against this
+    kind at check time.
 
-    * `INTERVAL`   — batched table; unit of work is one `(since, until)`
-                     window. One state row per window. Requires `batching`.
-    * `MONOLITHIC` — whole-table load; unit of work is the entire table.
-                     One whole-table state row. Must not have `batching`.
-    * `VIEW`       — a view; unit of work is its existence. One existence
-                     state row. No `batching` / no `staging`.
+    * `TEMPORAL` — has a time axis (`contract` begin/end). Batching is
+                   optional: batched → one state row per `(since, until)`
+                   window; unbatched → the whole `[begin, end]` range loaded in
+                   one run. A downstream may gate it per-window (WINDOW /
+                   THROUGH) or wholesale (WHOLE / EXISTS).
+    * `TIMELESS` — no time axis; the unit of work is the whole thing, one
+                   existence / whole-table state row. Must not have `batching`,
+                   and its `contract` carries no `begin`/`end`. A downstream can
+                   only gate it WHOLE (loaded) or EXISTS (registered) — there is
+                   no window to match, so WINDOW / THROUGH are rejected.
+
+    Materialization (a SQL view vs a materialized table) is orthogonal to the
+    time axis — see `Model(view=...)` / `Model.is_view`.
     """
 
-    INTERVAL = "interval"
-    MONOLITHIC = "monolithic"
-    VIEW = "view"
+    TEMPORAL = "temporal"
+    TIMELESS = "timeless"

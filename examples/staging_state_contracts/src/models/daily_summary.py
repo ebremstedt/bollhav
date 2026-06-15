@@ -1,16 +1,18 @@
 """daily_summary — an INTERVAL table (staging + state) that declares gated
-**upstream** Sources of all three contract kinds.
+**upstream** Sources, each with an `UpstreamContract` level.
 
 This is the point of the example. Its `upstream` is a list of `Source`s, each
-carrying a contract, checked by the upstream's shape before an interval runs:
+carrying a contract level. The level says *how much* must be ready; the
+upstream's **shape** (read from the registry) decides what that means, so the
+same `WINDOW` level resolves differently per upstream:
 
-  * SourceModel + IntervalContract on warehouse.orders — satisfied when orders
-                                            has an applied state row covering
-                                            this summary interval's window.
-  * SourceModel + ViewContract on warehouse.customers — satisfied when the
-                                            customers view exists (row applied).
-  * SourceModel + MonolithicContract on warehouse.app_config — satisfied when
-                                            app_config is loaded (row applied).
+  * warehouse.orders (an interval model) + WINDOW — satisfied when orders has
+                                            an applied state row covering this
+                                            summary interval's window.
+  * warehouse.customers (a view) + WINDOW — satisfied when the customers view
+                                            exists (its existence row applied).
+  * warehouse.app_config (monolithic) + WINDOW — satisfied when app_config is
+                                            loaded (its existence row applied).
 
 At each interval `@execute_lifecycle` checks every gated upstream. If any is
 unsatisfied the interval is marked `blocked` (with a reason naming each
@@ -22,20 +24,18 @@ from datetime import datetime, timezone
 
 from bollhav.model import (
     Batch,
-    Bounds,
+    Contract,
     Database,
     TimeChunking,
-    IntervalContract,
     Kind,
     Model,
-    MonolithicContract,
     Source,
     SourceModel,
     Staging,
     State,
     Tags,
     Target,
-    ViewContract,
+    UpstreamContract,
     WriteMode,
 )
 from bollhav.postgres import PostgresColumn, PostgresType
@@ -62,23 +62,29 @@ daily_summary = Model(
             ),
         ],
     ),
-    kind=Kind.INTERVAL,
+    kind=Kind.TEMPORAL,
     state=State(),
     batching=Batch(time=TimeChunking(chunk="@daily")),
-    bounds=Bounds(
+    contract=Contract(
         begin=datetime(2024, 1, 1, tzinfo=timezone.utc),
         end=datetime(2024, 1, 4, tzinfo=timezone.utc),
     ),
     # Upstreams are referenced by full identity (catalog.schema.table).
     upstream=[
         Source(
-            "demo.warehouse.orders", type=SourceModel(), contract=IntervalContract()
+            "demo.warehouse.orders",
+            type=SourceModel(),
+            contract=UpstreamContract.WINDOW,
         ),
-        Source("demo.warehouse.customers", type=SourceModel(), contract=ViewContract()),
+        Source(
+            "demo.warehouse.customers",
+            type=SourceModel(),
+            contract=UpstreamContract.WINDOW,
+        ),
         Source(
             "demo.warehouse.app_config",
             type=SourceModel(),
-            contract=MonolithicContract(),
+            contract=UpstreamContract.WINDOW,
         ),
     ],
     tagging=Tags(tags={"demo"}),

@@ -6,17 +6,17 @@ Reference for every env var bollhav reads, in alphabetical order. The right-side
 
 ## BACKFILL_ENABLED
 
-Bool, default `true` (when `LATEST_ENABLED=false`). Run in backfill mode — walk every interval from `BACKFILL_SINCE` (or model `bounds.begin`) up to `BACKFILL_UNTIL` (or `now()`).
+Bool, default `true` (when `LATEST_ENABLED=false`). Run in backfill mode — walk every interval from `BACKFILL_SINCE` (or model `contract.begin`) up to `BACKFILL_UNTIL` (or `now()`).
 
 ## BACKFILL_SINCE
 
-ISO 8601 datetime, optional. Overrides each model's `bounds.begin` for this run.
+ISO 8601 datetime, optional. Overrides each model's `contract.begin` for this run.
 
 Example: `BACKFILL_SINCE=2024-01-01T00:00:00Z`
 
 ## BACKFILL_UNTIL
 
-ISO 8601 datetime, optional. Overrides each model's `bounds.end` for this run.
+ISO 8601 datetime, optional. Overrides each model's `contract.end` for this run.
 
 ## DEBUG
 
@@ -28,7 +28,7 @@ Bool, default `false`. Prints a concise summary of every matched model (cron + i
 
 ## DRY_RUN_EXTRA
 
-Bool, default `false`. Same short-circuit as `DRY_RUN` but prints an exhaustive per-model block (schema, write mode, cron/window/intervals, bounds, tags, upstream, sources, description). Setting just `DRY_RUN_EXTRA=true` implies `DRY_RUN=true`.
+Bool, default `false`. Same short-circuit as `DRY_RUN` but prints an exhaustive per-model block (schema, write mode, cron/window/intervals, contract, tags, upstream, sources, description). Setting just `DRY_RUN_EXTRA=true` implies `DRY_RUN=true`.
 
 ## DRY_STATE
 

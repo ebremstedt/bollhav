@@ -213,8 +213,6 @@ class TestModelLifecycle:
         m.state.allow_concurrent_runs = allow_concurrent
         m.stateful = True
         m.is_view = False
-        m.is_kind_monolithic = False
-        m.is_kind_view = False
         # No resolved window on this bare mock → compute_intervals() returns
         # the (None,) contract instead of trying to split a MagicMock.
         m.window = None
@@ -236,8 +234,6 @@ class TestModelLifecycle:
         m.state = None
         m.stateful = False
         m.is_view = False
-        m.is_kind_monolithic = False
-        m.is_kind_view = False
         return ModelRun(model=m)
 
     def test_state_less_runs_assets_no_bootstrap(self):
@@ -347,8 +343,6 @@ class TestBackendDispatch:
         m.state = None
         m.stateful = False
         m.is_view = False
-        m.is_kind_monolithic = False
-        m.is_kind_view = False
         return ModelRun(model=m)
 
     def test_mssql_model_routes_assets_through_mssql_data(self):

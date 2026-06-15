@@ -13,7 +13,7 @@ from bollhav.model.window import (
     resolve_window,
     split_window,
 )
-from bollhav.model.bounds import Bounds
+from bollhav.model.contract import Contract
 from bollhav.model.intervals import TZInterval
 from bollhav.model.kind import Kind
 from bollhav.model.model import Model
@@ -30,7 +30,7 @@ def _model(
     tz=UTC,
     lookback=None,
     retries=None,
-    bounds=None,
+    contract=None,
     interval_override=None,
     tz_override=None,
     since=None,
@@ -51,15 +51,15 @@ def _model(
         ),
         retries=retries,
     )
-    bounds = bounds or Bounds()
+    contract = contract or Contract()
     window = resolve_window(
-        batching, bounds, latest=latest, since=since, until=until, name="test"
+        batching, contract, latest=latest, since=since, until=until, name="test"
     )
     model = Model(
         target=Target(name="test"),
         batching=batching,
-        bounds=bounds,
-        kind=Kind.INTERVAL,
+        contract=contract,
+        kind=Kind.TEMPORAL,
     )
     return ModelRun(model=model, window=window)
 

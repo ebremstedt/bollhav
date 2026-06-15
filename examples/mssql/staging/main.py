@@ -5,7 +5,7 @@ Self-contained (no @load_models / TAGS needed):
   1. ensure the MSSQL `bollhav` database exists,
   2. reset: drop the MSSQL target table AND the Postgres state (`z_bollhav`),
      so the run starts clean and every interval is pending,
-  3. resolve the daily window (reload mode → bounds.begin..bounds.end),
+  3. resolve the daily window (reload mode → contract.begin..contract.end),
   4. run through `@model_lifecycle` / `@execute_lifecycle`, passing **two**
      connections — MSSQL `data_conn` (pyodbc) for data + staging, and
      Postgres `state_conn` (psycopg) for the state machine.
@@ -73,12 +73,12 @@ def main() -> None:
     _reset_target(sales)
     _reset_state()
 
-    # Reload mode → window spans bounds.begin..bounds.end. The @model_lifecycle
+    # Reload mode → window spans contract.begin..contract.end. The @model_lifecycle
     # state bootstrap (on state_conn) splits this window into pending interval
     # rows in Postgres and narrows run.intervals to the actionable set.
     run = ModelRun(
         model=sales,
-        window=resolve_window(sales.batching, sales.bounds, reload=True),
+        window=resolve_window(sales.batching, sales.contract, reload=True),
     )
 
     # Two connections: MSSQL for data/staging, Postgres for state.

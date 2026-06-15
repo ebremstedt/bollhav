@@ -99,7 +99,7 @@ def _dry_state_extra() -> bool:
 
 def _fmt_window(interval) -> str:
     """A compact window label for one unit of work; `None` is the whole-table
-    / view singleton."""
+    / view oneshot."""
     if interval is None:
         return "(whole table)"
     return f"{interval.since:%Y-%m-%d %H:%M} → {interval.until:%Y-%m-%d %H:%M}"
@@ -314,8 +314,13 @@ def model_lifecycle(func: Callable) -> Callable:
                 postgres_state.register_model()
                 postgres_state.ensure_tables()
 
-                if model.is_kind_monolithic or model.is_kind_view:
-                    postgres_state.insert_singleton(run_id=run.run_id)
+                # A NULL-window one-shot row when there's no window to track —
+                # a timeless model, or a temporal one with no declared range.
+                # Otherwise one row per window: a batched run splits its window
+                # into chunks; an unbatched temporal run with a [begin, end]
+                # contract records that single range as one row.
+                if run.window is None:
+                    postgres_state.insert_oneshot(run_id=run.run_id)
                 else:
                     postgres_state.insert_intervals(
                         run_id=run.run_id,

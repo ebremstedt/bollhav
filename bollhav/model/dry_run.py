@@ -115,7 +115,7 @@ def _print_model_extra(run: ModelRun) -> None:
         if model.batching.time.lookback:
             print(f"    lookback     : {model.batching.time.lookback}")
 
-    print(f"    bounds       : {_format_bounds(model)}")
+    print(f"    contract     : {_format_contract(model)}")
     print(f"    tags         : {_format_tags(model)}")
     print(f"    upstream     : {_format_upstream(model)}")
     print(f"    sources      : {_format_sources(model)}")
@@ -123,8 +123,8 @@ def _print_model_extra(run: ModelRun) -> None:
         print(f"    description  : {model.description}")
 
 
-def _format_bounds(model: Model) -> str:
-    b = model.bounds
+def _format_contract(model: Model) -> str:
+    b = model.contract
     if b.begin is None and b.end is None:
         return "(none)"
     begin = b.begin.isoformat() if b.begin else "—"

@@ -3,7 +3,7 @@ from enum import Enum
 
 class WriteMode(Enum):
     """How *data* is written to a table target. Views have no write mode —
-    a view is identified by `kind=Kind.VIEW` and created by the lifecycle
+    a view is identified by `view=True` and created by the lifecycle
     (`PostgresData.create_or_replace_view`), not written here."""
 
     APPEND = "APPEND"  # Simply append rows each time

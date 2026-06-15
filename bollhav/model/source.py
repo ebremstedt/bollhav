@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from bollhav.model.upstream import Contract
+from bollhav.model.upstream import UpstreamContract
 
 
 @dataclass
@@ -56,7 +56,7 @@ class Source:
     can't be state-gated. `type=None` marks unknown provenance (auto-injected
     when a model declares nothing).
 
-    `assume_ok` (gated upstreams only) is a dev convenience: in a **suffixed**
+    `deactivate_for_dev` (gated upstreams only) is a dev convenience: in a **suffixed**
     (dev/PR) run, read this upstream from its canonical (prod) location and
     assume its state is okay — don't wait on a copy in your dev env that you
     never built. It has **no effect without a schema suffix**: a prod run reads
@@ -67,8 +67,8 @@ class Source:
 
     name: str
     type: SourceModel | SourceFile | SourceApi | None = None
-    contract: Contract | None = None
-    assume_ok: bool = False
+    contract: UpstreamContract | None = None
+    deactivate_for_dev: bool = False
 
     def __post_init__(self) -> None:
         if self.contract is not None and not isinstance(self.type, SourceModel):

@@ -97,7 +97,7 @@ Set on `Target`. Executed once inside `ensure_table` **before** the chunked writ
 target = Target(..., write_mode=WriteMode.APPEND, truncate_table=True)
 ```
 
-Both `False` by default; both `True` raises. Not valid with `WriteMode.VIEW`.
+Both `False` by default; both `True` raises. Does not apply to a view (views are not a write mode).
 
 ## UPSERT_NO_DELETE
 
@@ -114,9 +114,9 @@ MssqlColumn(name="id", data_type=MssqlType.INT, unique=True, nullable=False)
 
 If all columns are part of the unique key (no non-key columns), the `WHEN MATCHED` clause is omitted (insert-only merge).
 
-## VIEW
+## Views
 
-Runs `CREATE OR ALTER VIEW`. Requires a `Source` in `upstream` whose `SourceModel.query` is set (the view's definition). No dataframe is consumed.
+A view is `view=True` on the model, not a write mode. Runs `CREATE OR ALTER VIEW`. Requires a `Source` in `upstream` whose `SourceModel.query` is set (the view's definition). No dataframe is consumed.
 
 ```python
 from bollhav.model import Kind, Source, SourceModel

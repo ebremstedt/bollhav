@@ -159,13 +159,13 @@ class TestTimezone:
 
 class TestModelField:
     def test_defaults_to_none(self):
-        m = Model(target=Target(name="x"), kind=Kind.MONOLITHIC)
+        m = Model(target=Target(name="x"), kind=Kind.TIMELESS)
         assert m.curfew is None
 
     def test_stored_on_model(self):
         c = Curfew(windows=[(time(22), time(6))])
         m = Model(
-            target=Target(name="x"), kind=Kind.INTERVAL, batching=Batch(), curfew=c
+            target=Target(name="x"), kind=Kind.TEMPORAL, batching=Batch(), curfew=c
         )
         assert m.curfew is c
 

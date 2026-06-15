@@ -5,9 +5,10 @@ A view's "asset" is its definition: `@model_lifecycle` runs the
 `upstream`) — there's no data to write, so the execute body does nothing.
 Because it's state-tracked, it
 gets a single existence row that flips to `applied` once the view is in
-place. That row is what a `ViewContract` checks.
+place. That row is what a downstream's `WINDOW` contract resolves to for a
+view upstream (its existence row applied).
 
-`kind=Kind.VIEW` is what marks it a view; `write_mode` is irrelevant for
+`kind=Kind.TIMELESS, view=True` is what marks it a view; `write_mode` is irrelevant for
 views (it's a data-write strategy) and is left at its default.
 """
 
@@ -25,7 +26,8 @@ from bollhav.postgres import PostgresColumn, PostgresType
 
 
 customers = Model(
-    kind=Kind.VIEW,
+    kind=Kind.TIMELESS,
+    view=True,
     target=Target(
         name="customers",
         schema="warehouse",

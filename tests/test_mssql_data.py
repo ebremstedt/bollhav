@@ -46,7 +46,8 @@ def _model(
     recreate_table=False,
     truncate_table=False,
     cols=None,
-    kind=Kind.INTERVAL,
+    kind=Kind.TEMPORAL,
+    view=False,
 ):
     from bollhav.model.model import Model
 
@@ -55,8 +56,8 @@ def _model(
             MssqlColumn(name="id", data_type=MssqlType.BIGINT, nullable=False),
             MssqlColumn(name="val", data_type=MssqlType.NVARCHAR, length=50),
         ]
-    # A VIEW has no batching (and no staging); an INTERVAL needs batching.
-    batching = None if kind is Kind.VIEW else Batch()
+    # A TIMELESS model (incl. a view) has no batching; a TEMPORAL one is batched.
+    batching = None if kind is Kind.TIMELESS else Batch()
     return Model(
         target=Target(
             name="events",
@@ -73,6 +74,7 @@ def _model(
         state=state,
         batching=batching,
         kind=kind,
+        view=view,
     )
 
 
@@ -256,7 +258,7 @@ class TestStagedWritePath:
         from bollhav.mssql.write_modes import write
 
         conn, _ = _conn()
-        m = _model(kind=Kind.VIEW)
+        m = _model(kind=Kind.TIMELESS, view=True)
         with pytest.raises(ValueError, match="VIEW"):
             write(
                 conn=conn,
