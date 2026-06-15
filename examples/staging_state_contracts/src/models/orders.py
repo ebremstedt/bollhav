@@ -5,14 +5,14 @@ The classic shape: a batched table whose unit of work is a time window.
 rows COPY into a per-interval staging table; on a clean run the lifecycle
 merges staging → target and flips that interval's state row to `applied`.
 
-This is the IntervalContract upstream for `daily_summary`.
+This is the interval upstream `daily_summary` gates with `UpstreamContract.WINDOW`.
 """
 
 from datetime import datetime, timezone
 
 from bollhav.model import (
     Batch,
-    Bounds,
+    Contract,
     Database,
     TimeChunking,
     Kind,
@@ -50,10 +50,10 @@ orders = Model(
             ),
         ],
     ),
-    kind=Kind.INTERVAL,
+    kind=Kind.TEMPORAL,
     state=State(),  # required for staging; tracks one row per interval
     batching=Batch(time=TimeChunking(chunk="@daily")),
-    bounds=Bounds(
+    contract=Contract(
         begin=datetime(2024, 1, 1, tzinfo=timezone.utc),
         end=datetime(2024, 1, 4, tzinfo=timezone.utc),
     ),

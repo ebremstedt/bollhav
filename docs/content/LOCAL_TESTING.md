@@ -35,11 +35,11 @@ export TAGS='[all]'
 python main.py        # every model, in order, gated by contracts
 ```
 
-[examples/staging_state_contracts/](https://github.com/ebremstedt/bollhav/tree/main/examples/staging_state_contracts) is exactly this: a view, a monolith, an interval table, and a fourth model with contracts on all three — one `python main.py` against any local Postgres.
+[examples/staging_state_contracts/](https://github.com/ebremstedt/bollhav/tree/main/examples/staging_state_contracts) is exactly this: a view, a whole-table (timeless) model, a temporal table, and a fourth model with contracts on all three — one `python main.py` against any local Postgres.
 
 ## Bake upstreams into the config
 
-Declaring `upstream=[Source("warehouse.orders", type=SourceModel(), contract=IntervalContract()), ...]` with `state=State(...)` makes ordering and gating **data, not orchestration code**. So locally there's nothing to wire: the contract that blocks a model in prod blocks it identically on your laptop. You test the real dependency behavior, not a mock of it — run `python main.py` twice and the second run does nothing (everything `applied`), same as prod.
+Declaring `upstream=[Source("warehouse.orders", type=SourceModel(), contract=UpstreamContract.WINDOW), ...]` with `state=State(...)` makes ordering and gating **data, not orchestration code**. So locally there's nothing to wire: the contract that blocks a model in prod blocks it identically on your laptop. You test the real dependency behavior, not a mock of it — run `python main.py` twice and the second run does nothing (everything `applied`), same as prod.
 
 ## Backfill with separate processes
 

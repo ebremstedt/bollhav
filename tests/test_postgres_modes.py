@@ -71,7 +71,7 @@ def _model(
             truncate_table=truncate_table,
         ),
         batching=Batch(),
-        kind=Kind.INTERVAL,
+        kind=Kind.TEMPORAL,
     )
 
 
@@ -285,7 +285,7 @@ class TestUpdateInsert:
                 write_mode=WriteMode.UPSERT_NO_DELETE,
             ),
             batching=Batch(),
-            kind=Kind.INTERVAL,
+            kind=Kind.TEMPORAL,
         )
         df = pl.DataFrame({"id": [1], "val": ["a"]})
         copy_mock = MagicMock()

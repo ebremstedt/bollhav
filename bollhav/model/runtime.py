@@ -95,7 +95,7 @@ def _apply_to_model(
     # `resolve_window` applies the precedence (reload > latest > backfill).
     window = resolve_window(
         batching,
-        model.bounds,
+        model.contract,
         reload=reload,
         latest=latest,
         since=backfill_since,
@@ -110,7 +110,7 @@ def _apply_to_model(
         target = replace(target, staging=None)
     new_model = Model(
         target=target,
-        bounds=model.bounds,
+        contract=model.contract,
         batching=batching,
         kind=model.kind,
         state=None if state_disabled else model.state,

@@ -142,8 +142,8 @@ class ExploreTab(Vertical):
         up = [s.name for s in m.upstream if not s.name.startswith("unknown-")]
         sep = "\n" if style == "thicken" else ", "
         up_str = sep.join(present_name(n, style) for n in up) if up else "—"
-        b = m.bounds
-        bounds = (
+        b = m.contract
+        contract = (
             f"{b.begin:%Y-%m-%d} → {b.end:%Y-%m-%d}"
             if getattr(b, "begin", None) and getattr(b, "end", None)
             else "—"
@@ -156,7 +156,7 @@ class ExploreTab(Vertical):
             f"[b bright_red]Schema[/]     [red]{t.schema}[/]",
             f"[b bright_red]Catalog[/]    [red]{t.catalog}[/]",
             f"[b bright_red]Write mode[/] [red]{wm}[/]",
-            f"[b bright_red]Bounds[/]     [red]{bounds}[/]",
+            f"[b bright_red]Contract[/]   [red]{contract}[/]",
             f"[b bright_red]Upstream[/]   [red]{up_str}[/]",
             f"[b bright_red]Status[/]     [red]{STATUS[self.status[self.row_keys[row]]][0]}[/]",
             "",

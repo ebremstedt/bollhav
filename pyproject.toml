@@ -16,7 +16,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest", "ruff", "time-machine"]
+dev = ["pytest", "ruff", "time-machine", "pyright"]
 tui = ["textual>=0.50"]
 
 [project.scripts]
@@ -36,3 +36,9 @@ build-backend = "setuptools.build_meta"
 # auto-discovery sees multiple top-level packages (gui + bollhav) and aborts.
 [tool.setuptools.packages.find]
 include = ["bollhav*"]
+
+# Type-check the library only. tests/ has many harmless narrowing errors;
+# scoping here means a bare `pyright` (locally and in CI) checks just bollhav/.
+[tool.pyright]
+include = ["bollhav"]
+pythonVersion = "3.11"

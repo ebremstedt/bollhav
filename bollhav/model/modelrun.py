@@ -15,11 +15,11 @@ class ModelRun:
     """One invocation of a model — the immutable `model` definition paired with
     this run's temporal state.
 
-    `Model` answers *what / where / how* (target, batching, bounds, kind); a
+    `Model` answers *what / where / how* (target, batching, contract, kind); a
     `ModelRun` answers *when / how-far*:
 
         window     — the single time window this run targets (resolved once by
-                     `runtime.resolve_window` from bounds + the run instruction).
+                     `runtime.resolve_window` from contract + the run instruction).
         intervals  — the window split into the chunk contract; narrowed to the
                      still-actionable subset during the state bootstrap. `(None,)`
                      for a model with no window (monolithic / view).

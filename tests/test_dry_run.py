@@ -53,8 +53,8 @@ def _mk_model(
     model.target.name_resolved = name
     model.target.schema_resolved = schema
     model.target.write_mode.value = "APPEND"
-    model.bounds.begin = None
-    model.bounds.end = None
+    model.contract.begin = None
+    model.contract.end = None
     model.tags = set()
     model.upstream = []
     model.upstream_names = []
@@ -144,7 +144,7 @@ class TestExtra:
         assert "write mode   :" in out
         assert "cron         : @daily" in out
         assert "intervals    : 1" in out
-        assert "bounds       :" in out
+        assert "contract     :" in out
         assert "tags         :" in out
         assert "upstream     :" in out
 

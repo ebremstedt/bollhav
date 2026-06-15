@@ -1,53 +1,63 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import Enum
 
 
-@dataclass(frozen=True)
-class Contract:
-    """Gating policy for an upstream dependency. Abstract — use a concrete
-    subclass (`IntervalContract` / `ViewContract` / `MonolithicContract`),
-    which each pick how the dependency is satisfied. Carries no name: the
-    `Source` it sits on owns the upstream's identity."""
+class UpstreamContract(str, Enum):
+    """How ready an upstream must be before a downstream unit may run.
 
-    @property
-    def kind(self) -> str:
-        raise NotImplementedError(
-            "Contract is abstract — use IntervalContract, ViewContract, or "
-            "MonolithicContract, which each declare a `kind`."
-        )
+    A weak→strong **ladder** — each level implies the ones below it
+    (``WHOLE`` ⟹ ``THROUGH`` ⟹ ``WINDOW`` ⟹ ``EXISTS``).
+    You pick *how strict*; the upstream's **shape** (interval vs whole-table) is
+    read from the library at check time, so you never restate it. A source
+    without a contract is ungated (never waited on); to gate, name a level::
 
+        Source("warehouse.orders", type=SourceModel(...), contract=UpstreamContract.WINDOW)
+        Source("warehouse.orders", ..., contract=UpstreamContract.WHOLE)
 
-@dataclass(frozen=True)
-class IntervalContract(Contract):
-    """Upstream is an interval table. Satisfied when the upstream has an
-    applied state row whose window covers the downstream interval (a
-    daily-cadence upstream thus covers an hourly downstream)."""
+    ``EXISTS``
+        The upstream is a registered model. No window, no applied state — just
+        "it's a known model". Gives run-ordering + a managed lineage edge
+        without waiting for any data. The only level a **windowless** consumer
+        (view / monolithic) can use to depend on an *interval* upstream without
+        waiting (the stricter levels make it wait for the whole upstream).
 
-    @property
-    def kind(self) -> str:
-        return "interval"
+    ``WINDOW`` (the usual choice)
+        The upstream window that lines up with **my** window is ``applied`` — a
+        coarser upstream window that *contains* mine counts too (a daily upstream
+        covers an hourly consumer). This is the per-window, **pipelining** level:
+        my window N runs as soon as the upstream's matching window lands, with no
+        regard for the upstream's other windows.
 
+        Resolves by shape: for a **whole-table** upstream (one existence row), or
+        a **windowless** consumer reading *all* of an interval upstream, "the
+        data I read" is the whole thing — so this means the existence row /
+        every interval is applied.
 
-@dataclass(frozen=True)
-class ViewContract(Contract):
-    """Upstream is a view. Satisfied when the view exists (its single
-    existence row is applied) — the downstream window is irrelevant."""
+    ``THROUGH``
+        Every upstream interval **up to and including my window** is ``applied``
+        — a gap-free *prefix*. For **additive / cumulative** windowed models,
+        where window N sums history 1..N: ``WINDOW`` (only N) would
+        undercount; ``WHOLE`` would over-wait. ``THROUGH`` is
+        anchored to my window, so it still pipelines and — unlike ``WHOLE``
+        — stays satisfiable while the upstream grows past me. Differs from
+        ``WHOLE`` only when a consumer runs **behind** a moving upstream
+        (backfill / catch-up).
 
-    @property
-    def kind(self) -> str:
-        return "view"
+    ``WHOLE``
+        **Every** upstream interval is ``applied`` (and at least one is) — the
+        whole upstream, in absolute terms (not relative to my window). For
+        aggregates over all of it, snapshots, exports. On a continuously-growing
+        upstream it's satisfied whenever the upstream has caught up to its latest
+        *elapsed* tick (the in-progress tick isn't in state, so there's no
+        permanent pending tail).
+    """
 
-
-@dataclass(frozen=True)
-class MonolithicContract(Contract):
-    """Upstream is a monolithic (whole-table) model. Satisfied when the
-    whole table has been loaded (its single whole-table row is applied in state) —
-    the downstream window is irrelevant."""
-
-    @property
-    def kind(self) -> str:
-        return "monolithic"
+    EXISTS = "exists"
+    WINDOW = "window"
+    THROUGH = "through"
+    WHOLE = "whole"
 
 
 @dataclass(frozen=True)
@@ -80,9 +90,6 @@ class UpstreamCheck:
 
 
 __all__ = [
-    "Contract",
-    "IntervalContract",
-    "ViewContract",
-    "MonolithicContract",
+    "UpstreamContract",
     "UpstreamCheck",
 ]

@@ -71,10 +71,10 @@ def _model(
     # `register_model` reads `upstream_names` and the live gating loop reads
     # `gated_upstreams`. Pin both on the mock.
     from bollhav.model.source import Source, SourceModel
-    from bollhav.model.upstream import IntervalContract
+    from bollhav.model.upstream import UpstreamContract
 
     gated = [
-        Source(n, type=SourceModel(), contract=IntervalContract())
+        Source(n, type=SourceModel(), contract=UpstreamContract.WINDOW)
         for n in upstream_list
     ]
     model.upstream = gated
@@ -83,15 +83,15 @@ def _model(
     if is_view:
         model.target.staging = None
         model.state = None
-        model.kind = Kind.VIEW
+        model.kind = Kind.TIMELESS
     elif not has_staging:
         model.target.staging = None
         model.state = None
-        model.kind = Kind.INTERVAL
+        model.kind = Kind.TEMPORAL
     else:
         model.target.staging = Staging()
         model.state = State()
-        model.kind = Kind.INTERVAL
+        model.kind = Kind.TEMPORAL
     return model
 
 
@@ -143,7 +143,7 @@ class TestRegister:
         # state pointers now point at the central schema + deterministic name
         assert params[3] == LIBRARY_SCHEMA
         assert params[4] == state_table_name("warehouse.orders")
-        assert params[5] == "interval"
+        assert params[5] == "temporal"
 
     def test_view_writes_null_state_pointers(self) -> None:
         """Views have no state table — register stores NULLs so the
@@ -215,7 +215,7 @@ class TestLookup:
                 "TABLE",
                 "z_warehouse",
                 "orders_state",
-                "interval",
+                "temporal",
                 [{"name": "raw.landing", "kind": "database"}],
             )
         )
@@ -225,19 +225,19 @@ class TestLookup:
         assert result.model_type == "TABLE"
         assert result.state_schema == "z_warehouse"
         assert result.state_table == "orders_state"
-        assert result.kind == "interval"
+        assert result.kind == "temporal"
         assert result.sources == [{"name": "raw.landing", "kind": "database"}]
 
     def test_returns_entry_for_view_with_null_state_pointers(self) -> None:
         from bollhav.postgres.state import PostgresState
 
-        conn = _mock_conn(fetchone_value=([], "VIEW", None, None, "view", []))
+        conn = _mock_conn(fetchone_value=([], "VIEW", None, None, "timeless", []))
         result = PostgresState.lookup_model(conn, "warehouse.v_orders")
         assert result.model_type == "VIEW"
         assert result.state_schema is None
         assert result.state_table is None
         assert result.sources == []
-        assert result.kind == "view"
+        assert result.kind == "timeless"
 
 
 # ── is_satisfied ─────────────────────────────────────────────────────

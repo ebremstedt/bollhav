@@ -71,7 +71,7 @@ Nothing exits, errors, or waits. The process finishes normally having done no wo
 
 ## See also
 
-- [Bounds](BOUNDS.md) — the historical *range* a model walks, vs curfew's wall-clock *gate* on when it may run
+- [Contract](CONTRACT.md) — the historical *range* a model walks, vs curfew's wall-clock *gate* on when it may run
 - [Chunking](BATCH.md#chunking) — the interval the curfew is re-checked per
 - [State](STATE.md) — why a skipped unit staying `pending` resumes cleanly next run
 - [Model lifecycle](DECORATORS.md#model-lifecycle) · [Execute lifecycle](DECORATORS.md#execute-lifecycle) — where the two gates run

@@ -288,7 +288,7 @@ def get_graph(conn: "psycopg.Connection") -> dict:
 
 def get_model_metadata(conn: "psycopg.Connection", full_name: str) -> dict | None:
     """The model's stored property bag (`library.metadata`) — write_mode,
-    tags, description, bounds, batching, columns, … — or `None` when the model
+    tags, description, contract, batching, columns, … — or `None` when the model
     isn't registered. The bag is `{}` for rows written by a bollhav old enough
     to predate the `metadata` column (re-running that pipeline backfills it)."""
     if not _table_exists(conn, LIBRARY_SCHEMA, LIBRARY_TABLE):

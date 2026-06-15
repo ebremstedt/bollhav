@@ -2,7 +2,7 @@
 
 # State
 
-Per-model progress, tracked in a per-model state table. Opt in with `state=State(...)`; bollhav records each unit of work's lifecycle and re-runs become resumable. A unit is one window for an `interval` model, or the single whole-table / view existence row for a `monolithic` / `view` model — so every [kind](UPSTREAM.md) carries state, not just intervals.
+Per-model progress, tracked in a per-model state table. Opt in with `state=State(...)`; bollhav records each unit of work's lifecycle and re-runs become resumable. A unit is one window for a batched [temporal](KINDS.md) model, or the single one-shot row for a [timeless](KINDS.md) model (or an unbatched temporal one) — so every kind carries state, not just windowed models.
 
 ## Status values
 

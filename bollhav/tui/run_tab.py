@@ -26,7 +26,7 @@ from bollhav.tui.constants import (
 )
 from bollhav.tui.date_select import DateSelect
 from bollhav.tui.discovery import nearest_runner
-from bollhav.tui.radios import BoolRadio, ModeRadio, StateRadio
+from bollhav.tui.radios import BoolRadio, ChoiceRadio, ModeRadio, StateRadio
 
 if TYPE_CHECKING:
     from bollhav.tui.app import BollhavApp
@@ -166,7 +166,7 @@ class RunTab(Vertical):
             yield Static(label, classes="field-label")
             yield DateSelect(id=f"cfg-{env}")
         elif kind == "mode":
-            radio: Static = ModeRadio(default=MODE_DEFAULT, id=f"cfg-{env}")
+            radio: ChoiceRadio = ModeRadio(default=MODE_DEFAULT, id=f"cfg-{env}")
             radio.border_title = label
             yield radio
         elif kind == "state":
@@ -200,7 +200,7 @@ class RunTab(Vertical):
             elif kind in ("date", "bool", "state"):
                 widget.set_value(settings.get(env, ""))  # type: ignore[attr-defined]
             else:
-                widget.value = settings.get(env, "")
+                widget.value = settings.get(env, "")  # type: ignore[attr-defined]
         self._apply_mode()
 
     def _apply_mode(self) -> None:
@@ -225,7 +225,7 @@ class RunTab(Vertical):
             if kind in ("date", "bool", "state"):
                 value = widget.value  # type: ignore[attr-defined]
             else:
-                value = widget.value.strip()
+                value = widget.value.strip()  # type: ignore[attr-defined]
             if key == "TAGS":
                 tags = value
             elif value:

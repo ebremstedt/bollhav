@@ -228,6 +228,8 @@ def create_replace_view(conn: pyodbc.Connection, model: Model) -> None:
         )
     schema = model.target.schema_resolved
     view = model.target.name
+    # The filter above guarantees this, but it doesn't narrow `src.type`.
+    assert isinstance(src.type, SourceModel) and src.type.query is not None
     query = cast(LiteralString, src.type.query)
 
     cursor = conn.cursor()

@@ -17,6 +17,7 @@ from textual.widgets import (
     TabPane,
 )
 
+from bollhav.model.model import Model
 from bollhav.tui.discovery import (
     discover_models,
     resolve_folders,
@@ -84,10 +85,10 @@ class BollhavApp(App):
         self.projects = projects
         self.run_python = run_python
         self.active_index = start_index
-        self._discovery: dict[str, tuple[list, list[str]]] = {}
+        self._discovery: dict[str, tuple[list[Model], list[str]]] = {}
         # (re)bound to the active project by _activate()
         self.project = projects[start_index]
-        self.models: list = []
+        self.models: list[Model] = []
         self.settings_path = self.project / SETTINGS_FILENAME
         self.settings: dict[str, str] = {}
         # Site-wide name presentation: "lengthen" (catalog.schema.table on one
@@ -96,7 +97,7 @@ class BollhavApp(App):
         self.name_style: str = "lengthen"
 
     # ── shared services used by both tabs ────────────────────────────────
-    def _safe_discover(self, folder: Path) -> tuple[list, list[str]]:
+    def _safe_discover(self, folder: Path) -> tuple[list[Model], list[str]]:
         """Import every Model found recursively below `folder`, cached."""
         key = str(folder)
         if key not in self._discovery:

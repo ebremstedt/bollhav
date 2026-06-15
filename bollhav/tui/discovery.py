@@ -10,19 +10,20 @@ from bollhav.model.matching import (
     _models_from_module,
     _with_sys_path,
 )
+from bollhav.model.model import Model
 
 # Remembered project locations.
 WORKSPACES_PATH = Path.home() / ".config" / "bollhav-tui" / "workspaces.json"
 
 
-def discover_models(folder: Path) -> tuple[list, list[str]]:
+def discover_models(folder: Path) -> tuple[list[Model], list[str]]:
     """Import every `.py` file recursively below `folder` independently and
     collect all `Model` instances. Resilient: a file that fails to import is
     skipped (and reported) rather than aborting the whole scan.
 
     Returns (models, skipped) where `skipped` is a list of "file — reason".
     """
-    models: list = []
+    models: list[Model] = []
     seen: set = set()
     skipped: list[str] = []
     for file in sorted(folder.rglob("*.py")):

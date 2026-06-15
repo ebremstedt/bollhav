@@ -1,56 +1,34 @@
 """Unit tests for the upstream contract layer (bollhav.model.upstream).
 
-Pure logic, no DB: the three Contract subclasses expose the right `kind`,
-the abstract base refuses to, and UpstreamCheck composes the satisfied
-verdict + the single STATE_002 blocked reason from its blockers.
+Pure logic, no DB: the `UpstreamContract` ladder exposes the right level
+values, and UpstreamCheck composes the satisfied verdict + the single
+STATE_002 blocked reason from its blockers.
 """
 
-import pytest
-
 from bollhav.model.state import BlockCode, format_block_reason
-from bollhav.model.upstream import (
-    Contract,
-    IntervalContract,
-    MonolithicContract,
-    UpstreamCheck,
-    ViewContract,
-)
+from bollhav.model.upstream import UpstreamCheck, UpstreamContract
 
 
-class TestContractKind:
-    def test_interval_contract_kind(self):
-        assert IntervalContract().kind == "interval"
+class TestUpstreamContract:
+    def test_level_values(self):
+        # The on-the-wire strings the state backend keys on.
+        assert UpstreamContract.EXISTS.value == "exists"
+        assert UpstreamContract.WINDOW.value == "window"
+        assert UpstreamContract.THROUGH.value == "through"
+        assert UpstreamContract.WHOLE.value == "whole"
 
-    def test_view_contract_kind(self):
-        assert ViewContract().kind == "view"
+    def test_is_str_enum(self):
+        # A `str` Enum, so a member compares equal to its value and serializes
+        # as the plain string.
+        assert UpstreamContract.WINDOW == "window"
 
-    def test_monolithic_contract_kind(self):
-        assert MonolithicContract().kind == "monolithic"
-
-    def test_base_contract_kind_is_abstract(self):
-        # The base class is pure gating policy with no satisfaction semantics.
-        with pytest.raises(NotImplementedError):
-            _ = Contract().kind
-
-    def test_carries_no_name(self):
-        # A Contract is gating policy only — the Source it sits on owns the
-        # upstream's identity, so the contract takes no constructor args.
-        assert not hasattr(IntervalContract(), "name")
-
-    def test_is_frozen(self):
-        c = ViewContract()
-        with pytest.raises(Exception):
-            c.x = "other"  # frozen dataclass
-
-    def test_kind_matches_model_vocabulary(self):
-        # The contract kinds are exactly the strings Model.kind / the state
-        # backend key on.
-        kinds = {
-            IntervalContract().kind,
-            ViewContract().kind,
-            MonolithicContract().kind,
+    def test_exactly_four_levels(self):
+        assert {c.value for c in UpstreamContract} == {
+            "exists",
+            "window",
+            "through",
+            "whole",
         }
-        assert kinds == {"interval", "view", "monolithic"}
 
 
 class TestUpstreamCheck:

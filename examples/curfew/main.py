@@ -69,7 +69,7 @@ def _run_once(curfew: Curfew, label: str) -> None:
     print(f"   curfew active now? {curfew.blocks(datetime.now(timezone.utc))}")
     run = ModelRun(
         model=model,
-        window=resolve_window(model.batching, model.bounds, reload=True),
+        window=resolve_window(model.batching, model.contract, reload=True),
     )
     with (
         psycopg.connect(DSN, autocommit=True) as data_conn,

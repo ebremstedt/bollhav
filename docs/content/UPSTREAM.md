@@ -10,11 +10,13 @@ A model's inputs — **all of them** — live in one list: `upstream: list[Sourc
 That's the whole model: gated-vs-ungated is just "does this `Source` have a `contract`," not which list it's in.
 
 ```python
+from bollhav.model import UpstreamContract
+
 upstream=[
     # gated managed upstreams (need state — see below):
-    Source("warehouse.orders",    type=SourceModel(), contract=IntervalContract()),
-    Source("warehouse.customers", type=SourceModel(), contract=ViewContract()),
-    Source("warehouse.app_config",type=SourceModel(), contract=MonolithicContract()),
+    Source("warehouse.orders",    type=SourceModel(), contract=UpstreamContract.WINDOW),
+    Source("warehouse.customers", type=SourceModel(), contract=UpstreamContract.WHOLE),
+    Source("warehouse.app_config",type=SourceModel(), contract=UpstreamContract.EXISTS),
     # ungated external sources:
     Source("raw.landing",  type=SourceModel(dsn_env_var="RAW_DSN")),
     Source("crm.contacts", type=SourceApi(base_url="https://crm/api")),
@@ -25,13 +27,18 @@ A **contract is only valid on a `SourceModel`** — files and APIs aren't state-
 
 ## Contracts (gating)
 
-A contract is pure gating *policy* — it carries no name (the `Source` owns the identity). Its kind must match the upstream's [kind](KINDS.md):
+A contract is the gating **level** — *how much* of the upstream must be ready before this model runs — chosen from the `UpstreamContract` ladder (weak → strong). The upstream's *shape* (its [kind](KINDS.md)) is read from the library at check time, so you only state the level:
 
-| Contract | Satisfied when |
+| `UpstreamContract` | Satisfied when |
 |---|---|
-| `IntervalContract()` | upstream has an `applied` window covering this unit's `(since, until)`. A daily upstream covers an hourly downstream. |
-| `ViewContract()` | the view exists. Window-agnostic. |
-| `MonolithicContract()` | the whole table is loaded. Window-agnostic. |
+| `EXISTS` | the upstream is **registered**. No data wait — run-ordering + a lineage edge only. |
+| `WINDOW` | the upstream's window covering this unit's `(since, until)` is `applied`. A daily upstream covers an hourly downstream. *(the usual choice)* |
+| `THROUGH` | every upstream window **up to and including** this unit is `applied` — a gap-free prefix, for cumulative models that sum history `1..N`. |
+| `WHOLE` | the **entire** upstream is loaded — every window `applied` (a temporal upstream), or its one row `applied` (a timeless one). |
+
+**Timeless upstreams.** A [`TIMELESS`](KINDS.md) upstream (a view or whole-table load) has no window to match, so `WINDOW`/`THROUGH` against it is a hard error — gate it `WHOLE` (loaded) or `EXISTS` (registered). `WINDOW`/`THROUGH` are for temporal upstreams.
+
+A `Source` with **no** contract is **ungated** — never waited on (there's no default level).
 
 **Gating requires [state](STATE.md).** A contract is checked by the state machine (`@execute_lifecycle`), which only runs for state-tracked models. A gated upstream without `state=State(...)` is an error — the contract would otherwise never be enforced. Ungated sources need no state.
 
@@ -59,23 +66,23 @@ f"... FROM {model.ref('raw.landing')}"   # -> "raw"."landing"
 
 A gated source is a managed model, so its schema moves with the suffix just like your own target — the query stays portable. An ungated source is external, at a fixed location in every environment, so it resolves literally. Referencing an undeclared name raises; `ref()` on a `SourceFile`/`SourceApi` raises (there's no `FROM` for a file or an API — read those in your read function).
 
-## Shared upstreams — dev against prod (`assume_ok`)
+## Shared upstreams — dev against prod (`deactivate_for_dev`)
 
-In a [suffixed](TARGET.md#schema-vs-table-suffix) (dev / PR) run, a gated upstream resolves to *your env's* copy (`warehouse_pr123.orders`) and gates against your env's state. But some upstreams aren't rebuilt per environment — a shared table that lives only in prod. Set `assume_ok=True` on the `Source` to read it from prod and trust it — **only in a suffixed run**. It's inert without a suffix, so you declare it once and never flip it between dev and prod.
+In a [suffixed](TARGET.md#schema-vs-table-suffix) (dev / PR) run, a gated upstream resolves to *your env's* copy (`warehouse_pr123.orders`) and gates against your env's state. But some upstreams aren't rebuilt per environment — a shared table that lives only in prod. Set `deactivate_for_dev=True` on the `Source` to read it from prod and trust it — **only in a suffixed run**. It's inert without a suffix, so you declare it once and never flip it between dev and prod.
 
 ```python
-Source("warehouse.orders", type=SourceModel(), contract=IntervalContract(), assume_ok=True)
+Source("warehouse.orders", type=SourceModel(), contract=UpstreamContract.WINDOW, deactivate_for_dev=True)
 ```
 
 The three cases and how to declare each:
 
 | Case | Declaration | `ref()` reads | Gating |
 |---|---|---|---|
-| **dev → prod table**, assume its state ok | `contract=…, assume_ok=True` | prod — `"warehouse"."orders"` | assumed okay (skipped) |
+| **dev → prod table**, assume its state ok | `contract=…, deactivate_for_dev=True` | prod — `"warehouse"."orders"` | assumed okay (skipped) |
 | **dev → dev table**, check its state | `contract=…` (default) | dev copy — `"warehouse_pr123"."orders"` | checks the dev registration |
 | **prod → prod table** | *either of the above* | prod — `"warehouse"."orders"` | checks prod's registration |
 
-**Case 3 is automatic.** Prod has no suffix, so every gated upstream reads prod and gates prod regardless of `assume_ok` — the flag only does anything in a suffixed run. Different upstreams on one model can mix freely (`orders` pinned to prod, `customers` using your dev copy).
+**Case 3 is automatic.** Prod has no suffix, so every gated upstream reads prod and gates prod regardless of `deactivate_for_dev` — the flag only does anything in a suffixed run. Different upstreams on one model can mix freely (`orders` pinned to prod, `customers` using your dev copy).
 
 To assume an upstream is okay in **every** environment, prod included, don't gate it at all — drop the contract (an [ungated source](#ungated-sources)), which is never checked anywhere.
 
@@ -89,14 +96,14 @@ upstream=[
 ]
 ```
 
-`SourceModel` is the only **SQL-addressable** type — `model.ref("raw.orders")` resolves it into a `FROM`. It's also the only type that can be **gated**: attach a `contract` to make it a managed upstream. A [VIEW](KINDS.md) model's definition *is* a `SourceModel` with a `query` set, in its `upstream` list — that's what `CREATE OR REPLACE VIEW` runs.
+`SourceModel` is the only **SQL-addressable** type — `model.ref("raw.orders")` resolves it into a `FROM`. It's also the only type that can be **gated**: attach a `contract` to make it a managed upstream. A [view](KINDS.md) model's (`view=True`) definition *is* a `SourceModel` with a `query` set, in its `upstream` list — that's what `CREATE OR REPLACE VIEW` runs.
 
 | Field | Type · Default | Purpose |
 |---|---|---|
 | `schema` | `str` · `None` | Source schema. |
 | `catalog` | `str` · `None` | Source catalog / database (3-part `catalog.schema.table` names). |
 | `dsn_env_var` | `str` · `None` | DSN env var for the source connection. |
-| `query` | `str` · `None` | Optional query override. On a [VIEW](KINDS.md) model's source it *is* the view definition; otherwise the loader may use this SQL instead of `SELECT * FROM <schema>.<name>`. |
+| `query` | `str` · `None` | Optional query override. On a [view](KINDS.md) model's (`view=True`) source it *is* the view definition; otherwise the loader may use this SQL instead of `SELECT * FROM <schema>.<name>`. |
 | `partitioned_by` | `str` · `None` | Partition column on the source, when relevant to the read. |
 | `infer_schema_length` | `int` · `None` | Passed to polars as `infer_schema_length` — max rows scanned to infer column types. `None` scans every row (slow on large sources). |
 | `extra` | `dict` · `{}` | Free-form config bag for read functions that need extra knobs. |
@@ -144,7 +151,7 @@ A model doesn't have to declare any inputs. Your `read()` function is what actua
 ```python
 Model(
     target=Target(name="orders", ...),
-    kind=Kind.INTERVAL,
+    kind=Kind.TEMPORAL,
     batching=Batch(...),
     # no upstream — read() supplies the rows
 )
@@ -171,4 +178,4 @@ model.inputs_known      # False — its only input is the unknown sentinel
 
 - [State](STATE.md) — status values, rerun behaviour, errors, locks.
 - [Lineage](LINEAGE.md) — the dependency graph these feed.
-- [examples/staging_state_contracts/](https://github.com/ebremstedt/bollhav/tree/main/examples/staging_state_contracts) — a view, a monolith, an interval, and a fourth model gated on all three.
+- [examples/staging_state_contracts/](https://github.com/ebremstedt/bollhav/tree/main/examples/staging_state_contracts) — a view, a whole-table (timeless) model, a temporal model, and a fourth model gated on all three.

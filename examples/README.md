@@ -28,7 +28,7 @@ company_xyz_pipeline/
       products.py       # WriteMode.APPEND
       customers.py      # WriteMode.APPEND + truncate_table=True
       orders.py         # WriteMode.APPEND + recreate_table=True
-      views.py          # WriteMode.VIEW — CREATE OR ALTER VIEW
+      views.py          # a view (view=True) — CREATE OR ALTER VIEW
   main.py               # entry point — @load_models
   execute.py            # batch handler — @progress_bar
   mock_read.py          # returns fake polars DataFrames

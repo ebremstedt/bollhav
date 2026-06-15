@@ -6,7 +6,7 @@ from bollhav.model.kind import Kind
 
 
 def make_model(
-    name: str, upstream: list[str] | None = None, kind=Kind.INTERVAL
+    name: str, upstream: list[str] | None = None, kind=Kind.TEMPORAL, view=False
 ) -> MagicMock:
     model = MagicMock()
     model.name = name
@@ -22,11 +22,10 @@ def make_model(
     # bare names as the model's full set of inputs, so both resolve to it.
     model.upstream_names = upstream
     model.declared_inputs = upstream
-    # Views are identified by kind now (`model.is_view` is kind-based). Set
-    # both `kind` and the derived `is_view` so the mock matches the real
-    # Model's contract.
+    # Views are a separate flag now (`model.view`), independent of the time
+    # axis. Set both `kind` and `is_view` so the mock matches the real Model.
     model.kind = kind
-    model.is_view = kind is Kind.VIEW
+    model.is_view = view
     return model
 
 
@@ -122,6 +121,6 @@ def test_self_referencing_raises():
 
 def test_view_ordered_after_upstream():
     a = make_model("a")
-    v = make_model("v", upstream=["a"], kind=Kind.VIEW)
+    v = make_model("v", upstream=["a"], kind=Kind.TIMELESS, view=True)
     result = topological_sort([v, a])
     assert names(result) == ["a", "v"]

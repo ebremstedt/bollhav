@@ -1,25 +1,25 @@
 # staging + state + upstream contracts
 
-A minimal Postgres pipeline that creates **a view, a monolith, and an
-interval table**, then a fourth table that declares **upstream contracts**
-on all three.
+A minimal Postgres pipeline that creates **a view, a whole-table (timeless)
+model, and a temporal table**, then a fourth table that declares **upstream
+contracts** on all three.
 
 The four models (`src/models/`):
 
-| model           | kind        | state | staging | upstream contracts |
-|-----------------|-------------|:-----:|:-------:|--------------------|
-| `orders`        | interval    | ✓     | ✓       | —                  |
-| `customers`     | view        | ✓     | —       | —                  |
-| `app_config`    | monolith    | ✓     | —       | —                  |
-| `daily_summary` | interval    | ✓     | ✓       | **interval + view + monolith** |
+| model           | kind                | state | staging | upstream contracts |
+|-----------------|---------------------|:-----:|:-------:|--------------------|
+| `orders`        | temporal            | ✓     | ✓       | —                  |
+| `customers`     | timeless · view     | ✓     | —       | —                  |
+| `app_config`    | timeless            | ✓     | —       | —                  |
+| `daily_summary` | temporal            | ✓     | ✓       | **window + whole + whole** |
 
 `daily_summary` depends on:
 
 ```python
 upstream=[
-    Source("warehouse.orders",     type=SourceModel(), contract=IntervalContract()),    # applied interval covering the window
-    Source("warehouse.customers",  type=SourceModel(), contract=ViewContract()),         # the view exists
-    Source("warehouse.app_config", type=SourceModel(), contract=MonolithicContract()),  # the whole table is loaded
+    Source("warehouse.orders",     type=SourceModel(), contract=UpstreamContract.WINDOW),    # applied interval covering the window
+    Source("warehouse.customers",  type=SourceModel(), contract=UpstreamContract.WHOLE),         # the view is loaded
+    Source("warehouse.app_config", type=SourceModel(), contract=UpstreamContract.WHOLE),  # the whole table is loaded
 ]
 ```
 
@@ -38,7 +38,7 @@ src/models/*.py    the four Model definitions
 ```
 
 `run_model` loops `model.intervals`, which is time windows for batched
-models or a single `None` for the view / monolith. The staging table's
+models or a single `None` for the view / timeless model. The staging table's
 lifecycle (create → write → merge → drop) lives in `@execute_lifecycle`;
 `run_interval` just `read()`s and `write()`s. The view is created by
 `@model_lifecycle` (`CREATE OR REPLACE VIEW`), so its execute body is empty.
@@ -51,7 +51,7 @@ Needs a running Postgres (you supply the DSN — no Docker here).
 export TARGET_DSN='postgresql://postgres:postgres@localhost:5432/postgres'
 export TAGS='[demo]'                  # tag expression uses [group] syntax
 export USE_SCHEMA_SUFFIX=false        # keep schema = "warehouse" so the contract names match
-export BACKFILL_SINCE='2024-01-01T00:00:00+00:00'   # the window the interval models backfill
+export BACKFILL_SINCE='2024-01-01T00:00:00+00:00'   # the window the temporal models backfill
 export BACKFILL_UNTIL='2024-01-04T00:00:00+00:00'
 
 python main.py                        # add DEBUG=true for the full state:/stage: trail
@@ -73,7 +73,7 @@ SELECT * FROM warehouse.app_config;
 SELECT * FROM warehouse.daily_summary;
 
 -- the state rows (one per interval for orders/daily_summary;
--- one NULL-window row for the view / monolith)
+-- one NULL-window row for the view / timeless model)
 SELECT since, until, status, kind FROM z_warehouse.orders_state ORDER BY since;
 SELECT since, until, status, kind FROM z_warehouse.customers_state;
 SELECT since, until, status, kind FROM z_warehouse.app_config_state;
@@ -84,8 +84,8 @@ SELECT full_name, kind, upstream FROM z_bollhav.model_library ORDER BY full_name
 
 ### See a contract block it
 
-Reset the monolith's state and run only `daily_summary`'s tag — its
-`MonolithicContract` is now unsatisfied, so its intervals go `blocked`
+Reset the timeless model's (app_config) state and run only `daily_summary`'s tag — its
+`WHOLE` contract is now unsatisfied, so its intervals go `blocked`
 with a reason naming `warehouse.app_config`:
 
 ```sql

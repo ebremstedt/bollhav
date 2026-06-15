@@ -13,7 +13,7 @@ A model that declares neither has unknown provenance (`model.inputs_known is Fal
 
 ## Inspect one model's lineage in code
 
-A `Model` can describe its **own** declared inputs without any database — useful for a quick look, a CI check, or feeding a diagram. Each input is typed: a gated [upstream](UPSTREAM.md) by its contract kind (`interval` / `view` / `monolithic`), an ungated [source](UPSTREAM.md#ungated-sources) by its type (`model` / `file` / `api`).
+A `Model` can describe its **own** declared inputs without any database — useful for a quick look, a CI check, or feeding a diagram. Each input is typed: a gated [upstream](UPSTREAM.md) by its [contract level](UPSTREAM.md#contracts-gating) (`exists` / `window` / `through` / `whole`), an ungated [source](UPSTREAM.md#ungated-sources) by its type (`model` / `file` / `api`).
 
 `model.lineage_tree()` returns a little ASCII tree:
 
@@ -21,12 +21,12 @@ A `Model` can describe its **own** declared inputs without any database — usef
 print(model.lineage_tree())
 ```
 ```text
-warehouse.daily_summary (interval)
+warehouse.daily_summary (temporal)
 ├─ upstream
-│  ├─ warehouse.orders (interval)
-│  ├─ warehouse.events (interval)
-│  ├─ warehouse.customers (view)
-│  └─ warehouse.app_config (monolithic)
+│  ├─ warehouse.orders (window)
+│  ├─ warehouse.events (window)
+│  ├─ warehouse.customers (whole)
+│  └─ warehouse.app_config (exists)
 └─ sources
    ├─ raw.landing_orders (database)
    ├─ vendor.api_orders (api)
@@ -41,10 +41,10 @@ print(model.lineage_json())
 ```json
 {
   "model": "warehouse.daily_summary",
-  "kind": "interval",
+  "kind": "temporal",
   "upstream": [
-    {"name": "warehouse.orders", "kind": "interval"},
-    {"name": "warehouse.customers", "kind": "view"}
+    {"name": "warehouse.orders", "kind": "window"},
+    {"name": "warehouse.customers", "kind": "whole"}
   ],
   "sources": [
     {"name": "raw.landing_orders", "kind": "database"},
@@ -61,7 +61,7 @@ Supporting accessors:
 | `model.lineage()` | the structured dict (basis for both renderers) |
 | `model.lineage_json(indent=2)` | `lineage()` serialized to JSON |
 | `model.lineage_tree()` | the ASCII tree string |
-| `model.upstream_specs` | `[{"name", "kind"}]` — kind is `None` for a bare-string upstream |
+| `model.upstream_specs` | `[{"name", "kind"}]` — kind is the contract level; `None` for a bare-string upstream |
 | `model.source_specs` | `[{"name", "kind"}]` — bare-string sources default to `database` |
 | `model.declared_inputs` / `model.inputs_known` | all input names / whether any are declared |
 
@@ -90,14 +90,14 @@ Each row is a **node** (`full_name`, typed by `kind`); each name in its `upstrea
 | Source of the graph | the persisted library (`upstream` + `full_name`) | parsed `ref()`/`source()` in SQL |
 | Scope | **cross-pipeline** — every repo/run against the same state DB | one project's DAG |
 | Runtime awareness | **state-aware** — edges sit next to the state tables | static, compile-time |
-| Edge semantics | typed by `kind` (interval window / view gate / whole-table) | uniform refs |
+| Edge semantics | nodes typed by `kind` (temporal / timeless); edges carry the contract level | uniform refs |
 | Column-level | not available (see the catch) | yes, from SQL parsing |
 
 Three things stand out — and they're exactly where dbt's static, per-project lineage is weak:
 
 1. **Cross-pipeline.** The library spans every pipeline that registers against the same state DB, so a [contract](UPSTREAM.md) on a model shipped in a *different* repo is still an edge. Org-wide lineage, not one project.
 2. **State-aware.** Because the edges live next to the [state](STATE.md) rows, the graph can be coloured by status — this edge is `applied` through 2024-03-01, that downstream is `blocked` because its upstream's window isn't covered. Lineage **and** freshness in one view, closer to an observability graph than a static DAG.
-3. **Typed edges.** Each node already knows its `kind`, so the graph can render the *semantics* of a dependency (a daily interval covering an hourly downstream, a view existence gate, a whole-table load) — not just an arrow.
+3. **Typed edges.** Each node knows its `kind` and each edge its contract level, so the graph can render the *semantics* of a dependency (a `WINDOW` contract covering an hourly downstream, an `EXISTS` gate, a `WHOLE` load) — not just an arrow.
 
 ## The catch
 
@@ -121,9 +121,9 @@ edges = [(up, name) for name, upstream, kind in rows for up in upstream]
 
 ```mermaid
 graph LR
-  orders[orders · interval] --> daily_summary[daily_summary · interval]
-  customers[customers · view] --> daily_summary
-  app_config[app_config · monolith] --> daily_summary
+  orders[orders · temporal] --> daily_summary[daily_summary · temporal]
+  customers[customers · timeless] --> daily_summary
+  app_config[app_config · timeless] --> daily_summary
 ```
 
 A **model-level, cross-pipeline, state-aware** lineage graph straight from `library` — distinctive precisely where dbt is weak, lighter where dbt is strong.

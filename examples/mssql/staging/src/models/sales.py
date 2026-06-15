@@ -24,7 +24,7 @@ from datetime import datetime, timezone
 
 from bollhav.model import (
     Batch,
-    Bounds,
+    Contract,
     Database,
     TimeChunking,
     Kind,
@@ -68,14 +68,14 @@ sales = Model(
             ),
         ],
     ),
-    kind=Kind.INTERVAL,
+    kind=Kind.TEMPORAL,
     state=State(),  # tracked/gated; state rows live in Postgres (separate conn)
     # Two independent knobs: daily interval windows + rows per read chunk.
     batching=Batch(
         time=TimeChunking(chunk="@daily"),
         size=2000,
     ),
-    bounds=Bounds(
+    contract=Contract(
         begin=datetime(2024, 1, 1, tzinfo=timezone.utc),
         end=datetime(2024, 1, 4, tzinfo=timezone.utc),
     ),

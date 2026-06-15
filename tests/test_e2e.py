@@ -32,10 +32,10 @@ import pytest
 
 from bollhav.model import (
     Batch,
-    Bounds,
+    Contract,
     Database,
     TimeChunking,
-    IntervalContract,
+    UpstreamContract,
     Kind,
     Model,
     ModelRun,
@@ -208,7 +208,7 @@ def _orders_model(
     # returns a ModelRun. E2E tests call the bootstrap directly, so we build
     # the model + resolve the window by hand to the test's fixed window.
     batching = Batch(time=TimeChunking(chunk="@daily"))
-    bounds = Bounds(begin=SINCE, end=bounds_end)
+    contract = Contract(begin=SINCE, end=bounds_end)
     model = Model(
         target=Target(
             name=name,
@@ -226,14 +226,14 @@ def _orders_model(
         ),
         state=state,
         batching=batching,
-        kind=Kind.INTERVAL,
-        bounds=bounds,
+        kind=Kind.TEMPORAL,
+        contract=contract,
         # Gated upstreams and ungated sources are one list now.
         upstream=(upstream or []) + (sources or []),
     )
     return ModelRun(
         model=model,
-        window=resolve_window(batching, bounds, since=SINCE, until=bounds_end),
+        window=resolve_window(batching, contract, since=SINCE, until=bounds_end),
     )
 
 
@@ -270,7 +270,7 @@ def _bootstrap(models, *, state_mode: StateMode = StateMode.DISCOVER) -> None:
     DDL via `PostgresData` (schema, view-or-table, indexes, unique
     constraint, staging schema + orphan GC), then — for stateful models —
     the state bootstrap via `PostgresState` (ensure_library /
-    register_model / ensure_tables, seed the interval or singleton rows,
+    register_model / ensure_tables, seed the interval or oneshot rows,
     and filter `model.intervals` down to the actionable subset)."""
     with psycopg.connect(_dsn(), autocommit=True) as conn:
         for run in models:
@@ -302,8 +302,8 @@ def _bootstrap(models, *, state_mode: StateMode = StateMode.DISCOVER) -> None:
                 state.ensure_library()
                 state.register_model()
                 state.ensure_tables()
-                if model.is_kind_monolithic or model.is_view:
-                    state.insert_singleton(run_id=run.run_id)
+                if run.window is None:
+                    state.insert_oneshot(run_id=run.run_id)
                 else:
                     state.insert_intervals(
                         run_id=run.run_id,
@@ -509,7 +509,8 @@ def test_e2e_view_as_upstream_does_not_block_downstream(schema_name):
                 catalog=CAT,
                 dsn_env_var="TARGET_DSN",
             ),
-            kind=Kind.VIEW,
+            kind=Kind.TIMELESS,
+            view=True,
         )
     )
 
@@ -1096,7 +1097,7 @@ def _registry_models(schema_name):
             Source(
                 f"{CAT}.{schema_name}.orders",
                 type=SourceModel(),
-                contract=IntervalContract(),
+                contract=UpstreamContract.WINDOW,
             )
         ],
         sources=[
@@ -1117,12 +1118,18 @@ def test_e2e_registry_get_lineage_matches_model_lineage(schema_name):
     with _conn() as c:
         lineage = registry.get_lineage(c, summary_fqn)
 
-    # The DB-read lineage matches the in-code Model.lineage() shape exactly:
-    # upstream typed by the upstream's registered kind (= the contract kind
-    # here), sources typed by their source type (model / file / api).
-    assert lineage == summary.model.lineage()
+    # The DB-read lineage types each upstream by the upstream's OWN registered
+    # kind (orders is a temporal model) — this is the cross-model graph view, so
+    # it joins each upstream's library row. (Model.lineage(), by contrast, types
+    # an upstream by the local contract level, which it knows without a join.)
+    # Sources are typed by their source type (model / file / api).
+    assert lineage["model"] == summary_fqn
     assert lineage["upstream"] == [
-        {"name": f"{CAT}.{schema_name}.orders", "kind": "interval"}
+        {"name": f"{CAT}.{schema_name}.orders", "kind": "temporal"}
+    ]
+    # The in-code view types the same upstream by its contract level instead.
+    assert summary.model.lineage()["upstream"] == [
+        {"name": f"{CAT}.{schema_name}.orders", "kind": "window"}
     ]
     assert {"name": "vendor.api_orders", "kind": "api"} in lineage["sources"]
     assert lineage["inputs_known"] is True
@@ -1178,7 +1185,7 @@ def test_e2e_registry_get_upstream_tree_nests(schema_name):
             Source(
                 f"{CAT}.{schema_name}.orders",
                 type=SourceModel(),
-                contract=IntervalContract(),
+                contract=UpstreamContract.WINDOW,
             )
         ],
         sources=[Source("raw.landing", type=SourceApi())],
@@ -1192,7 +1199,7 @@ def test_e2e_registry_get_upstream_tree_nests(schema_name):
             Source(
                 f"{CAT}.{schema_name}.summary",
                 type=SourceModel(),
-                contract=IntervalContract(),
+                contract=UpstreamContract.WINDOW,
             )
         ],
     )
@@ -1258,7 +1265,7 @@ def test_e2e_schema_suffix_isolates_state_and_library(schema_name):
     (`z_bollhav_state_<suffix>` / `z_bollhav_<suffix>`), isolated from prod's
     `z_bollhav_state` / `z_bollhav` — dev and prod state never mix."""
     from bollhav.model import Source, SourceModel
-    from bollhav.model.upstream import MonolithicContract
+    from bollhav.model.upstream import UpstreamContract
     from bollhav.postgres.state import LIBRARY_SCHEMA
 
     suf = "iso"  # appendix disabled below → stable env-schema name
@@ -1278,7 +1285,7 @@ def test_e2e_schema_suffix_isolates_state_and_library(schema_name):
                     dsn_env_var="TARGET_DSN",
                     columns=_orders_columns(),
                 ),
-                kind=Kind.MONOLITHIC,
+                kind=Kind.TIMELESS,
                 state=State(),
                 upstream=upstream or [],
             )
@@ -1291,7 +1298,9 @@ def test_e2e_schema_suffix_isolates_state_and_library(schema_name):
             Source(
                 f"{CAT}.{schema_name}.orders",
                 type=SourceModel(),
-                contract=MonolithicContract(),
+                # orders is TIMELESS here, so it's gated WHOLE (loaded), not
+                # per-window — blocked until it has an applied row.
+                contract=UpstreamContract.WHOLE,
             )
         ],
     )
@@ -1413,7 +1422,7 @@ def test_e2e_dry_state_cascade_shows_will_run_after(schema_name, capsys, monkeyp
             Source(
                 f"{CAT}.{schema_name}.orders",
                 type=SourceModel(),
-                contract=IntervalContract(),
+                contract=UpstreamContract.WINDOW,
             )
         ],
     )
@@ -1533,3 +1542,228 @@ def test_e2e_drop_environment_refuses_without_suffix(schema_name):
     with psycopg.connect(_dsn(), autocommit=True) as conn:
         with pytest.raises(ValueError, match="no model carries a schema suffix"):
             drop_environment(conn, [run.model])
+
+
+# ── 16. upstream-contract gating: A → B through each contract level ───
+#
+# The four `UpstreamContract` levels form a weak→strong ladder
+#   EXISTS → WINDOW → THROUGH → WHOLE
+# (see bollhav/model/upstream.py). These tests build a producer `orders`
+# (temporal, 3 daily intervals) and a downstream gated on it, then drive
+# `orders` to a known *partial* applied state and assert exactly when the
+# downstream's gate opens.
+#
+# They exercise the live gate directly via
+#   PostgresState(downstream).is_upstream_satisfied_live(interval)
+# which is what `@model_lifecycle` calls per unit of work before running a
+# model. The verdict is an `UpstreamCheck`: `.satisfied` is the all-clear,
+# `.blockers` lists one `upstream 'name' (kind)` descriptor per unmet gate.
+#
+# For clear debugging, each test turns on DEBUG capture for the bollhav
+# state loggers — run with `-s --log-cli-level=DEBUG` (or read caplog on
+# failure) to watch `state: marked applied …` fire as `orders` advances.
+#
+# The three daily intervals are aligned between producer and consumer
+# (same SINCE/UNTIL window), so `orders` interval N lines up with the
+# downstream's interval N — which is what makes WINDOW/THROUGH legible.
+
+ORDERS_FQN_TMPL = "{cat}.{schema}.orders"
+
+
+def _downstream_on_orders(schema_name, contract, *, name="summary"):
+    """A state-tracked downstream gated on `orders` at `contract` level."""
+    return _orders_model(
+        schema_name,
+        name=name,
+        state=State(),
+        staging=Staging(),
+        upstream=[
+            Source(
+                f"{CAT}.{schema_name}.orders",
+                type=SourceModel(),
+                contract=contract,
+            )
+        ],
+    )
+
+
+def _bootstrap_orders_partial(orders_run, applied_idx):
+    """Bootstrap `orders` (registers it + seeds 3 pending interval rows),
+    then flip the intervals named in `applied_idx` to `applied`, leaving the
+    rest pending. Returns the full ordered interval tuple so callers can
+    index the matching downstream window.
+
+    No data is written — upstream-satisfaction reads only the state rows, so
+    this isolates the gate from the write path and keeps the scenario obvious:
+    `applied_idx=[0]` means "only day 1 of orders has landed"."""
+    _bootstrap([orders_run])
+    intervals = list(compute_intervals(orders_run))
+    with psycopg.connect(_dsn(), autocommit=True) as conn:
+        st = PostgresState(model=orders_run.model, conn=conn)
+        for i in applied_idx:
+            st.mark_applied(run_id=orders_run.run_id, interval=intervals[i])
+    return intervals
+
+
+def _gate(downstream_run, interval):
+    """Evaluate the downstream's live upstream gate for one window."""
+    with psycopg.connect(_dsn()) as conn:
+        return PostgresState(
+            model=downstream_run.model, conn=conn
+        ).is_upstream_satisfied_live(interval)
+
+
+def test_e2e_contract_exists_gates_on_registration_only(schema_name, caplog):
+    """EXISTS: the weakest gate. The downstream opens as soon as `orders` is
+    *registered* in the library — no applied row required. And an EXISTS gate
+    on something that was never registered is a hard error (a typo / undeployed
+    upstream), not a silent never-satisfied."""
+    _enable_debug_logging(caplog)
+    orders = _orders_model(schema_name, state=State(), staging=Staging())
+    summary = _downstream_on_orders(schema_name, UpstreamContract.EXISTS)
+
+    # orders registered but ZERO intervals applied.
+    intervals = _bootstrap_orders_partial(orders, applied_idx=[])
+
+    # EXISTS is satisfied with no applied data at all.
+    assert _gate(summary, intervals[0]).satisfied is True
+
+    # But an EXISTS gate on an unregistered upstream raises.
+    ghost = _downstream_on_orders(schema_name, UpstreamContract.EXISTS, name="ghost_ds")
+    ghost.model.upstream[0] = Source(
+        f"{CAT}.{schema_name}.never_deployed",
+        type=SourceModel(),
+        contract=UpstreamContract.EXISTS,
+    )
+    with pytest.raises(ValueError, match="is not registered in"):
+        _gate(ghost, intervals[0])
+
+
+def test_e2e_contract_window_gates_per_matching_window(schema_name, caplog):
+    """WINDOW: per-window pipelining. Downstream window N opens the moment
+    orders' matching window N is applied — and ONLY that window. Applying
+    orders day 1 unblocks the downstream's day 1 but not day 2."""
+    _enable_debug_logging(caplog)
+    orders = _orders_model(schema_name, state=State(), staging=Staging())
+    summary = _downstream_on_orders(schema_name, UpstreamContract.WINDOW)
+
+    # Only orders' first daily window is applied.
+    intervals = _bootstrap_orders_partial(orders, applied_idx=[0])
+
+    g0 = _gate(summary, intervals[0])
+    g1 = _gate(summary, intervals[1])
+    assert g0.satisfied is True  # day 1 lines up → open
+    assert g1.satisfied is False  # day 2 not applied → blocked
+    assert g1.blockers == (f"upstream '{CAT}.{schema_name}.orders' (window)",)
+
+    # Apply the rest → every downstream window opens.
+    _bootstrap_orders_partial(orders, applied_idx=[1, 2])
+    assert _gate(summary, intervals[1]).satisfied is True
+    assert _gate(summary, intervals[2]).satisfied is True
+
+
+def test_e2e_contract_through_requires_gapfree_prefix(schema_name, caplog):
+    """THROUGH: a gap-free prefix up to and including my window. For a
+    cumulative downstream whose day-N output sums orders 1..N.
+
+    With only orders day 1 applied: downstream day 1 (prefix = {day1}, all
+    applied) opens, but downstream day 2 (prefix needs day1+day2) stays
+    blocked because day 2 is a gap. Contrast WINDOW, which would not care
+    about day 1 when evaluating day 2."""
+    _enable_debug_logging(caplog)
+    orders = _orders_model(schema_name, state=State(), staging=Staging())
+    summary = _downstream_on_orders(schema_name, UpstreamContract.THROUGH)
+
+    intervals = _bootstrap_orders_partial(orders, applied_idx=[0])
+
+    assert _gate(summary, intervals[0]).satisfied is True  # prefix {d1} complete
+    assert _gate(summary, intervals[1]).satisfied is False  # d2 missing in prefix
+
+    # Fill the gap (day 2) → downstream day 2's prefix {d1,d2} is now complete,
+    # even though orders' day 3 is still pending (THROUGH is anchored to MY
+    # window, so the upstream growing past me doesn't matter).
+    _bootstrap_orders_partial(orders, applied_idx=[1])
+    assert _gate(summary, intervals[1]).satisfied is True
+
+
+def test_e2e_contract_whole_waits_for_full_load(schema_name, caplog):
+    """WHOLE: the strongest gate — every orders interval applied (in absolute
+    terms, not relative to my window). For snapshots / aggregates over all of
+    it. A partially-loaded upstream blocks EVERY downstream window."""
+    _enable_debug_logging(caplog)
+    orders = _orders_model(schema_name, state=State(), staging=Staging())
+    summary = _downstream_on_orders(schema_name, UpstreamContract.WHOLE)
+
+    # Days 1 & 2 applied, day 3 still pending → not the WHOLE upstream.
+    intervals = _bootstrap_orders_partial(orders, applied_idx=[0, 1])
+    assert _gate(summary, intervals[0]).satisfied is False
+    assert _gate(summary, intervals[2]).satisfied is False
+
+    # Apply the final interval → the whole upstream is loaded → gate opens for
+    # every downstream window.
+    _bootstrap_orders_partial(orders, applied_idx=[2])
+    assert _gate(summary, intervals[0]).satisfied is True
+    assert _gate(summary, intervals[2]).satisfied is True
+
+
+def test_e2e_contract_through_vs_whole_diverge(schema_name, caplog):
+    """The crux: THROUGH and WHOLE give DIFFERENT verdicts on the same upstream
+    state. With only orders day 1 applied and days 2-3 pending, a downstream
+    day-1 window is satisfied under THROUGH (its prefix {day1} is complete) but
+    blocked under WHOLE (days 2-3 haven't landed). They converge only once the
+    upstream is fully loaded."""
+    _enable_debug_logging(caplog)
+    orders = _orders_model(schema_name, state=State(), staging=Staging())
+    through_ds = _downstream_on_orders(
+        schema_name, UpstreamContract.THROUGH, name="through_ds"
+    )
+    whole_ds = _downstream_on_orders(
+        schema_name, UpstreamContract.WHOLE, name="whole_ds"
+    )
+
+    intervals = _bootstrap_orders_partial(orders, applied_idx=[0])
+
+    # Same upstream state, same downstream window → opposite verdicts.
+    assert _gate(through_ds, intervals[0]).satisfied is True
+    assert _gate(whole_ds, intervals[0]).satisfied is False
+
+    # Full load → both agree.
+    _bootstrap_orders_partial(orders, applied_idx=[1, 2])
+    assert _gate(through_ds, intervals[0]).satisfied is True
+    assert _gate(whole_ds, intervals[0]).satisfied is True
+
+
+def test_e2e_contract_check_emits_debug_log(schema_name, caplog):
+    """Every contract check emits DEBUG lines from
+    `bollhav.postgres.state.satisfaction` — one per gated upstream (SATISFIED /
+    BLOCKED, with the contract level and the upstream's own kind) plus a verdict
+    summary for the window. This is the example to run locally to *watch*
+    contracts being checked:
+
+        # see the gate-check log lines live:
+        pytest tests/test_e2e.py::test_e2e_contract_check_emits_debug_log \\
+            -s --log-cli-level=DEBUG
+
+    Scenario: orders' day 1 is applied, days 2-3 pending. A WINDOW downstream's
+    day-1 gate opens (SATISFIED) and its day-2 gate is BLOCKED — so a single run
+    produces one of each, which is what the assertions pin."""
+    _enable_debug_logging(caplog)
+    orders = _orders_model(schema_name, state=State(), staging=Staging())
+    summary = _downstream_on_orders(schema_name, UpstreamContract.WINDOW)
+    intervals = _bootstrap_orders_partial(orders, applied_idx=[0])
+
+    caplog.clear()  # drop the bootstrap/mark-applied logs; keep only the checks
+    assert _gate(summary, intervals[0]).satisfied is True  # day 1 → open
+    assert _gate(summary, intervals[1]).satisfied is False  # day 2 → blocked
+
+    msgs = [
+        r.message
+        for r in caplog.records
+        if r.name == "bollhav.postgres.state.satisfaction"
+    ]
+    # The day-1 check logged an open gate; the day-2 check logged a block.
+    assert any("SATISFIED upstream" in m and "(window" in m for m in msgs)
+    assert any("BLOCKED upstream" in m and "(window" in m for m in msgs)
+    # And each check logged a per-window verdict summary.
+    assert any("is SATISFIED (all gates open)" in m for m in msgs)
+    assert any("is BLOCKED by" in m for m in msgs)

@@ -67,7 +67,7 @@ nav:
           - Overview: MODEL.md
           - Kind: KINDS.md
           - Target: TARGET.md
-          - Bounds: BOUNDS.md
+          - Contract: CONTRACT.md
           - Batch: BATCH.md
           - Curfew: CURFEW.md
           - State: STATE.md
