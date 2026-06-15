@@ -2,7 +2,7 @@
 
 # Curfew
 
-Wall-clock hours and/or weekdays a model must **not** run. Reach for it when a model shouldn't touch its source during business hours, weekends, or a maintenance window — set `curfew=Curfew(...)` and the framework skips the model while the curfew is in effect, leaving its work `pending` for a later run.
+Wall-clock hours and/or weekdays a model must **not** run. Reach for it when a model shouldn't touch its source during business hours, weekends, or a maintenance window — set `curfew=Curfew(...)` and the framework skips the model while the curfew is in effect, leaving its work `pending` for a later run
 
 Models default to **no curfew** (`curfew=None`).
 
