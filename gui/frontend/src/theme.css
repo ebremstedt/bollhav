@@ -1,0 +1,69 @@
+/* Global theme. Light/dark is expressed as CSS custom properties on .wrap /
+   .wrap.dark; every component references var(--…) in its own scoped styles, so
+   dark mode "just works" through inheritance — no .dark overrides per element. */
+
+body {
+  margin: 0;
+}
+
+.wrap {
+  --bg: #fff;
+  --fg: #222;
+  --border: #e3e3e3;
+  --muted: #777;
+
+  --control-bg: #f5f5f5;
+  --control-fg: #222;
+  --control-border: #ccc;
+  --input-bg: #fff;
+  --placeholder: #aaa;
+
+  --table-border: #eee;
+  --err-bg: #fbeeee;
+  --err-accent: #c0392b;
+  --err-msg: #444;
+
+  --legend-fg: #333;
+  --legend-grp: #555;
+  --stripe-base: #fff;
+  --stripe-line: #e0e0e0;
+  --sep: #ddd;
+  --legend-hint: #aaa;
+
+  --node-bg: #fff;
+  --node-fg: #222;
+  --node-stripe: #e9e9e9;
+  --node-dot-border: #fff;
+  --node-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+}
+
+.wrap.dark {
+  --bg: #1b1b1f;
+  --fg: #eaeaea;
+  --border: #333;
+  --muted: #9a9a9a;
+
+  --control-bg: #2a2a30;
+  --control-fg: #eaeaea;
+  --control-border: #444;
+  --input-bg: #2a2a30;
+  --placeholder: #777;
+
+  --table-border: #2c2c33;
+  --err-bg: #2a1d1d;
+  --err-accent: #ff8b84;
+  --err-msg: #ccc;
+
+  --legend-fg: #cfcfcf;
+  --legend-grp: #bbb;
+  --stripe-base: #26262b;
+  --stripe-line: #3a3a42;
+  --sep: #3a3a42;
+  --legend-hint: #666;
+
+  --node-bg: #26262b;
+  --node-fg: #eaeaea;
+  --node-stripe: #33333b;
+  --node-dot-border: #1b1b1f;
+  --node-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+}

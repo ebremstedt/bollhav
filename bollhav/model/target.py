@@ -3,10 +3,22 @@ from datetime import datetime, timezone
 from typing import Callable
 
 from bollhav.model.database import Database, DatabaseColumn, DatabaseIndex
-from bollhav.model.model_type import ModelType
+from bollhav.model.staging import Staging
 from bollhav.model.write_modes import WriteMode
 from bollhav.model.column_sorting import sort_columns
-from bollhav.model.target_schema import TargetSchema
+
+
+def resolve_schema_name(name: str, suffix: str, appendix: str | None) -> str:
+    """Apply a rotating `suffix` (and optional date `appendix`) to a schema
+    name — `warehouse` → `warehouse_pr123_2425_` — or return it unchanged when
+    no suffix is set. Pure: callers pass the base name, never a resolved one,
+    so it's idempotent. (Note the trailing `_`, kept for back-compat.)"""
+    if not suffix:
+        return name
+    s = f"{name}_{suffix}"
+    if appendix:
+        s = s + "_" + datetime.now(tz=timezone.utc).strftime(appendix) + "_"
+    return s
 
 
 @dataclass
@@ -14,23 +26,27 @@ class Target:
     name: str
     suffix: str = ""
     suffix_appendix: str | None = None
-    schema: TargetSchema = field(default_factory=TargetSchema)
+    schema: str = ""
+    schema_suffix: str = ""
+    schema_suffix_appendix: str | None = "%y%V"
     catalog: str | None = None
     database: Database | None = None
+
     columns: list[DatabaseColumn] = field(default_factory=list)
     indexes: list[DatabaseIndex] = field(default_factory=list)
-    model_type: ModelType = ModelType.TABLE
-    write_mode: WriteMode = WriteMode.APPEND
-    dsn_env_var: str | None = None
     column_sorting: Callable | None = sort_columns
-    extra: dict | None = None
-    recreate_table: bool = False
-    truncate_table: bool = False
-
-    sensitive: bool = field(init=False, default=False)
     unique_columns: list = field(init=False, default_factory=list)
     primary_key_columns: list = field(init=False, default_factory=list)
     partitioned_by_index: bool = field(init=False, default=False)
+    sensitive: bool = field(init=False, default=False)
+
+    write_mode: WriteMode = WriteMode.APPEND
+    dsn_env_var: str | None = None
+    extra: dict | None = None
+    recreate_table: bool = False
+    truncate_table: bool = False
+    staging: Staging | None = None
+    stage: bool = field(init=False, default=False)
 
     @property
     def name_resolved(self) -> str:
@@ -44,24 +60,45 @@ class Target:
         return s
 
     @property
+    def schema_resolved(self) -> str:
+        """The schema name with its `schema_suffix` (+ optional date
+        `schema_suffix_appendix`) applied. Empty suffix returns the bare
+        schema."""
+        return resolve_schema_name(
+            self.schema, self.schema_suffix, self.schema_suffix_appendix
+        )
+
+    @property
     def full_name(self) -> str:
         """`catalog.schema.name_resolved` when catalog is set, else
         `schema.name_resolved` (or just `name_resolved` when schema is unset —
         same as before catalog existed)."""
         base = (
-            f"{self.schema.resolved}.{self.name_resolved}"
-            if self.schema.resolved
+            f"{self.schema_resolved}.{self.name_resolved}"
+            if self.schema_resolved
             else self.name_resolved
         )
         return f"{self.catalog}.{base}" if self.catalog else base
 
     @property
-    def is_view(self) -> bool:
-        return self.model_type == ModelType.VIEW
+    def canonical_full_name(self) -> str:
+        """Stable identity used to NAME the state table — the *base* schema
+        (WITHOUT `schema_suffix` / `schema_suffix_appendix`) plus the resolved
+        table name.
 
-    @property
-    def is_table(self) -> bool:
-        return self.model_type == ModelType.TABLE
+        The state SCHEMA still carries the suffix + date appendix
+        (`z_bollhav_<suffix>_<week>_`), so stripping them here keeps the table
+        *name* inside that schema stable across the rotation: one cleanly-named
+        state table per model (`…_orders_<digest>`), not a fresh
+        `…_<suffix>_<week>_orders_<digest>` name every week. Table-level
+        `suffix` is kept — a distinct physical table keeps distinct state.
+
+        Unlike `full_name` (which resolves the schema and so changes with every
+        suffix/appendix roll), this is the week-stable model identity."""
+        base = (
+            f"{self.schema}.{self.name_resolved}" if self.schema else self.name_resolved
+        )
+        return f"{self.catalog}.{base}" if self.catalog else base
 
     @property
     def partitioned_by(self) -> str | None:
@@ -80,25 +117,22 @@ class Target:
         return self.primary_key_columns or self.unique_columns
 
     def __post_init__(self) -> None:
-        if self.model_type == ModelType.VIEW and self.write_mode != WriteMode.VIEW:
-            raise ValueError("ModelType.VIEW must use WriteMode.VIEW")
-        if self.model_type == ModelType.TABLE and self.write_mode == WriteMode.VIEW:
-            raise ValueError("ModelType.TABLE cannot use WriteMode.VIEW")
         if self.recreate_table and self.truncate_table:
             raise ValueError(
                 "recreate_table and truncate_table cannot both be True — "
                 "recreate already leaves the table empty"
             )
-        if (
-            self.recreate_table or self.truncate_table
-        ) and self.write_mode == WriteMode.VIEW:
-            raise ValueError(
-                "recreate_table/truncate_table are not applicable to WriteMode.VIEW"
-            )
         if self.database is not None and len(self.columns) == 0:
             raise ValueError("columns must be set when database is provided")
         if len(self.columns) > 0 and self.database is None:
             raise ValueError("database must be set when columns is provided")
+        if self.database is not None and not self.catalog:
+            raise ValueError(
+                f"catalog must be set on model {self.name!r} — a database-backed "
+                f"model's identity is catalog.schema.table, so the catalog is "
+                f"required to keep names unique across databases in the shared "
+                f"library (referencing by anything less risks collisions)."
+            )
 
         partition_cols = [c for c in self.columns if getattr(c, "partition_on", False)]
         if len(partition_cols) > 1:
@@ -112,6 +146,7 @@ class Target:
             if self.columns
             else False
         )
+        self.stage = self.staging is not None
         self.unique_columns = (
             [c for c in self.columns if getattr(c, "unique", False)]
             if self.columns

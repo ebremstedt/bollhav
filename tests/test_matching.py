@@ -3,7 +3,6 @@ from pathlib import Path
 from unittest.mock import MagicMock
 import pytest
 
-from bollhav.model.batch import ChunkMode
 from bollhav.model.tagexpr import parse_expression
 from bollhav.model.matching import _model_matches, match_models
 
@@ -11,23 +10,17 @@ from bollhav.model.matching import _model_matches, match_models
 def make_model(*tags: str) -> MagicMock:
     model = MagicMock()
     model.tags = set(tags)
-    model.directives = MagicMock(
-        reload=False,
-        reload_mode=None,
-        reload_batch_size=None,
-        reload_interval_expression=None,
-    )
     return model
 
 
-# --- _model_matches ---
+# --- _model_matches: returns (model, reload) or None, no mutation ---
 
 
 def test_model_matches_when_tag_matches():
     model = make_model("wee", "all")
-    result = _model_matches(model, parse_expression("[wee]"))
-    assert result is model
-    assert result.directives.reload is False
+    matched, reload = _model_matches(model, parse_expression("[wee]"))
+    assert matched is model
+    assert reload is False
 
 
 def test_model_does_not_match_when_tag_absent():
@@ -37,37 +30,37 @@ def test_model_does_not_match_when_tag_absent():
 
 def test_model_matches_with_reload_tag_level():
     model = make_model("sales")
-    result = _model_matches(model, parse_expression("[r:sales]"))
-    assert result is model
-    assert result.directives.reload is True
+    matched, reload = _model_matches(model, parse_expression("[r:sales]"))
+    assert matched is model
+    assert reload is True
 
 
 def test_model_matches_with_reload_group_level():
     model = make_model("sales")
-    result = _model_matches(model, parse_expression("r:[sales]"))
-    assert result is model
-    assert result.directives.reload is True
+    matched, reload = _model_matches(model, parse_expression("r:[sales]"))
+    assert matched is model
+    assert reload is True
 
 
 def test_model_matches_with_reload_paren_level():
     model = make_model("finance")
-    result = _model_matches(model, parse_expression("[r:(sales|finance)]"))
-    assert result is model
-    assert result.directives.reload is True
+    matched, reload = _model_matches(model, parse_expression("[r:(sales|finance)]"))
+    assert matched is model
+    assert reload is True
 
 
 def test_model_reload_true_if_any_matching_group_has_reload():
     model = make_model("sales")
-    result = _model_matches(model, parse_expression("[r:sales][other]"))
-    assert result is model
-    assert result.directives.reload is True
+    matched, reload = _model_matches(model, parse_expression("[r:sales][other]"))
+    assert matched is model
+    assert reload is True
 
 
 def test_model_no_reload_when_matched_group_has_no_reload():
     model = make_model("finance")
-    result = _model_matches(model, parse_expression("[r:sales][finance]"))
-    assert result is model
-    assert result.directives.reload is False
+    matched, reload = _model_matches(model, parse_expression("[r:sales][finance]"))
+    assert matched is model
+    assert reload is False
 
 
 def test_disabled_model_does_not_match():
@@ -76,89 +69,10 @@ def test_disabled_model_does_not_match():
     assert _model_matches(model, parse_expression("[wee]")) is None
 
 
-# --- _model_matches propagates r_row_<N>: to directives ---
-
-
-def test_model_matches_populates_row_mode_and_batch_size():
-    model = make_model("vPAS")
-    result = _model_matches(model, parse_expression("[r_row_100:vPAS]"))
-    assert result is model
-    assert result.directives.reload is True
-    assert result.directives.reload_mode is ChunkMode.ROW
-    assert result.directives.reload_batch_size == 100
-
-
-def test_model_matches_group_level_r_row_propagates():
-    model = make_model("vPAS")
-    result = _model_matches(model, parse_expression("r_row_500:[vPAS]"))
-    assert result.directives.reload_mode is ChunkMode.ROW
-    assert result.directives.reload_batch_size == 500
-
-
-def test_model_matches_plain_reload_leaves_row_fields_none():
-    model = make_model("vPAS")
-    result = _model_matches(model, parse_expression("[r:vPAS]"))
-    assert result.directives.reload is True
-    assert result.directives.reload_mode is None
-    assert result.directives.reload_batch_size is None
-
-
-def test_model_matches_no_reload_leaves_row_fields_none():
-    model = make_model("vPAS")
-    result = _model_matches(model, parse_expression("[vPAS]"))
-    assert result.directives.reload is False
-    assert result.directives.reload_mode is None
-    assert result.directives.reload_batch_size is None
-
-
-def test_model_matches_populates_interval_expression():
-    model = make_model("foo")
-    result = _model_matches(model, parse_expression("[r_interval_@daily:foo]"))
-    assert result.directives.reload is True
-    assert result.directives.reload_mode is ChunkMode.INTERVAL
-    assert result.directives.reload_interval_expression == "@daily"
-    assert result.directives.reload_batch_size is None
-
-
 def test_model_matches_reload_word_alias_equivalent_to_r():
     model = make_model("foo")
-    result = _model_matches(model, parse_expression("[reload_row_100:foo]"))
-    assert result.directives.reload is True
-    assert result.directives.reload_mode is ChunkMode.ROW
-    assert result.directives.reload_batch_size == 100
-
-
-def test_model_matches_runtime_row_upsert_no_delete_is_compatible():
-    """UPSERT_NO_DELETE is one of the two write modes compatible with
-    ROW — each chunk is an idempotent keyed upsert, so partial batches
-    are fine (unlike truncate/recreate which assume full datasets)."""
-    from unittest.mock import MagicMock
-
-    from bollhav.model.database import Database
-    from bollhav.model.model import Model
-    from bollhav.model.target_schema import TargetSchema
-    from bollhav.model.tags import Tags
-    from bollhav.model.target import Target
-    from bollhav.model.write_modes import WriteMode
-    from bollhav.model.batch import ChunkMode
-
-    id_col = MagicMock(name="id", unique=True, sensitive=False)
-    id_col.name = "id"
-
-    m = Model(
-        target=Target(
-            name="dim_user",
-            schema=TargetSchema(name="s"),
-            write_mode=WriteMode.UPSERT_NO_DELETE,
-            database=Database.POSTGRES,
-            columns=[id_col],
-        ),
-        tagging=Tags({"dim_user"}),
-    )
-    result = _model_matches(m, parse_expression("[r_row_100:dim_user]"))
-    assert result is m
-    assert result.directives.reload_mode is ChunkMode.ROW
-    assert result.directives.reload_batch_size == 100
+    _, reload = _model_matches(model, parse_expression("[reload:foo]"))
+    assert reload is True
 
 
 # --- match_models ---

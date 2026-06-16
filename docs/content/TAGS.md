@@ -1,4 +1,4 @@
-[← home](index.md)
+[Home](index.md) › **Tags**
 
 # Tags
 
@@ -63,7 +63,7 @@ Prefix `r:` (or the long-form alias `reload:`) to mark matched models for reload
 | <code>[r:(foo&#124;bar)]</code> | match `foo` OR `bar`, reload |
 | `r:[foo & bar]` | match `foo` AND `bar`, reload all |
 
-For advanced reload prefixes that control chunk sizes (`r_row_<N>:`, `r_interval_<@alias>:`), see [Advanced tag prefixes](ADVANCED_TAGS.md).
+For combining `r:` with `not:` and group-level reload, see [Advanced tag prefixes](#advanced-tag-prefixes). Chunking config (interval, row `size`) lives on the model's `Batch`, not in tags.
 
 
 
@@ -76,3 +76,41 @@ Tag expressions exist because regex is a poor fit for model selection:
 - **Negation is explicit.** `[all & not:foo]` says exactly what it means. Regex negation (`^(?!.*foo).*$`) is easy to get wrong and hard to read at a glance.
 - **Fewer mistakes.** Regex has footguns everywhere — unescaped dots, greedy quantifiers, anchoring issues. Tag expressions have a small surface area: tags, `&`, `|`, `not:`, `r:`, and brackets. If it parses, it does what you expect.
 - **Environment-variable friendly.** Tag expressions are short, readable strings that work well as `TAGS=...` values. Complex regex patterns with special characters are awkward to pass through shell environments and easy to break with quoting issues.
+
+## Advanced tag prefixes
+
+!!! note "TODO"
+    This section needs a proper rewrite — the content below reads more like a reference dump than an explainer. Restructure as a guided walkthrough of when to reach for these prefixes and what trade-offs they imply.
+
+### Reloading
+
+Tags select models and optionally flag them for reload. Chunking config (the interval expression and row `size`) lives on the model's `Batch`, **not** in tags — there's a single reload prefix:
+
+| Prefix | Meaning |
+|--------|---------|
+| `r:` | reload the matched model(s) |
+| `reload:` | full-word alias for `r:` |
+
+To change the interval cadence for one run without editing the model, use the `INTERVAL_OVERRIDE` env var. Chunk `size` is model config — adjust it on the `Batch`.
+
+### Combining `r:` and `not:`
+
+The prefixes can be combined, at tag-level and group-level:
+
+| Syntax | Meaning |
+|--------|---------|
+| `[r:sales & not:foo]` | match `sales`, exclude `foo`, reload matched |
+| `r:not:[foo]` | match everything without `foo`, reload all |
+| `reload:[foo & bar]` | group-level reload for both |
+
+## Matching
+
+The standard entry point is `@load_models`. It reads runtime overrides from env vars (see [Runtime overrides](DECORATORS.md#runtime-overrides)), discovers models under `folder`, filters by `TAGS`, topologically sorts them, and bakes the overrides into each model's `batching` / `target`, pairing each with the run's resolved `window` on the returned `ModelRun`. The discovered source models are not mutated.
+
+```python
+from bollhav.model import ModelRun, load_models
+
+@load_models
+def main(runs: list[ModelRun], debug: bool) -> None:
+    for run in runs:
+```

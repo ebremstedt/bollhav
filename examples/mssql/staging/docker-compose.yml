@@ -1,0 +1,63 @@
+# Full local stack: SQL Server (data) + Postgres (state) + the example
+# runner. No host setup — `docker compose up --build` starts both DBs, waits
+# for them to be healthy, then runs the example inside the `app` container.
+#
+# The model's DATA lives in MSSQL and its STATE in Postgres, so the runner
+# opens one connection to each.
+#
+# SQL Server containers are amd64-only; on Apple Silicon they run under
+# emulation via `platform: linux/amd64`. If startup is painful, swap the
+# mssql image for `mcr.microsoft.com/azure-sql-edge:latest` (ARM-native,
+# same env vars and port).
+services:
+  mssql:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    platform: linux/amd64
+    container_name: bollhav-mssql-staging
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: "Bollhav_Passw0rd1"
+      MSSQL_PID: "Developer"
+    ports:
+      - "1434:1433"
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa
+          -P "$$MSSQL_SA_PASSWORD" -No -Q "SELECT 1" || exit 1
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+  postgres:
+    image: postgres:16
+    container_name: bollhav-mssql-staging-state
+    environment:
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  app:
+    build:
+      context: ../../..                               # repo root
+      dockerfile: examples/mssql/staging/Dockerfile
+    platform: linux/amd64
+    container_name: bollhav-mssql-staging-app
+    depends_on:
+      mssql:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    environment:
+      # `mssql` / `postgres` are the compose service hostnames.
+      # MSSQL holds the data; Encrypt=no + Trust… keep the dev cert simple.
+      BOLLHAV_MSSQL_DSN: "DRIVER={ODBC Driver 18 for SQL Server};SERVER=mssql,1433;DATABASE=bollhav;UID=sa;PWD=Bollhav_Passw0rd1;TrustServerCertificate=yes;Encrypt=no"
+      # Postgres holds the state.
+      STATE_DSN: "postgresql://postgres:postgres@postgres:5432/postgres"

@@ -10,7 +10,8 @@ sys.modules["icron"] = MagicMock()
 sys.modules["cron"] = cron_mock
 
 from bollhav.model.database import Database  # noqa: E402
-from bollhav.postgres.schema import _col_ddl, ensure_schema, ensure_table  # noqa: E402
+from bollhav.postgres.data import PostgresData  # noqa: E402
+from bollhav.postgres.schema import _col_ddl, ensure_schema  # noqa: E402
 from bollhav.postgres.modes import (  # noqa: E402
     append,
     recreate_partition,
@@ -18,11 +19,11 @@ from bollhav.postgres.modes import (  # noqa: E402
 )
 from bollhav.postgres.columns import PostgresColumn, PostgresType  # noqa: E402
 from bollhav.model.model import Model  # noqa: E402
-from bollhav.model.source_table import SourceTable  # noqa: E402
+from bollhav.model.source import Source, SourceModel  # noqa: E402
 from bollhav.model.target import Target  # noqa: E402
-from bollhav.model.target_schema import TargetSchema  # noqa: E402
 from bollhav.model.write_modes import WriteMode  # noqa: E402
-from bollhav.model.model_type import ModelType  # noqa: E402
+from bollhav.model.temporality import Temporality  # noqa: E402
+from bollhav.model.batch import Batch  # noqa: E402
 
 
 def _col(
@@ -58,19 +59,19 @@ def _model(
 ) -> Model:
     cols = columns or [_col("id"), _col("val")]
     return Model(
-        source=SourceTable(name="src", query=source_query),
+        upstream=[Source("src", type=SourceModel(query=source_query))],
         target=Target(
             name="test_table",
-            schema=TargetSchema(name="test_schema"),
+            schema="test_schema",
+            catalog="cat",
             database=Database.POSTGRES,
             columns=cols,
             write_mode=write_mode,
-            model_type=ModelType.TABLE
-            if write_mode != WriteMode.VIEW
-            else ModelType.VIEW,
             recreate_table=recreate_table,
             truncate_table=truncate_table,
         ),
+        batching=Batch(),
+        temporality=Temporality.TEMPORAL,
     )
 
 
@@ -123,25 +124,33 @@ class TestEnsureSchema:
         conn.execute.assert_called_once()
 
 
-class TestEnsureTable:
+class TestEnsureAssets:
+    """`run_pre_model_actions` is gone — target asset DDL now runs as the
+    discrete steps `PostgresData.ensure_assets()` drives (the lifecycle
+    hook calls the same methods). These assert the same DDL the old
+    pre-model action runner produced: schema + table, plus index / unique
+    constraint when the columns call for them."""
+
     def test_executes(self) -> None:
         conn = _conn()
-        ensure_table(conn=conn, model=_model())
+        PostgresData(model=_model(), conn=conn).ensure_assets()
         conn.execute.assert_called()
 
     def test_creates_index_when_partitioned(self) -> None:
         conn = _conn()
         model = _model(columns=[_col("id"), _col("ts", partition_on=True)])
-        ensure_table(conn=conn, model=model)
-        assert conn.execute.call_count == 2
+        PostgresData(model=model, conn=conn).ensure_assets()
+        # CREATE SCHEMA + CREATE TABLE + CREATE INDEX.
+        assert conn.execute.call_count == 3
 
     def test_creates_composite_unique_constraint(self) -> None:
         conn = _conn()
         model = _model(
             columns=[_col("a", unique=True), _col("b", unique=True), _col("val")]
         )
-        ensure_table(conn=conn, model=model)
-        assert conn.execute.call_count == 2  # CREATE TABLE + composite UNIQUE
+        PostgresData(model=model, conn=conn).ensure_assets()
+        # CREATE SCHEMA + CREATE TABLE + ALTER TABLE ADD UNIQUE.
+        assert conn.execute.call_count == 3
 
 
 class TestAppend:
@@ -167,59 +176,93 @@ class TestAppend:
 class TestOverwriteInsert:
     def test_raises_without_partitioned_by(self) -> None:
         from bollhav.model.database import Database
-        from bollhav.model.target_schema import TargetSchema
         from bollhav.model.target import Target
 
         with pytest.raises(ValueError, match="partition_on"):
             Target(
                 name="t",
-                schema=TargetSchema(name="s"),
+                schema="s",
+                catalog="cat",
                 database=Database.POSTGRES,
                 columns=[_col("id"), _col("val")],
                 write_mode=WriteMode.RECREATE_PARTITION,
             )
 
-    def test_raises_non_utc_since(self) -> None:
+    def test_raises_naive_since(self) -> None:
         conn = _conn()
         import polars as pl
 
         df = pl.DataFrame({"id": [1], "val": ["a"]})
-        since = datetime(2024, 1, 1)
+        since = datetime(2024, 1, 1)  # naive — ambiguous instant
         until = datetime(2024, 1, 2, tzinfo=timezone.utc)
-        with pytest.raises(ValueError, match="UTC"):
+        with pytest.raises(ValueError, match="timezone-aware"):
             recreate_partition(
                 conn=conn, model=_model(), df=df, since=since, until=until
             )
 
-    def test_raises_non_utc_until(self) -> None:
+    def test_raises_naive_until(self) -> None:
         conn = _conn()
         import polars as pl
 
         df = pl.DataFrame({"id": [1], "val": ["a"]})
         since = datetime(2024, 1, 1, tzinfo=timezone.utc)
-        until = datetime(2024, 1, 2)
-        with pytest.raises(ValueError, match="UTC"):
+        until = datetime(2024, 1, 2)  # naive
+        with pytest.raises(ValueError, match="timezone-aware"):
             recreate_partition(
                 conn=conn, model=_model(), df=df, since=since, until=until
             )
 
+    def test_accepts_non_utc_aware(self) -> None:
+        # A non-UTC but timezone-aware window is a valid instant — Postgres
+        # compares timestamptz by instant, so any zone is allowed.
+        from zoneinfo import ZoneInfo
+        import polars as pl
 
-class TestEnsureTableRecreate:
-    def test_drops_before_create_when_recreate_table(self) -> None:
         conn = _conn()
-        ensure_table(conn=conn, model=_model(recreate_table=True))
+        df = pl.DataFrame({"id": [1], "ts": ["a"]})
+        cols = [_col("id"), _col("ts", PostgresType.TIMESTAMPTZ, partition_on=True)]
+        tz = ZoneInfo("Europe/Stockholm")
+        since = datetime(2024, 1, 1, tzinfo=tz)
+        until = datetime(2024, 1, 2, tzinfo=tz)
+        # Must not raise; proceeds to the (mocked) DELETE + COPY.
+        recreate_partition(
+            conn=conn, model=_model(columns=cols), df=df, since=since, until=until
+        )
+
+
+class TestRecreateTable:
+    def test_drops_before_create_when_recreate_table(self) -> None:
+        # The lifecycle runs `recreate_table()` (the destructive DROP)
+        # before `create_table()` for a `recreate_table=True` model.
+        conn = _conn()
+        pg = PostgresData(model=_model(recreate_table=True), conn=conn)
+        pg.recreate_table()
+        pg.create_table()
         statements = [str(call.args[0]) for call in conn.execute.call_args_list]
         assert any("DROP TABLE" in s for s in statements), statements
         assert any("CREATE TABLE" in s for s in statements), statements
+        # DROP precedes CREATE.
+        drop_idx = next(i for i, s in enumerate(statements) if "DROP TABLE" in s)
+        create_idx = next(i for i, s in enumerate(statements) if "CREATE TABLE" in s)
+        assert drop_idx < create_idx, statements
 
 
-class TestEnsureTableTruncate:
+class TestTruncateTable:
     def test_truncates_after_create_when_truncate_table(self) -> None:
+        # The lifecycle runs `create_table()` then `truncate_table()` for a
+        # `truncate_table=True` model.
         conn = _conn()
-        ensure_table(conn=conn, model=_model(truncate_table=True))
+        pg = PostgresData(model=_model(truncate_table=True), conn=conn)
+        pg.create_table()
+        pg.truncate_table()
         statements = [str(call.args[0]) for call in conn.execute.call_args_list]
         assert any("CREATE TABLE" in s for s in statements), statements
         assert any("TRUNCATE TABLE" in s for s in statements), statements
+        create_idx = next(i for i, s in enumerate(statements) if "CREATE TABLE" in s)
+        truncate_idx = next(
+            i for i, s in enumerate(statements) if "TRUNCATE TABLE" in s
+        )
+        assert create_idx < truncate_idx, statements
 
 
 class TestUpdateInsert:
@@ -232,15 +275,17 @@ class TestUpdateInsert:
             _col("val"),
         ]
         model = Model(
-            source=SourceTable(name="src"),
+            upstream=[Source("src", type=SourceModel())],
             target=Target(
                 name="test_table",
-                schema=TargetSchema(name="test_schema"),
+                schema="test_schema",
                 columns=cols,
+                catalog="cat",
                 database=Database.POSTGRES,
                 write_mode=WriteMode.UPSERT_NO_DELETE,
-                model_type=ModelType.TABLE,
             ),
+            batching=Batch(),
+            temporality=Temporality.TEMPORAL,
         )
         df = pl.DataFrame({"id": [1], "val": ["a"]})
         copy_mock = MagicMock()

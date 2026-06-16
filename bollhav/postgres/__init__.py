@@ -7,6 +7,7 @@ from bollhav.postgres.modes import (
     create_replace_view,
 )
 from bollhav.postgres.write_modes import write, write_dataframes
+from bollhav.postgres.state import PostgresState, drop_environment
 
 __all__ = [
     "PostgresColumn",
@@ -20,4 +21,6 @@ __all__ = [
     "create_replace_view",
     "write",
     "write_dataframes",
+    "PostgresState",
+    "drop_environment",
 ]

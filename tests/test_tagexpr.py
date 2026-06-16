@@ -1,5 +1,6 @@
+import itertools
+
 import pytest
-from bollhav.model.batch import ChunkMode
 from bollhav.model.tagexpr import (
     PotentialTagMatch,
     PotentialTagGroup,
@@ -325,82 +326,6 @@ class TestTagsMatch:
         assert parsed[0].tags[0].reload is True
 
 
-# --- r_row_<N>: prefix (row-mode reload with batch size) ---
-
-
-class TestRowBatchPrefix:
-    def test_tag_level_sets_mode_and_size(self):
-        parsed = parse_expression("[r_row_100:foo]")
-        tag = parsed[0].tags[0]
-        assert tag.reload is True
-        assert tag.reload_mode is ChunkMode.ROW
-        assert tag.reload_batch_size == 100
-
-    def test_group_level_propagates_to_all_tags(self):
-        parsed = parse_expression("r_row_500:[foo & bar]")
-        foo, bar = parsed[0].tags
-        for t in (foo, bar):
-            assert t.reload is True
-            assert t.reload_mode is ChunkMode.ROW
-            assert t.reload_batch_size == 500
-
-    def test_plain_reload_leaves_row_fields_none(self):
-        parsed = parse_expression("[r:foo]")
-        tag = parsed[0].tags[0]
-        assert tag.reload is True
-        assert tag.reload_mode is None
-        assert tag.reload_batch_size is None
-
-    def test_no_reload_leaves_row_fields_none(self):
-        parsed = parse_expression("[foo]")
-        tag = parsed[0].tags[0]
-        assert tag.reload is False
-        assert tag.reload_mode is None
-        assert tag.reload_batch_size is None
-
-    def test_row_prefix_with_or_parens(self):
-        parsed = parse_expression("[r_row_250:(foo|bar)]")
-        tag = parsed[0].tags[0]
-        assert tag.candidates == ["foo", "bar"]
-        assert tag.reload_mode is ChunkMode.ROW
-        assert tag.reload_batch_size == 250
-
-    def test_row_prefix_combined_with_group_negate(self):
-        parsed = parse_expression("r_row_50:not:[foo]")
-        assert parsed[0].negate is True
-        tag = parsed[0].tags[0]
-        assert tag.reload is True
-        assert tag.reload_mode is ChunkMode.ROW
-        assert tag.reload_batch_size == 50
-
-    def test_mixed_groups_row_and_plain_reload(self):
-        parsed = parse_expression("[r:foo][r_row_250:bar]")
-        assert parsed[0].tags[0].reload_mode is None
-        assert parsed[0].tags[0].reload_batch_size is None
-        assert parsed[1].tags[0].reload_mode is ChunkMode.ROW
-        assert parsed[1].tags[0].reload_batch_size == 250
-
-    def test_at_cap_allowed(self):
-        parsed = parse_expression("[r_row_10000:foo]")
-        assert parsed[0].tags[0].reload_batch_size == 10000
-
-    def test_over_cap_raises_at_tag_level(self):
-        with pytest.raises(ValueError, match="exceeds max 10000"):
-            parse_expression("[r_row_10001:foo]")
-
-    def test_over_cap_raises_at_group_level(self):
-        with pytest.raises(ValueError, match="exceeds max 10000"):
-            parse_expression("r_row_50000:[foo]")
-
-    def test_error_names_r_row_tag_source(self):
-        with pytest.raises(ValueError, match="r_row_ tag"):
-            parse_expression("[r_row_99999:foo]")
-
-    def test_matching_unaffected_by_row_fields(self):
-        assert tags_match({"foo"}, parse_expression("[r_row_100:foo]")) is True
-        assert tags_match({"bar"}, parse_expression("[r_row_100:foo]")) is False
-
-
 # --- reload alias ("reload" == "r") ---
 
 
@@ -408,99 +333,15 @@ class TestReloadAlias:
     def test_plain_reload_word(self):
         parsed = parse_expression("[reload:foo]")
         assert parsed[0].tags[0].reload is True
-        assert parsed[0].tags[0].reload_mode is None
 
     def test_group_level_reload_word(self):
         parsed = parse_expression("reload:[foo & bar]")
         assert all(t.reload is True for t in parsed[0].tags)
 
-    def test_reload_row(self):
-        parsed = parse_expression("[reload_row_100:foo]")
-        tag = parsed[0].tags[0]
-        assert tag.reload is True
-        assert tag.reload_mode is ChunkMode.ROW
-        assert tag.reload_batch_size == 100
-
-    def test_reload_interval(self):
-        parsed = parse_expression("[reload_interval_@daily:foo]")
-        tag = parsed[0].tags[0]
-        assert tag.reload is True
-        assert tag.reload_mode is ChunkMode.INTERVAL
-        assert tag.reload_interval_expression == "@daily"
-
     def test_reload_alias_and_r_produce_identical_matches(self):
-        a = parse_expression("[r_row_100:foo]")
-        b = parse_expression("[reload_row_100:foo]")
+        a = parse_expression("[r:foo]")
+        b = parse_expression("[reload:foo]")
         assert a == b
-
-
-# --- r_interval_@<alias>: prefix ---
-
-
-class TestIntervalPrefix:
-    def test_tag_level_daily(self):
-        parsed = parse_expression("[r_interval_@daily:foo]")
-        tag = parsed[0].tags[0]
-        assert tag.reload is True
-        assert tag.reload_mode is ChunkMode.INTERVAL
-        assert tag.reload_interval_expression == "@daily"
-        assert tag.reload_batch_size is None
-
-    def test_group_level_hourly_propagates(self):
-        parsed = parse_expression("r_interval_@hourly:[foo & bar]")
-        for t in parsed[0].tags:
-            assert t.reload_mode is ChunkMode.INTERVAL
-            assert t.reload_interval_expression == "@hourly"
-
-    @pytest.mark.parametrize(
-        "alias",
-        [
-            "@minutely",
-            "@minute",
-            "@hourly",
-            "@hour",
-            "@daily",
-            "@day",
-            "@weekly",
-            "@week",
-            "@monthly",
-            "@month",
-        ],
-    )
-    def test_all_known_aliases_accepted(self, alias):
-        parsed = parse_expression(f"[r_interval_{alias}:foo]")
-        assert parsed[0].tags[0].reload_interval_expression == alias
-
-    def test_unknown_alias_raises(self):
-        with pytest.raises(ValueError, match="unknown cron alias"):
-            parse_expression("[r_interval_@weird:foo]")
-
-    def test_unknown_alias_lists_valid_ones(self):
-        with pytest.raises(ValueError, match="@daily"):
-            parse_expression("[r_interval_@bogus:foo]")
-
-    def test_raw_cron_not_supported(self):
-        # Only @aliases are accepted — a raw cron like "0 * * * *" isn't
-        # recognised as a prefix, so it falls through to being treated as
-        # a (nonexistent) tag name.
-        parsed = parse_expression("[r_interval_0 * * * *:foo]")
-        assert parsed[0].tags[0].reload is False
-        assert parsed[0].tags[0].reload_mode is None
-
-    def test_interval_prefix_combined_with_not(self):
-        parsed = parse_expression("r_interval_@daily:not:[foo]")
-        assert parsed[0].negate is True
-        assert parsed[0].tags[0].reload_mode is ChunkMode.INTERVAL
-        assert parsed[0].tags[0].reload_interval_expression == "@daily"
-
-    def test_multiple_groups_mixed_row_and_interval(self):
-        parsed = parse_expression("[r_row_100:foo][r_interval_@daily:bar]")
-        assert parsed[0].tags[0].reload_mode is ChunkMode.ROW
-        assert parsed[0].tags[0].reload_batch_size == 100
-        assert parsed[0].tags[0].reload_interval_expression is None
-        assert parsed[1].tags[0].reload_mode is ChunkMode.INTERVAL
-        assert parsed[1].tags[0].reload_interval_expression == "@daily"
-        assert parsed[1].tags[0].reload_batch_size is None
 
 
 # --- explain / explain_groups ---
@@ -534,12 +375,6 @@ class TestExplain:
     def test_reload_group_uniform(self):
         # r:[foo & bar] applies reload to both — should be lifted to group level
         assert explain("r:[foo & bar]") == "(foo and bar) (reload)"
-
-    def test_reload_row(self):
-        assert explain("[r_row_100:vPAS]") == "vPAS (reload, row mode, 100 rows/chunk)"
-
-    def test_reload_interval(self):
-        assert explain("[r_interval_@daily:sales]") == "sales (reload, daily)"
 
     def test_two_groups_compound(self):
         assert explain("[a & b][c]") == "(a and b) or c"
@@ -586,3 +421,60 @@ class TestExplainGroups:
     def test_pair_negate_group(self):
         pairs = explain_groups("not:[foo]")
         assert pairs == [("not:[foo]", "not foo")]
+
+
+# --- exhaustive: every expression vs EVERY combination (subset) of tags ---
+
+
+def _powerset(items):
+    """All subsets of `items`, as sets — every possible model tag combination."""
+    return [
+        set(combo)
+        for r in range(len(items) + 1)
+        for combo in itertools.combinations(items, r)
+    ]
+
+
+# A small tag universe; the test checks all 2**N subsets of it.
+_UNIVERSE = ["a", "b", "c"]
+
+# (expression, reference predicate over a model's tag set). The reference is
+# plain Python that encodes bollhav's documented semantics: `&` = AND within a
+# group, `|` = OR within a tag's candidates, `not:` negates a tag, a `not:`
+# prefix negates a whole group, and multiple `[..]` groups OR at the top level.
+_CASES = [
+    ("[a]", lambda t: "a" in t),
+    ("[a & b]", lambda t: "a" in t and "b" in t),
+    ("[a & b & c]", lambda t: {"a", "b", "c"} <= t),
+    ("[a|b]", lambda t: "a" in t or "b" in t),
+    ("[(a|b) & c]", lambda t: ("a" in t or "b" in t) and "c" in t),
+    # mixed &/| without parens — `&` splits first, so `b | c` is one candidate
+    ("[a & b | c]", lambda t: "a" in t and ("b" in t or "c" in t)),
+    ("[a|b & c]", lambda t: ("a" in t or "b" in t) and "c" in t),
+    ("[not:a]", lambda t: "a" not in t),
+    ("[a & not:b]", lambda t: "a" in t and "b" not in t),
+    ("[not:a & not:b]", lambda t: "a" not in t and "b" not in t),
+    ("not:[a & b]", lambda t: not ("a" in t and "b" in t)),
+    # top-level OR of groups
+    ("[a][b]", lambda t: "a" in t or "b" in t),
+    ("[a][b][c]", lambda t: bool(t & {"a", "b", "c"})),
+    ("[a & b][c]", lambda t: ("a" in t and "b" in t) or "c" in t),
+    ("[a]not:[b]", lambda t: "a" in t or "b" not in t),
+    # reload prefix must not change WHICH tags match, only the reload flag
+    ("[r:a & b]", lambda t: "a" in t and "b" in t),
+]
+
+
+@pytest.mark.parametrize("expr,ref", _CASES)
+def test_tags_match_over_every_combination(expr, ref):
+    parsed = parse_expression(expr)
+    for tags in _powerset(_UNIVERSE):
+        got = tags_match(tags, parsed)
+        assert got is ref(tags), (
+            f"{expr!r} on tags={sorted(tags)}: got {got}, expected {ref(tags)}"
+        )
+
+
+def test_universe_is_fully_exercised():
+    # sanity: we really do test all 2**N combinations (not an empty/partial set)
+    assert len(_powerset(_UNIVERSE)) == 2 ** len(_UNIVERSE) == 8

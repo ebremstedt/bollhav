@@ -6,13 +6,13 @@ from psycopg import Connection
 import polars as pl
 from bollhav.model.write_modes import WriteMode
 from bollhav.model.model import Model
+from bollhav.model.modelrun import ModelRun
 from bollhav.postgres.modes import (
     recreate_partition,
     upsert_no_delete,
-    create_replace_view,
     append,
 )
-from bollhav.postgres.schema import ensure_schema_and_table
+from bollhav.postgres.data import PostgresData
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +23,6 @@ def write_dataframes(
     df_gen: Generator[pl.DataFrame, None, None],
     since: datetime | None = None,
     until: datetime | None = None,
-    create_if_missing: bool = True,
 ) -> None:
     """Write a stream of DataFrames to a Postgres table using the model's write mode.
 
@@ -31,13 +30,16 @@ def write_dataframes(
     `model.target.write_mode`. Empty frames are skipped. Columns are reordered
     to match the model definition before writing.
 
+    Assumes the target assets already exist — the `@model_lifecycle` hook
+    ensures them (`PostgresData.ensure_assets`) once before the run; this
+    function just writes.
+
     Args:
         conn: Active psycopg connection.
         model: Model describing the target table and write behaviour.
         df_gen: Generator yielding DataFrames to write.
         since: Start of the overwrite window (UTC). Required for RECREATE_PARTITION.
         until: End of the overwrite window (UTC, exclusive). Required for RECREATE_PARTITION.
-        create_if_missing: If True, create the schema and table before writing.
 
     Raises:
         ValueError: If `since`/`until` are missing for RECREATE_PARTITION, or if the
@@ -55,10 +57,6 @@ def write_dataframes(
         case _:
             raise ValueError(f"Unhandled write mode: {model.target.write_mode}")
 
-    if create_if_missing:
-        logger.debug("Ensuring schema and table for %s", model.target.full_name)
-        ensure_schema_and_table(conn=conn, model=model)
-
     for df in df_gen:
         if len(df) == 0:
             continue
@@ -74,47 +72,92 @@ def write_dataframes(
 
 def write(
     conn: Connection,
-    model: Model,
+    run: ModelRun,
     df_gen: Generator[pl.DataFrame, None, None] | None = None,
     since: datetime | None = None,
     until: datetime | None = None,
-    create_if_missing: bool = True,
 ) -> None:
     """Write data to Postgres using the write mode defined on the model.
 
-    Routes to `write_dataframes` for table-based modes, or `create_replace_view`
-    for VIEW mode. Validates that a DataFrame generator is provided (or not) as
-    appropriate for the selected mode.
+    Two paths, chosen by `model.target.staging`:
+
+      * **Direct** (`staging is None`, default) — each DataFrame in
+        `df_gen` is written straight to the target in its own
+        transaction. Fast, simple, but a crash mid-stream leaves
+        partial writes in the target.
+      * **Staged** (`staging=Staging(...)`) — each DataFrame COPYs
+        into a per-interval staging table. After the generator drains,
+        one transaction moves staging → target, drops staging, and
+        flips the model's state row to `applied`. A crash mid-stream
+        leaves no partial writes in the target (staging is GC'd on
+        next run); the state row stays `pending` and the interval
+        reruns.
+
+    The staged path requires `model.state = State(...)` and is currently
+    APPEND-only (enforced by `bollhav.postgres.staging.stage`).
 
     Args:
         conn: Active psycopg connection.
-        model: Model describing the target and write behaviour.
+        run: ModelRun — `run.model` describes the target/write behaviour;
+            `run.run_id` keys the staging table.
         df_gen: Generator yielding DataFrames. Required for all non-VIEW modes.
-        since: Start of the overwrite window (UTC). Required for RECREATE_PARTITION.
-        until: End of the overwrite window (UTC, exclusive). Required for RECREATE_PARTITION.
-        create_if_missing: If True, create the schema and table before writing.
+        since: Start of the overwrite window (timezone-aware; any zone).
+            Required for RECREATE_PARTITION and for the staged path.
+        until: End of the overwrite window (timezone-aware, exclusive).
+            Required for RECREATE_PARTITION and for the staged path.
 
     Raises:
-        ValueError: If `df_gen` is missing for a table mode, or provided for VIEW mode.
+        ValueError: If `df_gen` is missing for a table mode, or if the
+            write mode is VIEW (views are created by `@model_lifecycle`,
+            not written here).
     """
-    if model.target.write_mode in (
+    model = run.model
+    if model.is_view:
+        raise ValueError(
+            f"write() is for data, not views — {model.target.full_name!r} is "
+            f"a VIEW. Views are created by @model_lifecycle "
+            f"(PostgresData.create_or_replace_view); a view's execute body "
+            f"has nothing to write."
+        )
+
+    if model.target.write_mode not in (
         WriteMode.APPEND,
         WriteMode.RECREATE_PARTITION,
         WriteMode.UPSERT_NO_DELETE,
     ):
-        if not df_gen:
-            raise ValueError(
-                "Modes APPEND, RECREATE_PARTITION, UPSERT_NO_DELETE need a dataframe"
-            )
-        write_dataframes(
-            conn=conn,
-            model=model,
-            df_gen=df_gen,
-            since=since,
-            until=until,
-            create_if_missing=create_if_missing,
+        raise ValueError(f"Unhandled write mode: {model.target.write_mode}")
+
+    if not df_gen:
+        raise ValueError(
+            "Modes APPEND, RECREATE_PARTITION, UPSERT_NO_DELETE need a dataframe"
         )
-    if model.target.write_mode == WriteMode.VIEW:
-        if df_gen:
-            raise ValueError("Modes VIEW does not need a dataframe")
-        create_replace_view(conn=conn, model=model)
+
+    if model.target.stage:
+        _write_staged(conn=conn, run=run, df_gen=df_gen)
+        return
+
+    write_dataframes(
+        conn=conn,
+        model=model,
+        df_gen=df_gen,
+        since=since,
+        until=until,
+    )
+
+
+def _write_staged(
+    conn: Connection,
+    run: ModelRun,
+    df_gen: Generator[pl.DataFrame, None, None],
+) -> None:
+    """Staged write — COPY each chunk into the per-interval staging table.
+
+    Just lands rows; the staging table must already exist. Its lifecycle
+    (create before the execute, merge into the target + drop after) is
+    owned by `@execute_lifecycle` via `PostgresData`. Both sides key the
+    table on `run.run_id`, so they target the same one."""
+    postgres_data = PostgresData(model=run.model, conn=conn)
+    for df in df_gen:
+        if len(df) == 0:
+            continue
+        postgres_data.write_to_staging(run.run_id, df)

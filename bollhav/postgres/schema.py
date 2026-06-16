@@ -1,7 +1,11 @@
+from __future__ import annotations
+
 import logging
+from typing import cast, LiteralString
+
 import psycopg
 from psycopg import sql
-from typing import cast, LiteralString
+
 from bollhav.model.model import Model
 from bollhav.postgres.columns import PostgresColumn
 
@@ -24,87 +28,27 @@ def _col_ddl(col: PostgresColumn) -> LiteralString:
 
 
 def ensure_schema(conn: psycopg.Connection, schema: str) -> None:
+    """Idempotent `CREATE SCHEMA IF NOT EXISTS`. Used by the state
+    bootstrap (which needs its `z_<schema>` ahead of any actions),
+    not gated by the action system."""
     logger.debug("Ensuring schema: %s", schema)
     conn.execute(
         sql.SQL("CREATE SCHEMA IF NOT EXISTS {}").format(sql.Identifier(schema))
     )
 
 
-def ensure_table(conn: psycopg.Connection, model: Model) -> None:
-    schema_id = sql.Identifier(model.target.schema.resolved)
-    table_id = sql.Identifier(model.target.name_resolved)
-    logger.debug(
-        "Ensuring table: %s.%s",
-        model.target.schema.resolved,
-        model.target.name_resolved,
-    )
-
-    if model.target.recreate_table:
-        conn.execute(
-            sql.SQL("DROP TABLE IF EXISTS {schema}.{table}").format(
-                schema=schema_id, table=table_id
-            )
-        )
-
-    col_defs = sql.SQL(",\n").join(
-        sql.SQL(_col_ddl(col))
-        for col in model.target.columns
-        if isinstance(col, PostgresColumn)
-    )
-    conn.execute(
-        sql.SQL("CREATE TABLE IF NOT EXISTS {schema}.{table} (\n{col_defs}\n)").format(
-            schema=schema_id,
-            table=table_id,
-            col_defs=col_defs,
-        )
-    )
-
-    if model.target.truncate_table:
-        conn.execute(
-            sql.SQL("TRUNCATE TABLE {schema}.{table}").format(
-                schema=schema_id, table=table_id
-            )
-        )
-    if model.target.partitioned_by is not None:
-        index_name = f"{model.target.name_resolved}_{model.target.partitioned_by}_idx"
-        conn.execute(
-            sql.SQL(
-                "CREATE INDEX IF NOT EXISTS {index} ON {schema}.{table} ({col})"
-            ).format(
-                index=sql.Identifier(index_name),
-                schema=sql.Identifier(model.target.schema.resolved),
-                table=sql.Identifier(model.target.name_resolved),
-                col=sql.Identifier(model.target.partitioned_by),
-            )
-        )
-
-    unique_columns = [
-        col
-        for col in model.target.columns
-        if isinstance(col, PostgresColumn) and col.unique
-    ]
-    if unique_columns:
-        constraint_name = f"{model.target.name_resolved}_uq"
-        unique_col_ids = sql.SQL(", ").join(
-            sql.Identifier(col.name) for col in unique_columns
-        )
-        conn.execute(
-            sql.SQL("""
-                DO $$ BEGIN
-                    ALTER TABLE {schema}.{table}
-                    ADD CONSTRAINT {constraint} UNIQUE ({cols});
-                EXCEPTION WHEN duplicate_table THEN NULL;
-                END $$
-            """).format(
-                schema=sql.Identifier(model.target.schema.resolved),
-                table=sql.Identifier(model.target.name_resolved),
-                constraint=sql.Identifier(constraint_name),
-                cols=unique_col_ids,
-            )
-        )
-
-
 def ensure_schema_and_table(conn: psycopg.Connection, model: Model) -> None:
-    with conn.transaction():
-        ensure_schema(conn=conn, schema=model.target.schema.resolved)
-        ensure_table(conn=conn, model=model)
+    """Public façade — idempotently ensure the model's target assets
+    (schema, table, indexes, unique constraint, staging schema). A
+    verb-style entrypoint over `PostgresData.ensure_assets()`."""
+    from bollhav.postgres.data import PostgresData
+
+    PostgresData(model=model, conn=conn).ensure_assets()
+
+
+def ensure_table(conn: psycopg.Connection, model: Model) -> None:
+    """Synonym for `ensure_schema_and_table` — both ensure the same
+    target assets via `PostgresData.ensure_assets()`."""
+    from bollhav.postgres.data import PostgresData
+
+    PostgresData(model=model, conn=conn).ensure_assets()

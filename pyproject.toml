@@ -1,6 +1,6 @@
 [project]
 name = "bollhav"
-version = "2.0.136"
+version = "3.0.0"
 authors = [
   { name="Erik Bremstedt", email="erik@bremstedtanalytics.se" },
 ]
@@ -16,8 +16,39 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest", "ruff", "time-machine"]
+dev = ["pytest", "ruff", "time-machine", "pyright"]
+tui = ["textual>=0.50"]
+# The MSSQL backend needs pyodbc (a C-extension). It's optional — Postgres
+# users never install it, tests mock it, and pyright is told the import may be
+# absent (see the `# pyright: ignore` on each `import pyodbc`).
+mssql = ["pyodbc>=5"]
+
+[project.scripts]
+bollhav = "bollhav._tui_entry:main"
+bollhav-tui = "bollhav._tui_entry:main"
 
 [project.urls]
 Homepage = "https://github.com/ebremstedt/bollhav"
 Issues = "https://github.com/ebremstedt/bollhav/issues"
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+# Only the bollhav library is the package. The repo also holds gui/, tests/,
+# docs/, examples/ at the top level — without this, setuptools' flat-layout
+# auto-discovery sees multiple top-level packages (gui + bollhav) and aborts.
+[tool.setuptools.packages.find]
+include = ["bollhav*"]
+
+# Type-check the library only. tests/ has many harmless narrowing errors;
+# scoping here means a bare `pyright` (locally and in CI) checks just bollhav/.
+[tool.pyright]
+include = ["bollhav"]
+pythonVersion = "3.11"
+
+[tool.ruff.lint.per-file-ignores]
+# These mock the optional pyodbc C-extension into sys.modules BEFORE importing
+# the modules that import it, so the imports legitimately follow statements.
+"tests/test_lifecycle.py" = ["E402"]
+"tests/test_mssql_data.py" = ["E402"]

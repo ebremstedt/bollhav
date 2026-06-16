@@ -6,41 +6,25 @@ from contextlib import contextmanager
 from pathlib import Path
 from bollhav.model.tagexpr import PotentialTagGroup, parse_expression, group_matches
 from bollhav.model.model import Model
-from bollhav.model.ordering import topological_sort, UpstreamMode
+from bollhav.model.ordering import topological_sort
 
 logger = logging.getLogger(__name__)
 
 
 def _model_matches(
     model: Model, potential_tag_groups: list[PotentialTagGroup]
-) -> Model | None:
+) -> tuple[Model, bool] | None:
+    """Return `(model, reload)` if the model matches one of the tag groups,
+    else `None`. `reload` is true when the matched group carries a reload
+    prefix. The model is NOT mutated — the reload decision is surfaced for
+    `runtime` to fold into the resolved window."""
     if not model.enabled:
         logger.debug("Skipping model %r because it is disabled", model.target.full_name)
         return None
     for group in potential_tag_groups:
         if group_matches(model.tags, group):
-            model.directives.reload = any(tag.reload for tag in group.tags)
-            model.directives.reload_mode = next(
-                (tag.reload_mode for tag in group.tags if tag.reload_mode is not None),
-                None,
-            )
-            model.directives.reload_batch_size = next(
-                (
-                    tag.reload_batch_size
-                    for tag in group.tags
-                    if tag.reload_batch_size is not None
-                ),
-                None,
-            )
-            model.directives.reload_interval_expression = next(
-                (
-                    tag.reload_interval_expression
-                    for tag in group.tags
-                    if tag.reload_interval_expression is not None
-                ),
-                None,
-            )
-            return model
+            reload = any(tag.reload for tag in group.tags)
+            return model, reload
     return None
 
 
@@ -77,20 +61,13 @@ def _with_sys_path(folder_path: Path):
             sys.path.remove(parent_dir)
 
 
-def match_models(
+def matched_with_reload(
     folder: str = "src/models",
     tags: str | None = None,
-    upstream_mode: UpstreamMode = UpstreamMode.ENFORCE,
-) -> list[Model]:
-    """
-    Scan a folder recursively for Python modules, discover all Model instances,
-    and return those whose tags match the given tag expression.
-
-    Runtime state (e.g. reload) is set on model.directives during matching.
-
-    Usage:
-        for model in match_models(folder="src/models", tags="[r:sales & finance]"):
-            ...
+) -> list[tuple[Model, bool]]:
+    """Like `match_models`, but pairs each matched model with its tag-driven
+    `reload` flag (topologically sorted). `runtime` uses the flag to resolve
+    each model's window; `match_models` is the public, reload-stripped view.
 
     Tag expression syntax:
         [foo]                   match if model has tag "foo"
@@ -102,17 +79,9 @@ def match_models(
         [reload:foo]            same as [r:foo] — "reload" is a full-word alias
         [r:(foo | bar)]         match "foo" or "bar", reload=True
         r:[foo & bar]           match "foo" and "bar", reload=True for all
-        [r_row_100:foo]         match "foo", reload=True, ROW mode, batch_size=100
-        r_row_500:[foo & bar]   match "foo" and "bar", reload with ROW/500 for all
-        [r_interval_@daily:foo] reload "foo" in INTERVAL mode, interval_expression="@daily"
-        reload_interval_@hourly:[foo]   group-level, same but hourly for all
 
-    Allowed cron aliases for r_interval_ are sourced from roskarl's
-    INTERVAL_EXPRESSION_SHORTCUTS: @minutely/@minute, @hourly/@hour,
-    @daily/@day, @weekly/@week, @monthly/@month. For custom cron
-    expressions, configure the model statically or use
-    INTERVAL_EXPRESSION_OVERRIDE — arbitrary cron strings are not accepted
-    inside tags.
+    Interval and chunk size are model config, not tag overrides. To change
+    the interval expression at runtime, use INTERVAL_OVERRIDE.
 
     Raises:
         ValueError: If tags is not provided or the expression is invalid.
@@ -124,6 +93,7 @@ def match_models(
     folder_path = Path(folder)
     logger.debug("Matching models in %r with tags %r", folder, tags)
 
+    reload_by_name: dict[str, bool] = {}
     results: list[Model] = []
     total_models = 0
     seen: dict[str, Path] = {}
@@ -144,12 +114,14 @@ def match_models(
                 total_models += 1
                 result = _model_matches(model, potential_tag_groups)
                 if result:
-                    results.append(result)
+                    matched_model, reload = result
+                    results.append(matched_model)
+                    reload_by_name[full_name] = reload
                     logger.debug(
                         "Matched model %r from %s (reload=%s)",
                         full_name,
                         file,
-                        model.directives.reload,
+                        reload,
                     )
 
     if total_models == 0:
@@ -160,4 +132,19 @@ def match_models(
         )
     else:
         logger.debug("Found %d model(s) matching tags %r", len(results), tags)
-    return topological_sort(results, upstream_mode=upstream_mode)
+    ordered = topological_sort(results)
+    return [(m, reload_by_name[m.target.full_name]) for m in ordered]
+
+
+def match_models(
+    folder: str = "src/models",
+    tags: str | None = None,
+) -> list[Model]:
+    """Scan a folder for Model instances and return those matching the tag
+    expression, topologically sorted. See `matched_with_reload` for the tag
+    syntax; this is the reload-stripped public view.
+
+    Raises:
+        ValueError: If tags is not provided or the expression is invalid.
+    """
+    return [model for model, _ in matched_with_reload(folder=folder, tags=tags)]

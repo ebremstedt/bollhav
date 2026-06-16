@@ -1,4 +1,4 @@
-[← home](index.md)
+[Home](index.md) › **Postgres**
 
 # PostgresColumn
 
@@ -7,7 +7,7 @@ Column definitions for Postgres targets.
 ## Usage
 
 ```python
-from bollhav import PostgresColumn, PostgresType
+from bollhav.postgres import PostgresColumn, PostgresType
 
 PostgresColumn(
     name="amount",
@@ -23,7 +23,7 @@ PostgresColumn(
 
 # Write Modes
 
-See [MODES.md](MODES.md) for the general concepts. Below describes the Postgres-specific implementation of each mode.
+See [Write modes](MODES.md) for the general concepts. Below describes the Postgres-specific implementation of each mode.
 
 ## APPEND
 
@@ -36,7 +36,7 @@ Both live on `Target`. They run once in `ensure_table` **before** the chunked wr
 - `recreate_table=True` → `DROP TABLE IF EXISTS` then `CREATE TABLE` (schema reset).
 - `truncate_table=True` → `CREATE TABLE IF NOT EXISTS` then `TRUNCATE TABLE` (rows wiped, schema kept).
 
-Both default to `False`; setting both raises. Combine with any non-VIEW write mode — typically `APPEND` for a full reload, or `UPSERT_NO_DELETE` when you also want dedup after the wipe.
+Both default to `False`; setting both raises. Combine with any write mode — typically `APPEND` for a full reload, or `UPSERT_NO_DELETE` when you also want dedup after the wipe.
 
 ## RECREATE_PARTITION
 
@@ -46,6 +46,6 @@ Requires `since` and `until` (UTC-aware datetimes) and `target.partitioned_by` t
 
 Loads data into a temp table via `COPY`, then runs `INSERT ... ON CONFLICT (...) DO UPDATE SET ...`. Requires `target.unique_columns` to be set. The temp table is dropped on commit.
 
-## VIEW
+## Views
 
-Runs `CREATE OR REPLACE VIEW`. Requires `model.source.query` to be set. No dataframe needed.
+A view is `view=True` on the model, not a write mode. Runs `CREATE OR REPLACE VIEW`. Requires a `Source` in `upstream` whose `SourceModel.query` is set (the view's definition). No dataframe needed.

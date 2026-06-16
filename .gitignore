@@ -166,3 +166,6 @@ cython_debug/
 .claude/
 .vscode
 docs/site/
+
+# bollhav TUI local config (per-checkout, not shared)
+.bollhav-tui.json

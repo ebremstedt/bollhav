@@ -16,7 +16,6 @@ sys.modules.setdefault("roskarl", MagicMock())
 sys.modules.setdefault("icron", MagicMock())
 
 from bollhav.model.load_models import load_models  # noqa: E402
-from bollhav.model.ordering import UpstreamMode  # noqa: E402
 
 
 _UNSET = object()
@@ -31,11 +30,10 @@ def _patches(
     backfill_enabled: object = _UNSET,
     backfill_since: datetime | None = None,
     backfill_until: datetime | None = None,
-    interval_expression_override: str | None = None,
-    window_expression_override: str | None = None,
+    interval_override: str | None = None,
+    window_override: str | None = None,
     lookback_override: int | None = None,
     tz_override: str | None = None,
-    upstream: str | None = None,
     dry_run: bool = False,
     debug: bool = False,
 ):
@@ -52,13 +50,12 @@ def _patches(
     strs = {
         "TAGS": tags,
         "SCHEMA_SUFFIX": schema_suffix,
-        "UPSTREAM": upstream,
         "TIMEZONE_OVERRIDE": tz_override,
     }
 
     intervals = {
-        "INTERVAL_EXPRESSION_OVERRIDE": interval_expression_override,
-        "WINDOW_EXPRESSION_OVERRIDE": window_expression_override,
+        "INTERVAL_OVERRIDE": interval_override,
+        "WINDOW_OVERRIDE": window_override,
     }
 
     ints = {"LOOKBACK_OVERRIDE": lookback_override}
@@ -93,6 +90,20 @@ def _patches(
     ]
 
 
+class _FakeRun:
+    """Minimal stand-in for a ModelRun: `@load_models` calls
+    `compute_intervals(run)` and stashes the result on `run.intervals`, so the
+    fake needs a `model` (with `batching=None` → the (None,) contract), a
+    `window`, and an assignable `intervals`."""
+
+    def __init__(self, name: str) -> None:
+        self.name = name
+        self.model = MagicMock()
+        self.model.batching = None
+        self.window = None
+        self.intervals = (None,)
+
+
 def _run_decorator(**env):
     """Apply patches, define a @load_models main, call it, return the kwargs
     apply_runtime_overrides was called with plus what main received."""
@@ -102,7 +113,7 @@ def _run_decorator(**env):
 
     def _fake_apm(**kwargs):
         apm_kwargs.update(kwargs)
-        return ["fake-model-1", "fake-model-2"]
+        return [_FakeRun("fake-model-1"), _FakeRun("fake-model-2")]
 
     with (
         patches[0],
@@ -113,12 +124,12 @@ def _run_decorator(**env):
         patch(
             "bollhav.model.load_models.apply_runtime_overrides", side_effect=_fake_apm
         ),
-        patch("bollhav.model.load_models._print_summary", lambda cfg: None),
+        patch("bollhav.model.load_models._print_summary", lambda cfg, runs: None),
     ):
 
         @load_models
-        def main(models, debug):
-            received["models"] = models
+        def main(runs, debug):
+            received["runs"] = runs
             received["debug"] = debug
 
         main()
@@ -132,8 +143,10 @@ class TestEnvReading:
         assert apm["tags"] == "[mytag]"
         assert apm["schema_suffix"] == "dev"
         assert apm["latest"] is False
-        assert apm["upstream_mode"] is UpstreamMode.ENFORCE
-        assert received["models"] == ["fake-model-1", "fake-model-2"]
+        assert [r.name for r in received["runs"]] == [
+            "fake-model-1",
+            "fake-model-2",
+        ]
         assert received["debug"] is False
 
     def test_latest_enabled_passes_through(self) -> None:
@@ -154,10 +167,6 @@ class TestEnvReading:
     def test_debug_propagates(self) -> None:
         _, received = _run_decorator(debug=True)
         assert received["debug"] is True
-
-    def test_upstream_mode_parsing(self) -> None:
-        apm, _ = _run_decorator(upstream="ignore_views")
-        assert apm["upstream_mode"] is UpstreamMode.IGNORE_VIEWS
 
     def test_lookback_override_passes_through(self) -> None:
         apm, _ = _run_decorator(lookback_override=5)
@@ -200,17 +209,13 @@ class TestValidation:
     def test_window_override_without_latest_raises(self) -> None:
         with pytest.raises(
             ValueError,
-            match="WINDOW_EXPRESSION_OVERRIDE only applies when LATEST_ENABLED",
+            match="WINDOW_OVERRIDE only applies when LATEST_ENABLED",
         ):
-            _run_decorator(window_expression_override="@daily")
+            _run_decorator(window_override="@daily")
 
     def test_negative_lookback_override_raises(self) -> None:
         with pytest.raises(ValueError, match="LOOKBACK_OVERRIDE must be non-negative"):
             _run_decorator(lookback_override=-1)
-
-    def test_invalid_upstream_raises(self) -> None:
-        with pytest.raises(ValueError, match="UPSTREAM must be one of"):
-            _run_decorator(upstream="bogus")
 
 
 class TestDecoratorForms:
@@ -237,11 +242,11 @@ class TestDecoratorForms:
                 "bollhav.model.load_models.apply_runtime_overrides",
                 side_effect=_fake_apm,
             ),
-            patch("bollhav.model.load_models._print_summary", lambda cfg: None),
+            patch("bollhav.model.load_models._print_summary", lambda cfg, models: None),
         ):
 
             @load_models(folder="custom/path")
-            def main(models, debug):
+            def main(runs, debug):
                 pass
 
             main()

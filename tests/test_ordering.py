@@ -1,18 +1,34 @@
 from unittest.mock import MagicMock
 import pytest
 
-from bollhav.model.ordering import topological_sort, UpstreamMode
-from bollhav.model.write_modes import WriteMode
+from bollhav.model.ordering import topological_sort
+from bollhav.model.temporality import Temporality
 
 
 def make_model(
-    name: str, upstream: list[str] | None = None, write_mode=WriteMode.APPEND
+    name: str,
+    upstream: list[str] | None = None,
+    temporality=Temporality.TEMPORAL,
+    view=False,
 ) -> MagicMock:
     model = MagicMock()
     model.name = name
     model.target.full_name = name
-    model.upstream = upstream or []
-    model.target.write_mode = write_mode
+    # `topological_sort` orders against `model.upstream_names` (a property on
+    # the real Model that resolves Contracts/bare strings to names), so the
+    # mock must expose that — `upstream` itself is no longer read here.
+    upstream = upstream or []
+    model.upstream = upstream
+    # `topological_sort` orders on `declared_inputs` (gated upstreams + ungated
+    # model sources) so ordering follows every producer→consumer edge, while
+    # runtime gating stays contract-only via `upstream_names`. These tests pass
+    # bare names as the model's full set of inputs, so both resolve to it.
+    model.upstream_names = upstream
+    model.declared_inputs = upstream
+    # Views are a separate flag now (`model.view`), independent of the time
+    # axis. Set both `kind` and `is_view` so the mock matches the real Model.
+    model.temporality = temporality
+    model.is_view = view
     return model
 
 
@@ -74,12 +90,17 @@ def test_diamond_dependency():
 
 
 # --- missing upstream ---
+#
+# An unmatched upstream (one not present in THIS run) is no longer an error:
+# it ships in another pipeline / under different TAGS and its satisfaction is
+# resolved at runtime against the cross-pipeline state library, not at sort
+# time. So it is simply skipped during ordering rather than raising.
 
 
-def test_unmatched_upstream_raises():
+def test_unmatched_upstream_is_skipped_not_raised():
     b = make_model("b", upstream=["missing"])
-    with pytest.raises(ValueError, match="unmatched upstream"):
-        topological_sort([b])
+    result = topological_sort([b])
+    assert names(result) == ["b"]
 
 
 # --- circular dependency ---
@@ -98,56 +119,11 @@ def test_self_referencing_raises():
         topological_sort([a])
 
 
-# --- views skip upstream ---
+# --- views are ordered like any other model ---
 
 
-def test_view_ignores_upstream():
-    make_model("a")
-    v = make_model("v", upstream=["a"], write_mode=WriteMode.VIEW)
-    result = topological_sort([v], upstream_mode=UpstreamMode.IGNORE_VIEWS)
-    assert names(result) == ["v"]
-
-
-def test_view_does_not_require_upstream_in_matched_set():
-    v = make_model("v", upstream=["missing"], write_mode=WriteMode.VIEW)
-    result = topological_sort([v], upstream_mode=UpstreamMode.IGNORE_VIEWS)
-    assert names(result) == ["v"]
-
-
-def test_view_not_ordered_after_upstream():
+def test_view_ordered_after_upstream():
     a = make_model("a")
-    v = make_model("v", upstream=["a"], write_mode=WriteMode.VIEW)
-    result = topological_sort([v, a], upstream_mode=UpstreamMode.IGNORE_VIEWS)
+    v = make_model("v", upstream=["a"], temporality=Temporality.TIMELESS, view=True)
+    result = topological_sort([v, a])
     assert names(result) == ["a", "v"]
-
-
-# --- upstream_mode=enforce ---
-
-
-def test_enforce_mode_requires_view_upstream():
-    v = make_model("v", upstream=["missing"], write_mode=WriteMode.VIEW)
-    with pytest.raises(ValueError, match="unmatched upstream"):
-        topological_sort([v], upstream_mode=UpstreamMode.ENFORCE)
-
-
-def test_enforce_mode_orders_views():
-    a = make_model("a")
-    v = make_model("v", upstream=["a"], write_mode=WriteMode.VIEW)
-    result = topological_sort([v, a], upstream_mode=UpstreamMode.ENFORCE)
-    assert names(result) == ["a", "v"]
-
-
-# --- upstream_mode=ignore ---
-
-
-def test_ignore_mode_skips_sorting():
-    b = make_model("b", upstream=["a"])
-    a = make_model("a")
-    result = topological_sort([b, a], upstream_mode=UpstreamMode.IGNORE_COMPLETELY)
-    assert names(result) == ["b", "a"]
-
-
-def test_ignore_mode_allows_missing_upstream():
-    b = make_model("b", upstream=["missing"])
-    result = topological_sort([b], upstream_mode=UpstreamMode.IGNORE_COMPLETELY)
-    assert names(result) == ["b"]

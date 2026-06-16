@@ -19,7 +19,6 @@ sys.modules.setdefault("roskarl", MagicMock())
 sys.modules.setdefault("icron", MagicMock())
 
 from bollhav.model.target import Target  # noqa: E402
-from bollhav.model.target_schema import TargetSchema  # noqa: E402
 
 
 # ── Target.name_resolved ─────────────────────────────────────────────
@@ -43,7 +42,7 @@ def test_name_resolved_with_suffix_and_appendix():
 
 
 def test_name_resolved_default_appendix_is_none():
-    """Unlike TargetSchema (which defaults the date suffix on), Target
+    """Unlike the schema suffix (which defaults the date appendix on), the table
     defaults it off — table hotswaps usually want a clean predictable
     name, not a time-varying one."""
     assert Target(name="customers", suffix="v2").suffix_appendix is None
@@ -56,7 +55,7 @@ def test_full_name_with_table_suffix_only():
     t = Target(
         name="customers",
         suffix="v2",
-        schema=TargetSchema(name="warehouse"),
+        schema="warehouse",
     )
     assert t.full_name == "warehouse.customers_v2"
 
@@ -65,7 +64,9 @@ def test_full_name_combines_schema_and_table_suffix():
     t = Target(
         name="customers",
         suffix="v2",
-        schema=TargetSchema(name="warehouse", suffix="pr123", suffix_appendix=None),
+        schema="warehouse",
+        schema_suffix="pr123",
+        schema_suffix_appendix=None,
     )
     assert t.full_name == "warehouse_pr123.customers_v2"
 
@@ -74,14 +75,14 @@ def test_full_name_with_catalog_schema_and_table_suffix():
     t = Target(
         name="customers",
         suffix="v2",
-        schema=TargetSchema(name="warehouse"),
+        schema="warehouse",
         catalog="prod_cat",
     )
     assert t.full_name == "prod_cat.warehouse.customers_v2"
 
 
 def test_full_name_unchanged_when_no_table_suffix():
-    t = Target(name="customers", schema=TargetSchema(name="warehouse"))
+    t = Target(name="customers", schema="warehouse")
     assert t.full_name == "warehouse.customers"
 
 
@@ -89,7 +90,7 @@ def test_full_name_unchanged_when_no_table_suffix():
 
 
 def _make_target(name="customers", suffix=""):
-    return Target(name=name, suffix=suffix, schema=TargetSchema(name="warehouse"))
+    return Target(name=name, suffix=suffix, schema="warehouse")
 
 
 def test_apply_runtime_overrides_bakes_table_suffix(tmp_path, monkeypatch):
@@ -127,7 +128,7 @@ def test_apply_runtime_overrides_combines_schema_and_table_suffix():
     new = _target_with_suffix(src, schema_suffix="pr123", table_suffix="v2")
 
     assert new.suffix == "v2"
-    assert new.schema.suffix == "pr123"
+    assert new.schema_suffix == "pr123"
     # resolved schema includes the schema date appendix by default, so use
     # the relevant pieces independently rather than asserting the full name.
     assert new.name_resolved == "customers_v2"
@@ -239,11 +240,11 @@ def test_load_models_passes_table_suffix_to_apply_runtime_overrides():
         patch(
             "bollhav.model.load_models.apply_runtime_overrides", side_effect=_fake_apm
         ),
-        patch("bollhav.model.load_models._print_summary", lambda cfg: None),
+        patch("bollhav.model.load_models._print_summary", lambda cfg, models: None),
     ):
 
         @load_models
-        def main(models, debug):
+        def main(runs, debug):
             pass
 
         main()
