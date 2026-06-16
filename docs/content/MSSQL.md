@@ -72,7 +72,7 @@ from bollhav.mssql import ensure_schema, ensure_table, ensure_primary_key, ensur
 
 # Write Modes
 
-See [MODES.md](MODES.md) for general concepts. Below describes the MSSQL-specific implementation.
+See [Write modes](MODES.md) for general concepts. Below describes the MSSQL-specific implementation.
 
 ## APPEND
 

@@ -1,4 +1,4 @@
-[Home](index.md) › **Modes**
+[Home](index.md) › **Write modes**
 
 # Write modes
 

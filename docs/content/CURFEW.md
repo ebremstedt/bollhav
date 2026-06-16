@@ -58,6 +58,30 @@ Model(..., curfew=Curfew.business_hours(tz=ZoneInfo("Europe/Stockholm")))
 
 Anything bespoke composes with the plain constructor — `Curfew(windows=..., days=..., tz=..., allowed=...)`.
 
+## At a glance
+
+🟢 may run · 🔴 curfew — one cell per hour, `00 → 23` (local `tz`):
+
+```
+business_hours()            09:00–17:00, weekdays
+  Mon–Fri  🟢🟢🟢🟢🟢🟢🟢🟢🟢🔴🔴🔴🔴🔴🔴🔴🔴🟢🟢🟢🟢🟢🟢🟢
+  Sat–Sun  🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢   (curfew is weekdays-only)
+
+overnight()                 22:00–06:00, every day
+  any day  🔴🔴🔴🔴🔴🔴🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🔴🔴
+
+work_hours(allowed=True)    run ONLY 09:00–17:00  →  allowed=True inverts it
+  any day  🔴🔴🔴🔴🔴🔴🔴🔴🔴🟢🟢🟢🟢🟢🟢🟢🟢🔴🔴🔴🔴🔴🔴🔴
+```
+
+By weekday (`Curfew.weekend()` — blocks all of Sat & Sun):
+
+```
+weekend()   Mon 🟢   Tue 🟢   Wed 🟢   Thu 🟢   Fri 🟢   Sat 🔴   Sun 🔴
+```
+
+A unit landing on a 🔴 cell is simply skipped (left `pending`) and runs on the next invocation after the window passes — see below.
+
 ## What happens when it hits
 
 The curfew is checked twice, and a skipped unit gets **no state transition** — it stays exactly `pending`.

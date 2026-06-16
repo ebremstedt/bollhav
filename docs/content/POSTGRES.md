@@ -23,7 +23,7 @@ PostgresColumn(
 
 # Write Modes
 
-See [MODES.md](MODES.md) for the general concepts. Below describes the Postgres-specific implementation of each mode.
+See [Write modes](MODES.md) for the general concepts. Below describes the Postgres-specific implementation of each mode.
 
 ## APPEND
 
