@@ -17,7 +17,12 @@ services:
   backend:
     build: ./backend
     environment:
-      BOLLHAV_STATE_DSN: postgresql://postgres:postgres@db:5432/postgres
+      # Defaults to the bundled `db` (demo). Override from your shell to read a
+      # real state DB:  BOLLHAV_STATE_DSN=... SEED=0 docker compose up
+      BOLLHAV_STATE_DSN: ${BOLLHAV_STATE_DSN:-postgresql://postgres:postgres@db:5432/postgres}
+      # SEED=1 (default) seeds the demo DAG; SEED=0 leaves the DB untouched
+      # (use when pointing at a real DB — seed.py drops & rebuilds z_bollhav).
+      SEED: ${SEED:-1}
       # local dev: import the in-repo bollhav (mounted below) ahead of the
       # PyPI one baked into the image, so registry changes show up on restart.
       PYTHONPATH: /src
