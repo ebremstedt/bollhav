@@ -65,7 +65,7 @@ nav:
   - Concepts:
       - Model:
           - Overview: MODEL.md
-          - Temporality: KINDS.md
+          - Temporality: TEMPORALITY.md
           - Target: TARGET.md
           - Contract: CONTRACT.md
           - Batch: BATCH.md
@@ -73,7 +73,7 @@ nav:
           - State: STATE.md
           - Upstream: UPSTREAM.md
           - Tagging: TAGGING.md
-          - Modes: MODES.md
+          - Write modes: MODES.md
           - Library: LIBRARY.md
       - Environment: ENV.md
       - Decorators: DECORATORS.md

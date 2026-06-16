@@ -62,7 +62,7 @@ When you call `main()`, the decorator runs the following steps **before** your f
 
 ### Calculating intervals
 
-`@load_models` resolves each model's `[since, until)` window from the run mode + [Contract](CONTRACT.md), then `compute_intervals(run)` splits it by `batching.time.chunk` into `TZInterval` chunks (held on `run.intervals`). See [Chunking](BATCH.md#chunking) and [Modes](MODES.md).
+`@load_models` resolves each model's `[since, until)` window from the run mode + [Contract](CONTRACT.md), then `compute_intervals(run)` splits it by `batching.time.chunk` into `TZInterval` chunks (held on `run.intervals`). See [Chunking](BATCH.md#chunking) and [Write modes](MODES.md).
 
 ### Mental model
 

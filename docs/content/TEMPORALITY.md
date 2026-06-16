@@ -2,7 +2,7 @@
 
 # Temporality
 
-A model's temporality is whether its unit of work has a **time axis**: `TEMPORAL` or `TIMELESS`. The temporality decides its unit of work, how many state rows it has, and how a downstream [contract](UPSTREAM.md) checks it.
+A model's temporality is whether its unit of work has a **time axis**: `TEMPORAL` or `TIMELESS`. The temporality decides its unit of work, how many state rows it has *when state tracking is on*, and how a downstream [contract](UPSTREAM.md) checks it.
 
 `temporality` defaults to `Temporality.TEMPORAL` (the common case). Set it explicitly from the `Temporality` enum when a model is timeless.
 
@@ -16,6 +16,15 @@ from bollhav.model import Temporality
 | `Temporality.TIMELESS` | the whole thing | one |
 
 A **`TEMPORAL`** model has a [`Contract`](CONTRACT.md) time window. With `batching` it splits that window into chunks (one state row per window); without `batching` it loads its whole `[begin, end]` range in one run (one state row spanning the range). A **`TIMELESS`** model has no time axis — no `batching`, and no `begin`/`end`.
+
+## State is optional
+
+**Temporality does not require state** — you never need `state=State(...)` just to set a temporality. They're independent:
+
+- **Without `state`** the model simply runs its unit(s) every time — the window(s) of a temporal model, or the whole thing for a timeless one — recording nothing and resuming nothing. The "state rows" column above is what *would* be recorded if state were on.
+- **With `state=State(...)`** bollhav writes those rows (per window / one-shot), so reruns skip already-`applied` units and you get status, errors, and resumability. See [State](STATE.md).
+
+The one case where `state` becomes **required** is gating: a `Source` that carries an [`UpstreamContract`](UPSTREAM.md) is enforced by the state machine, so a gated upstream without `state` is a construction error. Setting a temporality on its own never forces it.
 
 ## View vs table
 

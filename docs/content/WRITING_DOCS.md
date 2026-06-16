@@ -22,12 +22,12 @@ Home
 │  ├─ Target                  TARGET.md
 │  ├─ Contract                CONTRACT.md
 │  ├─ Batch                   BATCH.md
-│  ├─ Temporality             KINDS.md
+│  ├─ Temporality             TEMPORALITY.md
 │  ├─ State                   STATE.md
 │  ├─ Upstream                UPSTREAM.md
 │  └─ Tagging                 TAGGING.md
 ├─ Decorators                 DECORATORS.md
-├─ Concepts (Modes, Library, Chunking)
+├─ Concepts (Write modes, Library, Chunking)
 ├─ Runtime (Runtime overrides, Progress bar)
 ├─ Tags                       TAGS.md
 ├─ Implementations (Postgres, MSSQL)

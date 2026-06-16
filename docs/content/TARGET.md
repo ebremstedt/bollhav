@@ -61,7 +61,7 @@ Column definitions. Required if `database` is set.
 
 Type: `WriteMode` · Default: `APPEND`
 
-How to write data. See [Write modes](#write-modes) for the full list and trade-offs. (Whether a model is a table or a view is `view=True` on the [Model](KINDS.md), not a Target field.)
+How to write data. See [Write modes](#write-modes) for the full list and trade-offs. (Whether a model is a table or a view is `view=True` on the [Model](TEMPORALITY.md), not a Target field.)
 
 ## dsn_env_var
 
@@ -75,7 +75,7 @@ A derived `@property` — set `partition_on=True` on the column you want to part
 
 ## Write modes
 
-`write_mode` is a property of [Target](TARGET.md) (`WriteMode`, default `APPEND`). A practical guide to picking the right one: `APPEND`, `UPSERT_NO_DELETE`, or `RECREATE_PARTITION`. Views are not a write mode — a view is `view=True` on the [Model](KINDS.md).
+`write_mode` is a property of [Target](TARGET.md) (`WriteMode`, default `APPEND`). A practical guide to picking the right one: `APPEND`, `UPSERT_NO_DELETE`, or `RECREATE_PARTITION`. Views are not a write mode — a view is `view=True` on the [Model](TEMPORALITY.md).
 
 ### Pre-load table flags
 
@@ -294,7 +294,7 @@ Model(
 | `APPEND` *(default)* | bulk-insert / COPY the chunk into staging — no dedup, dupes accumulate | rows are append-only, or you don't care about dupes |
 | `UPSERT_NO_DELETE` | MERGE / `ON CONFLICT DO UPDATE` the chunk into staging on `target.unique_columns` — staging stays deduped as data arrives | source has duplicate keys (CDC streams, retried events) and you want them collapsed before the final apply |
 
-`RECREATE_PARTITION` and `VIEW` are rejected on the staging side — staging is per-interval scratch space, not a long-lived partitioned table.
+`RECREATE_PARTITION` is rejected on the staging side — staging is per-interval scratch space, not a long-lived partitioned table. (Views aren't written at all — a view is `view=True` on the [Model](TEMPORALITY.md), created by the lifecycle, with no write mode.)
 
 ### `target.write_mode` — how staging lands *in* target
 

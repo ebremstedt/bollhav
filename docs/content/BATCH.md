@@ -119,14 +119,14 @@ The **interval is the unit of recovery** — state tracks `(since, until)`, and 
 
 ### Chunk — slicing time
 
-`batching=Batch(time=TimeChunking(chunk="@daily"))` produces one window per day across the model's run range (see [Contract](CONTRACT.md) for backfill, or latest mode). The framework loops these windows; each is one [unit of work](KINDS.md) for an `interval`-kind model.
+`batching=Batch(time=TimeChunking(chunk="@daily"))` produces one window per day across the model's run range (see [Contract](CONTRACT.md) for backfill, or latest mode). The framework loops these windows; each is one [unit of work](TEMPORALITY.md) for a batched [temporal](TEMPORALITY.md) model.
 
 ```python
 batching=Batch(time=TimeChunking(chunk="@hourly"))
 # contract 2024-01-01..2024-01-03 → 48 hourly windows
 ```
 
-A model with no batching has a single unit (`run.intervals == (None,)`) — that's a `MONOLITHIC` or `VIEW` [kind](KINDS.md), not an interval one.
+A model with no batching has a single unit (`run.intervals == (None,)`) — that's a [`TIMELESS`](TEMPORALITY.md) model (or an unbatched `TEMPORAL` one), not a windowed model.
 
 ### Size — slicing rows
 

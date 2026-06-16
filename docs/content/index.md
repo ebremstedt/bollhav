@@ -17,7 +17,8 @@ hide:
 A model definition framework for ingesting and transforming data.
 
 Bollhav does not tell you *how to transform:* <br>
-It gives you the scaffolding around the transform ✨**and then gets out of the way.**✨
+It gives you the scaffolding around the transform <br>
+✨**and then gets out of the way.**✨
 
 ## Explore the features
 

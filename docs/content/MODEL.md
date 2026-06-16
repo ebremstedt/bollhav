@@ -6,7 +6,7 @@ A `Model` is a pure data object describing what data looks like and where it goe
 
 The `Model` itself is the top-level container. Its sub-objects each have their own page:
 
-- [Temporality](KINDS.md) — the model's time axis (`TEMPORAL` / `TIMELESS`), plus the `view=True` flag
+- [Temporality](TEMPORALITY.md) — the model's time axis (`TEMPORAL` / `TIMELESS`), plus the `view=True` flag
 - [Target](TARGET.md) — where data lands (table, schema, columns, write mode)
 - [Staging](TARGET.md#staging) — optional staging table on Target
 - [Contract](CONTRACT.md) — historical envelope for backfill mode
