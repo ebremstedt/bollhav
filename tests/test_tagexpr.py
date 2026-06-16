@@ -419,3 +419,63 @@ class TestExplainGroups:
     def test_pair_negate_group(self):
         pairs = explain_groups("not:[foo]")
         assert pairs == [("not:[foo]", "not foo")]
+
+
+# --- exhaustive: every expression vs EVERY combination (subset) of tags ---
+
+
+import itertools
+
+
+def _powerset(items):
+    """All subsets of `items`, as sets — every possible model tag combination."""
+    return [
+        set(combo)
+        for r in range(len(items) + 1)
+        for combo in itertools.combinations(items, r)
+    ]
+
+
+# A small tag universe; the test checks all 2**N subsets of it.
+_UNIVERSE = ["a", "b", "c"]
+
+# (expression, reference predicate over a model's tag set). The reference is
+# plain Python that encodes bollhav's documented semantics: `&` = AND within a
+# group, `|` = OR within a tag's candidates, `not:` negates a tag, a `not:`
+# prefix negates a whole group, and multiple `[..]` groups OR at the top level.
+_CASES = [
+    ("[a]", lambda t: "a" in t),
+    ("[a & b]", lambda t: "a" in t and "b" in t),
+    ("[a & b & c]", lambda t: {"a", "b", "c"} <= t),
+    ("[a|b]", lambda t: "a" in t or "b" in t),
+    ("[(a|b) & c]", lambda t: ("a" in t or "b" in t) and "c" in t),
+    # mixed &/| without parens — `&` splits first, so `b | c` is one candidate
+    ("[a & b | c]", lambda t: "a" in t and ("b" in t or "c" in t)),
+    ("[a|b & c]", lambda t: ("a" in t or "b" in t) and "c" in t),
+    ("[not:a]", lambda t: "a" not in t),
+    ("[a & not:b]", lambda t: "a" in t and "b" not in t),
+    ("[not:a & not:b]", lambda t: "a" not in t and "b" not in t),
+    ("not:[a & b]", lambda t: not ("a" in t and "b" in t)),
+    # top-level OR of groups
+    ("[a][b]", lambda t: "a" in t or "b" in t),
+    ("[a][b][c]", lambda t: bool(t & {"a", "b", "c"})),
+    ("[a & b][c]", lambda t: ("a" in t and "b" in t) or "c" in t),
+    ("[a]not:[b]", lambda t: "a" in t or "b" not in t),
+    # reload prefix must not change WHICH tags match, only the reload flag
+    ("[r:a & b]", lambda t: "a" in t and "b" in t),
+]
+
+
+@pytest.mark.parametrize("expr,ref", _CASES)
+def test_tags_match_over_every_combination(expr, ref):
+    parsed = parse_expression(expr)
+    for tags in _powerset(_UNIVERSE):
+        got = tags_match(tags, parsed)
+        assert got is ref(tags), (
+            f"{expr!r} on tags={sorted(tags)}: got {got}, expected {ref(tags)}"
+        )
+
+
+def test_universe_is_fully_exercised():
+    # sanity: we really do test all 2**N combinations (not an empty/partial set)
+    assert len(_powerset(_UNIVERSE)) == 2 ** len(_UNIVERSE) == 8

@@ -8,6 +8,7 @@
     MATERIALIZATION_COLOR,
     SRC_COLOR,
   } from "../lib/constants.js";
+  import { nameSegments } from "../lib/graph.js";
 
   let { data } = $props();
 
@@ -23,6 +24,12 @@
       : data.name,
   );
 
+  let segs = $derived(
+    data.matchTokens && data.matchTokens.length
+      ? nameSegments(data.name, data.matchTokens, view.nameStyle === "thicken")
+      : null,
+  );
+
   // readable text colour (dark/white) for a solid label background — keeps the
   // light-green and yellow labels legible.
   function textOn(hex) {
@@ -35,9 +42,8 @@
   }
 
   let isModel = $derived(data.nodeType === "model");
-  // Detail level (the "christmas tree"): lappland = bare; katrineholm = pills +
-  // status lights; stockholm = + the runs/errors buttons (and edge labels, gated
-  // in graph.js).
+  // Detail level: lappland = bare (names only); stockholm = everything (pills +
+  // status lights + runs/errors buttons, and the edge labels gated in graph.js).
   let showPills = $derived(view.detail !== "lappland");
   let showDots = $derived(view.detail !== "lappland");
   let showActions = $derived(view.detail === "stockholm");
@@ -142,7 +148,9 @@
     {/if}
   </div>
   {/if}
-  <div class="name">{displayName}</div>
+  <div class="name">
+    {#if segs}{#each segs as s}<span class:hit={s.hit}>{s.text}</span>{/each}{:else}{displayName}{/if}
+  </div>
   {#if isModel && showActions}
     <div class="actions">
       <button class="mini runs" onclick={(e) => show("state", e)}>runs</button>
@@ -287,6 +295,11 @@
     margin-bottom: 5px;
     white-space: pre-line;
     line-height: 1.25;
+  }
+  /* the part of a matched model's name that matched the tag query — green,
+     legible on both dark and light backgrounds */
+  .name .hit {
+    color: #16a34a;
   }
   .actions {
     display: flex;

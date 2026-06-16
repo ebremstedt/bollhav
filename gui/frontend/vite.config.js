@@ -20,6 +20,7 @@ export default defineConfig({
       "/state": API,
       "/models": API,
       "/model": API,
+      "/match": API,
       "/downstreams": API,
       "/errors": API,
     },

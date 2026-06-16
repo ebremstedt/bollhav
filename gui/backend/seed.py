@@ -31,6 +31,7 @@ from bollhav.model import (
     SourceFile,
     SourceModel,
     State,
+    Tags,
     Target,
     TimeChunking,
     UpstreamContract,
@@ -368,10 +369,20 @@ def _build(full_name, kind, upstream_specs, source_specs):
     # A view is never batched (it's one CREATE VIEW, not materialised per
     # window); only a temporal TABLE gets batching.
     batched = kind is Temporality.TEMPORAL and not view
+    # Tags are AUTO-DERIVED from the model's name / schema / catalog via bollhav's
+    # Tags.assemble — including splitting PascalCase names into words
+    # (CustomerInteractionEngagementEventFact -> customer, interaction, …, fact).
+    # That's the real tagging mechanism; no hand-assigned tags here.
+    tagging = Tags(
+        unpascal_name_for_tags=True,
+        unpascal_schema_for_tags=True,
+        unpascal_catalog_for_tags=True,
+    )
     return Model(
         target=target,
         temporality=kind,
         view=view,
+        tagging=tagging,
         batching=Batch(time=TimeChunking(chunk="@daily")) if batched else None,
         state=State(),
         upstream=upstream,

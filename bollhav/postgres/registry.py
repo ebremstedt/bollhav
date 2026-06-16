@@ -320,6 +320,7 @@ def get_graph(conn: "psycopg.Connection") -> dict:
             # the edge list.
             "upstream": list(upstream),
             "sources": sources or [],
+            "tags": (metadata or {}).get("tags", []) or [],
             "last_seen": last_seen.isoformat() if last_seen is not None else None,
             # current (unresolved) failure: a state row still in 'error'.
             # A successful rerun flips that row to 'applied', clearing this.
@@ -351,6 +352,54 @@ def get_graph(conn: "psycopg.Connection") -> dict:
                 {"from": name, "to": full_name, "relation": "source", "kind": src_kind}
             )
     return {"nodes": list(nodes.values()), "edges": edges}
+
+
+def match_tags(conn: "psycopg.Connection", expression: str) -> list[dict]:
+    """Registered models whose tags satisfy a bollhav tag `expression` — the same
+    `[group] & | not:` syntax used to select models for a run (see
+    `bollhav.model.tagexpr`), reusing that parser so the GUI filter and the run
+    selector behave identically. Raises `ValueError` on a malformed expression.
+
+    Returns `[{"name", "tags"}]` where `tags` is the model's OWN tags that the
+    expression positively referenced (the intersection of its real, server-
+    derived tag set with the positive candidates in the expression) — so the GUI
+    can highlight exactly the matching tags without re-deriving anything client-
+    side. Negated (`not:`) tags are excluded (they assert absence)."""
+    from bollhav.model.tagexpr import parse_expression, tags_match
+
+    # Accept a bare tag ("clean") or a simple un-bracketed expression
+    # ("(raw|clean)&orbit") as well as the full `[group]` syntax — wrap it in
+    # one group when the caller didn't bracket anything.
+    raw = expression.strip()
+    if "[" not in raw:
+        raw = f"[{raw}]"
+    # Case-INSENSITIVE for the GUI: lowercase the expression and every model's
+    # tags before matching, so `[Lakehouse]` matches the `lakehouse` tag (auto-
+    # derived tags are lowercased, but the names users read are PascalCase).
+    parsed = parse_expression(raw.lower())  # ValueError on bad syntax
+    # the positive tag candidates the expression references (for highlighting)
+    positive: set[str] = set()
+    for group in parsed:
+        if group.negate:
+            continue
+        for tm in group.tags:
+            if not tm.negate:
+                positive.update(c.strip() for c in tm.candidates)
+
+    if not _table_exists(conn, LIBRARY_SCHEMA, LIBRARY_TABLE):
+        return []
+    rows = conn.execute(
+        sql.SQL("SELECT full_name, metadata FROM {schema}.{table}").format(
+            schema=sql.Identifier(LIBRARY_SCHEMA),
+            table=sql.Identifier(LIBRARY_TABLE),
+        )
+    ).fetchall()
+    out: list[dict] = []
+    for full_name, metadata in rows:
+        tags = {str(t).lower() for t in ((metadata or {}).get("tags", []) or [])}
+        if tags_match(tags, parsed):
+            out.append({"name": full_name, "tags": sorted(tags & positive)})
+    return out
 
 
 def get_model_metadata(conn: "psycopg.Connection", full_name: str) -> dict | None:

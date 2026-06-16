@@ -2,17 +2,21 @@
   import {
     view,
     applyFilter,
+    applyTagFilter,
     clearFocus,
     refresh,
-    setNameStyle,
     setDetail,
+    setHideUpstreams,
   } from "../lib/view.svelte.js";
 
-  // detail-level radio (the "christmas tree"): more decoration the further right.
+  // detail-level radio: a bare tree (names only) vs a decorated one (everything).
   const DETAILS = [
-    ["lappland", "names only — bare boxes + arrows"],
-    ["katrineholm", "+ pills (model/table/view, source kind) + status lights"],
-    ["stockholm", "everything — + runs/errors buttons + contract labels"],
+    ["lappland", "🌲", "bare — just boxes, names, and arrows"],
+    [
+      "stockholm",
+      "🎄",
+      "everything — pills, status lights, runs/errors buttons, and contract labels",
+    ],
   ];
 
   let { dark = $bindable() } = $props();
@@ -25,6 +29,12 @@
           .sort()
       : [],
   );
+
+  let allTags = $derived(
+    view.full
+      ? [...new Set(view.full.nodes.flatMap((n) => n.tags || []))].sort()
+      : [],
+  );
 </script>
 
 <header>
@@ -34,13 +44,12 @@
       data-tip="Detail level (the christmas tree) — how much decoration to show on the graph."
     >
       <span class="seg">
-        <span class="tree" aria-hidden="true">🎄</span>
-        {#each DETAILS as [val, tip]}
+        {#each DETAILS as [val, emoji, tip]}
           <button
             class="seg-btn"
             class:active={view.detail === val}
             data-tip={tip}
-            onclick={() => setDetail(val)}>{val}</button
+            onclick={() => setDetail(val)}>{emoji} {val}</button
           >
         {/each}
       </span>
@@ -53,7 +62,7 @@
     <input
       class="search"
       list="model-list"
-      placeholder="focus a model + its upstreams…"
+      placeholder="find a model by name…"
       value={view.query}
       oninput={(e) => {
         view.query = e.currentTarget.value;
@@ -65,9 +74,32 @@
         <option value={m}></option>
       {/each}
     </datalist>
-    {#if view.focused}
-      <button class="clear" onclick={clearFocus}>✕ show all</button>
-    {/if}
+    <input
+      class="search tagsearch"
+      list="tag-list"
+      placeholder="tag or tagexpression — clean  ·  [(raw|clean)&amp;orbit]"
+      value={view.tagExpr}
+      oninput={(e) => (view.tagExpr = e.currentTarget.value)}
+      onkeydown={(e) => e.key === "Enter" && applyTagFilter()}
+    />
+    <datalist id="tag-list">
+      {#each allTags as t}
+        <option value={t}></option>
+      {/each}
+    </datalist>
+    <button class="toggle" onclick={applyTagFilter}>filter</button>
+    <button class="clear" onclick={clearFocus}>✕ clear all</button>
+    <span
+      class="tip-wrap"
+      data-tip="When focusing a model or tag-filtering, include the upstream chain or show only the matched models."
+    >
+      <button
+        class="toggle"
+        onclick={() => setHideUpstreams(!view.hideUpstreams)}
+      >
+        {view.hideUpstreams ? "⬆ upstreams: off" : "⬆ upstreams: on"}
+      </button>
+    </span>
     <span
       class="tip-wrap"
       data-tip="Reload the graph. Limited to once every 5 seconds."
@@ -80,18 +112,6 @@
             ? ` (${view.cooldown})`
             : ""}
         {/if}
-      </button>
-    </span>
-    <span
-      class="tip-wrap"
-      data-tip="How model & source names are shown: Lengthen (one line) or Thicken (one dotted segment per line)."
-    >
-      <button
-        class="toggle"
-        onclick={() =>
-          setNameStyle(view.nameStyle === "thicken" ? "lengthen" : "thicken")}
-      >
-        {view.nameStyle === "thicken" ? "⤢ Lengthen" : "≣ Thicken"}
       </button>
     </span>
     <button class="toggle" onclick={() => (dark = !dark)}>
@@ -221,6 +241,14 @@
     width: 230px;
   }
   .search::placeholder {
+    color: var(--placeholder);
+  }
+  .tagsearch {
+    width: 200px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    color: #16a34a;
+  }
+  .tagsearch::placeholder {
     color: var(--placeholder);
   }
   .clear {

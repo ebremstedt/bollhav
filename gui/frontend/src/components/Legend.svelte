@@ -1,5 +1,7 @@
 <script>
   import { LEGEND_KINDS, LEGEND_SOURCES } from "../lib/constants.js";
+
+  let showHelp = $state(false);
 </script>
 
 <footer class="legend">
@@ -63,13 +65,55 @@
     <span class="sw dot stale"></span>stale
   </span>
 
-  <span class="legend-hint">hover any item for an explanation</span>
+  <span class="help-wrap">
+    <button
+      class="help-btn"
+      onclick={() => (showHelp = !showHelp)}
+      aria-expanded={showHelp}>🏷 tag syntax</button
+    >
+    {#if showHelp}
+      <div class="help-pop">
+        <div class="help-head">
+          <strong>Filter by tag / tag expression</strong>
+          <button class="help-x" onclick={() => (showHelp = false)}>✕</button>
+        </div>
+        <p>
+          Type a tag or an expression; matching models stay (with their
+          upstreams) and the matched part of each name turns green.
+        </p>
+        <ul>
+          <li><code>clean</code> — has tag <code>clean</code> (bare = <code>[clean]</code>)</li>
+          <li><code>[a &amp; b]</code> — a <em>and</em> b</li>
+          <li><code>[a | b]</code> — a <em>or</em> b</li>
+          <li><code>[a][b]</code> — a <em>or</em> b (separate groups)</li>
+          <li><code>[not:a]</code> — <em>exclude</em> a</li>
+          <li><code>[(a|b) &amp; c]</code> — parentheses to group</li>
+        </ul>
+        <div class="help-eg">Examples</div>
+        <ul>
+          <li>
+            <code>[(customer|order) &amp; fact]</code><br />customer or order facts
+          </li>
+          <li><code>[clean &amp; not:fact]</code><br />clean, but not facts</li>
+          <li><code>[view][dimension]</code><br />views or dimensions</li>
+          <li>
+            <code>[consumption &amp; not:view]</code><br />consume layer, excluding views
+          </li>
+        </ul>
+        <p class="help-foot">
+          Case-insensitive. Tags are auto-derived from each model's
+          catalog / schema / name (plus any explicit ones).
+        </p>
+      </div>
+    {/if}
+  </span>
 </footer>
 
 <style>
   .legend {
     display: flex;
     align-items: center;
+    justify-content: center;
     gap: 14px;
     flex-wrap: wrap;
     padding: 8px 14px;
@@ -166,9 +210,89 @@
     height: 16px;
     background: var(--sep);
   }
-  .legend-hint {
-    margin-left: auto;
-    color: var(--legend-hint);
-    font-style: italic;
+  .help-wrap {
+    position: relative;
+    display: inline-flex;
+  }
+  .help-btn {
+    font-size: 12px;
+    padding: 3px 9px;
+    border-radius: 6px;
+    border: 1px solid var(--control-border);
+    background: var(--control-bg);
+    color: var(--control-fg);
+    cursor: pointer;
+  }
+  .help-pop {
+    position: absolute;
+    bottom: calc(100% + 8px);
+    right: 0;
+    width: 300px;
+    background: #222;
+    color: #fff;
+    border-radius: 8px;
+    padding: 11px 13px;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
+    z-index: 60;
+    font-style: normal;
+    line-height: 1.4;
+  }
+  .help-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 6px;
+  }
+  .help-x {
+    border: none;
+    background: transparent;
+    color: #aaa;
+    cursor: pointer;
+    font-size: 13px;
+    line-height: 1;
+  }
+  .help-x:hover {
+    color: #fff;
+  }
+  .help-pop p {
+    margin: 6px 0;
+    color: #d6d9de;
+  }
+  .help-pop ul {
+    margin: 6px 0;
+    padding-left: 4px;
+    list-style: none;
+  }
+  .help-pop li {
+    padding: 2px 0;
+  }
+  .help-eg {
+    margin-top: 8px;
+    border-top: 1px solid #3a3a3a;
+    padding-top: 6px;
+    font-weight: 700;
+  }
+  .help-eg + ul li {
+    padding: 4px 0;
+    color: #d6d9de;
+  }
+  .help-pop em {
+    color: #fff;
+    font-style: normal;
+    font-weight: 600;
+  }
+  .help-pop code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 11px;
+    background: #15803d;
+    color: #fff;
+    padding: 1px 5px;
+    border-radius: 4px;
+  }
+  .help-foot {
+    border-top: 1px solid #3a3a3a;
+    padding-top: 6px;
+    font-size: 11px;
   }
 </style>
