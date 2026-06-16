@@ -1,4 +1,4 @@
-[← home](index.md)
+[Home](index.md) › **MSSQL**
 
 # MssqlColumn
 
@@ -28,6 +28,7 @@ MssqlColumn(
 | `DATE`             | `DATE`             |                                    |
 | `DATETIME`         | `DATETIME`         |                                    |
 | `DATETIME2`        | `DATETIME2(n)`     | Optional `scale` (0–7)             |
+| `DATETIMEOFFSET`   | `DATETIMEOFFSET`   | Timezone-aware datetime            |
 | `DECIMAL`          | `DECIMAL(p, s)`    | Requires `precision` and `scale`   |
 | `FLOAT`            | `FLOAT`            |                                    |
 | `INT`              | `INT`              |                                    |
@@ -71,7 +72,7 @@ from bollhav.mssql import ensure_schema, ensure_table, ensure_primary_key, ensur
 
 # Write Modes
 
-See [MODES.md](MODES.md) for general concepts. Below describes the MSSQL-specific implementation.
+See [Write modes](MODES.md) for general concepts. Below describes the MSSQL-specific implementation.
 
 ## APPEND
 
@@ -96,7 +97,7 @@ Set on `Target`. Executed once inside `ensure_table` **before** the chunked writ
 target = Target(..., write_mode=WriteMode.APPEND, truncate_table=True)
 ```
 
-Both `False` by default; both `True` raises. Not valid with `WriteMode.VIEW`.
+Both `False` by default; both `True` raises. Does not apply to a view (views are not a write mode).
 
 ## UPSERT_NO_DELETE
 
@@ -113,15 +114,15 @@ MssqlColumn(name="id", data_type=MssqlType.INT, unique=True, nullable=False)
 
 If all columns are part of the unique key (no non-key columns), the `WHEN MATCHED` clause is omitted (insert-only merge).
 
-## VIEW
+## Views
 
-Runs `CREATE OR ALTER VIEW`. Requires `model.source.query` to be set. No dataframe is consumed.
+A view is `view=True` on the model, not a write mode. Runs `CREATE OR ALTER VIEW`. Requires a `Source` in `upstream` whose `SourceModel.query` is set (the view's definition). No dataframe is consumed.
 
 ```python
-from bollhav.model import WriteMode
+from bollhav.model import Temporality, Source, SourceModel
 
-target = Target(..., write_mode=WriteMode.VIEW)
-source = SourceTable(..., query="SELECT id, name FROM dbo.raw_table")
+target = Target(..., )
+upstream = [Source("raw_table", type=SourceModel(query="SELECT id, name FROM dbo.raw_table"))]
 write(conn=conn, model=model)   # no df_gen
 ```
 

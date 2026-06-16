@@ -3,16 +3,20 @@ import psycopg
 from psycopg import sql
 import polars as pl
 from typing import cast, LiteralString
-from datetime import datetime, timedelta
+from datetime import datetime
 from bollhav.model.model import Model
+from bollhav.postgres.columns import PostgresColumn
 from bollhav.postgres.schema import ensure_schema
 
 logger = logging.getLogger(__name__)
 
 
-def _assert_utc(dt: datetime, name: str) -> None:
-    if dt.tzinfo is None or dt.utcoffset() != timedelta(0):
-        raise ValueError(f"{name} must be UTC, got {dt!r}")
+def _assert_aware(dt: datetime, name: str) -> None:
+    # A timezone-aware datetime is an unambiguous instant, and Postgres compares
+    # `timestamptz` by instant — so any zone is allowed, not just UTC. Only a
+    # naive datetime is rejected: its instant depends on the session timezone.
+    if dt.tzinfo is None:
+        raise ValueError(f"{name} must be timezone-aware, got naive {dt!r}")
 
 
 def append(
@@ -22,7 +26,7 @@ def append(
 ) -> None:
     col_names = sql.SQL(", ").join(sql.Identifier(c) for c in df.columns)
     query = sql.SQL("COPY {schema}.{table} ({cols}) FROM STDIN").format(
-        schema=sql.Identifier(model.target.schema.resolved),
+        schema=sql.Identifier(model.target.schema_resolved),
         table=sql.Identifier(model.target.name),
         cols=col_names,
     )
@@ -40,22 +44,28 @@ def recreate_partition(
     since: datetime,
     until: datetime,
 ) -> None:
-    _assert_utc(since, "since")
-    _assert_utc(until, "until")
+    _assert_aware(since, "since")
+    _assert_aware(until, "until")
+    partition_col = model.target.partitioned_by
+    if partition_col is None:
+        raise ValueError(
+            f"recreate_partition requires model.target to have a column with "
+            f"partition_on=True (got none on {model.target.full_name!r})"
+        )
     with conn.transaction():
         conn.execute(
             sql.SQL(
                 "DELETE FROM {schema}.{table} WHERE {col} >= %s AND {col} < %s"
             ).format(
-                schema=sql.Identifier(model.target.schema.resolved),
+                schema=sql.Identifier(model.target.schema_resolved),
                 table=sql.Identifier(model.target.name),
-                col=sql.Identifier(model.target.partitioned_by),
+                col=sql.Identifier(partition_col),
             ),
             [since, until],
         )
         col_names = sql.SQL(", ").join(sql.Identifier(c) for c in df.columns)
         copy_query = sql.SQL("COPY {schema}.{table} ({cols}) FROM STDIN").format(
-            schema=sql.Identifier(model.target.schema.resolved),
+            schema=sql.Identifier(model.target.schema_resolved),
             table=sql.Identifier(model.target.name),
             cols=col_names,
         )
@@ -77,12 +87,14 @@ def upsert_no_delete(conn: psycopg.Connection, model: Model, df: pl.DataFrame) -
         for col in model.target.columns
         if col.name not in unique_columns
     )
+
+    pg_cols = [c for c in model.target.columns if isinstance(c, PostgresColumn)]
     col_defs = sql.SQL(", ").join(
         sql.SQL("{name} {type}").format(
             name=sql.Identifier(col.name),
             type=sql.SQL(col.data_type.value),
         )
-        for col in model.target.columns
+        for col in pg_cols
     )
 
     with conn.transaction():
@@ -112,7 +124,7 @@ def upsert_no_delete(conn: psycopg.Connection, model: Model, df: pl.DataFrame) -
                 "SELECT {cols} FROM {temp} t "
                 "ON CONFLICT ({pk_cols}) DO UPDATE SET {update_set}"
             ).format(
-                schema=sql.Identifier(model.target.schema.resolved),
+                schema=sql.Identifier(model.target.schema_resolved),
                 table=sql.Identifier(model.target.name),
                 cols=col_names,
                 temp=sql.Identifier(temp_table),
@@ -126,17 +138,30 @@ def create_replace_view(
     conn: psycopg.Connection,
     model: Model,
 ) -> None:
-    if model.source.query is None:
+    from bollhav.model.source import SourceModel
+
+    src = next(
+        (
+            s
+            for s in model.upstream
+            if isinstance(s.type, SourceModel) and s.type.query is not None
+        ),
+        None,
+    )
+    source = src.type if src is not None else None
+    if not isinstance(source, SourceModel) or source.query is None:
         raise ValueError(
-            f"model.source.query must be set for {model.target.write_mode.value}"
+            f"create_replace_view requires a Source with a SourceModel type "
+            f"whose .query is set, in upstream=[...] on "
+            f"{model.target.full_name!r}"
         )
 
     with conn.transaction():
-        ensure_schema(conn, model.target.schema.resolved)
+        ensure_schema(conn, model.target.schema_resolved)
         conn.execute(
             sql.SQL("CREATE OR REPLACE VIEW {schema}.{view} AS {query}").format(
-                schema=sql.Identifier(model.target.schema.resolved),
+                schema=sql.Identifier(model.target.schema_resolved),
                 view=sql.Identifier(model.target.name),
-                query=sql.SQL(cast(LiteralString, model.source.query)),
+                query=sql.SQL(cast(LiteralString, source.query)),
             )
         )

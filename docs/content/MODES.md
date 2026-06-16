@@ -1,4 +1,4 @@
-[← home](index.md)
+[Home](index.md) › **Write modes**
 
 # Write modes
 
@@ -28,12 +28,12 @@ flowchart LR
 
 ## Pre-load flags: `recreate_table` and `truncate_table`
 
-Two booleans on `Target` that compose with any non-VIEW write mode. They run **once** in `ensure_table`, before the chunked write loop — so they're safe to combine with row-chunked or interval-chunked batching without clobbering earlier chunks.
+Two booleans on `Target` that compose with any write mode. They run **once** in `ensure_table`, before the chunked write loop — so they're safe to combine with row-chunked or interval-chunked batching without clobbering earlier chunks.
 
 - `recreate_table=True` → `DROP TABLE IF EXISTS` then `CREATE TABLE`. Resets schema. Use when column definitions have changed.
 - `truncate_table=True` → `CREATE TABLE IF NOT EXISTS` then `TRUNCATE TABLE`. Wipes rows, keeps schema. Use when you want a full reload but the schema is stable.
 
-Both default to `False`. Setting both is an error. Neither is valid with `WriteMode.VIEW`.
+Both default to `False`. Setting both is an error. Neither applies to a view (views are not a write mode).
 
 ```mermaid
 flowchart LR
@@ -143,9 +143,9 @@ flowchart LR
     style G fill:#2C3E50,stroke:#1a252f,color:#fff
 ```
 
-## VIEW
+## Views
 
-Does not write data. Creates or replaces a view definition in place.
+A view is **not** a write mode — it's `view=True` on the model (timeless, or temporal with a `Contract` range it covers). It writes no data; the lifecycle runs `CREATE OR REPLACE VIEW` from the defining `SourceModel(query=…)` in `upstream`.
 
 ```mermaid
 flowchart LR
@@ -173,7 +173,8 @@ flowchart LR
 | `UPSERT_NO_DELETE` | ✅ | ✅ | ❌ | Safe upsert |
 | `RECREATE_PARTITION` | ✅ | ✅ | ✅ | Deletes matches first |
 | `MERGE` | ✅ | ✅ | ✅ | Requires Postgres 15+ |
-| `VIEW` | ❌ | ❌ | ❌ | Updates view definition only |
+
+A **view** is not a write mode — see [Views](#views); set `view=True` instead.
 
 ### Pre-load flags (on `Target`)
 

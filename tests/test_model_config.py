@@ -1,11 +1,10 @@
 from datetime import datetime, timezone
 from unittest.mock import MagicMock
 import pytest
-from bollhav.model.model_type import ModelType
+from bollhav.model.temporality import Temporality
 from bollhav.model.model import Model
-from bollhav.model.target_schema import TargetSchema
 from bollhav.model.target import Target
-from bollhav.model.bounds import Bounds
+from bollhav.model.contract import Contract
 from bollhav.model.tags import Tags
 from bollhav.model.write_modes import WriteMode
 
@@ -34,31 +33,36 @@ def make_db() -> MagicMock:
 
 
 def make_model(**overrides) -> Model:
+    # These config/tag tests build whole-table models with no batching, so
+    # default kind=MONOLITHIC (a kind is now required on every Model).
+    overrides.setdefault("kind", Temporality.TIMELESS)
     return Model(
         target=overrides.pop("target", Target(name="test_table")),
-        source=overrides.pop("source", None),
         **overrides,
     )
 
 
 # --- Target validation ---
+#
+# The old `ModelType.VIEW <-> WriteMode.VIEW` coupling tests were removed:
+# `WriteMode.VIEW` no longer exists, and `ModelType` is gone entirely. A view
+# is now identified solely by `Model(temporality=Temporality.TIMELESS, view=True)`; the Target no longer
+# carries a model_type, so there is no write-mode/model-type pairing to
+# validate.
 
 
-def test_view_model_type_requires_view_write_mode():
-    with pytest.raises(ValueError, match="ModelType.VIEW must use WriteMode.VIEW"):
-        Target(
-            name="test_table", model_type=ModelType.VIEW, write_mode=WriteMode.APPEND
-        )
-
-
-def test_table_model_type_cannot_use_view_write_mode():
-    with pytest.raises(ValueError, match="ModelType.TABLE cannot use WriteMode.VIEW"):
-        Target(name="test_table", model_type=ModelType.TABLE, write_mode=WriteMode.VIEW)
+def test_view_kind_has_no_write_mode_coupling():
+    # A VIEW with the default (APPEND) write mode on its target is accepted —
+    # the write mode is simply irrelevant for a view, so no error is raised.
+    m = make_model(
+        target=Target(name="test_table"), temporality=Temporality.TIMELESS, view=True
+    )
+    assert m.is_view is True
 
 
 def test_database_without_columns_raises():
     with pytest.raises(ValueError, match="columns must be set"):
-        Target(name="test_table", database=make_db())
+        Target(name="test_table", catalog="cat", database=make_db())
 
 
 def test_columns_without_database_raises():
@@ -72,6 +76,7 @@ def test_multiple_partition_columns_raises():
     ):
         Target(
             name="test_table",
+            catalog="cat",
             database=make_db(),
             columns=[
                 make_column("id", partition_on=True),
@@ -84,6 +89,7 @@ def test_upsert_no_delete_without_unique_or_pk_raises():
     with pytest.raises(ValueError, match="primary_key=True or unique=True"):
         Target(
             name="test_table",
+            catalog="cat",
             database=make_db(),
             columns=[make_column("id"), make_column("ts")],
             write_mode=WriteMode.UPSERT_NO_DELETE,
@@ -93,6 +99,7 @@ def test_upsert_no_delete_without_unique_or_pk_raises():
 def test_upsert_no_delete_with_primary_key_only_is_ok():
     t = Target(
         name="test_table",
+        catalog="cat",
         database=make_db(),
         columns=[make_column("id", primary_key=True), make_column("ts")],
         write_mode=WriteMode.UPSERT_NO_DELETE,
@@ -104,6 +111,7 @@ def test_upsert_no_delete_with_primary_key_only_is_ok():
 def test_merge_key_columns_prefers_primary_key_over_unique():
     t = Target(
         name="test_table",
+        catalog="cat",
         database=make_db(),
         columns=[
             make_column("id", primary_key=True),
@@ -117,6 +125,7 @@ def test_merge_key_columns_prefers_primary_key_over_unique():
 def test_merge_key_columns_falls_back_to_unique():
     t = Target(
         name="test_table",
+        catalog="cat",
         database=make_db(),
         columns=[make_column("id", unique=True), make_column("v")],
         write_mode=WriteMode.UPSERT_NO_DELETE,
@@ -124,13 +133,13 @@ def test_merge_key_columns_falls_back_to_unique():
     assert [c.name for c in t.merge_key_columns] == ["id"]
 
 
-# --- Bounds ---
+# --- Contract ---
 
 
 def test_bounds_stores_begin_end():
     begin = datetime(2024, 1, 1, tzinfo=UTC)
     end = datetime(2024, 12, 31, tzinfo=UTC)
-    b = Bounds(begin=begin, end=end)
+    b = Contract(begin=begin, end=end)
     assert b.begin == begin
     assert b.end == end
 
@@ -140,12 +149,11 @@ def test_bounds_stores_begin_end():
 
 def test_defaults():
     m = make_model()
-    assert m.source is None
+    assert m.source_names == []
     assert m.target.name == "test_table"
-    assert m.target.schema.resolved == ""
+    assert m.target.schema_resolved == ""
     assert m.target.database is None
     assert m.target.columns == []
-    assert m.target.model_type == ModelType.TABLE
     assert m.target.write_mode == WriteMode.APPEND
     assert m.enabled is True
     assert m.debug is False
@@ -164,9 +172,7 @@ def test_name_added_to_tags_by_default():
 
 
 def test_schema_added_to_tags_by_default():
-    m = make_model(
-        target=Target(name="test_table", schema=TargetSchema(name="my_schema"))
-    )
+    m = make_model(target=Target(name="test_table", schema="my_schema"))
     assert "my_schema" in m.tags
 
 
@@ -182,7 +188,7 @@ def test_name_not_added_to_tags_when_disabled():
 
 def test_schema_not_added_to_tags_when_disabled():
     m = make_model(
-        target=Target(name="test_table", schema=TargetSchema(name="my_schema")),
+        target=Target(name="test_table", schema="my_schema"),
         tagging=Tags(schema_add_to_tags=False),
     )
     assert "my_schema" not in m.tags
@@ -201,9 +207,7 @@ def test_unsnake_name_splits_on_underscore():
 
 
 def test_unsnake_schema_splits_on_underscore():
-    m = make_model(
-        target=Target(name="test_table", schema=TargetSchema(name="my_schema"))
-    )
+    m = make_model(target=Target(name="test_table", schema="my_schema"))
     assert "my" in m.tags
     assert "schema" in m.tags
 
@@ -218,7 +222,7 @@ def test_unsnake_name_disabled():
 
 def test_unsnake_schema_disabled():
     m = make_model(
-        target=Target(name="test_table", schema=TargetSchema(name="my_schema")),
+        target=Target(name="test_table", schema="my_schema"),
         tagging=Tags(unsnake_schema_for_tags=False),
     )
     assert "my" not in m.tags
@@ -243,7 +247,7 @@ def test_unpascal_name_splits_pascal_case():
 
 def test_unpascal_schema_splits_pascal_case():
     m = make_model(
-        target=Target(name="test_table", schema=TargetSchema(name="MySchema")),
+        target=Target(name="test_table", schema="MySchema"),
         tagging=Tags(unpascal_schema_for_tags=True),
     )
     assert "my" in m.tags
@@ -252,14 +256,14 @@ def test_unpascal_schema_splits_pascal_case():
 
 def test_unpascal_schema_off_by_default():
     m = make_model(
-        target=Target(name="test_table", schema=TargetSchema(name="MySchema")),
+        target=Target(name="test_table", schema="MySchema"),
     )
     assert "my" not in m.tags
 
 
 def test_full_name_added_to_tags_by_default():
     m = make_model(
-        target=Target(name="poop", schema=TargetSchema(name="cha_clean")),
+        target=Target(name="poop", schema="cha_clean"),
     )
     assert "cha_clean.poop" in m.tags
 
@@ -271,7 +275,7 @@ def test_full_name_not_added_when_no_schema():
 
 def test_full_name_not_added_when_disabled():
     m = make_model(
-        target=Target(name="poop", schema=TargetSchema(name="cha_clean")),
+        target=Target(name="poop", schema="cha_clean"),
         tagging=Tags(full_name_add_to_tags=False),
     )
     assert "cha_clean.poop" not in m.tags
@@ -281,16 +285,12 @@ def test_full_name_not_added_when_disabled():
 
 
 def test_catalog_added_to_tags_when_set():
-    m = make_model(
-        target=Target(
-            name="poop", schema=TargetSchema(name="cha_clean"), catalog="prod_dwh"
-        )
-    )
+    m = make_model(target=Target(name="poop", schema="cha_clean", catalog="prod_dwh"))
     assert "prod_dwh" in m.tags
 
 
 def test_catalog_not_added_when_none():
-    m = make_model(target=Target(name="poop", schema=TargetSchema(name="cha_clean")))
+    m = make_model(target=Target(name="poop", schema="cha_clean"))
     # None should not contaminate the tag set
     assert None not in m.tags
     assert "" not in m.tags
@@ -298,34 +298,26 @@ def test_catalog_not_added_when_none():
 
 def test_catalog_not_added_when_disabled():
     m = make_model(
-        target=Target(
-            name="poop", schema=TargetSchema(name="cha_clean"), catalog="prod_dwh"
-        ),
+        target=Target(name="poop", schema="cha_clean", catalog="prod_dwh"),
         tagging=Tags(catalog_add_to_tags=False),
     )
     assert "prod_dwh" not in m.tags
 
 
 def test_fully_qualified_name_added_when_catalog_and_schema():
-    m = make_model(
-        target=Target(
-            name="poop", schema=TargetSchema(name="cha_clean"), catalog="prod_dwh"
-        )
-    )
+    m = make_model(target=Target(name="poop", schema="cha_clean", catalog="prod_dwh"))
     assert "prod_dwh.cha_clean.poop" in m.tags
 
 
 def test_fully_qualified_name_not_added_without_catalog():
-    m = make_model(target=Target(name="poop", schema=TargetSchema(name="cha_clean")))
+    m = make_model(target=Target(name="poop", schema="cha_clean"))
     # No `None.cha_clean.poop` or `.cha_clean.poop` leaks in
     assert not any("None" in t for t in m.tags)
 
 
 def test_fully_qualified_name_disabled():
     m = make_model(
-        target=Target(
-            name="poop", schema=TargetSchema(name="cha_clean"), catalog="prod_dwh"
-        ),
+        target=Target(name="poop", schema="cha_clean", catalog="prod_dwh"),
         tagging=Tags(fully_qualified_name_add_to_tags=False),
     )
     assert "prod_dwh.cha_clean.poop" not in m.tags
@@ -334,29 +326,21 @@ def test_fully_qualified_name_disabled():
 
 
 def test_unsnake_catalog_splits_on_underscore():
-    m = make_model(
-        target=Target(
-            name="poop", schema=TargetSchema(name="cha_clean"), catalog="prod_dwh"
-        )
-    )
+    m = make_model(target=Target(name="poop", schema="cha_clean", catalog="prod_dwh"))
     assert "prod" in m.tags
     assert "dwh" in m.tags
 
 
 def test_unsnake_catalog_disabled():
     m = make_model(
-        target=Target(
-            name="poop", schema=TargetSchema(name="cha_clean"), catalog="prod_dwh"
-        ),
+        target=Target(name="poop", schema="cha_clean", catalog="prod_dwh"),
         tagging=Tags(unsnake_catalog_for_tags=False),
     )
     assert "prod" not in m.tags
 
 
 def test_unpascal_catalog_off_by_default():
-    m = make_model(
-        target=Target(name="poop", schema=TargetSchema(name="cha"), catalog="ProdDwh")
-    )
+    m = make_model(target=Target(name="poop", schema="cha", catalog="ProdDwh"))
     # unpascal off → "prod" not added; raw "ProdDwh" still is
     assert "prod" not in m.tags
     assert "ProdDwh" in m.tags
@@ -364,7 +348,7 @@ def test_unpascal_catalog_off_by_default():
 
 def test_unpascal_catalog_splits_pascal_case():
     m = make_model(
-        target=Target(name="poop", schema=TargetSchema(name="cha"), catalog="ProdDwh"),
+        target=Target(name="poop", schema="cha", catalog="ProdDwh"),
         tagging=Tags(unpascal_catalog_for_tags=True),
     )
     assert "prod" in m.tags
@@ -375,12 +359,12 @@ def test_unpascal_catalog_splits_pascal_case():
 
 
 def test_full_name_includes_catalog_when_set():
-    t = Target(name="poop", schema=TargetSchema(name="cha_clean"), catalog="prod_dwh")
+    t = Target(name="poop", schema="cha_clean", catalog="prod_dwh")
     assert t.full_name == "prod_dwh.cha_clean.poop"
 
 
 def test_full_name_skips_catalog_when_unset():
-    t = Target(name="poop", schema=TargetSchema(name="cha_clean"))
+    t = Target(name="poop", schema="cha_clean")
     assert t.full_name == "cha_clean.poop"
 
 
@@ -390,6 +374,7 @@ def test_full_name_skips_catalog_when_unset():
 def test_sensitive_flag_set_from_columns():
     t = Target(
         name="test_table",
+        catalog="cat",
         database=make_db(),
         columns=[make_column("id"), make_column("secret", sensitive=True)],
     )
@@ -399,6 +384,7 @@ def test_sensitive_flag_set_from_columns():
 def test_sensitive_false_when_no_sensitive_columns():
     t = Target(
         name="test_table",
+        catalog="cat",
         database=make_db(),
         columns=[make_column("id"), make_column("name")],
     )
@@ -408,6 +394,7 @@ def test_sensitive_false_when_no_sensitive_columns():
 def test_unique_columns_extracted():
     t = Target(
         name="test_table",
+        catalog="cat",
         database=make_db(),
         columns=[make_column("id", unique=True), make_column("name")],
     )
@@ -418,6 +405,7 @@ def test_unique_columns_extracted():
 def test_upsert_no_delete_with_unique_column_ok():
     t = Target(
         name="test_table",
+        catalog="cat",
         database=make_db(),
         columns=[make_column("id", unique=True), make_column("name")],
         write_mode=WriteMode.UPSERT_NO_DELETE,
@@ -434,6 +422,7 @@ def test_column_sorting_applied():
 
     t = Target(
         name="test_table",
+        catalog="cat",
         database=make_db(),
         columns=[make_column("b"), make_column("a")],
         column_sorting=custom_sort,
@@ -444,6 +433,7 @@ def test_column_sorting_applied():
 def test_column_sorting_none_skips_sort():
     t = Target(
         name="test_table",
+        catalog="cat",
         database=make_db(),
         columns=[make_column("b"), make_column("a")],
         column_sorting=None,
@@ -457,6 +447,7 @@ def test_column_sorting_none_skips_sort():
 def test_partition_on_sets_partitioned_by_and_index():
     t = Target(
         name="test_table",
+        catalog="cat",
         database=make_db(),
         columns=[make_column("id"), make_column("ts", partition_on=True)],
         column_sorting=None,

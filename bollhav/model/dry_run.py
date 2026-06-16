@@ -1,34 +1,30 @@
-"""Dry-run summary for @load_models.
+from collections.abc import Sequence
 
-Activated by DRY_RUN=true (concise) or DRY_RUN_EXTRA=true (verbose).
-The decorator runs everything up to and including apply_runtime_overrides,
-then calls into here instead of invoking the user's main(). Strictly
-read-only — no side effects."""
-
-from bollhav.model.batch import ChunkMode
+from bollhav.model.intervals import TZInterval
 from bollhav.model.load_models import _RuntimeConfig
 from bollhav.model.model import Model
+from bollhav.model.modelrun import ModelRun
 from bollhav.model.tagexpr import explain_groups
 
 
-def print_summary(models: list[Model], cfg: _RuntimeConfig) -> None:
+def print_summary(runs: list[ModelRun], cfg: _RuntimeConfig) -> None:
     """Print the dry-run summary to stdout.
 
-    Models are listed alphabetically by `target.full_name` regardless of
+    Runs are listed alphabetically by `target.full_name` regardless of
     the original ordering — easier to scan and compare across runs."""
     width = 60
     print()
     suffix = " (extra)" if cfg.dry_run_extra else ""
     print(f"── dry run{suffix} " + "─" * (width - 11 - len(suffix)))
-    plural = "s" if len(models) != 1 else ""
-    print(f" {len(models)} model{plural} matched, mode = {_mode_label(cfg)}")
+    plural = "s" if len(runs) != 1 else ""
+    print(f" {len(runs)} model{plural} matched, mode = {_mode_label(cfg)}")
     print()
     _print_tag_table(cfg.tags)
 
-    ordered = sorted(models, key=lambda m: m.target.full_name)
+    ordered = sorted(runs, key=lambda r: r.model.target.full_name)
     if cfg.dry_run_extra:
-        for model in ordered:
-            _print_model_extra(model)
+        for run in ordered:
+            _print_model_extra(run)
             print()
     else:
         _print_models_concise(ordered)
@@ -65,73 +61,70 @@ def _mode_label(cfg: _RuntimeConfig) -> str:
 # ── concise ──────────────────────────────────────────────────────────
 
 
-def _print_models_concise(models: list[Model]) -> None:
-    """Models grouped by schema (alphabetical), table names padded
-    within each group so the right-hand column lines up. Unbatched
-    models (views) get no trailing column."""
-    by_schema: dict[str, list[Model]] = {}
-    for model in models:
-        by_schema.setdefault(model.target.schema.resolved, []).append(model)
+def _print_models_concise(runs: list[ModelRun]) -> None:
+    """Runs grouped by schema (alphabetical), table names padded within each
+    group so the right-hand column lines up. Unbatched models (views) get no
+    trailing column."""
+    by_schema: dict[str, list[ModelRun]] = {}
+    for run in runs:
+        by_schema.setdefault(run.model.target.schema_resolved, []).append(run)
 
     schemas = sorted(by_schema)
     for i, schema in enumerate(schemas):
         group = by_schema[schema]
-        name_width = max(len(m.target.name_resolved) for m in group)
+        name_width = max(len(r.model.target.name_resolved) for r in group)
         print(f"{schema}:")
-        for model in group:
-            tail = _concise_tail(model)
+        for run in group:
+            tail = _concise_tail(run)
             if tail is None:
-                print(f"  {model.target.name_resolved}")
+                print(f"  {run.model.target.name_resolved}")
             else:
-                name = model.target.name_resolved.ljust(name_width)
+                name = run.model.target.name_resolved.ljust(name_width)
                 print(f"  {name}   {tail}")
         if i < len(schemas) - 1:
             print()
 
 
-def _concise_tail(model: Model) -> str | None:
+def _concise_tail(run: ModelRun) -> str | None:
     """Right-hand column for a model row. None means no tail (view / no
-    batching). ROW-mode and INTERVAL-mode get different shapes."""
+    batching)."""
+    model = run.model
     if model.batching is None:
         return None
-    if model.batching.mode is ChunkMode.ROW:
-        return f"{model.batching.row.batch_size} rows/chunk"
-    count = _format_interval_count(model.intervals)
-    return f"{count} × {model.batching.interval.expression}"
+    count = _format_interval_count(run.intervals)
+    return f"{count} × {model.batching.time.chunk}"
 
 
 # ── extra ────────────────────────────────────────────────────────────
 
 
-def _print_model_extra(model: Model) -> None:
+def _print_model_extra(run: ModelRun) -> None:
+    model = run.model
     print(f"▸ {model.target.full_name}")
     if model.target.catalog:
         print(f"    catalog      : {model.target.catalog}")
-    print(f"    schema       : {model.target.schema.resolved}")
+    print(f"    schema       : {model.target.schema_resolved}")
     print(f"    write mode   : {model.target.write_mode.value}")
 
     if model.batching is not None:
-        if model.batching.mode is ChunkMode.ROW:
-            print("    mode         : row")
-            print(f"    batch size   : {model.batching.row.batch_size}")
-        else:
-            intervals = model.intervals
-            print(f"    cron         : {model.batching.interval.expression}")
-            print(f"    window       : {_format_window(intervals)}")
-            print(f"    intervals    : {_format_interval_count(intervals)}")
-            if model.batching.interval.lookback:
-                print(f"    lookback     : {model.batching.interval.lookback}")
+        intervals = run.intervals
+        print(f"    cron         : {model.batching.time.chunk}")
+        print(f"    window       : {_format_window(intervals)}")
+        print(f"    intervals    : {_format_interval_count(intervals)}")
+        print(f"    batch size   : {model.batching.size}")
+        if model.batching.time.lookback:
+            print(f"    lookback     : {model.batching.time.lookback}")
 
-    print(f"    bounds       : {_format_bounds(model)}")
+    print(f"    contract     : {_format_contract(model)}")
     print(f"    tags         : {_format_tags(model)}")
     print(f"    upstream     : {_format_upstream(model)}")
-    print(f"    source       : {_format_source(model)}")
+    print(f"    sources      : {_format_sources(model)}")
     if model.description:
         print(f"    description  : {model.description}")
 
 
-def _format_bounds(model: Model) -> str:
-    b = model.bounds
+def _format_contract(model: Model) -> str:
+    b = model.contract
     if b.begin is None and b.end is None:
         return "(none)"
     begin = b.begin.isoformat() if b.begin else "—"
@@ -144,30 +137,25 @@ def _format_tags(model: Model) -> str:
 
 
 def _format_upstream(model: Model) -> str:
-    return ", ".join(model.upstream) if model.upstream else "(none)"
+    return ", ".join(model.upstream_names) or "(none)"
 
 
-def _format_source(model: Model) -> str:
-    src = model.source
-    if src is None:
+def _format_sources(model: Model) -> str:
+    specs = model.source_specs
+    if not specs:
         return "(none)"
-    cls = type(src).__name__
-    name = getattr(src, "name", None) or getattr(src, "path", "?")
-    schema = getattr(src, "schema", None)
-    if schema:
-        return f"{cls}({schema}.{name})"
-    return f"{cls}({name})"
+    return ", ".join(f"{s['name']} ({s['kind']})" for s in specs)
 
 
 # ── shared formatters ───────────────────────────────────────────────
 
 
-def _format_window(intervals: list) -> str:
+def _format_window(intervals: Sequence[TZInterval | None]) -> str:
     real = [iv for iv in intervals if iv is not None]
     if not real:
         return "(unfiltered)"
     return f"{real[0].since.isoformat()} → {real[-1].until.isoformat()}"
 
 
-def _format_interval_count(intervals: list) -> str:
+def _format_interval_count(intervals: Sequence[TZInterval | None]) -> str:
     return str(len([iv for iv in intervals if iv is not None]))

@@ -1,10 +1,10 @@
 import logging
-import pyodbc
+import pyodbc  # pyright: ignore[reportMissingImports]  # optional mssql extra
 import polars as pl
 from typing import cast, LiteralString
 from bollhav.model.model import Model
 from bollhav.mssql.columns import MssqlColumn, MssqlType
-from bollhav.mssql.schema import _b, _col_type
+from bollhav.mssql.schema import _bracket_quote, _col_type
 
 logger = logging.getLogger(__name__)
 
@@ -17,7 +17,7 @@ def _bulk_insert(
     columns: list[MssqlColumn] | None = None,
     fast: bool = True,
 ) -> None:
-    cols = ", ".join(_b(c) for c in col_names)
+    cols = ", ".join(_bracket_quote(c) for c in col_names)
     placeholders = ", ".join(["?"] * len(col_names))
     cursor.fast_executemany = fast
     if fast and columns:
@@ -108,30 +108,43 @@ def _set_input_sizes(cursor: pyodbc.Cursor, columns: list[MssqlColumn]) -> None:
     cursor.setinputsizes([_input_size_for(c) for c in columns])
 
 
-def merge(
-    conn: pyodbc.Connection,
+def _merge_via_temp(
+    cursor: pyodbc.Cursor,
+    target_table: str,
     model: Model,
     df: pl.DataFrame,
+    *,
     fast_executemany: bool = True,
 ) -> None:
-    """Upsert into target using MSSQL MERGE via a temp staging table."""
-    schema = model.target.schema.resolved
-    table = model.target.name
-    temp = f"#tmp_{table}"
+    """MERGE one DataFrame into `target_table` via a session-scoped
+    `#tmp` table.
 
+    `target_table` is the fully-bracketed `[schema].[table]` string of
+    whatever table this MERGE lands in — the real target for direct
+    upserts, or a staging table for staged upserts. The merge keys come
+    from `model.target.merge_key_columns` either way (staging mirrors
+    the target's PK/unique constraint).
+
+    Does not commit — the caller decides when to flush, so multiple
+    operations can share a transaction."""
     mssql_cols = [c for c in model.target.columns if isinstance(c, MssqlColumn)]
     all_col_names = [c.name for c in mssql_cols]
     unique_col_names = [c.name for c in model.target.merge_key_columns]
     non_unique_col_names = [c for c in all_col_names if c not in unique_col_names]
 
-    col_defs = ", ".join(f"{_b(c.name)} {_col_type(c)}" for c in mssql_cols)
-    on_clause = " AND ".join(
-        f"target.{_b(c)} = source.{_b(c)}" for c in unique_col_names
-    )
-    insert_cols = ", ".join(_b(c) for c in all_col_names)
-    insert_vals = ", ".join(f"source.{_b(c)}" for c in all_col_names)
+    # `#tmp_` names are session-scoped in tempdb. Hash the target_table
+    # so concurrent merges into different tables in the same session
+    # don't collide on the temp name.
+    temp = f"#tmp_merge_{abs(hash(target_table)) % 10_000_000:07d}"
 
-    cursor = conn.cursor()
+    col_defs = ", ".join(f"{_bracket_quote(c.name)} {_col_type(c)}" for c in mssql_cols)
+    on_clause = " AND ".join(
+        f"target.{_bracket_quote(c)} = source.{_bracket_quote(c)}"
+        for c in unique_col_names
+    )
+    insert_cols = ", ".join(_bracket_quote(c) for c in all_col_names)
+    insert_vals = ", ".join(f"source.{_bracket_quote(c)}" for c in all_col_names)
+
     cursor.execute(f"IF OBJECT_ID('tempdb..{temp}') IS NOT NULL DROP TABLE {temp}")
     cursor.execute(f"CREATE TABLE {temp} ({col_defs})")
     _bulk_insert(
@@ -140,18 +153,34 @@ def merge(
 
     if non_unique_col_names:
         update_set = ", ".join(
-            f"target.{_b(c)} = source.{_b(c)}" for c in non_unique_col_names
+            f"target.{_bracket_quote(c)} = source.{_bracket_quote(c)}"
+            for c in non_unique_col_names
         )
         matched_clause = f"WHEN MATCHED THEN UPDATE SET {update_set}"
     else:
         matched_clause = ""
 
     cursor.execute(
-        f"MERGE INTO {_b(schema)}.{_b(table)} AS target "
+        f"MERGE INTO {target_table} AS target "
         f"USING {temp} AS source ON {on_clause} "
         f"{matched_clause} "
         f"WHEN NOT MATCHED THEN INSERT ({insert_cols}) VALUES ({insert_vals});"
     )
+
+
+def merge(
+    conn: pyodbc.Connection,
+    model: Model,
+    df: pl.DataFrame,
+    fast_executemany: bool = True,
+) -> None:
+    """Upsert directly into the target table using MSSQL MERGE.
+
+    Thin wrapper over `_merge_via_temp` that opens a cursor, runs the
+    merge against the target table, and commits."""
+    target_table = f"{_bracket_quote(model.target.schema_resolved)}.{_bracket_quote(model.target.name)}"
+    cursor = conn.cursor()
+    _merge_via_temp(cursor, target_table, model, df, fast_executemany=fast_executemany)
     cursor.commit()
 
 
@@ -162,7 +191,7 @@ def append(
     fast_executemany: bool = True,
 ) -> None:
     """Bulk insert rows into target without clearing existing data."""
-    schema = model.target.schema.resolved
+    schema = model.target.schema_resolved
     table = model.target.name
     all_col_names = [c.name for c in model.target.columns]
 
@@ -170,7 +199,7 @@ def append(
     mssql_cols = [c for c in model.target.columns if isinstance(c, MssqlColumn)]
     _bulk_insert(
         cursor,
-        f"{_b(schema)}.{_b(table)}",
+        f"{_bracket_quote(schema)}.{_bracket_quote(table)}",
         all_col_names,
         df,
         columns=mssql_cols,
@@ -180,15 +209,31 @@ def append(
 
 
 def create_replace_view(conn: pyodbc.Connection, model: Model) -> None:
-    """Create or alter a view using the query defined on model.source."""
-    if model.source is None or model.source.query is None:
+    """Create or alter a view using the query defined on its SourceModel."""
+    from bollhav.model.source import SourceModel
+
+    src = next(
+        (
+            s
+            for s in model.upstream
+            if isinstance(s.type, SourceModel) and s.type.query is not None
+        ),
+        None,
+    )
+    if src is None:
         raise ValueError(
-            f"model.source.query must be set for {model.target.write_mode.value}"
+            f"create_replace_view requires a Source with a SourceModel type "
+            f"whose .query is set, in upstream=[...] on "
+            f"{model.target.full_name!r}"
         )
-    schema = model.target.schema.resolved
+    schema = model.target.schema_resolved
     view = model.target.name
-    query = cast(LiteralString, model.source.query)
+    # The filter above guarantees this, but it doesn't narrow `src.type`.
+    assert isinstance(src.type, SourceModel) and src.type.query is not None
+    query = cast(LiteralString, src.type.query)
 
     cursor = conn.cursor()
-    cursor.execute(f"CREATE OR ALTER VIEW {_b(schema)}.{_b(view)} AS {query}")
+    cursor.execute(
+        f"CREATE OR ALTER VIEW {_bracket_quote(schema)}.{_bracket_quote(view)} AS {query}"
+    )
     cursor.commit()
