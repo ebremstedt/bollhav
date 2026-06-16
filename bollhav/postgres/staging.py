@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class PostgresStaging(Staging):
-    """Postgres-specific extension of `Staging`.
+    """Postgres-specific extension of `Staging`
 
     Adds knobs only meaningful to Postgres; the neutral options
     (schema, table_prefix, mode, keep_after_apply) come from the base.
