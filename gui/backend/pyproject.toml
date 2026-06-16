@@ -8,7 +8,7 @@ dependencies = [
     "uvicorn",
     "psycopg[binary]",
     # bollhav provides the lineage query functions (bollhav.postgres.registry).
-    "bollhav==3.0.0rc18",
+    "bollhav==3.0.0rc19",
 ]
 
 [build-system]

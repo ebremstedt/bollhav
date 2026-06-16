@@ -59,6 +59,17 @@ def graph():
         return registry.get_graph(c)
 
 
+@app.get("/match")
+def match(expr: str):
+    """Full names of models matching a bollhav tag expression (the `[group]`
+    syntax). 400 on a malformed expression."""
+    with _conn() as c:
+        try:
+            return {"expr": expr, "models": registry.match_tags(c, expr)}
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+
+
 @app.get("/model/{full_name}")
 def model(full_name: str):
     with _conn() as c:

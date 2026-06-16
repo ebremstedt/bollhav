@@ -6,6 +6,7 @@
   // tier-1 (upstream / sources / last_seen) is already on the graph node;
   // tier-2 (the property bag) is fetched from /model/{name}.
   let node = $derived(view.full?.nodes.find((n) => n.name === info.name) || null);
+  let isView = $derived(node?.model_type === "VIEW");
   let meta = $state(null);
   let loading = $state(false);
   // tags + columns are collapsed by default — expand on click.
@@ -97,7 +98,7 @@
 
 <aside class="meta-panel">
   <div class="head">
-    <span class="title tbl">{tbl}</span>
+    <span class="title">{tbl}</span>
     <button class="x" onclick={() => (info.name = null)}>✕</button>
   </div>
 
@@ -113,10 +114,12 @@
   </div>
 
   {#if hasMeta}
-    <div class="row">
-      <span>write mode</span>
-      <b>{meta.write_mode || "—"}{meta.staging ? " · staged" : ""}</b>
-    </div>
+    {#if !isView}
+      <div class="row">
+        <span>write mode</span>
+        <b>{meta.write_mode || "—"}{meta.staging ? " · staged" : ""}</b>
+      </div>
+    {/if}
     {#if meta.batching}
       <div class="row">
         <span>batching</span>

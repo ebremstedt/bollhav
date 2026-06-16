@@ -48,7 +48,7 @@ Then open **http://localhost:53173**. Other URLs:
 | http://localhost:58137/graph | the raw graph JSON |
 
 Three services (see `docker-compose.yml`): `db` (Postgres), `backend`
-(FastAPI; installs `bollhav==3.0.0rc18` from PyPI and runs `seed.py` on
+(FastAPI; installs `bollhav==3.0.0rc19` from PyPI and runs `seed.py` on
 start), `frontend` (Vite dev server, proxies the API over the compose
 network). Stop with `Ctrl-C`; `docker compose down -v` to also drop the DB
 volume. Re-running `up` re-seeds (the seed wipes `z_bollhav` first).
@@ -68,7 +68,7 @@ bollhav-gui/
 ├── backend/
 │   ├── app.py            # FastAPI: /graph /lineage /tree /state /errors /downstreams /models + viz
 │   ├── seed.py           # registers a demo DAG (+ runs/errors) into z_bollhav
-│   ├── pyproject.toml    # fastapi, uvicorn, psycopg, bollhav==3.0.0rc18
+│   ├── pyproject.toml    # fastapi, uvicorn, psycopg, bollhav==3.0.0rc19
 │   └── Dockerfile
 └── frontend/             # Vite + Svelte + @xyflow/svelte (Svelte Flow)
     ├── Dockerfile
@@ -82,7 +82,7 @@ bollhav-gui/
 
 Prerequisites: a reachable **Postgres** (set `BOLLHAV_STATE_DSN`, default
 `postgresql://postgres:postgres@localhost:5432/postgres`) and **Node**.
-`pyproject.toml` pins `bollhav==3.0.0rc18` from PyPI, so a plain
+`pyproject.toml` pins `bollhav==3.0.0rc19` from PyPI, so a plain
 `pip install .` in `backend/` is enough — no sibling checkout needed.
 
 ```bash
