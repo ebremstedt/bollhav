@@ -7,6 +7,7 @@
     refresh,
     setDetail,
     setHideUpstreams,
+    setEnv,
   } from "../lib/view.svelte.js";
 
   // detail-level radio: a bare tree (names only) vs a decorated one (everything).
@@ -49,11 +50,29 @@
             class="seg-btn"
             class:active={view.detail === val}
             data-tip={tip}
-            onclick={() => setDetail(val)}>{emoji} {val}</button
+            title={val}
+            onclick={() => setDetail(val)}>{emoji}</button
           >
         {/each}
       </span>
     </span>
+    {#if view.environments.length}
+      <span
+        class="tip-wrap"
+        data-tip="Environment — which bollhav library schema to read: prod, or a suffixed dev / PR env in the same database."
+      >
+        <select
+          class="envsel"
+          value={view.env ??
+            view.environments.find((e) => e.label === "prod")?.schema}
+          onchange={(e) => setEnv(e.currentTarget.value)}
+        >
+          {#each view.environments as ev}
+            <option value={ev.schema}>{ev.label}</option>
+          {/each}
+        </select>
+      </span>
+    {/if}
   </div>
 
   <strong class="brand">Lineage</strong>
@@ -242,6 +261,15 @@
   }
   .search::placeholder {
     color: var(--placeholder);
+  }
+  .envsel {
+    font-size: 12px;
+    padding: 4px 8px;
+    border-radius: 6px;
+    border: 1px solid var(--control-border);
+    background: var(--control-bg);
+    color: var(--control-fg);
+    cursor: pointer;
   }
   .tagsearch {
     width: 200px;
