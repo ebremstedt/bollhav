@@ -15,6 +15,7 @@ export default defineConfig({
     strictPort: true,
     proxy: {
       "/graph": API,
+      "/environments": API,
       "/tree": API,
       "/lineage": API,
       "/state": API,

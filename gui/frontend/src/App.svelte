@@ -1,7 +1,7 @@
 <script>
   import { onMount } from "svelte";
   import { selection, info } from "./lib/selection.svelte.js";
-  import { loadGraph } from "./lib/view.svelte.js";
+  import { init } from "./lib/view.svelte.js";
   import Header from "./components/Header.svelte";
   import Flow from "./components/Flow.svelte";
   import DetailPanel from "./components/DetailPanel.svelte";
@@ -10,7 +10,7 @@
 
   let dark = $state(true);
 
-  onMount(loadGraph);
+  onMount(init);
 </script>
 
 <div class="wrap" class:dark>

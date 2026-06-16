@@ -131,13 +131,42 @@ def list_models(conn: "psycopg.Connection") -> list[dict]:
     return [_node(*r) for r in rows]
 
 
-def get_model(conn: "psycopg.Connection", full_name: str) -> dict | None:
-    """One model's library row as a node, or None if unregistered."""
-    if not _table_exists(conn, LIBRARY_SCHEMA, LIBRARY_TABLE):
+def list_environments(conn: "psycopg.Connection") -> list[dict]:
+    """Every bollhav library schema in the connected database — prod
+    (`z_bollhav`) plus any suffixed dev / PR environments (`z_bollhav_<suffix>…`).
+    Returns `[{"schema", "label"}]` (prod first); `label` is `"prod"` for the
+    base schema, else the suffix part. Only schemas that actually hold a
+    `library` table are listed, so the GUI can offer a real env switcher."""
+    rows = conn.execute(
+        "SELECT s.schema_name FROM information_schema.schemata s "
+        "JOIN information_schema.tables t "
+        "  ON t.table_schema = s.schema_name AND t.table_name = %s "
+        "ORDER BY s.schema_name",
+        [LIBRARY_TABLE],
+    ).fetchall()
+    envs: list[dict] = []
+    for (name,) in rows:
+        if name == LIBRARY_SCHEMA or name.startswith(LIBRARY_SCHEMA + "_"):
+            label = (
+                "prod"
+                if name == LIBRARY_SCHEMA
+                else name[len(LIBRARY_SCHEMA) + 1 :].rstrip("_")
+            )
+            envs.append({"schema": name, "label": label or name})
+    envs.sort(key=lambda e: (e["schema"] != LIBRARY_SCHEMA, e["schema"]))
+    return envs
+
+
+def get_model(
+    conn: "psycopg.Connection", full_name: str, schema: str = LIBRARY_SCHEMA
+) -> dict | None:
+    """One model's library row as a node, or None if unregistered. `schema` is
+    the library schema to read — prod by default, or a suffixed env."""
+    if not _table_exists(conn, schema, LIBRARY_TABLE):
         return None
     row = conn.execute(
         sql.SQL(_SELECT_NODE + " WHERE full_name = %s").format(
-            schema=sql.Identifier(LIBRARY_SCHEMA),
+            schema=sql.Identifier(schema),
             table=sql.Identifier(LIBRARY_TABLE),
         ),
         [full_name],
@@ -216,17 +245,21 @@ def get_upstream_tree(
 
 
 def get_recent_state(
-    conn: "psycopg.Connection", full_name: str, limit: int = 50
+    conn: "psycopg.Connection",
+    full_name: str,
+    limit: int = 50,
+    schema: str = LIBRARY_SCHEMA,
 ) -> list[dict]:
     """Recent rows from a model's state table — its run/interval ledger
     (status, window, when it was applied, run id). Newest first. The state
-    table is located from the model's library row; returns [] if the model or
-    its state table isn't there (e.g. registered but never bootstrapped)."""
-    node = get_model(conn, full_name)
+    table is located from the model's library row (in `schema`); returns [] if
+    the model or its state table isn't there (e.g. registered but never
+    bootstrapped)."""
+    node = get_model(conn, full_name, schema=schema)
     if node is None or not node["state_schema"] or not node["state_table"]:
         return []
-    schema, table = node["state_schema"], node["state_table"]
-    if not _table_exists(conn, schema, table):
+    st_schema, st_table = node["state_schema"], node["state_table"]
+    if not _table_exists(conn, st_schema, st_table):
         return []
     rows = conn.execute(
         sql.SQL(
@@ -234,8 +267,8 @@ def get_recent_state(
             "FROM {schema}.{table} "
             "ORDER BY applied_at DESC NULLS LAST, since DESC NULLS LAST LIMIT %s"
         ).format(
-            schema=sql.Identifier(schema),
-            table=sql.Identifier(table),
+            schema=sql.Identifier(st_schema),
+            table=sql.Identifier(st_table),
         ),
         [limit],
     ).fetchall()
@@ -271,14 +304,14 @@ def get_downstreams(conn: "psycopg.Connection", full_name: str) -> list[str]:
     return [r[0] for r in rows]
 
 
-def get_graph(conn: "psycopg.Connection") -> dict:
+def get_graph(conn: "psycopg.Connection", schema: str = LIBRARY_SCHEMA) -> dict:
     """The whole cross-pipeline graph: `{"nodes": [...], "edges": [...]}`.
 
-    Nodes are models (`type="model"`, typed by `kind`) plus external source
-    boundary nodes (`type="external"`, typed by source kind). Edges point
-    from input to consumer: `relation` is `upstream` (managed) or `source`
-    (external)."""
-    if not _table_exists(conn, LIBRARY_SCHEMA, LIBRARY_TABLE):
+    Reads the library in `schema` (prod by default, or a suffixed env). Nodes
+    are models (`type="model"`, typed by `kind`) plus external source boundary
+    nodes (`type="external"`, typed by source kind). Edges point from input to
+    consumer: `relation` is `upstream` (managed) or `source` (external)."""
+    if not _table_exists(conn, schema, LIBRARY_TABLE):
         return {"nodes": [], "edges": []}
     rows = conn.execute(
         sql.SQL(
@@ -286,7 +319,7 @@ def get_graph(conn: "psycopg.Connection") -> dict:
             "state_schema, state_table, last_seen, metadata FROM {schema}.{table} "
             "ORDER BY full_name"
         ).format(
-            schema=sql.Identifier(LIBRARY_SCHEMA),
+            schema=sql.Identifier(schema),
             table=sql.Identifier(LIBRARY_TABLE),
         )
     ).fetchall()
@@ -354,7 +387,9 @@ def get_graph(conn: "psycopg.Connection") -> dict:
     return {"nodes": list(nodes.values()), "edges": edges}
 
 
-def match_tags(conn: "psycopg.Connection", expression: str) -> list[dict]:
+def match_tags(
+    conn: "psycopg.Connection", expression: str, schema: str = LIBRARY_SCHEMA
+) -> list[dict]:
     """Registered models whose tags satisfy a bollhav tag `expression` — the same
     `[group] & | not:` syntax used to select models for a run (see
     `bollhav.model.tagexpr`), reusing that parser so the GUI filter and the run
@@ -386,11 +421,11 @@ def match_tags(conn: "psycopg.Connection", expression: str) -> list[dict]:
             if not tm.negate:
                 positive.update(c.strip() for c in tm.candidates)
 
-    if not _table_exists(conn, LIBRARY_SCHEMA, LIBRARY_TABLE):
+    if not _table_exists(conn, schema, LIBRARY_TABLE):
         return []
     rows = conn.execute(
         sql.SQL("SELECT full_name, metadata FROM {schema}.{table}").format(
-            schema=sql.Identifier(LIBRARY_SCHEMA),
+            schema=sql.Identifier(schema),
             table=sql.Identifier(LIBRARY_TABLE),
         )
     ).fetchall()
@@ -402,16 +437,19 @@ def match_tags(conn: "psycopg.Connection", expression: str) -> list[dict]:
     return out
 
 
-def get_model_metadata(conn: "psycopg.Connection", full_name: str) -> dict | None:
+def get_model_metadata(
+    conn: "psycopg.Connection", full_name: str, schema: str = LIBRARY_SCHEMA
+) -> dict | None:
     """The model's stored property bag (`library.metadata`) — write_mode,
     tags, description, contract, batching, columns, … — or `None` when the model
-    isn't registered. The bag is `{}` for rows written by a bollhav old enough
-    to predate the `metadata` column (re-running that pipeline backfills it)."""
-    if not _table_exists(conn, LIBRARY_SCHEMA, LIBRARY_TABLE):
+    isn't registered. Read from `schema` (prod by default, or a suffixed env).
+    The bag is `{}` for rows written by a bollhav old enough to predate the
+    `metadata` column (re-running that pipeline backfills it)."""
+    if not _table_exists(conn, schema, LIBRARY_TABLE):
         return None
     row = conn.execute(
         sql.SQL("SELECT metadata FROM {schema}.{table} WHERE full_name = %s").format(
-            schema=sql.Identifier(LIBRARY_SCHEMA),
+            schema=sql.Identifier(schema),
             table=sql.Identifier(LIBRARY_TABLE),
         ),
         [full_name],
@@ -420,12 +458,15 @@ def get_model_metadata(conn: "psycopg.Connection", full_name: str) -> dict | Non
 
 
 def get_errors(
-    conn: "psycopg.Connection", full_name: str | None = None, limit: int = 100
+    conn: "psycopg.Connection",
+    full_name: str | None = None,
+    limit: int = 100,
+    schema: str = LIBRARY_SCHEMA,
 ) -> list[dict]:
-    """Recent rows from the shared `z_bollhav.errors`, newest first.
-    Optionally filtered to one model by `full_name`. Empty if the errors
-    table doesn't exist yet."""
-    if not _table_exists(conn, LIBRARY_SCHEMA, ERRORS_TABLE):
+    """Recent rows from the errors table in `schema` (prod `z_bollhav` by
+    default, or a suffixed env), newest first. Optionally filtered to one model
+    by `full_name`. Empty if the errors table doesn't exist yet."""
+    if not _table_exists(conn, schema, ERRORS_TABLE):
         return []
     where = sql.SQL("WHERE full_name = %s ") if full_name is not None else sql.SQL("")
     params: list = [full_name] if full_name is not None else []
@@ -436,7 +477,7 @@ def get_errors(
             "traceback, created_at FROM {schema}.{table} {where}"
             "ORDER BY created_at DESC LIMIT %s"
         ).format(
-            schema=sql.Identifier(LIBRARY_SCHEMA),
+            schema=sql.Identifier(schema),
             table=sql.Identifier(ERRORS_TABLE),
             where=where,
         ),
