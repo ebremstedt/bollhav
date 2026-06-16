@@ -1,12 +1,35 @@
 # bollhav-gui
 
-A small web app that visualizes [bollhav](https://github.com/ebremstedt/bollhav)
+A web app that visualizes [bollhav](https://github.com/ebremstedt/bollhav)
 lineage — the cross-pipeline model graph stored in the `z_bollhav` library.
 
-A **FastAPI** backend reads the lineage out of Postgres (via bollhav's own
-query functions) and serves it as JSON; a **Svelte Flow** frontend fetches
-that JSON and draws the graph — models coloured by kind, sources by kind,
-upstream vs source edges, dark mode, pan/zoom/minimap.
+## Run it
+
+**See the demo** (brings its own Postgres + seeded data — nothing to set up):
+
+```bash
+docker compose up --build      # then open http://localhost:53173
+```
+
+**Point it at your own state DB** (`SEED=0` keeps it read-only — without it the
+demo seed would drop & rebuild your `z_bollhav` schema):
+
+```bash
+BOLLHAV_STATE_DSN=postgresql://user:pass@host:5432/db SEED=0 docker compose up --build
+```
+
+That's it. The env switcher in the header then lists every `z_bollhav[_suffix]`
+schema in that database (prod + any dev/PR envs).
+
+---
+
+Everything below is reference — you don't need it to run the app.
+
+| URL | what |
+|---|---|
+| http://localhost:53173 | the lineage graph |
+| http://localhost:58137/docs | the API (Swagger) |
+| http://localhost:58137/graph | the raw graph JSON |
 
 ## How it's put together
 
@@ -17,7 +40,7 @@ flowchart LR
     REG["bollhav.postgres.registry"]
     DB[("Postgres: z_bollhav.library + errors")]
 
-    FE -->|"GET /graph /lineage /tree"| API
+    FE -->|"GET /graph /match /environments"| API
     API -->|calls| REG
     REG -->|SELECT| DB
     DB -.->|rows| REG
@@ -25,71 +48,26 @@ flowchart LR
     API -.->|JSON| FE
 ```
 
-Solid arrows = the request path; dashed = data flowing back. The key point:
-**all SQL/schema knowledge lives in bollhav** (`bollhav.postgres.registry`).
-The backend is a thin HTTP adapter over those functions, and the frontend
-holds no schema knowledge at all — it just renders `/graph`.
-
-## Quick start (Docker) — one command
-
-Spins up Postgres, seeds a realistic `raw → clean → consume` demo DAG (with
-run history + a few errors), starts the API, and serves the graph UI:
-
-```bash
-docker compose up --build
-```
-
-Then open **http://localhost:53173**. Other URLs:
-
-| URL | what |
-|---|---|
-| http://localhost:53173 | the Svelte Flow lineage graph |
-| http://localhost:58137/docs | the API (Swagger) |
-| http://localhost:58137/graph | the raw graph JSON |
-
-Three services (see `docker-compose.yml`): `db` (Postgres), `backend`
-(FastAPI; installs `bollhav==3.0.0rc19` from PyPI and runs `seed.py` on
-start), `frontend` (Vite dev server, proxies the API over the compose
-network). Stop with `Ctrl-C`; `docker compose down -v` to also drop the DB
-volume. Re-running `up` re-seeds (the seed wipes `z_bollhav` first).
-
-To re-seed without a restart: `docker compose exec backend python seed.py`.
-
-> Host ports are deliberately rare to avoid collisions — UI `53173`, API
-> `58137`, Postgres `55432` — all mapped to the normal ports inside the
-> containers. Nothing local needs to be free, and Docker runs its own
-> Postgres (nothing local required).
-
-## Layout
-
-```
-bollhav-gui/
-├── docker-compose.yml    # db + backend + frontend (one command)
-├── backend/
-│   ├── app.py            # FastAPI: /graph /lineage /tree /state /errors /downstreams /models + viz
-│   ├── seed.py           # registers a demo DAG (+ runs/errors) into z_bollhav
-│   ├── pyproject.toml    # fastapi, uvicorn, psycopg, bollhav==3.0.0rc19
-│   └── Dockerfile
-└── frontend/             # Vite + Svelte + @xyflow/svelte (Svelte Flow)
-    ├── Dockerfile
-    └── src/
-        ├── App.svelte         # fetch /graph -> dagre layout -> <SvelteFlow> + legend + panel
-        ├── LineageNode.svelte # custom model/source card
-        └── selection.svelte.js
-```
+**All SQL/schema knowledge lives in bollhav** (`bollhav.postgres.registry`).
+The backend is a thin HTTP adapter; the frontend holds no schema knowledge —
+it just renders `/graph`. Three compose services: `db` (Postgres), `backend`
+(FastAPI; the in-repo `bollhav` is mounted at `/src` so registry edits show up
+on restart), `frontend` (Vite dev server, proxies the API).
 
 ## Run it manually (no Docker)
 
 Prerequisites: a reachable **Postgres** (set `BOLLHAV_STATE_DSN`, default
 `postgresql://postgres:postgres@localhost:5432/postgres`) and **Node**.
-`pyproject.toml` pins `bollhav==3.0.0rc19` from PyPI, so a plain
-`pip install .` in `backend/` is enough — no sibling checkout needed.
+`gui/` lives inside the bollhav repo, so install the in-repo `bollhav`
+alongside the backend's own deps (the `bollhav==3.0.0rc19` pin in
+`pyproject.toml` is for the Docker image and isn't on public PyPI):
 
 ```bash
 # 1. backend (serves the lineage JSON on :8137)
 cd backend
-pip install .
-python seed.py                      # populate the demo DAG
+pip install fastapi uvicorn "psycopg[binary]"
+pip install -e ../..                # the in-repo bollhav package
+python seed.py                      # populate the demo DAG (drops z_bollhav first!)
 uvicorn app:app --port 8137
 
 # 2. frontend (Svelte Flow UI on :5173, proxies the JSON to :8137)
@@ -98,6 +76,6 @@ npm install
 npm run dev
 ```
 
-Then open `http://127.0.0.1:5173`. The backend's own quick visualization is
-also at `http://127.0.0.1:8137/`, and the API docs at
-`http://127.0.0.1:8137/docs`.
+Then open `http://127.0.0.1:5173`. To read a **real** state DB instead of the
+demo, skip `seed.py` and point `BOLLHAV_STATE_DSN` at your database before
+starting uvicorn. The API docs are at `http://127.0.0.1:8137/docs`.

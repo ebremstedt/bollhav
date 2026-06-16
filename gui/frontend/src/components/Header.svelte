@@ -41,7 +41,7 @@
 <header>
   <div class="left">
     <span
-      class="tip-wrap"
+      class="tip-wrap tipleft"
       data-tip="Detail level (the christmas tree) — how much decoration to show on the graph."
     >
       <span class="seg">
@@ -58,7 +58,7 @@
     </span>
     {#if view.environments.length}
       <span
-        class="tip-wrap"
+        class="tip-wrap tipleft"
         data-tip="Environment — which bollhav library schema to read: prod, or a suffixed dev / PR env in the same database."
       >
         <select
@@ -74,8 +74,6 @@
       </span>
     {/if}
   </div>
-
-  <strong class="brand">Lineage</strong>
 
   <div class="right">
     <input
@@ -162,10 +160,6 @@
   .right {
     justify-content: flex-end;
   }
-  .brand {
-    flex: 0 0 auto;
-    white-space: nowrap;
-  }
   .toggle {
     font-size: 12px;
     padding: 4px 10px;
@@ -238,6 +232,16 @@
     border-bottom-color: #222;
     z-index: 50;
     pointer-events: none;
+  }
+  /* left-zone controls: anchor the tooltip to the LEFT so it opens rightward
+     into the viewport instead of off the left edge. */
+  .tip-wrap.tipleft:hover::after {
+    right: auto;
+    left: 0;
+  }
+  .tip-wrap.tipleft:hover::before {
+    right: auto;
+    left: 14px;
   }
   .ico {
     display: inline-block;

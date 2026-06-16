@@ -44,31 +44,48 @@ flowchart TD
 
 The key property: **all SQL/schema knowledge lives in bollhav** (`bollhav.postgres.registry`). The backend holds no SQL; the frontend holds no schema knowledge — it just renders what `/graph` returns.
 
-## Quick start (Docker)
+## Get started locally
 
-One command spins up Postgres, seeds a realistic `raw → clean → consume` demo DAG (with run history and a few errors), starts the API, and serves the UI:
+The fastest way is Docker — two commands, depending on whether you want the demo or your own data. (Full details in the [`gui/` README](https://github.com/ebremstedt/bollhav/tree/main/gui).)
+
+**See the demo** — brings its own Postgres and seeds a realistic `raw → clean → consume` DAG (with run history and a few errors). Nothing to set up:
 
 ```bash
 cd gui
-docker compose up --build
+docker compose up --build      # then open http://localhost:53173
 ```
 
-Then open the graph UI (the compose file maps rare host ports to avoid clashes):
+**Point it at your own state DB** — set the connection and disable seeding. `SEED=0` is required: without it the demo seed drops and rebuilds the `z_bollhav` schema and would destroy your real lineage:
+
+```bash
+cd gui
+BOLLHAV_STATE_DSN=postgresql://user:pass@host:5432/db SEED=0 docker compose up --build
+```
+
+The GUI is read-only over your data, and the **environment switcher** in the header lists every `z_bollhav[_suffix]` library schema it finds in that database — so prod and any dev / PR envs are all browsable.
 
 | URL | What |
 |---|---|
 | http://localhost:53173 | the lineage graph UI |
+| http://localhost:58137/docs | the API (Swagger) |
 | http://localhost:58137/graph | the raw graph JSON |
 
-## Run it manually (no Docker)
+??? note "Useful one-liners"
+    - Stop: `Ctrl-C`. Drop the demo DB too: `docker compose down -v`.
+    - Re-seed the demo: `docker compose exec backend python seed.py`
+    - Add a second demo env to toggle between: `docker compose exec backend python seed_dev.py`
+    - Ports are deliberately rare (UI `53173`, API `58137`, Postgres `55432`) so nothing local needs to be free.
 
-Needs a reachable Postgres (`BOLLHAV_STATE_DSN`, default `postgresql://postgres:postgres@localhost:5432/postgres`) and Node. The backend now uses `pyproject.toml` (it pins `bollhav==3.0.0rc19` from PyPI), so a plain `pip install .` is enough — no sibling checkout needed.
+### Without Docker
+
+Needs a reachable Postgres (`BOLLHAV_STATE_DSN`, default `postgresql://postgres:postgres@localhost:5432/postgres`) and Node. `gui/` lives inside the bollhav repo, so install the in-repo `bollhav` (the `bollhav==3.0.0rc19` pin in `pyproject.toml` is for the Docker image and isn't on public PyPI):
 
 ```bash
 # backend — serves lineage JSON on :8137
 cd gui/backend
-pip install .
-python seed.py            # populate the demo DAG
+pip install fastapi uvicorn "psycopg[binary]"
+pip install -e ../..      # the in-repo bollhav package
+python seed.py            # populate the demo DAG (drops z_bollhav first!)
 uvicorn app:app --port 8137
 
 # frontend — Svelte Flow UI on :5173, proxies JSON to :8137
@@ -76,6 +93,8 @@ cd gui/frontend
 npm install
 npm run dev
 ```
+
+To read a **real** state DB instead of the demo, skip `seed.py` and point `BOLLHAV_STATE_DSN` at your database before starting uvicorn.
 
 ## Endpoints
 
