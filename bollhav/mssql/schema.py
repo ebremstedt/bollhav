@@ -1,5 +1,5 @@
 import logging
-import pyodbc
+import pyodbc  # pyright: ignore[reportMissingImports]  # optional mssql extra
 from bollhav.model.model import Model
 from bollhav.mssql.columns import MssqlColumn
 from bollhav.mssql.indexes import MssqlIndex

@@ -1416,8 +1416,7 @@ def test_e2e_dry_state_cascade_shows_will_run_after(schema_name, capsys, monkeyp
 
     @model_lifecycle
     def run_model(run, data_conn, state_conn=None):
-        for _ in model.intervals:
-            pass
+        pass  # never invoked under DRY_STATE; the cascade is computed, not run
 
     orders = _orders_model(schema_name, name="orders", state=State(), staging=Staging())
     summary = _orders_model(

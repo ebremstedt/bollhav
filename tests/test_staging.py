@@ -24,7 +24,6 @@ from unittest.mock import MagicMock
 from uuid import UUID
 
 import polars as pl
-import pytest
 
 
 SINCE = datetime(2024, 1, 1, tzinfo=timezone.utc)

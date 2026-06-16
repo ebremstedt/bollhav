@@ -1,5 +1,5 @@
 import logging
-import pyodbc
+import pyodbc  # pyright: ignore[reportMissingImports]  # optional mssql extra
 import polars as pl
 from datetime import datetime
 from typing import Generator
