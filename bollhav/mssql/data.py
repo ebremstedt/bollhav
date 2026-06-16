@@ -4,7 +4,7 @@ import logging
 from typing import TYPE_CHECKING
 from uuid import UUID
 
-import pyodbc
+import pyodbc  # pyright: ignore[reportMissingImports]  # optional mssql extra
 
 from bollhav.mssql.columns import MssqlColumn
 from bollhav.mssql.schema import (

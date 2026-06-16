@@ -1,3 +1,5 @@
+import itertools
+
 import pytest
 from bollhav.model.tagexpr import (
     PotentialTagMatch,
@@ -422,9 +424,6 @@ class TestExplainGroups:
 
 
 # --- exhaustive: every expression vs EVERY combination (subset) of tags ---
-
-
-import itertools
 
 
 def _powerset(items):

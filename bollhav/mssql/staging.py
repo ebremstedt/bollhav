@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 from uuid import UUID
 
 import polars as pl
-import pyodbc
+import pyodbc  # pyright: ignore[reportMissingImports]  # optional mssql extra
 
 from bollhav.model.staging import Staging
 from bollhav.model.write_modes import WriteMode
