@@ -35,6 +35,12 @@
   }
 
   let isModel = $derived(data.nodeType === "model");
+  // Detail level (the "christmas tree"): lappland = bare; katrineholm = pills +
+  // status lights; stockholm = + the runs/errors buttons (and edge labels, gated
+  // in graph.js).
+  let showPills = $derived(view.detail !== "lappland");
+  let showDots = $derived(view.detail !== "lappland");
+  let showActions = $derived(view.detail === "stockholm");
   // An unmanaged source's second pill colour reflects its kind (model/api/file).
   let kindColor = $derived(SRC_COLOR[data.kind] || "#888");
   // Outline: a solid yellow frame for a managed model; for an unmanaged source
@@ -75,6 +81,7 @@
   tabindex="0"
   onkeydown={(e) => e.key === "Enter" && open()}
 >
+  {#if showPills}
   <div class="tag-row">
     {#if isModel}
       <span
@@ -109,9 +116,11 @@
       >
     {/if}
   </div>
+  {/if}
   <!-- status lights: a fixed strip anchored top-right, filling right→left, so
        a single light always sits at the same spot. Order here is the fill
        order (rightmost first). -->
+  {#if showDots}
   <div class="dots">
     {#if data.hasError}
       <span class="dot err" title="error on a recent run"></span>
@@ -132,8 +141,9 @@
       ></span>
     {/if}
   </div>
+  {/if}
   <div class="name">{displayName}</div>
-  {#if isModel}
+  {#if isModel && showActions}
     <div class="actions">
       <button class="mini runs" onclick={(e) => show("state", e)}>runs</button>
       <button class="mini errors" onclick={(e) => show("errors", e)}>errors</button>

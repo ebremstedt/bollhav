@@ -44,12 +44,14 @@
 <style>
   .lbl {
     display: flex;
-    gap: 5px;
+    flex-direction: column;
+    gap: 1px;
     align-items: center;
     font-size: 10px;
     font-weight: 600;
+    line-height: 1.25;
     background: #1f2227;
-    padding: 1px 6px;
+    padding: 2px 6px;
     border-radius: 5px;
     white-space: nowrap;
   }

@@ -8,6 +8,9 @@
   let node = $derived(view.full?.nodes.find((n) => n.name === info.name) || null);
   let meta = $state(null);
   let loading = $state(false);
+  // tags + columns are collapsed by default — expand on click.
+  let showTags = $state(false);
+  let showCols = $state(false);
 
   $effect(() => {
     const name = info.name;
@@ -28,14 +31,13 @@
   function fmtTs(iso) {
     return iso ? iso.replace("T", " ").slice(0, 19) : "—";
   }
-  function colLabel(c) {
+  // A column's type string: "type", "type(len)", or "type(p,s)".
+  function colType(c) {
     let t = c.type || "?";
     if (c.length != null) t += `(${c.length})`;
     else if (c.precision != null)
       t += `(${c.precision}${c.scale != null ? "," + c.scale : ""})`;
-    const marks =
-      (c.primary_key ? " PK" : "") + (c.unique && !c.primary_key ? " UQ" : "");
-    return `${c.name} : ${t}${marks}`;
+    return t;
   }
   // Stack a dotted tag onto one line per segment (each non-final keeps its
   // trailing dot), rendered with `white-space: pre-line` so it HARD-breaks at
@@ -55,6 +57,24 @@
   let upstream = $derived(node?.upstream ?? []);
   let sources = $derived(node?.sources ?? []);
 
+  // Split a dotted name into colour-coded parts: catalog (dark blue),
+  // schema (blue), table (light blue). Non-final segments keep their dot.
+  function nameParts(full) {
+    const parts = String(full).split(".");
+    if (parts.length >= 3)
+      return [
+        { t: parts[0] + ".", c: "cat" },
+        { t: parts[1] + ".", c: "sch" },
+        { t: parts.slice(2).join("."), c: "tbl" },
+      ];
+    if (parts.length === 2)
+      return [
+        { t: parts[0] + ".", c: "sch" },
+        { t: parts[1], c: "tbl" },
+      ];
+    return [{ t: parts[0], c: "tbl" }];
+  }
+
   // seconds -> "1d" / "6h" / "30m" for a freshness window
   function fmtDur(secs) {
     if (secs == null) return "";
@@ -72,17 +92,16 @@
   }
 </script>
 
+{#snippet fqn(name)}{#each nameParts(name) as p}<span class={p.c}>{p.t}</span
+    >{/each}{/snippet}
+
 <aside class="meta-panel">
   <div class="head">
-    <span class="title">{tbl}</span>
+    <span class="title tbl">{tbl}</span>
     <button class="x" onclick={() => (info.name = null)}>✕</button>
   </div>
 
-  <div class="fqn">
-    {#if cat}<span class="dim">{cat}.</span>{/if}{#if sch}<span class="dim"
-        >{sch}.</span
-      >{/if}{tbl}
-  </div>
+  <div class="fqn stack">{@render fqn(info.name)}</div>
 
   {#if hasMeta && meta.description}
     <div class="desc">{meta.description}</div>
@@ -127,40 +146,71 @@
     <ul class="list">
       {#each upstreamSpecs as u}
         <li>
-          {u.name}
-          <span class="contract">{u.contract}</span>
-          {#if u.freshness}<span class="fresh">{freshLabel(u.freshness)}</span>{/if}
-          {#if u.deactivate_for_dev}<em class="devoff">dev→prod</em>{/if}
+          <span class="up-name stack">{@render fqn(u.name)}</span>{#if u.deactivate_for_dev}
+            <em class="devoff">dev→prod</em>{/if}
+          <span class="up-badges">
+            <span class="contract">{u.contract}</span>
+            {#if u.freshness}<span class="fresh">{freshLabel(u.freshness)}</span>{/if}
+          </span>
         </li>
       {/each}
     </ul>
   {:else if upstream.length}
     <ul class="list">
-      {#each upstream as u}<li>{u}</li>{/each}
+      {#each upstream as u}<li><span class="up-name stack">{@render fqn(u)}</span></li>{/each}
     </ul>
   {/if}
 
   <div class="sec">sources ({sources.length})</div>
   {#if sources.length}
     <ul class="list">
-      {#each sources as s}<li>{s.name} <em>({s.kind})</em></li>{/each}
+      {#each sources as s}<li>
+          <span class="up-name stack">{@render fqn(s.name)}</span>
+          <em>({s.kind})</em>
+        </li>{/each}
     </ul>
   {/if}
 
   {#if metaTags.length}
-    <div class="sec">tags ({metaTags.length})</div>
-    <div class="tags">
-      {#each metaTags as t}
-        <span class="chip">{stackDots(t)}</span>
-      {/each}
-    </div>
+    <button
+      class="sec sec-toggle"
+      onclick={() => (showTags = !showTags)}
+      aria-expanded={showTags}
+    >
+      <span class="caret">{showTags ? "▾" : "▸"}</span> tags ({metaTags.length})
+    </button>
+    {#if showTags}
+      <div class="tags">
+        {#each metaTags as t}
+          <span class="chip">{stackDots(t)}</span>
+        {/each}
+      </div>
+    {/if}
   {/if}
 
   {#if cols.length}
-    <div class="sec">columns ({cols.length})</div>
-    <ul class="list cols">
-      {#each cols as c}<li>{colLabel(c)}</li>{/each}
-    </ul>
+    <button
+      class="sec sec-toggle"
+      onclick={() => (showCols = !showCols)}
+      aria-expanded={showCols}
+    >
+      <span class="caret">{showCols ? "▾" : "▸"}</span> columns ({cols.length})
+    </button>
+    {#if showCols}
+      <table class="cols-table">
+        <tbody>
+          {#each cols as c}
+            <tr>
+              <td class="cname">{c.name}</td>
+              <td class="ctype">{colType(c)}</td>
+              <td class="cflag"
+                >{c.primary_key ? "PK" : c.unique ? "UQ" : ""}</td
+              >
+            </tr>
+          {/each}
+        </tbody>
+      </table>
+    {/if}
   {/if}
 
   {#if loading}
@@ -212,6 +262,22 @@
   .dim {
     color: var(--muted, #888);
   }
+  /* dotted-name colour ramp: catalog (dark blue) · schema (blue) · table
+     (light blue), used everywhere a name shows in this panel. */
+  .cat {
+    color: #2563eb;
+  }
+  .sch {
+    color: #3b82f6;
+  }
+  .tbl {
+    color: #60a5fa;
+  }
+  /* a `.stack`ed name puts each dotted segment on its own line */
+  .stack :global(span),
+  .stack span {
+    display: block;
+  }
   .desc {
     font-style: italic;
     color: var(--muted, #888);
@@ -249,7 +315,21 @@
     color: var(--muted, #888);
     font-style: normal;
   }
-  /* contract level + freshness chips on each upstream */
+  /* upstream name stacked one dotted segment per line (catalog. / schema. /
+     table), each non-final segment keeping its trailing dot. */
+  .up-name {
+    white-space: pre-line;
+    overflow-wrap: anywhere;
+  }
+  /* contract level + freshness chips stacked under the upstream name —
+     freshness sits beneath the contract, not beside it. */
+  .up-badges {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 3px;
+    margin: 3px 0 5px 2px;
+  }
   .contract {
     font-size: 9px;
     font-weight: 700;
@@ -259,7 +339,6 @@
     border-radius: 8px;
     background: #2b2f36;
     color: #ffd23f;
-    margin-left: 4px;
   }
   .fresh {
     font-size: 9px;
@@ -268,7 +347,6 @@
     border-radius: 8px;
     background: #16313a;
     color: #4aa3ff;
-    margin-left: 4px;
     white-space: nowrap;
   }
   .devoff {
@@ -276,9 +354,51 @@
     color: var(--muted, #888);
     margin-left: 4px;
   }
-  .cols li {
+  /* a collapsible section header (tags / columns) — looks like .sec but is a
+     button with a caret. */
+  .sec-toggle {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+    text-align: left;
+    background: transparent;
+    border: none;
+    border-top: 1px solid var(--border);
+    color: var(--fg);
+    font: inherit;
+    font-weight: 700;
+    cursor: pointer;
+  }
+  .caret {
+    color: var(--muted, #888);
+    font-size: 10px;
+  }
+  /* columns rendered as a compact table */
+  .cols-table {
+    width: 100%;
+    border-collapse: collapse;
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
     font-size: 11px;
+    margin-top: 3px;
+  }
+  .cols-table td {
+    padding: 2px 6px 2px 0;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+  }
+  .cols-table .cname {
+    word-break: break-word;
+  }
+  .cols-table .ctype {
+    color: var(--muted, #888);
+    white-space: nowrap;
+  }
+  .cols-table .cflag {
+    color: #ffd23f;
+    font-weight: 700;
+    text-align: right;
+    white-space: nowrap;
   }
   .tags {
     display: flex;
