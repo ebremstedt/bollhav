@@ -81,9 +81,13 @@ nav:
       - Tags: TAGS.md
       - TUI: TUI.md
       - GUI: GUI.md
-  - Implementations:
-      - Postgres: POSTGRES.md
-      - MSSQL: MSSQL.md
+      - Backends:
+          - Postgres: POSTGRES.md
+          - MSSQL: MSSQL.md
+  - Examples:
+      - Model: MODEL_EXAMPLE.md
+      - Tags: TAGS_EXAMPLE.md
+      - Decorator: EXAMPLES.md
   - Articles:
       - Overview: ARTICLES.md
       - Virtual environments: VIRTUAL_ENVIRONMENTS.md
