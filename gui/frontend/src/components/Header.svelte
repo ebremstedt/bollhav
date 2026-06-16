@@ -5,7 +5,15 @@
     clearFocus,
     refresh,
     setNameStyle,
+    setDetail,
   } from "../lib/view.svelte.js";
+
+  // detail-level radio (the "christmas tree"): more decoration the further right.
+  const DETAILS = [
+    ["lappland", "names only — bare boxes + arrows"],
+    ["katrineholm", "+ pills (model/table/view, source kind) + status lights"],
+    ["stockholm", "everything — + runs/errors buttons + contract labels"],
+  ];
 
   let { dark = $bindable() } = $props();
 
@@ -20,55 +28,76 @@
 </script>
 
 <header>
-  <strong>Lineage</strong>
-  <span class="hint">click a model for runs &amp; errors</span>
-  <input
-    class="search"
-    list="model-list"
-    placeholder="focus a model + its upstreams…"
-    value={view.query}
-    oninput={(e) => {
-      view.query = e.currentTarget.value;
-      applyFilter();
-    }}
-  />
-  <datalist id="model-list">
-    {#each modelNames as m}
-      <option value={m}></option>
-    {/each}
-  </datalist>
-  {#if view.focused}
-    <button class="clear" onclick={clearFocus}>✕ show all</button>
-  {/if}
-  <span
-    class="tip-wrap"
-    data-tip="Reload the graph. Limited to once every 5 seconds."
-  >
-    <button class="toggle" onclick={refresh} disabled={!view.canRefresh}>
-      {#if view.refreshing}
-        <span class="ico spin">⟳</span> refreshing…
-      {:else}
-        <span class="ico">⟳</span> refresh{view.cooldown > 0
-          ? ` (${view.cooldown})`
-          : ""}
-      {/if}
-    </button>
-  </span>
-  <span
-    class="tip-wrap"
-    data-tip="How model & source names are shown: Lengthen (one line) or Thicken (one dotted segment per line)."
-  >
-    <button
-      class="toggle"
-      onclick={() =>
-        setNameStyle(view.nameStyle === "thicken" ? "lengthen" : "thicken")}
+  <div class="left">
+    <span
+      class="tip-wrap"
+      data-tip="Detail level (the christmas tree) — how much decoration to show on the graph."
     >
-      {view.nameStyle === "thicken" ? "⤢ Lengthen" : "≣ Thicken"}
+      <span class="seg">
+        <span class="tree" aria-hidden="true">🎄</span>
+        {#each DETAILS as [val, tip]}
+          <button
+            class="seg-btn"
+            class:active={view.detail === val}
+            data-tip={tip}
+            onclick={() => setDetail(val)}>{val}</button
+          >
+        {/each}
+      </span>
+    </span>
+  </div>
+
+  <strong class="brand">Lineage</strong>
+
+  <div class="right">
+    <input
+      class="search"
+      list="model-list"
+      placeholder="focus a model + its upstreams…"
+      value={view.query}
+      oninput={(e) => {
+        view.query = e.currentTarget.value;
+        applyFilter();
+      }}
+    />
+    <datalist id="model-list">
+      {#each modelNames as m}
+        <option value={m}></option>
+      {/each}
+    </datalist>
+    {#if view.focused}
+      <button class="clear" onclick={clearFocus}>✕ show all</button>
+    {/if}
+    <span
+      class="tip-wrap"
+      data-tip="Reload the graph. Limited to once every 5 seconds."
+    >
+      <button class="toggle" onclick={refresh} disabled={!view.canRefresh}>
+        {#if view.refreshing}
+          <span class="ico spin">⟳</span> refreshing…
+        {:else}
+          <span class="ico">⟳</span> refresh{view.cooldown > 0
+            ? ` (${view.cooldown})`
+            : ""}
+        {/if}
+      </button>
+    </span>
+    <span
+      class="tip-wrap"
+      data-tip="How model & source names are shown: Lengthen (one line) or Thicken (one dotted segment per line)."
+    >
+      <button
+        class="toggle"
+        onclick={() =>
+          setNameStyle(view.nameStyle === "thicken" ? "lengthen" : "thicken")}
+      >
+        {view.nameStyle === "thicken" ? "⤢ Lengthen" : "≣ Thicken"}
+      </button>
+    </span>
+    <button class="toggle" onclick={() => (dark = !dark)}>
+      {dark ? "☀ light" : "☾ dark"}
     </button>
-  </span>
-  <button class="toggle" onclick={() => (dark = !dark)}>
-    {dark ? "☀ light" : "☾ dark"}
-  </button>
+  </div>
 </header>
 
 <style>
@@ -82,9 +111,21 @@
     background: var(--bg);
     color: var(--fg);
   }
-  .hint {
-    color: var(--muted);
-    font-weight: 400;
+  /* three header zones: christmas radio (left) · Lineage (centred) · controls
+     (right). left/right flex equally so the brand sits dead centre. */
+  .left,
+  .right {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .right {
+    justify-content: flex-end;
+  }
+  .brand {
+    flex: 0 0 auto;
+    white-space: nowrap;
   }
   .toggle {
     font-size: 12px;
@@ -94,6 +135,33 @@
     background: var(--control-bg);
     color: var(--control-fg);
     cursor: pointer;
+  }
+  /* christmas-tree detail radio: a segmented control */
+  .seg {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    border: 1px solid var(--control-border);
+    border-radius: 6px;
+    background: var(--control-bg);
+    padding: 2px;
+  }
+  .seg .tree {
+    font-size: 13px;
+    padding: 0 3px 0 4px;
+  }
+  .seg-btn {
+    font-size: 12px;
+    padding: 3px 9px;
+    border: none;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--control-fg);
+    cursor: pointer;
+  }
+  .seg-btn.active {
+    background: #2e7d32;
+    color: #fff;
   }
   .toggle:disabled {
     opacity: 0.55;
@@ -144,7 +212,6 @@
     }
   }
   .search {
-    margin-left: auto;
     font-size: 12px;
     padding: 4px 9px;
     border-radius: 6px;

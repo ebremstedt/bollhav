@@ -39,7 +39,7 @@
     class="item"
     data-tip="Each upstream edge is labelled with the contract it enforces: the completeness level (exists / window / through / whole) and, when set, a freshness bound (❄ ≤age, latest or all)."
   >
-    <span class="edge"></span>contract · ❄ freshness
+    <span class="edge"></span>contract · <span class="snow">❄︎</span> freshness
   </span>
   <span
     class="item"
@@ -151,6 +151,10 @@
   }
   .sw.dot.stale {
     background: #2f8fff;
+  }
+  .snow {
+    color: #4aa3ff;
+    font-weight: 700;
   }
   .edge {
     width: 22px;
