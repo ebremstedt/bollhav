@@ -24,6 +24,8 @@ export default defineConfig({
       "/match": API,
       "/downstreams": API,
       "/errors": API,
+      "/runs": API,
+      "/grid": API,
     },
   },
 });

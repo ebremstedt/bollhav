@@ -100,7 +100,7 @@
     gap: 8px;
   }
   .panel-title {
-    font-weight: 600;
+    font-weight: 700;
     font-size: 14px;
     word-break: break-all;
   }
