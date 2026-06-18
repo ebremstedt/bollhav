@@ -1,5 +1,10 @@
 <script>
-  import { view, setDetail, setHideUpstreams } from "../lib/view.svelte.js";
+  import {
+    view,
+    setDetail,
+    setHideUpstreams,
+    setAnimateEdges,
+  } from "../lib/view.svelte.js";
 
   // detail-level radio: a bare tree (names only) vs a decorated one (everything).
   const DETAILS = [
@@ -37,6 +42,18 @@
       {view.hideUpstreams ? "⬆ upstreams: off" : "⬆ upstreams: on"}
     </button>
   </span>
+  <span
+    class="tip-wrap"
+    data-tip="Animate the dependency arrows (marching dashes). Off by default — it's heavy on slow machines."
+  >
+    <button
+      class="toggle"
+      class:on={view.animateEdges}
+      onclick={() => setAnimateEdges(!view.animateEdges)}
+    >
+      {view.animateEdges ? "✦ arrows: animated" : "✦ arrows: static"}
+    </button>
+  </span>
 </div>
 
 <style>
@@ -57,6 +74,11 @@
     background: var(--control-bg);
     color: var(--control-fg);
     cursor: pointer;
+  }
+  .toggle.on {
+    background: #2e7d32;
+    border-color: #2e7d32;
+    color: #fff;
   }
   .seg {
     display: inline-flex;

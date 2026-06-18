@@ -11,6 +11,17 @@ DSN = os.environ.get(
 app = FastAPI(title="LINEAGE")
 
 
+@app.get("/config")
+def config():
+    """Runtime UI config from env vars. `default_model` / `default_tags`
+    pre-narrow the lineage graph on load so slow clients never lay out the
+    whole DAG (set one or the other on the backend deployment)."""
+    return {
+        "default_model": os.environ.get("LINEAGE_DEFAULT_MODEL") or None,
+        "default_tags": os.environ.get("LINEAGE_DEFAULT_TAGS") or None,
+    }
+
+
 def _conn():
     return psycopg.connect(DSN)
 
