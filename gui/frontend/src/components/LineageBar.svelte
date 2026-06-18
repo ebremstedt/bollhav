@@ -39,7 +39,7 @@
     data-tip="When focusing a model or tag-filtering, include the upstream chain or show only the matched models."
   >
     <button class="toggle" onclick={() => setHideUpstreams(!view.hideUpstreams)}>
-      {view.hideUpstreams ? "⬆ upstreams: off" : "⬆ upstreams: on"}
+      {view.hideUpstreams ? "upstreams: off" : "upstreams: on"}
     </button>
   </span>
   <span
@@ -51,7 +51,7 @@
       class:on={view.animateEdges}
       onclick={() => setAnimateEdges(!view.animateEdges)}
     >
-      {view.animateEdges ? "✦ arrows: animated" : "✦ arrows: static"}
+      {view.animateEdges ? "arrows: animated" : "arrows: static"}
     </button>
   </span>
 </div>

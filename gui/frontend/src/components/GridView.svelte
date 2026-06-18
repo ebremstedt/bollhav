@@ -65,6 +65,16 @@
     return out;
   });
 
+  // is any filter (name / tag / time) narrowing the view right now?
+  let hasFilter = $derived(
+    !!view.query.trim() ||
+      !!tagMatchSet ||
+      (view.loadedMode === "exact"
+        ? !!view.loadedExact
+        : !!(view.loadedFrom || view.loadedTo)) ||
+      view.intervalMode !== "any",
+  );
+
   // a model's catalog / schema / table segment, from the end of the dotted name
   function part(full, key) {
     const p = (full || "").split(".");
@@ -145,7 +155,13 @@
   </div>
 
   {#if loaded && rows.length === 0}
-    <p class="empty">No runs match in this environment. 🎉</p>
+    <p class="empty">
+      {#if hasFilter}
+        No models match the current filters.
+      {:else}
+        Nothing recorded in this environment yet. 🎉
+      {/if}
+    </p>
   {:else}
     <div class="body">
       <div class="scroll">

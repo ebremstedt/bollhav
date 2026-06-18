@@ -4,7 +4,7 @@
   import { view } from "../lib/view.svelte.js";
   import {
     MODEL_YELLOW,
-    UNMANAGED_YELLOW,
+    UNMANAGED_GREY,
     MATERIALIZATION_COLOR,
     SRC_COLOR,
   } from "../lib/constants.js";
@@ -112,7 +112,7 @@
     {:else}
       <span
         class="kind-label"
-        style="background:{UNMANAGED_YELLOW};color:{textOn(UNMANAGED_YELLOW)}"
+        style="background:{UNMANAGED_GREY};color:{textOn(UNMANAGED_GREY)}"
         title="not managed by bollhav — external input">unmanaged</span
       >
       <span

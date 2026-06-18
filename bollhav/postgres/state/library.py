@@ -233,7 +233,7 @@ class Library(_PostgresStateBase):
             "catalog": t.catalog,
             "schema": t.schema,
             "table": t.name,
-            "tags": sorted(model.tags),
+            "tags": sorted(set(model.tags) | model.suffix_tags()),
             "partitioned_by": t.partitioned_by,
             "staging": t.stage,
             "primary_key": [c.name for c in t.primary_key_columns],

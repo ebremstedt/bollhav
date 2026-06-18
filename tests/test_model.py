@@ -7,8 +7,59 @@ from bollhav.model.contract import Contract
 from bollhav.model.model import Model
 from bollhav.model.temporality import Temporality
 from bollhav.model.target import Target
+from bollhav.model.tags import Tags
 from bollhav.model.modelrun import ModelRun
 from bollhav.model.window import compute_intervals, resolve_window, split_window
+
+
+def _suffixed_model(*, suffix="demoenv", appendix=None, tagging=None) -> Model:
+    return Model(
+        target=Target(
+            name="orders",
+            schema="warehouse",
+            schema_suffix=suffix,
+            schema_suffix_appendix=appendix,
+        ),
+        temporality=Temporality.TEMPORAL,
+        batching=Batch(),
+        tagging=tagging,
+    )
+
+
+def test_suffix_tags_adds_the_suffix():
+    assert _suffixed_model(appendix=None).suffix_tags() == {"demoenv"}
+
+
+def test_suffix_tags_includes_the_date_appendix():
+    m = _suffixed_model(appendix="%y%V")
+    expected = {"demoenv", datetime.now(tz=timezone.utc).strftime("%y%V")}
+    assert m.suffix_tags() == expected
+
+
+def test_suffix_tags_empty_without_a_suffix():
+    m = Model(
+        target=Target(name="orders", schema="warehouse"),
+        temporality=Temporality.TEMPORAL,
+        batching=Batch(),
+    )
+    assert m.suffix_tags() == set()
+
+
+def test_suffix_tags_respects_flag_off():
+    m = _suffixed_model(appendix="%y%V", tagging=Tags(suffix_add_to_tags=False))
+    assert m.suffix_tags() == set()
+
+
+def test_suffix_add_to_tags_defaults_true():
+    assert Tags().suffix_add_to_tags is True
+
+
+def test_suffix_not_in_logical_tags():
+    # the logical tag set stays env-neutral — the suffix only joins at
+    # registration (model.tags | model.suffix_tags()), so TAGS= run-selection
+    # matches the same models in every environment.
+    m = _suffixed_model(appendix="%y%V")
+    assert "demoenv" not in m.tags
 
 
 def make_model(**overrides) -> Model:
