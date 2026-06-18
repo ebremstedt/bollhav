@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import datetime, timezone
 from uuid import uuid4
 
 from bollhav.model.target import Target
@@ -46,10 +47,13 @@ class Model:
         self.debug = debug
         self.description = description
         self.upstream: list[Source] = upstream or [_unknown_source()]
+        # keep the tagging config so registration can add the schema-suffix
+        # tags (env-specific) per `suffix_add_to_tags`; default when unset.
+        self.tagging: Tags = tagging or Tags()
         self.tags: set[str] = (
             tags
             if tags is not None
-            else (tagging or Tags()).assemble(
+            else self.tagging.assemble(
                 self.target.name, self.target.schema, self.target.catalog
             )
         )
@@ -393,6 +397,22 @@ class Model:
         if self.target.database is Database.MSSQL:
             return ".".join(f"[{p}]" for p in idents)
         return ".".join('"' + p.replace('"', '""') + '"' for p in idents)
+
+    def suffix_tags(self) -> set[str]:
+        """Tags derived from the active schema suffix (and its date appendix),
+        when `Tags.suffix_add_to_tags` is on. Empty when no suffix is applied —
+        so prod (unsuffixed) models are unaffected. Added to the library tags
+        at registration, not to `self.tags` (run-selection stays env-neutral)."""
+        if not self.tagging.suffix_add_to_tags:
+            return set()
+        suffix = self.target.schema_suffix
+        if not suffix:
+            return set()
+        out = {suffix}
+        appendix = self.target.schema_suffix_appendix
+        if appendix:
+            out.add(datetime.now(tz=timezone.utc).strftime(appendix))
+        return out
 
     @property
     def stateful(self) -> bool:

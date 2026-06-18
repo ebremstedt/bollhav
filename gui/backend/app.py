@@ -17,6 +17,7 @@ def config():
     pre-narrow the lineage graph on load so slow clients never lay out the
     whole DAG (set one or the other on the backend deployment)."""
     return {
+        "title": os.environ.get("LINEAGE_TITLE") or "Model GUI",
         "default_model": os.environ.get("LINEAGE_DEFAULT_MODEL") or None,
         "default_tags": os.environ.get("LINEAGE_DEFAULT_TAGS") or None,
     }

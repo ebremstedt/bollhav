@@ -121,6 +121,7 @@ def _apply_to_model(
         description=model.description,
         upstream=list(model.upstream),
         tags=set(model.tags),
+        tagging=model.tagging,
         **model.extra,
     )
     # Record which mode resolved the window — same precedence resolve_window

@@ -115,6 +115,16 @@
     return filtered.slice(0, limit);
   });
 
+  // is any filter (name / tag / time) narrowing the view right now?
+  let hasFilter = $derived(
+    !!nameQuery.trim() ||
+      !!tagMatchSet ||
+      (view.loadedMode === "exact"
+        ? !!view.loadedExact
+        : !!(view.loadedFrom || view.loadedTo)) ||
+      view.intervalMode !== "any",
+  );
+
   // render the model name per the chosen mode
   function displayName(full) {
     const parts = (full || "").split(".");
@@ -171,7 +181,13 @@
   </div>
 
   {#if loaded && items.length === 0}
-    <p class="empty">Nothing to show in this environment. 🎉</p>
+    <p class="empty">
+      {#if hasFilter}
+        No runs match the current filters.
+      {:else}
+        Nothing recorded in this environment yet. 🎉
+      {/if}
+    </p>
   {:else}
     <div class="scroll">
       <table>

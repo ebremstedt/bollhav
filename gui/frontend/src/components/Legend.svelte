@@ -18,12 +18,12 @@
   {#if view.tab === "lineage"}
   <span
     class="grp"
-    data-tip="Managed models are state-tracked and gated. Drawn with a yellow outline; the pill reads `model`, with a second pill for its temporality."
-    >Models (managed)</span
+    data-tip="Sources are external inputs bollhav does NOT manage — no state, never gated, fixed across environments. Drawn as a striped, dashed card."
+    >Sources (unmanaged)</span
   >
-  {#each LEGEND_KINDS as k}
-    <span class="item" data-tip={k.tip}>
-      <span class="sw" style="background:{k.c}"></span>{k.label}
+  {#each LEGEND_SOURCES as s}
+    <span class="item" data-tip={s.tip}>
+      <span class="sw striped" style="border-color:{s.c}"></span>{s.label}
     </span>
   {/each}
 
@@ -31,12 +31,18 @@
 
   <span
     class="grp"
-    data-tip="Sources are external inputs bollhav does NOT manage — no state, never gated, fixed across environments. Drawn as a striped, dashed card."
-    >Sources (unmanaged)</span
+    data-tip="Managed models are state-tracked and gated. Drawn with a yellow outline; the pill reads `model`, with a second pill for its temporality."
+    >Models (managed)</span
   >
-  {#each LEGEND_SOURCES as s}
-    <span class="item" data-tip={s.tip}>
-      <span class="sw striped" style="border-color:{s.c}"></span>{s.label}
+  {#each LEGEND_KINDS.slice(0, 1) as k}
+    <span class="item" data-tip={k.tip}>
+      <span class="sw" style="background:{k.c}"></span>{k.label}
+    </span>
+  {/each}
+  <span class="pipe">|</span>
+  {#each LEGEND_KINDS.slice(1) as k}
+    <span class="item" data-tip={k.tip}>
+      <span class="sw" style="background:{k.c}"></span>{k.label}
     </span>
   {/each}
 
@@ -144,6 +150,9 @@
     font-weight: 600;
     color: var(--legend-grp);
     cursor: help;
+  }
+  .pipe {
+    color: var(--sep);
   }
   .item {
     display: inline-flex;
