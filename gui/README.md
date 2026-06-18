@@ -5,7 +5,7 @@ lineage — the cross-pipeline model graph stored in the `z_bollhav` library.
 
 ## Run it
 
-**See the demo** (brings its own Postgres + seeded data — nothing to set up):
+**See the demo** (brings its own Postgres + seeded data — nothing to set up)
 
 ```bash
 docker compose up --build      # then open http://localhost:53173
