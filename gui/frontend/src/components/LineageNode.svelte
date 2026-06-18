@@ -227,7 +227,10 @@
     height: 11px;
     border-radius: 50%;
     border: 2px solid var(--node-dot-border);
-    animation: dot-pulse 1.4s ease-in-out infinite;
+    /* static glow, tinted per-dot via the --glow RGB custom property (no pulse) */
+    box-shadow:
+      0 0 6px 2px rgba(var(--glow), 0.9),
+      0 0 14px 4px rgba(var(--glow), 0.55);
   }
   .dot.err {
     background: #ff2d3a;
@@ -244,29 +247,6 @@
   .dot.stale {
     background: #2f8fff;
     --glow: 47, 143, 255;
-  }
-  /* one glow animation, tinted per-dot via the --glow RGB custom property */
-  @keyframes dot-pulse {
-    0%,
-    100% {
-      box-shadow:
-        0 0 6px 2px rgba(var(--glow), 0.9),
-        0 0 14px 4px rgba(var(--glow), 0.5);
-    }
-    50% {
-      box-shadow:
-        0 0 10px 3px rgba(var(--glow), 1),
-        0 0 26px 8px rgba(var(--glow), 0.7);
-    }
-  }
-  /* respect users who ask for less motion — keep the strong glow, drop the pulse */
-  @media (prefers-reduced-motion: reduce) {
-    .dot {
-      animation: none;
-      box-shadow:
-        0 0 6px 2px rgba(var(--glow), 0.9),
-        0 0 14px 4px rgba(var(--glow), 0.55);
-    }
   }
   .card.model {
     border-radius: 6px;

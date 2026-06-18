@@ -103,3 +103,18 @@ def errors(full_name: str | None = None, limit: int = 100, env: str | None = Non
         return registry.get_errors(
             c, full_name=full_name, limit=limit, schema=_schema(env)
         )
+
+
+@app.get("/runs")
+def runs(limit: int = 50, env: str | None = None):
+    """Recent run/interval state rows across every model (newest first)."""
+    with _conn() as c:
+        return registry.get_recent_runs(c, limit=limit, schema=_schema(env))
+
+
+@app.get("/grid")
+def grid(limit: int = 40, env: str | None = None):
+    """Per-model run history for the grid view — each model with its most
+    recent `limit` run rows."""
+    with _conn() as c:
+        return registry.get_runs_grouped(c, limit=limit, schema=_schema(env))

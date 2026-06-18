@@ -412,6 +412,7 @@
      shown in yellow, staying inside the panel */
   .chip {
     font-size: 10px;
+    font-weight: 700;
     padding: 2px 7px;
     border-radius: 9px;
     border: 1px solid var(--control-border);

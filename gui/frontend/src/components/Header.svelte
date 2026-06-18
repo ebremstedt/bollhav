@@ -5,19 +5,15 @@
     applyTagFilter,
     clearFocus,
     refresh,
-    setDetail,
-    setHideUpstreams,
     setEnv,
+    setTab,
   } from "../lib/view.svelte.js";
 
-  // detail-level radio: a bare tree (names only) vs a decorated one (everything).
-  const DETAILS = [
-    ["lappland", "🌲", "bare — just boxes, names, and arrows"],
-    [
-      "stockholm",
-      "🎄",
-      "everything — pills, status lights, runs/errors buttons, and contract labels",
-    ],
+  // top-level view tabs
+  const TABS = [
+    ["lineage", "Lineage"],
+    ["runs", "Runs"],
+    ["grid", "Grid"],
   ];
 
   let { dark = $bindable() } = $props();
@@ -40,21 +36,15 @@
 
 <header>
   <div class="left">
-    <span
-      class="tip-wrap tipleft"
-      data-tip="Detail level (the christmas tree) — how much decoration to show on the graph."
-    >
-      <span class="seg">
-        {#each DETAILS as [val, emoji, tip]}
-          <button
-            class="seg-btn"
-            class:active={view.detail === val}
-            data-tip={tip}
-            title={val}
-            onclick={() => setDetail(val)}>{emoji}</button
-          >
-        {/each}
-      </span>
+    <span class="seg">
+      {#each TABS as [val, label]}
+        <button
+          class="seg-btn"
+          class:active={view.tab === val}
+          onclick={() => setTab(val)}
+          >{label}{#if val === "grid"}<sup class="beta">(beta)</sup>{/if}</button
+        >
+      {/each}
     </span>
     {#if view.environments.length}
       <span
@@ -108,18 +98,7 @@
     <button class="clear" onclick={clearFocus}>✕ clear all</button>
     <span
       class="tip-wrap"
-      data-tip="When focusing a model or tag-filtering, include the upstream chain or show only the matched models."
-    >
-      <button
-        class="toggle"
-        onclick={() => setHideUpstreams(!view.hideUpstreams)}
-      >
-        {view.hideUpstreams ? "⬆ upstreams: off" : "⬆ upstreams: on"}
-      </button>
-    </span>
-    <span
-      class="tip-wrap"
-      data-tip="Reload the graph. Limited to once every 5 seconds."
+      data-tip="Reload data. Limited to once every 5 seconds."
     >
       <button class="toggle" onclick={refresh} disabled={!view.canRefresh}>
         {#if view.refreshing}
@@ -148,8 +127,6 @@
     background: var(--bg);
     color: var(--fg);
   }
-  /* three header zones: christmas radio (left) · Lineage (centred) · controls
-     (right). left/right flex equally so the brand sits dead centre. */
   .left,
   .right {
     flex: 1;
@@ -169,7 +146,6 @@
     color: var(--control-fg);
     cursor: pointer;
   }
-  /* christmas-tree detail radio: a segmented control */
   .seg {
     display: inline-flex;
     align-items: center;
@@ -178,10 +154,6 @@
     border-radius: 6px;
     background: var(--control-bg);
     padding: 2px;
-  }
-  .seg .tree {
-    font-size: 13px;
-    padding: 0 3px 0 4px;
   }
   .seg-btn {
     font-size: 12px;
@@ -196,12 +168,16 @@
     background: #2e7d32;
     color: #fff;
   }
+  .beta {
+    font-size: 8px;
+    margin-left: 1px;
+    color: #ffd23f;
+  }
   .toggle:disabled {
     opacity: 0.55;
     cursor: not-allowed;
   }
-  /* custom hover tooltip, dropped below the button (native title is flaky and
-     never shows while the button is disabled during the cooldown) */
+  /* custom hover tooltip, dropped below the button */
   .tip-wrap {
     position: relative;
     display: inline-flex;
@@ -233,8 +209,6 @@
     z-index: 50;
     pointer-events: none;
   }
-  /* left-zone controls: anchor the tooltip to the LEFT so it opens rightward
-     into the viewport instead of off the left edge. */
   .tip-wrap.tipleft:hover::after {
     right: auto;
     left: 0;

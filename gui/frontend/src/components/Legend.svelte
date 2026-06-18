@@ -1,10 +1,21 @@
 <script>
-  import { LEGEND_KINDS, LEGEND_SOURCES } from "../lib/constants.js";
+  import { LEGEND_KINDS, LEGEND_SOURCES, STATUS_COLOR } from "../lib/constants.js";
+  import { view } from "../lib/view.svelte.js";
 
   let showHelp = $state(false);
+
+  // run-status colours shown on the runs + grid tabs
+  const RUN_STATUSES = [
+    ["applied", "applied (ok)"],
+    ["running", "running"],
+    ["blocked", "blocked"],
+    ["error", "error"],
+    ["pending", "pending"],
+  ];
 </script>
 
 <footer class="legend">
+  {#if view.tab === "lineage"}
   <span
     class="grp"
     data-tip="Managed models are state-tracked and gated. Drawn with a yellow outline; the pill reads `model`, with a second pill for its temporality."
@@ -64,6 +75,13 @@
   >
     <span class="sw dot stale"></span>stale
   </span>
+  {:else}
+    {#each RUN_STATUSES as [k, label]}
+      <span class="item">
+        <span class="sw dot" style="background:{STATUS_COLOR[k]}"></span>{label}
+      </span>
+    {/each}
+  {/if}
 
   <span class="help-wrap">
     <button

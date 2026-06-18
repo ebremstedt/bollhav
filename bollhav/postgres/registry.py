@@ -286,6 +286,114 @@ def get_recent_state(
     ]
 
 
+def get_recent_runs(
+    conn: "psycopg.Connection",
+    limit: int = 50,
+    schema: str = LIBRARY_SCHEMA,
+) -> list[dict]:
+    """Recent run/interval rows across ALL models in `schema` — every model's
+    state ledger unioned and sorted newest-first, each row carrying its
+    `full_name`. The cross-model companion to `get_recent_state`. Empty if the
+    library isn't there."""
+    if not _table_exists(conn, schema, LIBRARY_TABLE):
+        return []
+    models = conn.execute(
+        sql.SQL(
+            "SELECT full_name, state_schema, state_table FROM {schema}.{table} "
+            "WHERE state_table IS NOT NULL ORDER BY full_name"
+        ).format(
+            schema=sql.Identifier(schema),
+            table=sql.Identifier(LIBRARY_TABLE),
+        )
+    ).fetchall()
+    runs: list[dict] = []
+    for full_name, st_schema, st_table in models:
+        if (
+            not st_schema
+            or not st_table
+            or not _table_exists(conn, st_schema, st_table)
+        ):
+            continue
+        rows = conn.execute(
+            sql.SQL(
+                "SELECT status, since, until, applied_at, run_id, temporality, "
+                "blocked_reason FROM {schema}.{table} "
+                "ORDER BY applied_at DESC NULLS LAST, since DESC NULLS LAST LIMIT %s"
+            ).format(
+                schema=sql.Identifier(st_schema),
+                table=sql.Identifier(st_table),
+            ),
+            [limit],
+        ).fetchall()
+        for status, since, until, applied_at, run_id, kind, blocked_reason in rows:
+            runs.append(
+                {
+                    "full_name": full_name,
+                    "status": status,
+                    "since": _iso(since),
+                    "until": _iso(until),
+                    "applied_at": _iso(applied_at),
+                    "run_id": str(run_id) if run_id is not None else None,
+                    "kind": kind,
+                    "blocked_reason": blocked_reason,
+                }
+            )
+    # newest first across all models; rows with no applied_at sink to the end
+    runs.sort(key=lambda r: (r["applied_at"] or "", r["since"] or ""), reverse=True)
+    return runs[:limit]
+
+
+def get_runs_grouped(
+    conn: "psycopg.Connection",
+    limit: int = 40,
+    schema: str = LIBRARY_SCHEMA,
+) -> list[dict]:
+    """Per-model run history for the grid view — every stateful model (ordered
+    by name) with its most recent `limit` run rows (newest first). Unlike
+    `get_recent_runs` it groups by model and is NOT globally capped, so each
+    model keeps its own row of cells."""
+    if not _table_exists(conn, schema, LIBRARY_TABLE):
+        return []
+    models = conn.execute(
+        sql.SQL(
+            "SELECT full_name, state_schema, state_table FROM {schema}.{table} "
+            "WHERE state_table IS NOT NULL ORDER BY full_name"
+        ).format(
+            schema=sql.Identifier(schema),
+            table=sql.Identifier(LIBRARY_TABLE),
+        )
+    ).fetchall()
+    out = []
+    for full_name, st_schema, st_table in models:
+        runs: list[dict] = []
+        if st_schema and st_table and _table_exists(conn, st_schema, st_table):
+            rows = conn.execute(
+                sql.SQL(
+                    "SELECT status, since, until, applied_at, run_id, temporality, "
+                    "blocked_reason FROM {schema}.{table} "
+                    "ORDER BY applied_at DESC NULLS LAST, since DESC NULLS LAST LIMIT %s"
+                ).format(
+                    schema=sql.Identifier(st_schema),
+                    table=sql.Identifier(st_table),
+                ),
+                [limit],
+            ).fetchall()
+            runs = [
+                {
+                    "status": status,
+                    "since": _iso(since),
+                    "until": _iso(until),
+                    "applied_at": _iso(applied_at),
+                    "run_id": str(run_id) if run_id is not None else None,
+                    "kind": kind,
+                    "blocked_reason": blocked_reason,
+                }
+                for status, since, until, applied_at, run_id, kind, blocked_reason in rows
+            ]
+        out.append({"full_name": full_name, "runs": runs})
+    return out
+
+
 def get_downstreams(conn: "psycopg.Connection", full_name: str) -> list[str]:
     """Reverse edges — the names of models that declare `full_name` as a
     managed upstream ('who depends on me'). Ordered by name."""
@@ -504,6 +612,8 @@ __all__ = [
     "get_lineage",
     "get_upstream_tree",
     "get_recent_state",
+    "get_recent_runs",
+    "get_runs_grouped",
     "get_downstreams",
     "get_graph",
     "get_errors",
