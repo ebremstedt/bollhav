@@ -7,6 +7,7 @@
   } from "@xyflow/svelte";
   import LineageNode from "./LineageNode.svelte";
   import ContractEdge from "./ContractEdge.svelte";
+  import Recenter from "./Recenter.svelte";
   import { view } from "../lib/view.svelte.js";
 
   let { dark } = $props();
@@ -25,7 +26,9 @@
       {edgeTypes}
       colorMode={dark ? "dark" : "light"}
       fitView
+      fitViewOptions={{ maxZoom: 1, padding: 0.2 }}
     >
+      <Recenter />
       <Background />
       <Controls />
       <MiniMap />

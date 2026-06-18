@@ -4,6 +4,7 @@
     setDetail,
     setHideUpstreams,
     setAnimateEdges,
+    recenter,
   } from "../lib/view.svelte.js";
 
   // detail-level radio: a bare tree (names only) vs a decorated one (everything).
@@ -53,6 +54,12 @@
     >
       {view.animateEdges ? "arrows: animated" : "arrows: static"}
     </button>
+  </span>
+  <span
+    class="tip-wrap"
+    data-tip="Recenter — frame the whole graph (caps zoom so a lone node isn't blown up)."
+  >
+    <button class="toggle" onclick={() => recenter()}>⌖ recenter</button>
   </span>
 </div>
 
