@@ -1,7 +1,7 @@
 # bollhav-gui
 
 A web app that visualizes [bollhav](https://github.com/ebremstedt/bollhav)
-lineage — the cross-pipeline model graph stored in the `z_bollhav` library.
+lineage — the cross-pipeline model graph stored in the `z_bollhav` library
 
 ## Run it
 
