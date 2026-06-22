@@ -121,7 +121,7 @@ def ensure_primary_key(conn: pyodbc.Connection, model: Model) -> None:
     Idempotent and safe on existing tables — re-running is a no-op once the PK
     is in place. Pairs with `_col_ddl` (which no longer emits inline PRIMARY
     KEY) so new and existing tables both get a deterministically named, clustered
-    PK from this single code path.
+    PK from this single code path
     """
     schema = model.target.schema_resolved
     table = model.target.name_resolved
