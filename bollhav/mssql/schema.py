@@ -179,7 +179,7 @@ def ensure_indexes(conn: pyodbc.Connection, model: Model) -> None:
             idx.name,
             f"{schema}.{table}",
         )
-    cursor.commit()
+        cursor.commit()
 
 
 def ensure_schema_and_table(conn: pyodbc.Connection, model: Model) -> None:
