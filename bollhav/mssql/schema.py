@@ -116,7 +116,7 @@ def ensure_table(conn: pyodbc.Connection, model: Model) -> None:
 
 def ensure_primary_key(conn: pyodbc.Connection, model: Model) -> None:
     """Add a CLUSTERED PRIMARY KEY named `<table>_pk` if any columns are flagged
-    `primary_key=True` and the table doesn't already have a PK.
+    `primary_key=True` and the table doesn't already have a PK
 
     Idempotent and safe on existing tables — re-running is a no-op once the PK
     is in place. Pairs with `_col_ddl` (which no longer emits inline PRIMARY
