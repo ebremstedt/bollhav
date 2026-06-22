@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from datetime import datetime, tzinfo
 from functools import wraps
@@ -136,6 +137,16 @@ def load_models(
         @wraps(func)
         def wrapper() -> None:
             cfg = _read_env()
+            if (
+                cfg.backfill_enabled
+                and not cfg.latest
+                and "LATEST_ENABLED" not in os.environ
+                and "BACKFILL_ENABLED" not in os.environ
+            ):
+                logger.debug(
+                    "no run mode set — defaulting to backfill; "
+                    "set LATEST_ENABLED=true for latest-tick mode"
+                )
             runs = apply_runtime_overrides(
                 folder=folder,
                 tags=cfg.tags,
