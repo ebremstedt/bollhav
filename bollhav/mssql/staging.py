@@ -338,6 +338,7 @@ def apply_atomically_to_target(
             cursor.execute(
                 f"DROP TABLE {_bracket_quote(staging_schema)}.{_bracket_quote(staging_table)}"
             )
+            logger.debug("dropped staging table %s.%s", staging_schema, staging_table)
         cursor.commit()
     except Exception:
         cursor.rollback()
