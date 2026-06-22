@@ -27,7 +27,7 @@ def append(
     col_names = sql.SQL(", ").join(sql.Identifier(c) for c in df.columns)
     query = sql.SQL("COPY {schema}.{table} ({cols}) FROM STDIN").format(
         schema=sql.Identifier(model.target.schema_resolved),
-        table=sql.Identifier(model.target.name),
+        table=sql.Identifier(model.target.name_resolved),
         cols=col_names,
     )
     with conn.transaction():
@@ -58,7 +58,7 @@ def recreate_partition(
                 "DELETE FROM {schema}.{table} WHERE {col} >= %s AND {col} < %s"
             ).format(
                 schema=sql.Identifier(model.target.schema_resolved),
-                table=sql.Identifier(model.target.name),
+                table=sql.Identifier(model.target.name_resolved),
                 col=sql.Identifier(partition_col),
             ),
             [since, until],
@@ -66,7 +66,7 @@ def recreate_partition(
         col_names = sql.SQL(", ").join(sql.Identifier(c) for c in df.columns)
         copy_query = sql.SQL("COPY {schema}.{table} ({cols}) FROM STDIN").format(
             schema=sql.Identifier(model.target.schema_resolved),
-            table=sql.Identifier(model.target.name),
+            table=sql.Identifier(model.target.name_resolved),
             cols=col_names,
         )
         with conn.cursor().copy(copy_query) as copy:
@@ -76,7 +76,7 @@ def recreate_partition(
 
 def upsert_no_delete(conn: psycopg.Connection, model: Model, df: pl.DataFrame) -> None:
     unique_columns = [col.name for col in model.target.unique_columns]
-    temp_table = f"temp_{model.target.name}"
+    temp_table = f"temp_{model.target.name_resolved}"
 
     col_names = sql.SQL(", ").join(
         sql.Identifier(col.name) for col in model.target.columns
@@ -125,7 +125,7 @@ def upsert_no_delete(conn: psycopg.Connection, model: Model, df: pl.DataFrame) -
                 "ON CONFLICT ({pk_cols}) DO UPDATE SET {update_set}"
             ).format(
                 schema=sql.Identifier(model.target.schema_resolved),
-                table=sql.Identifier(model.target.name),
+                table=sql.Identifier(model.target.name_resolved),
                 cols=col_names,
                 temp=sql.Identifier(temp_table),
                 pk_cols=pk_cols,
@@ -161,7 +161,7 @@ def create_replace_view(
         conn.execute(
             sql.SQL("CREATE OR REPLACE VIEW {schema}.{view} AS {query}").format(
                 schema=sql.Identifier(model.target.schema_resolved),
-                view=sql.Identifier(model.target.name),
+                view=sql.Identifier(model.target.name_resolved),
                 query=sql.SQL(cast(LiteralString, source.query)),
             )
         )
