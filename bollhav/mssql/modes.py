@@ -178,7 +178,7 @@ def merge(
 
     Thin wrapper over `_merge_via_temp` that opens a cursor, runs the
     merge against the target table, and commits."""
-    target_table = f"{_bracket_quote(model.target.schema_resolved)}.{_bracket_quote(model.target.name)}"
+    target_table = f"{_bracket_quote(model.target.schema_resolved)}.{_bracket_quote(model.target.name_resolved)}"
     cursor = conn.cursor()
     _merge_via_temp(cursor, target_table, model, df, fast_executemany=fast_executemany)
     cursor.commit()
@@ -192,7 +192,7 @@ def append(
 ) -> None:
     """Bulk insert rows into target without clearing existing data."""
     schema = model.target.schema_resolved
-    table = model.target.name
+    table = model.target.name_resolved
     all_col_names = [c.name for c in model.target.columns]
 
     cursor = conn.cursor()
@@ -227,7 +227,7 @@ def create_replace_view(conn: pyodbc.Connection, model: Model) -> None:
             f"{model.target.full_name!r}"
         )
     schema = model.target.schema_resolved
-    view = model.target.name
+    view = model.target.name_resolved
     # The filter above guarantees this, but it doesn't narrow `src.type`.
     assert isinstance(src.type, SourceModel) and src.type.query is not None
     query = cast(LiteralString, src.type.query)
