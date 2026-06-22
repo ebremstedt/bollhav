@@ -347,8 +347,8 @@ def apply_atomically_to_target(
     model: "Model",
     *,
     run_id: UUID,
-    since: datetime,
-    until: datetime,
+    since: datetime | None = None,
+    until: datetime | None = None,
     drop_after_apply: bool | None = None,
 ) -> None:
     """Apply the staged content to the target using whatever operation
@@ -396,6 +396,11 @@ def apply_atomically_to_target(
             case WriteMode.UPSERT_NO_DELETE:
                 _apply_upsert(conn, model, **table_names)
             case WriteMode.RECREATE_PARTITION:
+                if since is None or until is None:
+                    raise ValueError(
+                        "RECREATE_PARTITION requires a window (since/until) — "
+                        "run the model windowed."
+                    )
                 _apply_recreate_partition(
                     conn, model, **table_names, since=since, until=until
                 )

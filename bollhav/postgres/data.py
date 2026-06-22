@@ -291,19 +291,24 @@ class PostgresData:
 
         _write_to_staging(self.conn, self.model, run_id, df)
 
-    def apply_staging_to_target(self, run_id: UUID, interval: "TZInterval") -> None:
+    def apply_staging_to_target(
+        self, run_id: UUID, interval: "TZInterval | None"
+    ) -> None:
         """Merge this run's staging table into the target using
         `target.write_mode` (APPEND / UPSERT_NO_DELETE / RECREATE_PARTITION),
         atomically. Does NOT drop the staging table — `drop_staging_table`
-        does, so the merge and the teardown stay distinct steps."""
+        does, so the merge and the teardown stay distinct steps.
+
+        `interval` is None for a no-window staged run (whole-table atomic
+        load); only RECREATE_PARTITION needs the window."""
         from bollhav.postgres.staging import apply_atomically_to_target
 
         apply_atomically_to_target(
             self.conn,
             self.model,
             run_id=run_id,
-            since=interval.since,
-            until=interval.until,
+            since=interval.since if interval is not None else None,
+            until=interval.until if interval is not None else None,
             drop_after_apply=False,
         )
 
