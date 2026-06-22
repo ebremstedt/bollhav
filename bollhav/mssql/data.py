@@ -133,13 +133,15 @@ class MssqlData:
     def write_to_staging(self, run_id: UUID, df: "pl.DataFrame") -> None:
         write_to_staging(self.conn, self.model, run_id, df)
 
-    def apply_staging_to_target(self, run_id: UUID, interval: "TZInterval") -> None:
+    def apply_staging_to_target(
+        self, run_id: UUID, interval: "TZInterval | None"
+    ) -> None:
         apply_atomically_to_target(
             self.conn,
             self.model,
             run_id=run_id,
-            since=interval.since,
-            until=interval.until,
+            since=interval.since if interval is not None else None,
+            until=interval.until if interval is not None else None,
         )
 
     def drop_staging_table(self, run_id: UUID) -> None:

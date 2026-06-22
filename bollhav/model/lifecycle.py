@@ -11,6 +11,7 @@ from typing import Callable
 
 from bollhav.model.progress_bar import PROGRESS
 from bollhav.model.window import compute_intervals
+from bollhav.model.write_modes import WriteMode
 
 logger = logging.getLogger(__name__)
 
@@ -314,6 +315,24 @@ def model_lifecycle(func: Callable) -> Callable:
                 postgres_state.register_model()
                 postgres_state.ensure_tables()
 
+                # Only RECREATE_PARTITION is window-scoped: its staged apply
+                # deletes the target partition for [since, until) before swapping
+                # the staged rows in, so a no-window run is meaningless and would
+                # plant a NULL-window "oneshot" row it can never consume. APPEND /
+                # UPSERT_NO_DELETE staging is window-agnostic (it MERGEs the whole
+                # staging table), so a no-window staged run is a valid atomic
+                # whole-table load — recorded as a single oneshot row. Refuse only
+                # the genuinely-broken case, before any state is written.
+                if (
+                    run.window is None
+                    and model.target.write_mode is WriteMode.RECREATE_PARTITION
+                ):
+                    raise ValueError(
+                        f"{model.target.full_name!r} uses WriteMode.RECREATE_PARTITION, "
+                        f"which is window-scoped, but this run resolved no window — "
+                        f"run it windowed (LATEST_ENABLED or a BACKFILL window)."
+                    )
+
                 # A NULL-window one-shot row when there's no window to track —
                 # a timeless model, or a temporal one with no declared range.
                 # Otherwise one row per window: a batched run splits its window
@@ -403,13 +422,19 @@ def execute_lifecycle(func: Callable) -> Callable:
         def staged_execute():
             """Run the user's execute bracketed by the staging lifecycle:
             create the table → execute writes rows into it → merge into the
-            target → tear it down. Staging is interval-only. The data
-            backend swaps on `model.target.database`; both expose the same
-            staging methods."""
-            if interval is None:
+            target → tear it down. The data backend swaps on
+            `model.target.database`; both expose the same staging methods.
+
+            A no-window run (interval=None) is allowed: it stages the whole
+            read and applies it atomically (one MERGE/INSERT). Only
+            RECREATE_PARTITION needs a window — it's partition-scoped."""
+            if interval is None and (
+                model.target.write_mode is WriteMode.RECREATE_PARTITION
+            ):
                 raise ValueError(
-                    f"staging is interval-only, but {model.target.full_name!r} "
-                    f"ran with no interval — staging requires a batched model."
+                    f"RECREATE_PARTITION is window-scoped, but "
+                    f"{model.target.full_name!r} ran with no interval — run it "
+                    f"windowed (LATEST_ENABLED or a BACKFILL window)."
                 )
             from bollhav.model.database import Database
 
