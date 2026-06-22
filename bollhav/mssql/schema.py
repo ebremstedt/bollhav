@@ -157,7 +157,20 @@ def ensure_indexes(conn: pyodbc.Connection, model: Model) -> None:
     logger.debug("Ensuring %d index(es) on: %s.%s", len(mssql_indexes), schema, table)
 
     cursor = conn.cursor()
+    existing: set[str] = set()
+    if logger.isEnabledFor(logging.DEBUG):
+        existing = {
+            name
+            for (name,) in cursor.execute(
+                "SELECT name FROM sys.indexes "
+                "WHERE object_id = OBJECT_ID(?) AND name IS NOT NULL",
+                f"{schema}.{table}",
+            ).fetchall()
+        }
     for idx in mssql_indexes:
+        if logger.isEnabledFor(logging.DEBUG):
+            state = "present" if idx.name in existing else "creating"
+            logger.debug("  index %s: %s on %s.%s", idx.name, state, schema, table)
         cursor.execute(
             f"IF NOT EXISTS ("
             f"    SELECT 1 FROM sys.indexes"
