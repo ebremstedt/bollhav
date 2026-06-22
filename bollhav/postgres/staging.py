@@ -115,12 +115,15 @@ def _staging_table(model: "Model", run_id: UUID) -> str:
 
 
 def drop_staging_table(conn: psycopg.Connection, model: "Model", run_id: UUID) -> None:
+    schema = _staging_schema(model)
+    table = _staging_table(model, run_id)
     conn.execute(
         sql.SQL("DROP TABLE IF EXISTS {schema}.{table}").format(
-            schema=sql.Identifier(_staging_schema(model)),
-            table=sql.Identifier(_staging_table(model, run_id)),
+            schema=sql.Identifier(schema),
+            table=sql.Identifier(table),
         )
     )
+    logger.debug("dropped staging table %s.%s", schema, table)
 
 
 # ── write to staging ─────────────────────────────────────────────────
@@ -413,6 +416,7 @@ def apply_atomically_to_target(
                     table=sql.Identifier(staging_table),
                 )
             )
+            logger.debug("dropped staging table %s.%s", staging_schema, staging_table)
         # State is flipped to `applied` separately, by the interval
         # lifecycle's `mark_applied` after this returns — not inside the
         # data-move transaction. The data write commits here; the state
