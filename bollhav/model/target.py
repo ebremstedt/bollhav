@@ -1,3 +1,4 @@
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Callable
@@ -32,8 +33,8 @@ class Target:
     catalog: str | None = None
     database: Database | None = None
 
-    columns: list[DatabaseColumn] = field(default_factory=list)
-    indexes: list[DatabaseIndex] = field(default_factory=list)
+    columns: Sequence[DatabaseColumn] = field(default_factory=list)
+    indexes: Sequence[DatabaseIndex] = field(default_factory=list)
     column_sorting: Callable | None = sort_columns
     unique_columns: list = field(init=False, default_factory=list)
     primary_key_columns: list = field(init=False, default_factory=list)
