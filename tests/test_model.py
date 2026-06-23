@@ -250,7 +250,7 @@ class TestUpstreamRequiresState:
                     Source(
                         "warehouse.orders",
                         type=SourceModel(),
-                        contract=UpstreamContract.WINDOW,
+                        contract=UpstreamContract.ENCAPSULATE,
                     )
                 ]
             )
@@ -271,7 +271,7 @@ class TestUpstreamRequiresState:
                 Source(
                     "warehouse.customers",
                     type=SourceModel(),
-                    contract=UpstreamContract.WINDOW,
+                    contract=UpstreamContract.ENCAPSULATE,
                 )
             ],
             state=State(),

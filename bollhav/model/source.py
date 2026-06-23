@@ -86,14 +86,14 @@ class Source:
                 raise ValueError(
                     f"source {self.name!r} sets `freshness` but has no contract "
                     f"— freshness is a recency bound on a gated upstream's state. "
-                    f"Add a contract (WINDOW / THROUGH / WHOLE) or drop freshness."
+                    f"Add a contract (ENCAPSULATE / THROUGH / WHOLE) or drop freshness."
                 )
             if self.contract is UpstreamContract.EXISTS:
                 raise ValueError(
                     f"source {self.name!r} sets `freshness` with contract=EXISTS, "
                     f"but EXISTS never inspects state (registration is the whole "
-                    f"gate) — there's no applied_at to age. Use WINDOW / THROUGH / "
-                    f"WHOLE, or drop freshness."
+                    f"gate) — there's no applied_at to age. Use ENCAPSULATE / "
+                    f"THROUGH / WHOLE, or drop freshness."
                 )
 
     @property

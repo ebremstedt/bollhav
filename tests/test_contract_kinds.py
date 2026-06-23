@@ -1,7 +1,7 @@
 """Contract × model-kind satisfaction matrix.
 
-Exercises every `UpstreamContract` level — EXISTS / WINDOW / THROUGH / WHOLE —
-against every upstream SHAPE that produces state, by driving
+Exercises every `UpstreamContract` level — EXISTS / EXACT / ENCAPSULATE /
+THROUGH / WHOLE — against every upstream SHAPE that produces state, by driving
 `PostgresState.is_satisfied` directly against hand-built state rows:
 
   * temporal-batched   — one row per window (here: 3 daily windows)
@@ -11,10 +11,15 @@ against every upstream SHAPE that produces state, by driving
                          view-vs-table is irrelevant to satisfaction)
 
 `is_satisfied` is keyed by the downstream's contract level (or, for a bare
-upstream, the upstream's own `kind`). The hard error for WINDOW/THROUGH against
-a TIMELESS upstream lives one layer up in `is_upstream_satisfied_live`; here we
-assert what `is_satisfied` itself computes (a timeless upstream simply fails to
-match a window query).
+upstream, the upstream's own `kind`). The hard error for the window-scoped
+levels (EXACT / ENCAPSULATE / THROUGH) against a TIMELESS upstream lives one
+layer up in `is_upstream_satisfied_live`; here we assert what `is_satisfied`
+itself computes (a timeless upstream simply fails to match a window query).
+
+`TestEncapsulateUnion` and `TestExact` cover the two new modes specifically: the
+finer→coarser **union** coverage that distinguishes ENCAPSULATE from the old
+single-row WINDOW, and the exact-grain match that makes EXACT reject both coarser
+rows and finer unions.
 """
 
 import os
@@ -72,6 +77,12 @@ WINDOWS = [(D1, D2), (D2, D3), (D3, D4)]
 # Downstream windows: one strictly inside the range, one at the range's end.
 INSIDE = TZInterval(D2, D3)
 AT_END = TZInterval(D3, D4)
+# A downstream window COARSER than any single upstream window — the whole 3-day
+# span. No single daily row contains it; only a union of all three does.
+SPAN = TZInterval(D1, D4)
+# A coarser window starting one day in (used to show a hole *outside* my window
+# doesn't block ENCAPSULATE, but does block THROUGH).
+TAIL = TZInterval(D2, D4)
 
 
 @pytest.fixture
@@ -151,7 +162,13 @@ class TestTemporalBatched:
 
     @pytest.mark.parametrize(
         "contract,expected",
-        [("exists", True), ("window", True), ("through", True), ("whole", True)],
+        [
+            ("exists", True),
+            ("exact", True),  # an applied row equals [D2,D3] exactly
+            ("encapsulate", True),  # [D2,D3] is applied (single-row fast path)
+            ("through", True),
+            ("whole", True),
+        ],
     )
     def test_fully_loaded(self, conn, contract, expected):
         t = _table(conn, _batched(loaded=True))
@@ -161,7 +178,8 @@ class TestTemporalBatched:
         "contract,expected",
         [
             ("exists", True),  # registered
-            ("window", True),  # my window [D2,D3] is applied
+            ("exact", True),  # my exact window [D2,D3] is applied
+            ("encapsulate", True),  # my window [D2,D3] is applied
             ("through", True),  # gap-free prefix up to D3 is applied
             ("whole", False),  # the last window is still pending
         ],
@@ -181,8 +199,14 @@ class TestTemporalOneshot:
         [
             ("exists", INSIDE, True),
             ("whole", INSIDE, True),  # the single range row is applied
-            ("window", INSIDE, True),  # [D2,D3] falls inside [D1,D4]
-            ("window", AT_END, True),  # so does [D3,D4]
+            ("encapsulate", INSIDE, True),  # [D2,D3] falls inside [D1,D4]
+            ("encapsulate", AT_END, True),  # so does [D3,D4]
+            ("encapsulate", SPAN, True),  # the row IS [D1,D4] — contains it
+            # EXACT needs a row at exactly my grain. The one row is [D1,D4], so
+            # it matches only the whole-span window, never a sub-window.
+            ("exact", SPAN, True),
+            ("exact", INSIDE, False),  # a coarser row does not satisfy EXACT
+            ("exact", AT_END, False),
             # THROUGH is a gap-free prefix up to my window's end. The one row
             # ends at D4, so it only counts as a prefix when my window reaches
             # D4 — satisfied at the end, not for a window strictly inside.
@@ -196,7 +220,13 @@ class TestTemporalOneshot:
 
     @pytest.mark.parametrize(
         "contract,expected",
-        [("exists", True), ("whole", False), ("window", False), ("through", False)],
+        [
+            ("exists", True),
+            ("whole", False),
+            ("encapsulate", False),
+            ("exact", False),
+            ("through", False),
+        ],
     )
     def test_pending(self, conn, contract, expected):
         t = _table(conn, _oneshot(loaded=False))
@@ -206,10 +236,11 @@ class TestTemporalOneshot:
 class TestTimeless:
     """A timeless upstream (whole-table load or view): one NULL-window row.
 
-    WINDOW/THROUGH are rejected for a timeless upstream by the live gate; at the
-    `is_satisfied` layer they simply never match the NULL-window row (False).
-    Only EXISTS / WHOLE are meaningful, plus the bare-string fallback (kind=None
-    → the upstream's own `timeless` kind → existence check).
+    The window-scoped levels (EXACT / ENCAPSULATE / THROUGH) are rejected for a
+    timeless upstream by the live gate; at the `is_satisfied` layer they simply
+    never match the NULL-window row (False). Only EXISTS / WHOLE are meaningful,
+    plus the bare-string fallback (kind=None → the upstream's own `timeless` kind
+    → existence check).
     """
 
     KIND = "timeless"
@@ -219,7 +250,8 @@ class TestTimeless:
         [
             ("exists", True),  # registered
             ("whole", True),  # the one row is applied
-            ("window", False),  # no window to match
+            ("exact", False),  # no window to match
+            ("encapsulate", False),  # no window to match
             ("through", False),  # no window to match
         ],
     )
@@ -254,7 +286,78 @@ class TestTimeless:
         assert _ok(conn, t, self.KIND, contract=contract, interval=INSIDE) is expected
 
 
-# ── the live gate: WINDOW/THROUGH against a TIMELESS upstream is a hard error ──
+class TestEncapsulateUnion:
+    """ENCAPSULATE's distinguishing power: a downstream window COARSER than any
+    single upstream window is covered by a gap-free UNION of finer rows. The old
+    single-row WINDOW would block all of these (no one row contains the span)."""
+
+    KIND = "temporal"
+
+    def test_finer_union_covers_coarser_window(self, conn):
+        # 3 daily rows, all applied; downstream wants the whole [D1,D4] span.
+        # No single row contains it — the union of all three tiles it gap-free.
+        t = _table(conn, _batched(loaded=True))
+        assert _ok(conn, t, self.KIND, contract="encapsulate", interval=SPAN) is True
+
+    def test_partial_union_covers_sub_span(self, conn):
+        # [D1,D2] + [D2,D3] tile [D1,D3] exactly.
+        t = _table(conn, [(D1, D2, "applied"), (D2, D3, "applied")])
+        assert (
+            _ok(conn, t, self.KIND, contract="encapsulate", interval=TZInterval(D1, D3))
+            is True
+        )
+
+    def test_hole_in_union_blocks(self, conn):
+        # Missing middle window → a gap at [D2,D3] → [D1,D4] not covered.
+        t = _table(conn, [(D1, D2, "applied"), (D3, D4, "applied")])
+        assert _ok(conn, t, self.KIND, contract="encapsulate", interval=SPAN) is False
+
+    def test_pending_middle_window_is_a_hole(self, conn):
+        # A pending middle row is not `applied`, so it leaves a gap.
+        t = _table(
+            conn,
+            [(D1, D2, "applied"), (D2, D3, "pending"), (D3, D4, "applied")],
+        )
+        assert _ok(conn, t, self.KIND, contract="encapsulate", interval=SPAN) is False
+
+    def test_hole_outside_my_window_does_not_block(self, conn):
+        # The KEY difference from THROUGH: a pending [D1,D2] is OUTSIDE my window
+        # [D2,D4]. ENCAPSULATE only looks at rows covering my window, so it's
+        # satisfied; THROUGH (gap-free prefix up to D4) is blocked by the hole.
+        t = _table(
+            conn,
+            [(D1, D2, "pending"), (D2, D3, "applied"), (D3, D4, "applied")],
+        )
+        assert _ok(conn, t, self.KIND, contract="encapsulate", interval=TAIL) is True
+        assert _ok(conn, t, self.KIND, contract="through", interval=TAIL) is False
+
+
+class TestExact:
+    """EXACT requires a row at *exactly* my grain — it rejects both a coarser
+    containing row and a gap-free union of finer rows (which ENCAPSULATE accept)."""
+
+    KIND = "temporal"
+
+    def test_exact_grain_row_satisfies(self, conn):
+        t = _table(conn, _batched(loaded=True))
+        assert _ok(conn, t, self.KIND, contract="exact", interval=INSIDE) is True
+
+    def test_rejects_finer_union(self, conn):
+        # 3 daily rows cover [D1,D4] as a union — but no single row equals it,
+        # so EXACT is NOT satisfied (ENCAPSULATE would be).
+        t = _table(conn, _batched(loaded=True))
+        assert _ok(conn, t, self.KIND, contract="exact", interval=SPAN) is False
+        assert _ok(conn, t, self.KIND, contract="encapsulate", interval=SPAN) is True
+
+    def test_rejects_coarser_container(self, conn):
+        # One [D1,D4] row contains [D2,D3] but isn't equal to it → EXACT False,
+        # ENCAPSULATE True.
+        t = _table(conn, _oneshot(loaded=True))
+        assert _ok(conn, t, self.KIND, contract="exact", interval=INSIDE) is False
+        assert _ok(conn, t, self.KIND, contract="encapsulate", interval=INSIDE) is True
+
+
+# ── the live gate: a window-scoped level on a TIMELESS upstream is a hard error ──
 SUFFIX = "ck_raise"  # isolates the library to z_bollhav_<suffix>
 
 
@@ -278,7 +381,7 @@ def _model(name, *, temporality, upstream=None):
     )
 
 
-class TestWindowOnTimelessRaises:
+class TestWindowScopedOnTimelessRaises:
     @pytest.fixture
     def env(self):
         env_lib = f"{LIBRARY_SCHEMA}_{SUFFIX}"
@@ -303,7 +406,12 @@ class TestWindowOnTimelessRaises:
                 )
 
     @pytest.mark.parametrize(
-        "level", [UpstreamContract.WINDOW, UpstreamContract.THROUGH]
+        "level",
+        [
+            UpstreamContract.EXACT,
+            UpstreamContract.ENCAPSULATE,
+            UpstreamContract.THROUGH,
+        ],
     )
     def test_raises(self, env, level):
         down = _model(

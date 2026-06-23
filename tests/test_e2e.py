@@ -1099,7 +1099,7 @@ def _registry_models(schema_name):
             Source(
                 f"{CAT}.{schema_name}.orders",
                 type=SourceModel(),
-                contract=UpstreamContract.WINDOW,
+                contract=UpstreamContract.ENCAPSULATE,
             )
         ],
         sources=[
@@ -1131,7 +1131,7 @@ def test_e2e_registry_get_lineage_matches_model_lineage(schema_name):
     ]
     # The in-code view types the same upstream by its contract level instead.
     assert summary.model.lineage()["upstream"] == [
-        {"name": f"{CAT}.{schema_name}.orders", "kind": "window"}
+        {"name": f"{CAT}.{schema_name}.orders", "kind": "encapsulate"}
     ]
     assert {"name": "vendor.api_orders", "kind": "api"} in lineage["sources"]
     assert lineage["inputs_known"] is True
@@ -1167,7 +1167,7 @@ def test_e2e_registry_list_and_downstreams_and_graph(schema_name):
         "from": orders_fqn,
         "to": summary_fqn,
         "relation": "upstream",
-        "contract": "window",
+        "contract": "encapsulate",
         "freshness": None,
     } in graph["edges"]
     assert {
@@ -1192,7 +1192,7 @@ def test_e2e_registry_get_upstream_tree_nests(schema_name):
             Source(
                 f"{CAT}.{schema_name}.orders",
                 type=SourceModel(),
-                contract=UpstreamContract.WINDOW,
+                contract=UpstreamContract.ENCAPSULATE,
             )
         ],
         sources=[Source("raw.landing", type=SourceApi())],
@@ -1206,7 +1206,7 @@ def test_e2e_registry_get_upstream_tree_nests(schema_name):
             Source(
                 f"{CAT}.{schema_name}.summary",
                 type=SourceModel(),
-                contract=UpstreamContract.WINDOW,
+                contract=UpstreamContract.ENCAPSULATE,
             )
         ],
     )
@@ -1428,7 +1428,7 @@ def test_e2e_dry_state_cascade_shows_will_run_after(schema_name, capsys, monkeyp
             Source(
                 f"{CAT}.{schema_name}.orders",
                 type=SourceModel(),
-                contract=UpstreamContract.WINDOW,
+                contract=UpstreamContract.ENCAPSULATE,
             )
         ],
     )
@@ -1651,7 +1651,7 @@ def test_e2e_contract_window_gates_per_matching_window(schema_name, caplog):
     orders day 1 unblocks the downstream's day 1 but not day 2."""
     _enable_debug_logging(caplog)
     orders = _orders_model(schema_name, state=State(), staging=Staging())
-    summary = _downstream_on_orders(schema_name, UpstreamContract.WINDOW)
+    summary = _downstream_on_orders(schema_name, UpstreamContract.ENCAPSULATE)
 
     # Only orders' first daily window is applied.
     intervals = _bootstrap_orders_partial(orders, applied_idx=[0])
@@ -1660,7 +1660,7 @@ def test_e2e_contract_window_gates_per_matching_window(schema_name, caplog):
     g1 = _gate(summary, intervals[1])
     assert g0.satisfied is True  # day 1 lines up → open
     assert g1.satisfied is False  # day 2 not applied → blocked
-    assert g1.blockers == (f"upstream '{CAT}.{schema_name}.orders' (window)",)
+    assert g1.blockers == (f"upstream '{CAT}.{schema_name}.orders' (encapsulate)",)
 
     # Apply the rest → every downstream window opens.
     _bootstrap_orders_partial(orders, applied_idx=[1, 2])
@@ -1755,7 +1755,7 @@ def test_e2e_contract_check_emits_debug_log(schema_name, caplog):
     produces one of each, which is what the assertions pin."""
     _enable_debug_logging(caplog)
     orders = _orders_model(schema_name, state=State(), staging=Staging())
-    summary = _downstream_on_orders(schema_name, UpstreamContract.WINDOW)
+    summary = _downstream_on_orders(schema_name, UpstreamContract.ENCAPSULATE)
     intervals = _bootstrap_orders_partial(orders, applied_idx=[0])
 
     caplog.clear()  # drop the bootstrap/mark-applied logs; keep only the checks
@@ -1768,8 +1768,8 @@ def test_e2e_contract_check_emits_debug_log(schema_name, caplog):
         if r.name == "bollhav.postgres.state.satisfaction"
     ]
     # The day-1 check logged an open gate; the day-2 check logged a block.
-    assert any("SATISFIED upstream" in m and "(window" in m for m in msgs)
-    assert any("BLOCKED upstream" in m and "(window" in m for m in msgs)
+    assert any("SATISFIED upstream" in m and "(encapsulate" in m for m in msgs)
+    assert any("BLOCKED upstream" in m and "(encapsulate" in m for m in msgs)
     # And each check logged a per-window verdict summary.
     assert any("is SATISFIED (all gates open)" in m for m in msgs)
     assert any("is BLOCKED by" in m for m in msgs)
