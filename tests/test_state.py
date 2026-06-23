@@ -575,7 +575,7 @@ class TestAssumeOkUpstream:
         return Source(
             "warehouse.orders",
             type=SourceModel(),
-            contract=UpstreamContract.WINDOW,
+            contract=UpstreamContract.ENCAPSULATE,
             deactivate_for_dev=True,
         )
 

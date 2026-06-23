@@ -14,7 +14,7 @@ from bollhav.model import UpstreamContract
 
 upstream=[
     # gated managed upstreams (need state — see below):
-    Source("warehouse.orders",    type=SourceModel(), contract=UpstreamContract.WINDOW),
+    Source("warehouse.orders",    type=SourceModel(), contract=UpstreamContract.ENCAPSULATE),
     Source("warehouse.customers", type=SourceModel(), contract=UpstreamContract.WHOLE),
     Source("warehouse.app_config",type=SourceModel(), contract=UpstreamContract.EXISTS),
     # ungated external sources:
@@ -27,16 +27,31 @@ A **contract is only valid on a `SourceModel`** — files and APIs aren't state-
 
 ## Contracts (gating)
 
-A contract is the gating **level** — *how much* of the upstream must be ready before this model runs — chosen from the `UpstreamContract` ladder (weak → strong). The upstream's *shape* (its [temporality](TEMPORALITY.md)) is read from the library at check time, so you only state the level:
+A contract is the gating **level** — *how much* of the upstream must be ready before this model runs — chosen from the `UpstreamContract` ladder. The upstream's *shape* (its [temporality](TEMPORALITY.md)) is read from the library at check time, so you only state the level. Five levels, on three **scopes**:
 
-| `UpstreamContract` | Satisfied when |
-|---|---|
-| `EXISTS` | the upstream is **registered**. No data wait — run-ordering + a lineage edge only. |
-| `WINDOW` | the upstream's window covering this unit's `(since, until)` is `applied`. A daily upstream covers an hourly downstream. *(the usual choice)* |
-| `THROUGH` | every upstream window **up to and including** this unit is `applied` — a gap-free prefix, for cumulative models that sum history `1..N`. |
-| `WHOLE` | the **entire** upstream is loaded — every window `applied` (a temporal upstream), or its one row `applied` (a timeless one). |
+| `UpstreamContract` | Scope | Satisfied when |
+|---|---|---|
+| `EXISTS` | registration | the upstream is **registered**. No data wait — run-ordering + a lineage edge only. |
+| `EXACT` | my window | one `applied` upstream row **equals** my `(since, until)`. Only an exact-grain match — a coarser row that *contains* my window, or a union of finer rows, does **not** count. |
+| `ENCAPSULATE` | my window | the `applied` rows **cover** my `(since, until)` — a single coarser row that contains it, the exact-grain row, or a gap-free **union** of finer rows. A daily upstream covers an hourly downstream; 24 hourly rows cover a daily one. *(the usual choice)* |
+| `THROUGH` | prefix | every upstream window **up to and including** my window is `applied` — a gap-free prefix, for cumulative models that sum history `1..N`. A hole anywhere *before* my window blocks it. |
+| `WHOLE` | whole upstream | the **entire** upstream is loaded — every window `applied` (a temporal upstream), or its one row `applied` (a timeless one). |
 
-**Timeless upstreams.** A [`TIMELESS`](TEMPORALITY.md) upstream (a view or whole-table load) has no window to match, so `WINDOW`/`THROUGH` against it is a hard error — gate it `WHOLE` (loaded) or `EXISTS` (registered). `WINDOW`/`THROUGH` are for temporal upstreams.
+The three window-scoped levels (`EXACT` ⊂ `ENCAPSULATE`, and `EXISTS` below them) consult **only** the upstream rows touching my window — nothing outside `[since, until)` can block me. `THROUGH` and `WHOLE` widen the scope past my window, so a hole elsewhere *does* block. Strength ladder: `WHOLE` ⟹ `THROUGH` ⟹ `ENCAPSULATE` ⟹ `EXISTS`, with `EXACT` ⟹ `ENCAPSULATE` (an exact-grain row also covers the window).
+
+### When to use which
+
+- **`EXISTS`** — you only need *ordering + lineage*, not data: a config/seed table that just has to be registered, or a windowless consumer (view / monolithic) that wants a managed edge to an interval upstream without waiting for it.
+- **`EXACT`** — the upstream is **aggregated at exactly my grain** and that alignment is load-bearing: a daily rollup consuming a daily upstream rollup, where you want *that day's own* aggregate row and a coarser backfill that merged several days must **not** count as ready.
+- **`ENCAPSULATE`** — the default for a **window-local transform**: my window's output is a pure function of my window's input (filter / segment / reshape this slice). Pipelines per-window and tolerates the upstream being at any grain — coarser *or* finer — as long as my window is covered. Use this whenever `WINDOW` was your instinct.
+- **`THROUGH`** — my window's output **depends on history `1..N`**, not just window N: running totals, cumulative balances, snapshots-as-of. Waits for the gap-free prefix; a hole in old history correctly blocks me.
+- **`WHOLE`** — I read **all** of the upstream every run: a full aggregate, an export, a snapshot, or any windowless downstream of an interval upstream.
+
+> `ENCAPSULATE` vs `EXACT`: both look only at my window. `ENCAPSULATE` asks *"is my window's data present, by any combination of rows?"*; `EXACT` asks the stricter *"did the upstream produce a row at exactly my grain?"*. `ENCAPSULATE` vs `THROUGH`: both are gap-free, but `ENCAPSULATE` covers *only* my window while `THROUGH` covers the *whole prefix up to* it — so one old hole blocks `THROUGH` and not `ENCAPSULATE`.
+
+> **Renamed:** the former `WINDOW` level (a single-row "a row contains my window" check) has been **removed** and folded into `ENCAPSULATE`, which subsumes it (a single containing row is a one-element cover) and additionally accepts a finer union. Replace any `UpstreamContract.WINDOW` with `UpstreamContract.ENCAPSULATE`.
+
+**Timeless upstreams.** A [`TIMELESS`](TEMPORALITY.md) upstream (a view or whole-table load) has no window to match, so `EXACT` / `ENCAPSULATE` / `THROUGH` against it is a hard error — gate it `WHOLE` (loaded) or `EXISTS` (registered). The window-scoped levels are for temporal upstreams.
 
 A `Source` with **no** contract is **ungated** — never waited on (there's no default level).
 
@@ -66,14 +81,14 @@ Source(
 )
 ```
 
-The age is measured against the upstream's `applied_at` — when bollhav *loaded* each row (a producer-side, shared timestamp), **not** the source's own event time. The threshold and scope are **per-consumer**: different downstreams can demand different freshness off the same upstream load. The rows checked are exactly the ones the contract level selects (`WHOLE` → all; `WINDOW` → the matching window; `THROUGH` → the prefix; timeless → the existence row).
+The age is measured against the upstream's `applied_at` — when bollhav *loaded* each row (a producer-side, shared timestamp), **not** the source's own event time. The threshold and scope are **per-consumer**: different downstreams can demand different freshness off the same upstream load. The rows checked are exactly the ones the contract level selects (`WHOLE` → all; `EXACT` → the exact-grain row; `ENCAPSULATE` → the rows covering my window; `THROUGH` → the prefix; timeless → the existence row).
 
 | `FreshnessScope` | Fresh when |
 |---|---|
 | `LATEST` | the **newest** applied row in the selection is within `within` (`max(applied_at)`). "Is it keeping up at the head?" — for append-only / growing tables. |
 | `ALL` | **every** applied row in the selection is — i.e. the **oldest** one (`min(applied_at)`). "Was the whole thing rebuilt recently?" — for full-refresh snapshots / reference tables. |
 
-The scope only differs on a **multi-row** selection (`WHOLE` / `THROUGH` over several windows). For a single-row selection (`WINDOW`, or a timeless upstream) `LATEST` and `ALL` are identical.
+The scope only differs on a **multi-row** selection (`WHOLE` / `THROUGH`, or an `ENCAPSULATE` window satisfied by a union of finer rows). For a single-row selection (`EXACT`, a single-container `ENCAPSULATE`, or a timeless upstream) `LATEST` and `ALL` are identical.
 
 - **`LATEST`** catches a *stalled* pipeline (nothing new landing) but ignores immutable history — right for append-only tables, where `ALL` would be permanently stale (it'd demand re-loading ancient partitions).
 - **`ALL`** catches a *frozen partition* (one window silently stopped refreshing) that `LATEST` misses — right when a stale slice means wrong answers.
@@ -102,7 +117,7 @@ A gated source is a managed model, so its schema moves with the suffix just like
 In a [suffixed](TARGET.md#schema-vs-table-suffix) (dev / PR) run, a gated upstream resolves to *your env's* copy (`warehouse_pr123.orders`) and gates against your env's state. But some upstreams aren't rebuilt per environment — a shared table that lives only in prod. Set `deactivate_for_dev=True` on the `Source` to read it from prod and trust it — **only in a suffixed run**. It's inert without a suffix, so you declare it once and never flip it between dev and prod.
 
 ```python
-Source("warehouse.orders", type=SourceModel(), contract=UpstreamContract.WINDOW, deactivate_for_dev=True)
+Source("warehouse.orders", type=SourceModel(), contract=UpstreamContract.ENCAPSULATE, deactivate_for_dev=True)
 ```
 
 The three cases and how to declare each:

@@ -74,17 +74,17 @@ daily_summary = Model(
         Source(
             "demo.warehouse.orders",
             type=SourceModel(),
-            contract=UpstreamContract.WINDOW,
+            contract=UpstreamContract.ENCAPSULATE,
         ),
         Source(
             "demo.warehouse.customers",
             type=SourceModel(),
-            contract=UpstreamContract.WINDOW,
+            contract=UpstreamContract.ENCAPSULATE,
         ),
         Source(
             "demo.warehouse.app_config",
             type=SourceModel(),
-            contract=UpstreamContract.WINDOW,
+            contract=UpstreamContract.ENCAPSULATE,
         ),
     ],
     tagging=Tags(tags={"demo"}),

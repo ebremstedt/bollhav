@@ -5,6 +5,8 @@ values, and UpstreamCheck composes the satisfied verdict + the single
 STATE_002 blocked reason from its blockers.
 """
 
+import pytest
+
 from bollhav.model.state import BlockCode, format_block_reason
 from bollhav.model.upstream import UpstreamCheck, UpstreamContract
 
@@ -13,22 +15,31 @@ class TestUpstreamContract:
     def test_level_values(self):
         # The on-the-wire strings the state backend keys on.
         assert UpstreamContract.EXISTS.value == "exists"
-        assert UpstreamContract.WINDOW.value == "window"
+        assert UpstreamContract.EXACT.value == "exact"
+        assert UpstreamContract.ENCAPSULATE.value == "encapsulate"
         assert UpstreamContract.THROUGH.value == "through"
         assert UpstreamContract.WHOLE.value == "whole"
 
     def test_is_str_enum(self):
         # A `str` Enum, so a member compares equal to its value and serializes
         # as the plain string.
-        assert UpstreamContract.WINDOW == "window"
+        assert UpstreamContract.ENCAPSULATE == "encapsulate"
 
-    def test_exactly_four_levels(self):
+    def test_no_window_member(self):
+        # WINDOW was removed (folded into ENCAPSULATE) — referencing it raises.
+        assert not hasattr(UpstreamContract, "WINDOW")
+        with pytest.raises(ValueError):
+            UpstreamContract("window")
+
+    def test_exactly_five_levels(self):
         assert {c.value for c in UpstreamContract} == {
             "exists",
-            "window",
+            "exact",
+            "encapsulate",
             "through",
             "whole",
         }
+        assert len(list(UpstreamContract)) == 5
 
 
 class TestUpstreamCheck:

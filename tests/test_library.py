@@ -74,7 +74,7 @@ def _model(
     from bollhav.model.upstream import UpstreamContract
 
     gated = [
-        Source(n, type=SourceModel(), contract=UpstreamContract.WINDOW)
+        Source(n, type=SourceModel(), contract=UpstreamContract.ENCAPSULATE)
         for n in upstream_list
     ]
     model.upstream = gated
@@ -290,12 +290,15 @@ class TestIsSatisfied:
     def test_state_tracked_table_no_applied_row_not_satisfied(self) -> None:
         from bollhav.postgres.state import PostgresState
 
-        # pg_tables existence check returns a row; the applied-row query
-        # returns None → not satisfied.
+        # pg_tables existence check returns a row; then the ENCAPSULATE level
+        # (temporal fallback) runs two queries — the single-row fast path
+        # (None → no container) and the union-coverage fallback (no rows → NULL
+        # bounds) → not satisfied.
         conn = MagicMock()
-        results = [MagicMock(), MagicMock()]
+        results = [MagicMock(), MagicMock(), MagicMock()]
         results[0].fetchone.return_value = (1,)  # pg_tables → exists
-        results[1].fetchone.return_value = None  # applied-row query → none
+        results[1].fetchone.return_value = None  # fast-path container → none
+        results[2].fetchone.return_value = (None,)  # union coverage → NULL → false
         conn.execute.side_effect = results
 
         entry = _entry(state_schema="z_raw", state_table="orders_state")

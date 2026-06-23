@@ -160,12 +160,12 @@ SPEC = [
         [
             (
                 clean("CustomerInteractionEngagementEventFact"),
-                UpstreamContract.WINDOW,
+                UpstreamContract.ENCAPSULATE,
                 fresh_latest(1),
             ),
             (
                 clean("SubscriptionBillingLifecycleCycleFact"),
-                UpstreamContract.WINDOW,
+                UpstreamContract.ENCAPSULATE,
                 None,
             ),
             (
@@ -221,12 +221,12 @@ SPEC = [
         [
             (
                 clean("CustomerInteractionEngagementEventFact"),
-                UpstreamContract.WINDOW,
+                UpstreamContract.ENCAPSULATE,
                 None,
             ),
             (
                 clean("OrderFulfilmentShipmentMovementFact"),
-                UpstreamContract.WINDOW,
+                UpstreamContract.ENCAPSULATE,
                 fresh_latest(3),
             ),
         ],
