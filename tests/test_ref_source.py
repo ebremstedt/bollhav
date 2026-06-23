@@ -160,7 +160,9 @@ class TestContractValidation:
 
     def test_contract_on_model_is_ok(self) -> None:
         s = Source(
-            "warehouse.orders", type=SourceModel(), contract=UpstreamContract.ENCAPSULATE
+            "warehouse.orders",
+            type=SourceModel(),
+            contract=UpstreamContract.ENCAPSULATE,
         )
         assert s.gated is True
         assert s.contract.value == "encapsulate"
@@ -248,7 +250,9 @@ class TestLineage:
         assert {"name": "raw.landing", "kind": "model"} in lin["sources"]
 
     def test_upstream_specs_use_contract_level(self) -> None:
-        m = _pg_model(upstream=[_gated("warehouse.orders", UpstreamContract.ENCAPSULATE)])
+        m = _pg_model(
+            upstream=[_gated("warehouse.orders", UpstreamContract.ENCAPSULATE)]
+        )
         assert m.upstream_specs == [{"name": "warehouse.orders", "kind": "encapsulate"}]
 
     def test_lineage_json_roundtrips(self) -> None:
