@@ -73,7 +73,7 @@ daily_summary = Model(
         end=datetime(2024, 1, 4, tzinfo=timezone.utc),
     ),
     upstream=[
-        Source("demo.warehouse.orders",     type=SourceModel(), contract=UpstreamContract.WINDOW),
+        Source("demo.warehouse.orders",     type=SourceModel(), contract=UpstreamContract.ENCAPSULATE),
         Source("demo.warehouse.customers",  type=SourceModel(), contract=UpstreamContract.WHOLE),
         Source("demo.warehouse.app_config", type=SourceModel(), contract=UpstreamContract.WHOLE),
     ],

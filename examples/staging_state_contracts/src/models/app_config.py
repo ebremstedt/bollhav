@@ -3,7 +3,7 @@
 No batching: its unit of work is "load the whole table," not a time
 window. `temporality=Temporality.TIMELESS` says so explicitly (a forgotten `batching`
 won't silently make a model monolithic). It gets a single whole-table
-state row that flips to `applied` once loaded — what a downstream's `WINDOW`
+state row that flips to `applied` once loaded — what a downstream's `ENCAPSULATE`
 contract resolves to for a whole-table upstream (its existence row applied).
 Re-runs skip it (already applied) until the state is reset.
 """

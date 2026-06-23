@@ -4,7 +4,7 @@
 
 A model's inputs — **all of them** — live in one list: `upstream: list[Source]`. A `Source` is one input, described by two independent dials:
 
-- **`type`** — *what* it is, and its read config: a [`SourceModel`](#sourcemodel) (relational — a managed model, an external table, or a view), a [`SourceFile`](#sourcefile), or a `SourceApi`.
+- **`type`** — *what* it is, and its read config: a [`SourceModel`](#sourcemodel) (relational — a managed model, an external table, or a view), a [`SourceFile`](#sourcefile), a `SourceApi`, or a [`SourceHardcoded`](#sourcehardcoded) (data written inline, in code).
 - **`contract`** — *whether it gates*. A `Source` carrying a contract is a **managed upstream** the state machine waits for (it must be `applied` before this model runs). No contract ⇒ **ungated** — an external input assumed always present, never blocking.
 
 That's the whole model: gated-vs-ungated is just "does this `Source` have a `contract`," not which list it's in.
@@ -175,6 +175,46 @@ A `SourceFile` is **not** SQL-addressable (`ref()` on it raises — there's no `
 | `dateformat` | `str` · `None` | `strftime` format for date columns when polars can't autodetect (e.g. `"%d/%m/%Y"`). |
 | `file_ending` | `str` · `None` | File extension hint (e.g. `"csv"`, `"tsv"`). Only needed when `path` doesn't carry one. |
 
+## SourceHardcoded
+
+The `type` of a **hardcoded** input — data written **inline, in code**, not read from a database, file, or API. For small constants kept in the repo: seed / reference / lookup tables, enum mappings, fixtures. The data lives in **exactly one** of two forms:
+
+```python
+from bollhav.model import Source, SourceHardcoded
+
+upstream=[
+    # Python rows — a list of dicts, one per row:
+    Source("ref.countries", type=SourceHardcoded(rows=[
+        {"id": 1, "code": "SE", "name": "Sweden"},
+        {"id": 2, "code": "NO", "name": "Norway"},
+    ])),
+    # …or a self-contained SQL literal (no FROM a real table):
+    Source("ref.flags", type=SourceHardcoded(
+        sql="SELECT * FROM (VALUES (1, true), (2, false)) AS t(id, active)"
+    )),
+]
+```
+
+Like files / APIs it is **never gated** (a `contract` is rejected — hardcoded data is always present, there's nothing to wait on) and **never SQL-addressable** (`ref()` raises — it has no stable table identifier). You read it with `to_dataframe()` and write it like any other DataFrame — there's no read query or external connection to plumb:
+
+```python
+# in your execute body — no read() function needed:
+df = my_source.to_dataframe(data_conn)   # rows: built directly; sql: run on the conn
+write(conn=data_conn, run=run, df_gen=df)
+```
+
+| Field / member | Type · Default | Purpose |
+|---|---|---|
+| `rows` | `Sequence[Mapping] · None` | Inline Python rows (list of dicts). Column names come from the keys. |
+| `sql` | `str · None` | A self-contained SQL literal (`VALUES` / `SELECT`-literal, no real `FROM`) that yields the rows, run on the data connection. |
+| `extra` | `dict · {}` | Free-form config bag. |
+| `content_hash` *(property)* | `str` | A stable, cross-process fingerprint of the inline content — the constant's **version**. Changes iff `rows`/`sql` change, so it can drive re-apply-on-edit (there's no `_data_modified` on a constant). |
+| `to_dataframe(conn=None)` *(method)* | `pl.DataFrame` | Materialize: `rows` builds the frame directly (no connection); `sql` runs on `conn` (a psycopg / pyodbc connection) and reads the result. |
+
+Exactly one of `rows` / `sql` must be set (both, or neither, is a definition-time error). In [lineage](LINEAGE.md) it appears as a real input with `kind="hardcoded"` — distinct from the `unknown-<uuid>` sentinel — so "which tables are code-maintained constants?" is an auditable query.
+
+> **Materialization is explicit today.** You call `to_dataframe()` in your execute body and `write()` the result. A fully-automatic, view-style path (bollhav writes the constant with *no* execute body, re-applying when `content_hash` changes) is a planned follow-up.
+
 ## Ungated sources
 
 An **ungated source** is a `Source` in `upstream` with **no `contract`** — a raw landing table, a third-party API, a dropped file, a hand-made table. Assumed always present, it can never block a unit of work; declaring it just records where data enters the system and (for relational types) enables `ref()` resolution. You never *have* to declare one — you can always hardcode an external table in your SQL. Declaring is the opt-in that buys you [lineage](LINEAGE.md) and `ref()` resolution.
@@ -184,7 +224,7 @@ An **ungated source** is a `Source` in `upstream` with **no `contract`** — a r
 | has a `contract` | yes | no |
 | refers to | a bollhav-managed model | an external, unmanaged input |
 | requires [state](STATE.md) | yes — gated by the state machine | no — never gated |
-| `type` allowed | `SourceModel` only | any (`SourceModel` / `SourceFile` / `SourceApi`) |
+| `type` allowed | `SourceModel` only | any (`SourceModel` / `SourceFile` / `SourceApi` / `SourceHardcoded`) |
 | `ref()` resolution | suffix-aware (moves with env) | literal (fixed location) |
 | purpose | wait-for + lineage | lineage / boundary marker |
 

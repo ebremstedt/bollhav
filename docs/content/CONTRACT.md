@@ -14,7 +14,7 @@ Model(contract=Contract(begin=..., end=...), ...)
 
 Only a [`TEMPORAL`](TEMPORALITY.md) model has a time axis, so only a temporal model carries a `begin`/`end`. A [`TIMELESS`](TEMPORALITY.md) model has no time to reference — giving one a `begin`/`end` raises at validation.
 
-A temporal model needn't be batched. With `batching`, the window is split into chunks (one state row per window). **Without** batching, a temporal model with a closed `begin`/`end` loads that whole range in one run and records it as a single state row spanning `[begin, end]` — so a downstream can still gate a `WINDOW` contract against it (its window must fall inside the range).
+A temporal model needn't be batched. With `batching`, the window is split into chunks (one state row per window). **Without** batching, a temporal model with a closed `begin`/`end` loads that whole range in one run and records it as a single state row spanning `[begin, end]` — so a downstream can still gate an `ENCAPSULATE` contract against it (its window must fall inside the range).
 
 ## begin
 

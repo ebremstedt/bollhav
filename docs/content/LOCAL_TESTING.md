@@ -39,7 +39,7 @@ python main.py        # every model, in order, gated by contracts
 
 ## Bake upstreams into the config
 
-Declaring `upstream=[Source("warehouse.orders", type=SourceModel(), contract=UpstreamContract.WINDOW), ...]` with `state=State(...)` makes ordering and gating **data, not orchestration code**. So locally there's nothing to wire: the contract that blocks a model in prod blocks it identically on your laptop. You test the real dependency behavior, not a mock of it — run `python main.py` twice and the second run does nothing (everything `applied`), same as prod.
+Declaring `upstream=[Source("warehouse.orders", type=SourceModel(), contract=UpstreamContract.ENCAPSULATE), ...]` with `state=State(...)` makes ordering and gating **data, not orchestration code**. So locally there's nothing to wire: the contract that blocks a model in prod blocks it identically on your laptop. You test the real dependency behavior, not a mock of it — run `python main.py` twice and the second run does nothing (everything `applied`), same as prod.
 
 ## Backfill with separate processes
 

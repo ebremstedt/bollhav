@@ -1,9 +1,14 @@
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 from bollhav.model.upstream import Freshness, UpstreamContract
+
+if TYPE_CHECKING:
+    import polars as pl
 
 
 @dataclass
@@ -48,6 +53,83 @@ class SourceApi:
 
 
 @dataclass
+class SourceHardcoded:
+    """Hardcoded input — the data is written **inline, in code**, not read from
+    a database / file / API. For small constants maintained in the repo: seed /
+    reference / lookup tables, enum mappings, fixtures.
+
+    The data is carried in exactly one of two forms (set one, not both):
+
+    - `rows` — a Python literal: a list of dicts (one per row). bollhav builds
+      the DataFrame from it; column names come from the keys.
+    - `sql` — a **self-contained** SQL literal that yields the rows: a `VALUES`
+      / `SELECT`-literal with *no FROM a real table*. Run on the data
+      connection to materialize.
+
+    Like files / APIs it is **never gated** (a contract is rejected — hardcoded
+    data is always present, there's nothing to wait on) and **never
+    SQL-addressable** (`ref()` raises — it has no stable table identifier; read
+    it via `to_dataframe()` and write it like any other DataFrame).
+
+    Because the content fully defines the data, `content_hash` is a stable
+    fingerprint of it — edit the literal and the hash moves, which is the natural
+    version for change-detection (there's no `_data_modified` on a constant)."""
+
+    rows: Sequence[Mapping[str, Any]] | None = None
+    sql: str | None = None
+    extra: dict = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if (self.rows is None) == (self.sql is None):
+            raise ValueError(
+                "SourceHardcoded needs exactly one of `rows` (inline Python "
+                "rows) or `sql` (an inline SQL literal) — "
+                + ("both were set." if self.rows is not None else "neither was set.")
+            )
+
+    @property
+    def content_hash(self) -> str:
+        """A stable (cross-process) fingerprint of the inline content — the
+        constant's version. Changes iff the `rows` / `sql` change, so a state
+        layer can re-apply on edit. Not Python's salted `hash()`: a SHA-256 over
+        a canonical serialization, so it's identical run-to-run."""
+        import hashlib
+        import json
+
+        if self.sql is not None:
+            payload = "sql:" + self.sql
+        else:
+            payload = "rows:" + json.dumps(
+                [dict(r) for r in self.rows or []], sort_keys=True, default=str
+            )
+        return hashlib.sha256(payload.encode()).hexdigest()[:16]
+
+    def to_dataframe(self, conn: Any | None = None) -> "pl.DataFrame":
+        """Materialize the hardcoded data into a polars DataFrame — the
+        read-replacement. `rows` builds one directly (no connection needed);
+        `sql` runs on `conn` (a DBAPI connection — psycopg or pyodbc) and reads
+        the result. Hand the result straight to `write(conn, run, df)`."""
+        import polars as pl
+
+        if self.rows is not None:
+            return pl.DataFrame([dict(r) for r in self.rows])
+
+        if conn is None:
+            raise ValueError(
+                "SourceHardcoded(sql=...) needs a `conn` to materialize "
+                "(it runs the SQL); pass the data connection to to_dataframe()."
+            )
+        cur = conn.cursor()
+        try:
+            cur.execute(self.sql)
+            columns = [d[0] for d in cur.description]
+            data = [tuple(row) for row in cur.fetchall()]
+        finally:
+            cur.close()
+        return pl.DataFrame(data, schema=columns, orient="row")
+
+
+@dataclass
 class Source:
     """One input on a model's `upstream` list. `type` says what it is (and
     holds its read config); `contract` says whether it gates.
@@ -66,7 +148,7 @@ class Source:
     Source)."""
 
     name: str
-    type: SourceModel | SourceFile | SourceApi | None = None
+    type: SourceModel | SourceFile | SourceApi | SourceHardcoded | None = None
     contract: UpstreamContract | None = None
     freshness: Freshness | None = None
     deactivate_for_dev: bool = False
@@ -76,8 +158,8 @@ class Source:
             raise ValueError(
                 f"source {self.name!r} has a contract but type="
                 f"{type(self.type).__name__} — only a SourceModel can be gated "
-                f"(files / APIs aren't state-tracked). Drop the contract or make "
-                f"it a SourceModel."
+                f"(files / APIs / hardcoded data aren't state-tracked). Drop the "
+                f"contract or make it a SourceModel."
             )
         if self.freshness is not None:
             # Freshness reads the upstream's applied_at, so it needs a gated
@@ -109,13 +191,15 @@ class Source:
 
     @property
     def kind(self) -> str:
-        """A short label for lineage: model / file / api / unknown."""
+        """A short label for lineage: model / file / api / hardcoded / unknown."""
         if isinstance(self.type, SourceModel):
             return "model"
         if isinstance(self.type, SourceFile):
             return "file"
         if isinstance(self.type, SourceApi):
             return "api"
+        if isinstance(self.type, SourceHardcoded):
+            return "hardcoded"
         return "unknown"
 
 
@@ -124,4 +208,5 @@ __all__ = [
     "SourceModel",
     "SourceFile",
     "SourceApi",
+    "SourceHardcoded",
 ]

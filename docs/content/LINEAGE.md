@@ -13,7 +13,7 @@ A model that declares neither has unknown provenance (`model.inputs_known is Fal
 
 ## Inspect one model's lineage in code
 
-A `Model` can describe its **own** declared inputs without any database — useful for a quick look, a CI check, or feeding a diagram. Each input is typed: a gated [upstream](UPSTREAM.md) by its [contract level](UPSTREAM.md#contracts-gating) (`exists` / `window` / `through` / `whole`), an ungated [source](UPSTREAM.md#ungated-sources) by its type (`model` / `file` / `api`).
+A `Model` can describe its **own** declared inputs without any database — useful for a quick look, a CI check, or feeding a diagram. Each input is typed: a gated [upstream](UPSTREAM.md) by its [contract level](UPSTREAM.md#contracts-gating) (`exists` / `exact` / `encapsulate` / `through` / `whole`), an ungated [source](UPSTREAM.md#ungated-sources) by its type (`model` / `file` / `api` / `hardcoded`).
 
 `model.lineage_tree()` returns a little ASCII tree:
 
@@ -97,7 +97,7 @@ Three things stand out — and they're exactly where dbt's static, per-project l
 
 1. **Cross-pipeline.** The library spans every pipeline that registers against the same state DB, so a [contract](UPSTREAM.md) on a model shipped in a *different* repo is still an edge. Org-wide lineage, not one project.
 2. **State-aware.** Because the edges live next to the [state](STATE.md) rows, the graph can be coloured by status — this edge is `applied` through 2024-03-01, that downstream is `blocked` because its upstream's window isn't covered. Lineage **and** freshness in one view, closer to an observability graph than a static DAG.
-3. **Typed edges.** Each node knows its `temporality` and each edge its contract level, so the graph can render the *semantics* of a dependency (a `WINDOW` contract covering an hourly downstream, an `EXISTS` gate, a `WHOLE` load) — not just an arrow.
+3. **Typed edges.** Each node knows its `temporality` and each edge its contract level, so the graph can render the *semantics* of a dependency (an `ENCAPSULATE` contract covering an hourly downstream, an `EXISTS` gate, a `WHOLE` load) — not just an arrow.
 
 ## The catch
 
