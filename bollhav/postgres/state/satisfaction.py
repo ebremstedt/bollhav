@@ -401,9 +401,9 @@ class Satisfaction(_PostgresStateBase):
             "    ORDER BY since, until ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING"
             "  ) AS prev_max FROM ov"
             ") "
-            "SELECT (SELECT min(since) FROM ov) <= %s "          # covers the left edge
-            "   AND (SELECT max(until) FROM ov) >= %s "          # covers the right edge
-            "   AND NOT EXISTS ("                                 # no internal hole
+            "SELECT (SELECT min(since) FROM ov) <= %s "  # covers the left edge
+            "   AND (SELECT max(until) FROM ov) >= %s "  # covers the right edge
+            "   AND NOT EXISTS ("  # no internal hole
             "     SELECT 1 FROM chain WHERE prev_max IS NOT NULL AND since > prev_max"
             "   )"
         ).format(

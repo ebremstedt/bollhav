@@ -132,7 +132,7 @@ class SourceHardcoded:
 @dataclass
 class Source:
     """One input on a model's `upstream` list. `type` says what it is (and
-    holds its read config); `contract` says whether it gates.
+    holds its read config); `contract` says whether it gates
 
     A `contract` requires `type` to be a `SourceModel` — files and APIs
     can't be state-gated. `type=None` marks unknown provenance (auto-injected

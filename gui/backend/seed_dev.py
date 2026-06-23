@@ -66,7 +66,11 @@ DEV_SPEC = [
         consume("AuroraForecastRollupFact"),
         Temporality.TEMPORAL,
         [
-            (clean("PenguinTelemetryEventFact"), UpstreamContract.ENCAPSULATE, _fresh(1)),
+            (
+                clean("PenguinTelemetryEventFact"),
+                UpstreamContract.ENCAPSULATE,
+                _fresh(1),
+            ),
             (clean("GlacierBoundaryReferenceDimension"), UpstreamContract.WHOLE, None),
         ],
         [],
