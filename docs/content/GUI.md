@@ -14,9 +14,9 @@ The **detail level** is a toggle in the header (the 🎄) — **lappland** is a 
 
 ![GUI — stockholm (full detail)](GUI_stockholm.png)
 
-- **Managed models** have a solid yellow outline with a `model` pill and a `table` / `view` materialization pill. **Unmanaged sources** have a dashed outline coloured by kind (`model` / `api` / `file`) with an `unmanaged` pill.
+- **Managed models** have a solid yellow outline with a `model` pill and a `table` / `view` materialization pill. **Unmanaged sources** have a dashed outline coloured by kind (`model` / `api` / `file` / `hardcoded`) with an `unmanaged` pill.
 - **Status lights** (top-right of a box): error (red), running (green), **blocked** (orange — an upstream hasn't produced the data yet), and **stale** (blue — an upstream is present but too old for a freshness contract).
-- **The dependency arrows** are labelled (in stockholm) with the upstream **contract**: the completeness level (`exists` / `window` / `through` / `whole`) and any **❄ freshness** bound.
+- **The dependency arrows** are labelled (in stockholm) with the upstream **contract**: the completeness level (`exists` / `exact` / `encapsulate` / `through` / `whole`) and any **❄ freshness** bound.
 - **Search** by model name, or **filter by tag / tag expression** in the second box — e.g. `[clean & fact]`, `[(customer|order) & fact]`, `[consumption & not:view]` (or a bare `clean`). Matched models stay — with their upstreams — and the matching part of each name turns green. The **🏷 tag syntax** button in the legend explains the expression syntax. (Matching reuses [`bollhav.model.tagexpr`](TAGS.md), so it behaves exactly like `TAGS=` run selection — but case-insensitively.)
 
 ## End to end — from pipelines to the browser
