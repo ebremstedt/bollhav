@@ -147,7 +147,7 @@ When bollhav inserts a state row as `blocked` instead of `pending`, the
 `LIB`, etc.), permanent once assigned, and never renumbered — so you
 can grep logs, build runbooks, and key alerts off them.
 
-This page explains each code: what triggers it, what to do about it.
+This page explains each code: what triggers it, what to do about it
 
 ### STATE_001 — upstream not registered
 
