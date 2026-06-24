@@ -16,11 +16,22 @@ class StateMode(Enum):
 
     DISCOVER  — preserve applied rows; only insert pending rows for
                  new (since, until) intervals. The resumable mode.
-    BULLDOZER — reset every interval back to pending, regardless of
-                 prior status. The whole window reruns."""
+    BULLDOZER — reset every *existing* interval row back to pending,
+                 regardless of prior status. The whole window reruns, but the
+                 rows keep their (since, until) boundaries — so the chunk
+                 granularity is fixed.
+    NUKE      — DELETE every state row for the model first, then prefill fresh
+                 at the current chunk. The escape hatch for changing chunk
+                 granularity (e.g. hourly → monthly) or wiping a stale backlog:
+                 unlike BULLDOZER it clears the rows entirely, so the new
+                 granularity starts clean. Destructive — applied history is
+                 lost, so the next run reprocesses every interval (idempotent
+                 for MERGE / recreate writes; APPEND would duplicate). Does NOT
+                 touch the model's data."""
 
     DISCOVER = "discover"
     BULLDOZER = "bulldozer"
+    NUKE = "nuke"
 
 
 @dataclass

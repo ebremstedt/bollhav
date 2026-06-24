@@ -34,12 +34,29 @@ class TimeChunking:
 
     `lookback` extends the start of the interval backwards by N cron-ticks,
     useful for reprocessing recent history to account for late-arriving data.
+
+    `fixed_intervals` declares whether this chunk grid is the model's state
+    *identity* (`True`, the default and today's only behavior) or a free
+    slicing of a coverage set (`False`). When `True`, state is a grid — one
+    row per `(since, until)` chunk; the chunk is part of identity, so changing
+    it requires a state reset (`STATE_MODE=nuke`), and downstreams may gate
+    `EXACT` on it. `False` is an **attestation** that the model's output is
+    invariant to how time is partitioned (its query is window-decomposable AND
+    its write is order-independent/idempotent), allowing variable-grain
+    coverage-based state.
+
+    NOTE: only the `True` path exists today. The coverage engine, the
+    `EXACT`/`APPEND` guards, and range locking that `False` implies are not yet
+    built — see `design/flexible-intervals.md`. The field is declared now so it
+    is plumbed (it carries through the runtime rebuild); setting `False` has no
+    effect yet.
     """
 
     chunk: IntervalExpression | IntervalExpressionExtended = "@daily"
     window: IntervalExpression | IntervalExpressionExtended | None = None
     tz: tzinfo = timezone.utc
     lookback: int | None = None
+    fixed_intervals: bool = True
 
 
 @dataclass

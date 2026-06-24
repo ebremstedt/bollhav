@@ -214,7 +214,10 @@ class Rows(_PostgresStateBase):
         from bollhav.model.state import StateMode
 
         on_conflict = ""
-        if model.state.mode is StateMode.DISCOVER:
+        # NUKE deletes every row up front (in the lifecycle), so its prefill
+        # hits no conflicts — fall in with DISCOVER's preserve-applied upsert as
+        # a harmless safety net for any stray row.
+        if model.state.mode in (StateMode.DISCOVER, StateMode.NUKE):
             on_conflict = sql.SQL(
                 "ON CONFLICT (since, until) DO UPDATE SET "
                 "status = CASE WHEN {schema}.{table}.status = 'applied' "
@@ -293,7 +296,9 @@ class Rows(_PostgresStateBase):
         from bollhav.model.state import StateMode
 
         on_conflict = sql.SQL("")
-        if model.state.mode is StateMode.DISCOVER:
+        # NUKE clears the row first (in the lifecycle), so its prefill hits no
+        # conflict — share DISCOVER's preserve-applied upsert as a safety net.
+        if model.state.mode in (StateMode.DISCOVER, StateMode.NUKE):
             on_conflict = sql.SQL(
                 "ON CONFLICT ((since IS NULL)) WHERE since IS NULL DO UPDATE SET "
                 "status = CASE WHEN {schema}.{table}.status = 'applied' "
@@ -327,6 +332,40 @@ class Rows(_PostgresStateBase):
             model.temporality.value,
             model.target.full_name,
             model.state.mode.value,
+        )
+
+    def nuke_rows(self) -> None:
+        """Delete every state row for this model (keeping the state table and
+        the library registration), so the next prefill rediscovers intervals
+        from scratch at the current chunk. The `STATE_MODE=nuke` escape hatch:
+        unlike BULLDOZER (reset existing rows to pending — granularity fixed) it
+        clears the rows entirely, so a chunk-granularity change or a stale
+        backlog starts clean. Lighter than `clear_state` (which also drops the
+        table + deregisters). Does NOT touch the model's data.
+
+        Destructive — applied history is lost, so the next run reprocesses
+        every interval (idempotent for MERGE / recreate; APPEND would
+        duplicate)."""
+        schema = self._state_schema()
+        table = self._state_table()
+        conn = self._require_conn()
+        # `ensure_tables` runs before this in the lifecycle, but stay safe if the
+        # table was never bootstrapped — nothing to nuke.
+        present = conn.execute(
+            "SELECT to_regclass(%s)", [f"{schema}.{table}"]
+        ).fetchone()
+        if not (present and present[0] is not None):
+            return
+        with conn.transaction():
+            deleted = conn.execute(
+                sql.SQL("DELETE FROM {schema}.{table}").format(
+                    schema=sql.Identifier(schema), table=sql.Identifier(table)
+                )
+            ).rowcount
+        logger.warning(
+            "state: NUKE deleted %d row(s) for %s — re-prefilling from scratch",
+            deleted,
+            self.model.target.full_name,
         )
 
     @staticmethod

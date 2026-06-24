@@ -35,7 +35,10 @@ def _apply(
     window_override: str | None = None,
     lookback_override: int | None = None,
     tz_override=None,
+    state_mode=None,
 ) -> Model:
+    from bollhav.model.state import StateMode
+
     return _apply_to_model(
         model,
         reload=reload,
@@ -47,6 +50,7 @@ def _apply(
         window_override=window_override,
         lookback_override=lookback_override,
         tz_override=tz_override,
+        state_mode=state_mode or StateMode.DISCOVER,
     )
 
 
@@ -147,23 +151,49 @@ class TestWindowResolution:
 
 
 class TestBatchingCarryThrough:
+    """`_batching_with_overrides` rebuilds `TimeChunking` / `Batch` every run, so
+    any field NOT overridden this run must survive. It uses `replace` (not an
+    enumerating constructor), so a forgotten field can't silently revert to its
+    default — the bug-class that made STATE_MODE a no-op."""
+
     def test_size_carried_through(self) -> None:
         m = Model(
             target=Target(name="events", schema="raw", schema_suffix_appendix=None),
             batching=Batch(
                 time=TimeChunking(chunk="@hourly", tz=UTC),
                 size=5000,
+                retries=7,
             ),
             contract=Contract(begin=datetime(2024, 1, 1, tzinfo=UTC)),
             temporality=Temporality.TEMPORAL,
         )
         out = _apply(m).model
         assert out.batching.size == 5000
+        assert out.batching.retries == 7  # Batch-level fields carry too
 
     def test_pipe_override_sets_interval_expression(self) -> None:
         m = _model(chunk="@hourly")
         out = _apply(m, interval_override="*/15 * * * *").model
         assert out.batching.time.chunk == "*/15 * * * *"
+
+    def test_timechunking_fields_survive_no_override(self) -> None:
+        # Every TimeChunking field a no-override run doesn't touch is preserved.
+        sthlm = ZoneInfo("Europe/Stockholm")
+        m = _apply(_model(chunk="@daily", window="@weekly", lookback=3, tz=sthlm)).model
+        t = m.batching.time
+        assert (t.chunk, t.window, t.lookback, t.tz) == ("@daily", "@weekly", 3, sthlm)
+
+    def test_lookback_zero_survives_no_override(self) -> None:
+        # 0 is meaningful ("no lookback") and must not be dropped to the default.
+        assert _apply(_model(lookback=0)).model.batching.time.lookback == 0
+
+    def test_fixed_intervals_defaults_true_and_survives(self) -> None:
+        # The attestation defaults True (grid), and a declared False carries
+        # through the rebuild even though _batching_with_overrides never names
+        # it — exactly what the `replace` refactor guarantees.
+        assert _model().batching.time.fixed_intervals is True
+        out = _apply(_model(fixed_intervals=False)).model
+        assert out.batching.time.fixed_intervals is False
 
 
 class TestBatchingNone:
@@ -194,10 +224,33 @@ class TestStateAndStagingCarryThrough:
             temporality=Temporality.TEMPORAL,
         )
         out = _apply(m).model
-        assert out.state is s
+        # Rebuilt (to stamp STATE_MODE on), so value-equal rather than identical.
+        assert out.state == s
 
     def test_state_None_stays_None(self) -> None:
         out = _apply(_model()).model
+        assert out.state is None
+
+    def test_state_mode_is_applied(self) -> None:
+        # Regression: STATE_MODE used to be resolved + displayed but never
+        # stamped onto model.state.mode, so bulldozer / nuke were silent no-ops.
+        from bollhav.model.state import State, StateMode
+
+        m = Model(
+            target=Target(name="orders", schema="public", schema_suffix_appendix=None),
+            batching=Batch(time=TimeChunking(chunk="@hourly", tz=UTC)),
+            state=State(),  # defaults to DISCOVER
+            temporality=Temporality.TEMPORAL,
+        )
+        out = _apply(m, state_mode=StateMode.NUKE).model
+        assert out.state is not None
+        assert out.state.mode is StateMode.NUKE
+
+    def test_state_mode_ignored_when_no_state(self) -> None:
+        # A stateless model stays stateless regardless of STATE_MODE.
+        from bollhav.model.state import StateMode
+
+        out = _apply(_model(), state_mode=StateMode.NUKE).model
         assert out.state is None
 
     def test_staging_carries_through(self) -> None:
