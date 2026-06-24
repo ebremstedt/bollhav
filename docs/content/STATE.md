@@ -104,7 +104,7 @@ When set: `@load_models` clears `state` and `target.staging` on every matched mo
 
 `STATE_MARK_APPLIED=true` is the **complement of `STATE_DISABLED`**: it writes the **state** without running the **data**. It stamps the matched models' window intervals `applied` and exits — no read, no write, no MERGE, no target DDL.
 
-The use case is exactly the pair: you loaded a table some other way (a `STATE_DISABLED` bulk load, a manual script, a one-off `INSERT`) and now want the state machine to *know* those intervals are done, so the daily incremental doesn't re-load them.
+The use case is exactly the pair: you loaded a table some other way (a `STATE_DISABLED` bulk load, a manual script, a one-off `INSERT`) and now want the state machine to *know* those intervals are done, so the daily incremental doesn't re-load them
 
 Where the four combinations sit:
 
