@@ -38,7 +38,12 @@ logger = logging.getLogger(__name__)
 _BLOCK_UPSTREAM_RE = re.compile(r"upstream '([^']+)'(?: \(([^)]+)\))?")
 
 
-class Rows(_PostgresStateBase):
+class StateTable(_PostgresStateBase):
+    """The per-model state table and the interval-status lifecycle over it:
+    create/migrate the table, prefill interval rows, select the actionable
+    ones, transition statuses (running → applied / blocked / error), and
+    torch/clear. One row per interval."""
+
     def ensure_tables(self) -> None:
         """Create the central state schema (`z_bollhav_state`), the model's
         state table, and its indexes if absent. Idempotent. (Errors are NOT
