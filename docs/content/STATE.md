@@ -100,12 +100,43 @@ Set `STATE_DISABLED=true` to force a pipeline to run with no state tracking, eve
 
 When set: `@load_models` clears `state` and `target.staging` on every matched model, the state bootstrap and banner are skipped, `@state` becomes a passthrough, and `write()` uses the direct (non-staged) path. State tables aren't read from or written to during the run.
 
+## Recording an out-of-band load: `STATE_MARK_APPLIED`
+
+`STATE_MARK_APPLIED=true` is the **complement of `STATE_DISABLED`**: it writes the **state** without running the **data**. It stamps the matched models' window intervals `applied` and exits — no read, no write, no MERGE, no target DDL.
+
+The use case is exactly the pair: you loaded a table some other way (a `STATE_DISABLED` bulk load, a manual script, a one-off `INSERT`) and now want the state machine to *know* those intervals are done, so the daily incremental doesn't re-load them.
+
+Where the four combinations sit:
+
+| | state | data |
+|---|---|---|
+| normal run | ✅ written | ✅ run |
+| `DRY_STATE` | ✅ prefilled / classified | ❌ |
+| `STATE_DISABLED` | ❌ | ✅ run |
+| **`STATE_MARK_APPLIED`** | ✅ **stamped applied** | ❌ |
+
+**Scope.** It marks exactly the run's **`compute_intervals(run)`** — the `[BACKFILL_SINCE, BACKFILL_UNTIL)` (or `LATEST`) window, split by your chunk — and **nothing else**. Crucially it does *not* go through the normal "drain every actionable row" executor, so a leftover `pending` backlog from other intervals is **left untouched**. Match the chunk (`INTERVAL_OVERRIDE`) to how the data was actually loaded, since that's the grain of the rows it stamps.
+
+```sh
+# you loaded 2025-11-06 out of band; now record it as done:
+export TAGS="[FactCaseVariableDevice]"
+export BACKFILL_ENABLED=true
+export BACKFILL_SINCE=2025-11-06T00:00:00
+export BACKFILL_UNTIL=2025-11-07T00:00:00
+export INTERVAL_OVERRIDE=@daily        # the grain it was loaded at
+export STATE_MARK_APPLIED=true
+python src/main.py
+```
+
+**It is an assertion, not a verification.** bollhav does *not* check the data is actually there — it records that you say it is. If you're wrong, downstreams gate on a claim that isn't true. `applied_at` is set to *now* (the claim time, not when the data really landed), so a downstream `Freshness` check sees "just loaded." It logs a `WARNING` per model and shows a `mark applied` banner in the run summary, since it's a deliberate override.
+
 ## Env vars (state-related)
 
 | Variable | Default | Effect |
 |---|---|---|
 | `STATE_MODE` | `discover` | `discover` preserves `applied` rows on re-evaluation and adds new pending intervals as discovered; `bulldozer` resets every existing row to the freshly-computed status (boundaries kept); `nuke` deletes every row then re-prefills at the current chunk (for changing chunk granularity / wiping a backlog — destructive) |
-| `STATE_DISABLED` | `false` | When `true`, force no-state behavior on every matched model |
+| `STATE_DISABLED` | `false` | When `true`, force no-state behavior on every matched model (data without state) |
+| `STATE_MARK_APPLIED` | `false` | When `true`, stamp the matched window's intervals `applied` without running them (state without data) — to record an out-of-band load. Scoped to `compute_intervals(run)`, never the backlog. An assertion, not a verification |
 | `DRY_STATE` | `false` | When `true`, run the state bootstrap and print each model's resolved plan (would-run / applied / blocked), then exit without creating assets, writing data, or running model logic |
 
 ## Block codes

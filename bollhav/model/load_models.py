@@ -135,6 +135,15 @@ def load_models(
                                       `state` + `target.staging` so the
                                       lifecycle hooks pass through and write()
                                       uses the direct path.
+        STATE_MARK_APPLIED            bool; when true, stamp the matched models'
+                                      window intervals `applied` in state WITHOUT
+                                      running them — for recording an out-of-band
+                                      load (a manual / STATE_DISABLED bulk load)
+                                      so the daily incremental won't reload it.
+                                      Scoped to `compute_intervals(run)` (the
+                                      supplied window + chunk), never the backlog.
+                                      No DDL, no data writes. An assertion, not a
+                                      verification — only what you select.
     """
 
     def decorator(func: Callable[..., None]) -> Callable[[], None]:
@@ -455,6 +464,13 @@ def _print_summary(cfg: _RuntimeConfig, runs: list[ModelRun]) -> None:
         _row("state", "disabled")
     elif has_state:
         _row("state", cfg.state_mode.value)
+    # STATE_MARK_APPLIED is resolved in @model_lifecycle (like DRY_STATE), but flag it
+    # loudly here so it's never run by accident — it writes `applied` without
+    # running any data.
+    from bollhav.model.lifecycle import _mark_applied
+
+    if _mark_applied():
+        _row("mark applied", "stamping window applied — NO data will run")
     # Close the runtime box with a lower border.
     print("────────────────────────────")
 
