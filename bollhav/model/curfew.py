@@ -33,9 +33,7 @@ class Curfew:
     windows: list[tuple[time, time]] = field(default_factory=list)
     days: set[int] | None = None
     tz: tzinfo = timezone.utc
-    allowed: bool = (
-        False  # False = deny when in effect; True = allow ONLY when in effect
-    )
+    allowed: bool = False
 
     @staticmethod
     def _contains(window: tuple[time, time], t: time) -> bool:
@@ -64,12 +62,6 @@ class Curfew:
         effect."""
         in_effect = self._in_effect(now)
         return (not in_effect) if self.allowed else in_effect
-
-    # ── presets ──────────────────────────────────────────────────────
-    # Named constructors for common curfews. Each takes `tz` (default UTC) and
-    # the `allowed` flip, so e.g. `Curfew.work_hours(allowed=True)` means "run
-    # ONLY during work hours." Build a bespoke day+hour mix with the plain
-    # constructor when none of these fit.
 
     @classmethod
     def work_hours(

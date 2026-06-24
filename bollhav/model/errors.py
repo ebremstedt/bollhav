@@ -50,6 +50,15 @@ class InvalidTimezoneError(RuntimeConfigError):
         super().__init__(f"TIMEZONE_OVERRIDE is not a valid IANA timezone: {value!r}")
 
 
+class RecreatePartitionWithoutWindowError(RuntimeConfigError):
+    def __init__(self, full_name: str) -> None:
+        super().__init__(
+            f"{full_name!r} uses WriteMode.RECREATE_PARTITION, which is "
+            f"window-scoped, but this run resolved no window — run it windowed "
+            f"(LATEST_ENABLED or a BACKFILL window)."
+        )
+
+
 __all__ = [
     "RuntimeConfigError",
     "ConflictingRunModeError",
@@ -59,4 +68,5 @@ __all__ = [
     "NegativeLookbackError",
     "InvalidStateModeError",
     "InvalidTimezoneError",
+    "RecreatePartitionWithoutWindowError",
 ]
