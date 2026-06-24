@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from functools import wraps
 from typing import Callable
 
+from bollhav.model.errors import RecreatePartitionWithoutWindowError
 from bollhav.model.progress_bar import PROGRESS
 from bollhav.model.window import compute_intervals
 from bollhav.model.write_modes import WriteMode
@@ -124,7 +125,7 @@ def _fmt_window(interval) -> str:
 _DRY_STATE_RUNS: dict[str, list] = {}
 
 
-def _print_state_plan(run, postgres_state) -> None:
+def _print_state_plan(run, state_handler) -> None:
     """One run's state-resolved plan, for `DRY_STATE`. Each actionable unit is
     classified — **would run** (gates already satisfied), **will run after** an
     upstream that would itself run earlier in this pass (the cascade), or
@@ -135,7 +136,7 @@ def _print_state_plan(run, postgres_state) -> None:
     name = run.model.target.full_name  # raw — used as the `_DRY_STATE_RUNS` key
     display = _gradient_name(name)  # colorized for output only
     kind = run.model.temporality.value
-    if postgres_state is None:
+    if state_handler is None:
         pending = _lgreen(f"pending {len(run.intervals)} unit(s)")
         print(f"  {display} ({kind})  ·  stateless → {pending}")
         if extra:
@@ -146,13 +147,13 @@ def _print_state_plan(run, postgres_state) -> None:
 
     # (interval, status, upstreams) — status in {"run", "after", "blocked"}.
     rows = [
-        (interval, *postgres_state.dry_state_classify(interval, _DRY_STATE_RUNS))
+        (interval, *state_handler.dry_state_classify(interval, _DRY_STATE_RUNS))
         for interval in run.intervals
     ]
 
     would_run = sum(1 for _, s, _ in rows if s in ("run", "after"))
     blocked = sum(1 for _, s, _ in rows if s == "blocked")
-    applied = postgres_state.read_status_summary()["counts"].get("applied", 0)
+    applied = state_handler.read_status_summary()["counts"].get("applied", 0)
     # Show only the non-zero buckets — a `pending 0` / `blocked 0` / `applied 0`
     # segment is just noise. A model with nothing in any bucket falls back to a
     # dash so the line still reads.
@@ -203,14 +204,9 @@ def _conns(arguments: dict):
             "function."
         )
     state_conn = arguments.get("state_conn") or data_conn
-
-    # State always runs in Postgres. If the data backend is MSSQL and the
-    # model is state-tracked, the state machine can't run on the MSSQL
-    # data_conn — a separate Postgres state_conn is required. Catch the
-    # missing one here with a clear message instead of a driver error later.
     run = arguments.get("run")
     model = run.model if run is not None else None
-    if model is not None and getattr(model, "stateful", False):
+    if model is not None and model.stateful:
         from bollhav.model.database import Database
 
         if model.target.database is Database.MSSQL and state_conn is data_conn:
@@ -250,22 +246,15 @@ def model_lifecycle(func: Callable) -> Callable:
 
         dry_state = _dry_state()
         mark_applied = _mark_applied()
-        postgres_state = None
+        state_handler = None
 
-        # Curfew early-out (real runs only): if the curfew is in effect right
-        # now, skip the whole model — no lock, no asset DDL, no state bootstrap.
-        # Every interval would be skipped per-interval anyway, so this avoids the
-        # setup. A run that STARTS clear of the curfew but crosses into it mid-run
-        # is still caught per interval in @execute_lifecycle. DRY_STATE keeps
-        # planning the model (it does no expensive setup to skip).
         if (
             not dry_state
             and model.curfew is not None
             and model.curfew.blocks(datetime.now(timezone.utc))
         ):
-            logger.info(
-                "curfew: skipping model %s (stays pending)", model.target.full_name
-            )
+            msg = "curfew: skipping model %s (stays pending)"
+            logger.info(msg, model.target.full_name)
             return None
 
         locked = False
@@ -276,72 +265,55 @@ def model_lifecycle(func: Callable) -> Callable:
         ):
             from bollhav.postgres.state import PostgresState
 
-            postgres_state = PostgresState(model=model, conn=state_conn)
-            locked = postgres_state.acquire_model_lock()
+            state_handler = PostgresState(model=model, conn=state_conn)
+            locked = state_handler.acquire_model_lock()
 
         # DRY_STATE and STATE_MARK_APPLIED do no target-schema work — no data backend,
         # so the asset-DDL block below is skipped entirely (no CREATE TABLE etc.).
-        data = None
+        data_handler = None
         if not dry_state and not mark_applied:
             if model.target.database is Database.POSTGRES:
                 from bollhav.postgres.data import PostgresData
 
-                data = PostgresData(model=model, conn=data_conn)
+                data_handler = PostgresData(model=model, conn=data_conn)
             elif model.target.database is Database.MSSQL:
                 from bollhav.mssql.data import MssqlData
 
-                data = MssqlData(model=model, conn=data_conn)
+                data_handler = MssqlData(model=model, conn=data_conn)
 
         try:
-            if data is not None:
-                data.create_schema()
+            if data_handler is not None:
+                data_handler.create_schema()
                 if model.is_view:
-                    # A view's asset IS its definition — create it here, in
-                    # place of the table DDL. No table/index/staging applies.
-                    data.create_or_replace_view()
+                    data_handler.create_or_replace_view()
                 else:
                     if model.target.recreate_table:
-                        data.recreate_table()
-                    data.create_table()
+                        data_handler.recreate_table()
+                    data_handler.create_table()
                     if model.target.truncate_table:
-                        data.truncate_table()
+                        data_handler.truncate_table()
                     if model.target.partitioned_by is not None:
-                        data.create_indexes()
+                        data_handler.create_indexes()
                     if model.target.unique_columns:
-                        data.add_unique_constraint()
+                        data_handler.add_unique_constraint()
                     if model.target.stage:
-                        data.create_staging_schema()
-                        data.gc_orphan_staging_tables()
+                        data_handler.create_staging_schema()
+                        data_handler.gc_orphan_staging_tables()
 
-            # State always lives in Postgres (the only backend). An MSSQL-data
-            # model can be state-tracked too — its state rows live in Postgres,
-            # on the separate `state_conn` (`_conns` enforces that a distinct
-            # Postgres connection is passed). So this block runs for any
-            # stateful model regardless of its data backend.
             if model.stateful and model.state.backend == StateBackend.POSTGRES:
                 from bollhav.postgres.state import PostgresState
 
-                postgres_state = PostgresState(model=model, conn=state_conn)
-                postgres_state.ensure_library()
-                postgres_state.register_model()
-                postgres_state.ensure_tables()
+                state_handler = PostgresState(model=model, conn=state_conn)
+                state_handler.ensure_library()
+                state_handler.register_model()
+                state_handler.ensure_tables()
 
-                # Only RECREATE_PARTITION is window-scoped: its staged apply
-                # deletes the target partition for [since, until) before swapping
-                # the staged rows in, so a no-window run is meaningless and would
-                # plant a NULL-window "oneshot" row it can never consume. APPEND /
-                # UPSERT_NO_DELETE staging is window-agnostic (it MERGEs the whole
-                # staging table), so a no-window staged run is a valid atomic
-                # whole-table load — recorded as a single oneshot row. Refuse only
-                # the genuinely-broken case, before any state is written.
                 if (
                     run.window is None
                     and model.target.write_mode is WriteMode.RECREATE_PARTITION
                 ):
-                    raise ValueError(
-                        f"{model.target.full_name!r} uses WriteMode.RECREATE_PARTITION, "
-                        f"which is window-scoped, but this run resolved no window — "
-                        f"run it windowed (LATEST_ENABLED or a BACKFILL window)."
+                    raise RecreatePartitionWithoutWindowError(
+                        model.target.full_name
                     )
 
                 # STATE_MODE=nuke: wipe this model's existing state rows before
@@ -351,7 +323,7 @@ def model_lifecycle(func: Callable) -> Callable:
                 from bollhav.model.state import StateMode
 
                 if model.state.mode is StateMode.NUKE and not dry_state:
-                    postgres_state.nuke_rows()
+                    state_handler.nuke_rows()
 
                 # A NULL-window one-shot row when there's no window to track —
                 # a timeless model, or a temporal one with no declared range.
@@ -359,13 +331,13 @@ def model_lifecycle(func: Callable) -> Callable:
                 # into chunks; an unbatched temporal run with a [begin, end]
                 # contract records that single range as one row.
                 if run.window is None:
-                    postgres_state.insert_oneshot(run_id=run.run_id)
+                    state_handler.insert_oneshot(run_id=run.run_id)
                 else:
-                    postgres_state.insert_intervals(
+                    state_handler.insert_intervals(
                         run_id=run.run_id,
                         intervals=compute_intervals(run),
                     )
-                run.intervals = postgres_state.get_actionable_intervals()
+                run.intervals = state_handler.get_actionable_intervals()
 
                 # STATE_MARK_APPLIED: the data was loaded out of band — stamp exactly
                 # THIS window's intervals applied (compute_intervals, NEVER the
@@ -374,7 +346,7 @@ def model_lifecycle(func: Callable) -> Callable:
                 if mark_applied and not dry_state:
                     ivs = compute_intervals(run)
                     for interval in ivs:
-                        postgres_state.mark_applied(
+                        state_handler.mark_applied(
                             run_id=run.run_id, interval=interval
                         )
                     logger.warning(
@@ -386,7 +358,7 @@ def model_lifecycle(func: Callable) -> Callable:
 
             PROGRESS.begin_model_for(model, total=len(run.intervals))
             if dry_state:
-                _print_state_plan(run, postgres_state)
+                _print_state_plan(run, state_handler)
                 return None
             if mark_applied:
                 return None  # state stamped above; run no model logic
@@ -401,8 +373,8 @@ def model_lifecycle(func: Callable) -> Callable:
                 try:
                     from bollhav.postgres.state import PostgresState
 
-                    postgres_state = PostgresState(model=model, conn=state_conn)
-                    postgres_state.release_lock()
+                    state_handler = PostgresState(model=model, conn=state_conn)
+                    state_handler.release_lock()
                 except Exception:
                     # Released automatically when the session ends too.
                     pass
@@ -480,16 +452,16 @@ def execute_lifecycle(func: Callable) -> Callable:
             if model.target.database is Database.MSSQL:
                 from bollhav.mssql.data import MssqlData
 
-                data = MssqlData(model=model, conn=data_conn)
+                data_handler = MssqlData(model=model, conn=data_conn)
             else:
                 from bollhav.postgres.data import PostgresData
 
-                data = PostgresData(model=model, conn=data_conn)
+                data_handler = PostgresData(model=model, conn=data_conn)
 
-            data.create_staging_table(run.run_id)
+            data_handler.create_staging_table(run.run_id)
             result = func(*args, **kwargs)
-            data.apply_staging_to_target(run.run_id, interval)
-            data.drop_staging_table(run.run_id)
+            data_handler.apply_staging_to_target(run.run_id, interval)
+            data_handler.drop_staging_table(run.run_id)
             return result
 
         def plain_execute():
@@ -498,35 +470,35 @@ def execute_lifecycle(func: Callable) -> Callable:
         def run_with_state(execute):
             from bollhav.postgres.state import PostgresState
 
-            postgres_state = PostgresState(model=model, conn=state_conn)
+            state_handler = PostgresState(model=model, conn=state_conn)
 
-            if postgres_state.is_applied(interval):
+            if state_handler.is_applied(interval):
                 message = "state: gate skipped applied %s for %s"
                 logger.debug(message, interval, model.target.full_name)
                 return None
 
-            if not postgres_state.try_acquire_interval_lock(interval):
+            if not state_handler.try_acquire_interval_lock(interval):
                 message = "state: lock held by another worker, skipping %s on %s"
                 logger.debug(message, interval, model.target.full_name)
                 return None
 
             try:
                 if model.gated_upstreams:
-                    check = postgres_state.is_upstream_satisfied_live(interval)
+                    check = state_handler.is_upstream_satisfied_live(interval)
                     if not check.satisfied:
-                        postgres_state.mark_blocked(
+                        state_handler.mark_blocked(
                             run_id=run.run_id,
                             interval=interval,
                             reason=check.reason or "",
                         )
                         return None
 
-                postgres_state.mark_running(run_id=run.run_id, interval=interval)
+                state_handler.mark_running(run_id=run.run_id, interval=interval)
 
                 try:
                     result = execute()
                 except Exception as exc:
-                    postgres_state.record_failure(
+                    state_handler.record_failure(
                         run_id=run.run_id,
                         interval=interval,
                         error_type=type(exc).__name__,
@@ -536,11 +508,11 @@ def execute_lifecycle(func: Callable) -> Callable:
                     )
                     raise
 
-                postgres_state.mark_applied(run_id=run.run_id, interval=interval)
+                state_handler.mark_applied(run_id=run.run_id, interval=interval)
                 return result
             finally:
                 try:
-                    postgres_state.release_interval_lock(interval)
+                    state_handler.release_interval_lock(interval)
                 except Exception:
                     pass
 
