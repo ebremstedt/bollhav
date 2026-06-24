@@ -420,7 +420,9 @@ def apply_atomically_to_target(
                     table=sql.Identifier(staging_table),
                 )
             )
-            logger.debug("dropped staging table %s.%s", staging_schema, staging_table)
+            logger.debug(
+                "dropped staging table %s.%s", staging_schema, staging_table
+            )
         # State is flipped to `applied` separately, by the interval
         # lifecycle's `mark_applied` after this returns — not inside the
         # data-move transaction. The data write commits here; the state

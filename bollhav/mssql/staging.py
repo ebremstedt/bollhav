@@ -184,9 +184,7 @@ def write_to_staging(
             raise UnsupportedStagingWriteModeError(wm)
     cursor.commit()
     logger.debug(
-        "wrote %d rows to staging table (%s)",
-        len(df),
-        _staging_write_mode(model).value,
+        "wrote %d rows to staging table (%s)", len(df), _staging_write_mode(model).value
     )
 
 
@@ -346,10 +344,7 @@ def apply_atomically_to_target(
     except Exception:
         cursor.rollback()
         raise
-    logger.debug(
-        "moved data from staging to target (%s)",
-        model.target.write_mode.value,
-    )
+    logger.debug("moved data from staging to target (%s)", model.target.write_mode.value)
 
 
 def cleanup_orphaned_staging_tables(
@@ -360,8 +355,7 @@ def cleanup_orphaned_staging_tables(
 ) -> None:
     if model.target.staging is not None and model.target.staging.keep_after_apply:
         logger.debug(
-            "GC skipped for %s — Staging.keep_after_apply=True",
-            model.target.full_name,
+            "GC skipped for %s — Staging.keep_after_apply=True", model.target.full_name
         )
         return
 

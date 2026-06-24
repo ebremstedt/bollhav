@@ -8,12 +8,6 @@ from uuid import UUID
 
 from psycopg import sql
 
-from bollhav.model.messages.info import (
-    info_state_cleared,
-    info_state_notnull_relaxed,
-    info_state_temporality_added,
-)
-from bollhav.model.messages.warning import warn_torch_deleted
 from bollhav.postgres.messages.error import (
     StateHashCollisionError,
     PrefillRequiresStateError,
@@ -149,7 +143,12 @@ class Rows(_PostgresStateBase):
                     table=sql.Identifier(state_table),
                 )
             )
-            info_state_temporality_added(logger, state_schema, state_table)
+            logger.info(
+                "state: migrated %s.%s — added temporality column (default 'temporal' "
+                "so older images keep writing temporal rows)",
+                state_schema,
+                state_table,
+            )
 
         # `model_name` was added so the table self-identifies. On a
         # pre-existing table we add it nullable (existing rows have no value);
@@ -180,7 +179,13 @@ class Rows(_PostgresStateBase):
                         col=sql.Identifier(col),
                     )
                 )
-                info_state_notnull_relaxed(logger, state_schema, state_table, col)
+                logger.info(
+                    "state: migrated %s.%s — relaxed NOT NULL on %s "
+                    "(monolithic / view rows carry a NULL window)",
+                    state_schema,
+                    state_table,
+                    col,
+                )
 
     def insert_intervals(self, *, run_id: UUID, intervals: tuple) -> None:
         """Insert one row per interval. Each item in `intervals` is either:
@@ -358,7 +363,11 @@ class Rows(_PostgresStateBase):
                     schema=sql.Identifier(schema), table=sql.Identifier(table)
                 )
             ).rowcount
-        warn_torch_deleted(logger, self.model.target.full_name, deleted)
+        logger.warning(
+            "state: TORCH deleted %d row(s) for %s — re-prefilling from scratch",
+            deleted,
+            self.model.target.full_name,
+        )
 
     @staticmethod
     def _normalize_prefill_row(item) -> tuple:
@@ -699,4 +708,4 @@ class Rows(_PostgresStateBase):
                         ),
                         [full_name],
                     )
-        info_state_cleared(logger, full_name, schema)
+        logger.info("state: cleared all state for %s (schema %s)", full_name, schema)

@@ -1,14 +1,9 @@
-"""User-facing message text, centralized so call sites stay free of prose.
+"""Typed, named exceptions for the model runtime, centralized in `error.py` so
+call sites just `raise <SpecificError>(...)` instead of carrying message prose.
 
-Three submodules, split by severity / mechanism:
-
-- `error`   — typed exceptions (raised, fatal); each owns its message.
-- `warning` — `warn_*(logger, ...)` emitters for non-fatal `logger.warning`s.
-- `info`    — `info_*(logger, ...)` emitters for routine `logger.info` lines.
-
-The error classes are re-exported here for convenience; the warning/info
-emitters are imported from their submodules directly (`messages.warning`,
-`messages.info`)."""
+Only errors are centralized — `logger.info`/`warning`/`debug` lines are written
+inline at their call sites (they read fine in context and don't benefit from the
+indirection). The error classes are re-exported here for convenience."""
 
 from __future__ import annotations
 

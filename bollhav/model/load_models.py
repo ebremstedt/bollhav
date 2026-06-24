@@ -26,8 +26,6 @@ from bollhav.model.messages.error import (
     NegativeLookbackError,
     WindowOverrideWithoutLatestError,
 )
-from bollhav.model.messages.debug import debug_defaulting_to_backfill
-from bollhav.model.messages.info import info_state_disabled
 from bollhav.model.window import compute_intervals
 from bollhav.model.progress_bar import get_progress_level, PROGRESS, ProgressLevel
 from bollhav.model.state import StateMode
@@ -158,7 +156,10 @@ def load_models(
                 and "LATEST_ENABLED" not in os.environ
                 and "BACKFILL_ENABLED" not in os.environ
             ):
-                debug_defaulting_to_backfill(logger)
+                logger.debug(
+                    "no run mode set — defaulting to backfill; "
+                    "set LATEST_ENABLED=true for latest-tick mode"
+                )
             runs = apply_runtime_overrides(
                 folder=folder,
                 tags=cfg.tags,
@@ -175,7 +176,10 @@ def load_models(
                 state_mode=cfg.state_mode,
             )
             if cfg.state_disabled:
-                info_state_disabled(logger, len(runs))
+                logger.info(
+                    "STATE_DISABLED: state + staging cleared on %d matched model(s)",
+                    len(runs),
+                )
 
             # Split each run's resolved window into its interval contract once
             # (apply_runtime_overrides already baked the window in) — and stash
