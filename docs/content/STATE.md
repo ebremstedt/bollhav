@@ -115,7 +115,7 @@ Where the four combinations sit:
 | `STATE_DISABLED` | ❌ | ✅ run |
 | **`STATE_MARK_APPLIED`** | ✅ **stamped applied** | ❌ |
 
-**Scope.** It marks exactly the run's **`compute_intervals(run)`** — the `[BACKFILL_SINCE, BACKFILL_UNTIL)` (or `LATEST`) window, split by your chunk — and **nothing else**. Crucially it does *not* go through the normal "drain every actionable row" executor, so a leftover `pending` backlog from other intervals is **left untouched**. Match the chunk (`INTERVAL_OVERRIDE`) to how the data was actually loaded, since that's the grain of the rows it stamps.
+**Scope.** It marks exactly the run's **`compute_intervals(run)`** — the `[BACKFILL_SINCE, BACKFILL_UNTIL)` (or `LATEST`) window, split by your chunk — and **nothing else**. Crucially it does *not* go through the normal "drain every actionable row" executor, so a leftover `pending` backlog from other intervals is **left untouched**. Match the chunk (`INTERVAL_OVERRIDE`) to how the data was actually loaded, since that's the grain of the rows it stamps
 
 ```sh
 # you loaded 2025-11-06 out of band; now record it as done:
