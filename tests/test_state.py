@@ -38,7 +38,7 @@ class TestStateMode:
     def test_values(self) -> None:
         assert StateMode.DISCOVER.value == "discover"
         assert StateMode.BULLDOZER.value == "bulldozer"
-        assert StateMode.NUKE.value == "nuke"
+        assert StateMode.TORCH.value == "torch"
 
 
 class TestBlockCode:
@@ -450,14 +450,14 @@ class TestStateMode_EnvVar:
         ):
             assert _resolve_state_mode() is StateMode.BULLDOZER
 
-    def test_nuke(self) -> None:
+    def test_torch(self) -> None:
         from bollhav.model.load_models import _resolve_state_mode
 
         with patch(
             "bollhav.model.load_models.env_var",
-            lambda name, **kw: "nuke" if name == "STATE_MODE" else None,
+            lambda name, **kw: "torch" if name == "STATE_MODE" else None,
         ):
-            assert _resolve_state_mode() is StateMode.NUKE
+            assert _resolve_state_mode() is StateMode.TORCH
 
     def test_unknown_raises(self) -> None:
         from bollhav.model.load_models import _resolve_state_mode
@@ -470,8 +470,8 @@ class TestStateMode_EnvVar:
                 _resolve_state_mode()
 
 
-class TestNukeRows:
-    """`nuke_rows` deletes every state row for the model (mock conn)."""
+class TestTorchRows:
+    """`torch_rows` deletes every state row for the model (mock conn)."""
 
     def _conn(self, *, table_exists: bool, deleted: int = 0):
         conn = MagicMock()
@@ -489,7 +489,7 @@ class TestNukeRows:
         from bollhav.postgres.state import PostgresState
 
         conn = self._conn(table_exists=True, deleted=14200)
-        PostgresState(_pg_model(), conn).nuke_rows()
+        PostgresState(_pg_model(), conn).torch_rows()
         executed = " ".join(str(c.args[0]) for c in conn.execute.call_args_list)
         assert "to_regclass" in executed
         assert "DELETE FROM" in executed
@@ -501,7 +501,7 @@ class TestNukeRows:
         probe = MagicMock()
         probe.fetchone.return_value = (None,)
         conn.execute.return_value = probe
-        PostgresState(_pg_model(), conn).nuke_rows()
+        PostgresState(_pg_model(), conn).torch_rows()
         # only the existence probe ran — no DELETE issued
         executed = " ".join(str(c.args[0]) for c in conn.execute.call_args_list)
         assert "DELETE FROM" not in executed

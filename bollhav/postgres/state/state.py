@@ -7,6 +7,9 @@ from typing import TYPE_CHECKING
 import psycopg
 from psycopg import sql
 
+from bollhav.model.messages.info import info_dropped_environment
+from bollhav.postgres.messages.error import DropEnvironmentRefusedError
+
 from ._base import _PostgresStateBase
 from ._ddl import LIBRARY_SCHEMA
 from .library import Library
@@ -54,12 +57,7 @@ def drop_environment(conn: psycopg.Connection, models: Sequence["Model"]) -> Non
 
     suffixed = [m for m in models if m.target.schema_suffix]
     if not suffixed:
-        raise ValueError(
-            "drop_environment refuses to run: no model carries a schema suffix, "
-            f"so it would target prod schemas ({LIBRARY_SCHEMA} + unsuffixed "
-            "targets). Set SCHEMA_SUFFIX for an ephemeral environment, or drop "
-            "prod schemas by hand if you must."
-        )
+        raise DropEnvironmentRefusedError(LIBRARY_SCHEMA)
     target_schemas: set[str] = set()
     state_schemas: set[str] = set()
     for m in suffixed:
@@ -83,8 +81,6 @@ def drop_environment(conn: psycopg.Connection, models: Sequence["Model"]) -> Non
             conn.execute(
                 sql.SQL("DROP SCHEMA IF EXISTS {} CASCADE").format(sql.Identifier(s))
             )
-    logger.info(
-        "dropped environment: target schemas %s, state schemas %s",
-        sorted(target_schemas),
-        sorted(state_schemas),
+    info_dropped_environment(
+        logger, sorted(target_schemas), sorted(state_schemas)
     )

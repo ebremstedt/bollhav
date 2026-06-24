@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from bollhav.model.messages.error import StagingWriteModeError
 from bollhav.model.write_modes import WriteMode
 
 
@@ -55,13 +56,7 @@ class Staging:
 
     def __post_init__(self) -> None:
         if self.write_mode not in (WriteMode.APPEND, WriteMode.UPSERT_NO_DELETE):
-            raise ValueError(
-                f"Staging.write_mode must be WriteMode.APPEND or "
-                f"WriteMode.UPSERT_NO_DELETE — got "
-                f"{self.write_mode!r}. RECREATE_PARTITION and VIEW are "
-                f"target-side concepts that don't apply to chunks landing "
-                f"in a staging table."
-            )
+            raise StagingWriteModeError(self.write_mode)
 
 
 __all__ = ["Staging"]

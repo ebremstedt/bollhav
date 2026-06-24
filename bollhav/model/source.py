@@ -5,6 +5,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from bollhav.model.messages.error import (
+    FreshnessWithExistsContractError,
+    FreshnessWithoutContractError,
+    HardcodedSourceFormError,
+    HardcodedSqlWithoutConnError,
+    SourceContractWithoutModelError,
+)
 from bollhav.model.upstream import Freshness, UpstreamContract
 
 if TYPE_CHECKING:
@@ -81,11 +88,7 @@ class SourceHardcoded:
 
     def __post_init__(self) -> None:
         if (self.rows is None) == (self.sql is None):
-            raise ValueError(
-                "SourceHardcoded needs exactly one of `rows` (inline Python "
-                "rows) or `sql` (an inline SQL literal) — "
-                + ("both were set." if self.rows is not None else "neither was set.")
-            )
+            raise HardcodedSourceFormError(self.rows is not None)
 
     @property
     def content_hash(self) -> str:
@@ -115,10 +118,7 @@ class SourceHardcoded:
             return pl.DataFrame([dict(r) for r in self.rows])
 
         if conn is None:
-            raise ValueError(
-                "SourceHardcoded(sql=...) needs a `conn` to materialize "
-                "(it runs the SQL); pass the data connection to to_dataframe()."
-            )
+            raise HardcodedSqlWithoutConnError()
         cur = conn.cursor()
         try:
             cur.execute(self.sql)
@@ -155,28 +155,16 @@ class Source:
 
     def __post_init__(self) -> None:
         if self.contract is not None and not isinstance(self.type, SourceModel):
-            raise ValueError(
-                f"source {self.name!r} has a contract but type="
-                f"{type(self.type).__name__} — only a SourceModel can be gated "
-                f"(files / APIs / hardcoded data aren't state-tracked). Drop the "
-                f"contract or make it a SourceModel."
+            raise SourceContractWithoutModelError(
+                self.name, type(self.type).__name__
             )
         if self.freshness is not None:
             # Freshness reads the upstream's applied_at, so it needs a gated
             # upstream with state — and EXISTS never inspects state at all.
             if self.contract is None:
-                raise ValueError(
-                    f"source {self.name!r} sets `freshness` but has no contract "
-                    f"— freshness is a recency bound on a gated upstream's state. "
-                    f"Add a contract (ENCAPSULATE / THROUGH / WHOLE) or drop freshness."
-                )
+                raise FreshnessWithoutContractError(self.name)
             if self.contract is UpstreamContract.EXISTS:
-                raise ValueError(
-                    f"source {self.name!r} sets `freshness` with contract=EXISTS, "
-                    f"but EXISTS never inspects state (registration is the whole "
-                    f"gate) — there's no applied_at to age. Use ENCAPSULATE / "
-                    f"THROUGH / WHOLE, or drop freshness."
-                )
+                raise FreshnessWithExistsContractError(self.name)
 
     @property
     def gated(self) -> bool:

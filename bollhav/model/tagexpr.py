@@ -1,6 +1,8 @@
 import re
 from dataclasses import dataclass
 
+from bollhav.model.messages.error import InvalidTagExpressionError
+
 
 @dataclass
 class PotentialTagMatch:
@@ -71,7 +73,7 @@ def _parse_group(prefix: str, group_content: str) -> PotentialTagGroup:
 def parse_expression(expr: str) -> list[PotentialTagGroup]:
     groups = re.findall(rf"((?:{_RELOAD_PREFIX_TOKEN}|not:)*)?\[([^\]]+)\]", expr)
     if not groups:
-        raise ValueError(f"Invalid tag expression: {expr!r}. Must use [group] syntax.")
+        raise InvalidTagExpressionError(expr)
     return [_parse_group(prefix, content) for prefix, content in groups]
 
 

@@ -1409,7 +1409,8 @@ def test_e2e_dry_state_plans_without_executing(schema_name, capsys, monkeypatch)
 def test_e2e_dry_state_cascade_shows_will_run_after(schema_name, capsys, monkeypatch):
     """DRY_STATE understands the cascade: a downstream gated on an upstream that
     would itself run this pass shows 'pending after <upstream>', not blocked."""
-    from bollhav.model.lifecycle import _DRY_STATE_RUNS, model_lifecycle
+    from bollhav.model.lifecycle import model_lifecycle
+    from bollhav.model.state_dry_plan import _DRY_STATE_RUNS
 
     _DRY_STATE_RUNS.clear()
     monkeypatch.setenv("DRY_STATE_EXTRA", "true")

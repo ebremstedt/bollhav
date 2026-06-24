@@ -109,7 +109,7 @@ def _apply_to_model(
     # STATE_DISABLED forces no-state semantics — null `state` + `target.staging`
     # at construction so the lifecycle hooks pass through and write() goes
     # direct. Otherwise carry the model's state, with the run's STATE_MODE
-    # (discover / bulldozer / nuke) stamped on — the env override only takes
+    # (discover / bulldozer / torch) stamped on — the env override only takes
     # effect here. Born-complete: never mutated onto the model after the fact.
     target = _target_with_suffix(model.target, schema_suffix, table_suffix)
     if state_disabled:

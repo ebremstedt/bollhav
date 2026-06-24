@@ -8,6 +8,21 @@ from uuid import UUID
 
 from psycopg import sql
 
+from bollhav.model.messages.info import (
+    info_state_cleared,
+    info_state_notnull_relaxed,
+    info_state_temporality_added,
+)
+from bollhav.model.messages.warning import warn_torch_deleted
+from bollhav.postgres.messages.error import (
+    StateHashCollisionError,
+    PrefillRequiresStateError,
+    OneshotRequiresStateError,
+    InvalidPrefillStatusError,
+    BlockedRowRequiresReasonError,
+    ClearStateRefusedError,
+)
+
 from ._base import _PostgresStateBase
 from ._naming import _name_digest
 from ._ddl import (
@@ -101,10 +116,8 @@ class Rows(_PostgresStateBase):
             [self.model.target.full_name],
         ).fetchone()
         if row is not None:
-            raise ValueError(
-                f"state hash collision: {schema}.{state_table} already holds "
-                f"state for {row[0]!r}, not {self.model.target.full_name!r}. "
-                f"Rename one model or widen the digest in state_table_name."
+            raise StateHashCollisionError(
+                schema, state_table, row[0], self.model.target.full_name
             )
 
     def _migrate_state_additively(
@@ -136,12 +149,7 @@ class Rows(_PostgresStateBase):
                     table=sql.Identifier(state_table),
                 )
             )
-            logger.info(
-                "state: migrated %s.%s — added temporality column (default "
-                "'temporal' so older images keep writing temporal rows)",
-                state_schema,
-                state_table,
-            )
+            info_state_temporality_added(logger, state_schema, state_table)
 
         # `model_name` was added so the table self-identifies. On a
         # pre-existing table we add it nullable (existing rows have no value);
@@ -172,13 +180,7 @@ class Rows(_PostgresStateBase):
                         col=sql.Identifier(col),
                     )
                 )
-                logger.info(
-                    "state: migrated %s.%s — relaxed NOT NULL on %s "
-                    "(monolithic / view rows carry a NULL window)",
-                    state_schema,
-                    state_table,
-                    col,
-                )
+                info_state_notnull_relaxed(logger, state_schema, state_table, col)
 
     def insert_intervals(self, *, run_id: UUID, intervals: tuple) -> None:
         """Insert one row per interval. Each item in `intervals` is either:
@@ -198,10 +200,7 @@ class Rows(_PostgresStateBase):
             prior value (applied_at cleared too)."""
         model = self.model
         if model.state is None:
-            raise ValueError(
-                "prefill_intervals requires a state-enabled model "
-                f"({model.target.full_name!r} has no `state`)"
-            )
+            raise PrefillRequiresStateError(model.target.full_name)
 
         if not intervals:
             return
@@ -214,10 +213,10 @@ class Rows(_PostgresStateBase):
         from bollhav.model.state import StateMode
 
         on_conflict = ""
-        # NUKE deletes every row up front (in the lifecycle), so its prefill
+        # TORCH deletes every row up front (in the lifecycle), so its prefill
         # hits no conflicts — fall in with DISCOVER's preserve-applied upsert as
         # a harmless safety net for any stray row.
-        if model.state.mode in (StateMode.DISCOVER, StateMode.NUKE):
+        if model.state.mode in (StateMode.DISCOVER, StateMode.TORCH):
             on_conflict = sql.SQL(
                 "ON CONFLICT (since, until) DO UPDATE SET "
                 "status = CASE WHEN {schema}.{table}.status = 'applied' "
@@ -285,10 +284,7 @@ class Rows(_PostgresStateBase):
         isn't re-run), BULLDOZER resets it to pending."""
         model = self.model
         if model.state is None:
-            raise ValueError(
-                "insert_oneshot requires a state-enabled model "
-                f"({model.target.full_name!r} has no `state`)"
-            )
+            raise OneshotRequiresStateError(model.target.full_name)
 
         schema = self._state_schema()
         table = self._state_table()
@@ -296,9 +292,9 @@ class Rows(_PostgresStateBase):
         from bollhav.model.state import StateMode
 
         on_conflict = sql.SQL("")
-        # NUKE clears the row first (in the lifecycle), so its prefill hits no
+        # TORCH clears the row first (in the lifecycle), so its prefill hits no
         # conflict — share DISCOVER's preserve-applied upsert as a safety net.
-        if model.state.mode in (StateMode.DISCOVER, StateMode.NUKE):
+        if model.state.mode in (StateMode.DISCOVER, StateMode.TORCH):
             on_conflict = sql.SQL(
                 "ON CONFLICT ((since IS NULL)) WHERE since IS NULL DO UPDATE SET "
                 "status = CASE WHEN {schema}.{table}.status = 'applied' "
@@ -334,10 +330,10 @@ class Rows(_PostgresStateBase):
             model.state.mode.value,
         )
 
-    def nuke_rows(self) -> None:
+    def torch_rows(self) -> None:
         """Delete every state row for this model (keeping the state table and
         the library registration), so the next prefill rediscovers intervals
-        from scratch at the current chunk. The `STATE_MODE=nuke` escape hatch:
+        from scratch at the current chunk. The `STATE_MODE=torch` escape hatch:
         unlike BULLDOZER (reset existing rows to pending — granularity fixed) it
         clears the rows entirely, so a chunk-granularity change or a stale
         backlog starts clean. Lighter than `clear_state` (which also drops the
@@ -350,7 +346,7 @@ class Rows(_PostgresStateBase):
         table = self._state_table()
         conn = self._require_conn()
         # `ensure_tables` runs before this in the lifecycle, but stay safe if the
-        # table was never bootstrapped — nothing to nuke.
+        # table was never bootstrapped — nothing to torch.
         present = conn.execute(
             "SELECT to_regclass(%s)", [f"{schema}.{table}"]
         ).fetchone()
@@ -362,11 +358,7 @@ class Rows(_PostgresStateBase):
                     schema=sql.Identifier(schema), table=sql.Identifier(table)
                 )
             ).rowcount
-        logger.warning(
-            "state: NUKE deleted %d row(s) for %s — re-prefilling from scratch",
-            deleted,
-            self.model.target.full_name,
-        )
+        warn_torch_deleted(logger, self.model.target.full_name, deleted)
 
     @staticmethod
     def _normalize_prefill_row(item) -> tuple:
@@ -374,11 +366,9 @@ class Rows(_PostgresStateBase):
         if isinstance(item, tuple) and len(item) == 3:
             interval, status, reason = item
             if status not in ("pending", "blocked"):
-                raise ValueError(
-                    f"prefill status must be 'pending' or 'blocked', got {status!r}"
-                )
+                raise InvalidPrefillStatusError(status)
             if status == "blocked" and not reason:
-                raise ValueError("blocked rows require a non-empty blocked_reason")
+                raise BlockedRowRequiresReasonError()
             return (interval, status, reason if status == "blocked" else None)
         # Bare TZInterval — backward-compat: treat as pending.
         return (item, "pending", None)
@@ -680,12 +670,8 @@ class Rows(_PostgresStateBase):
         (`z_bollhav`) is intentionally not offered — the suffix marks the
         ephemeral environment this is meant for. Do it by hand if you must."""
         if not self.model.target.schema_suffix:
-            raise ValueError(
-                f"clear_state refuses to run on {self.model.target.full_name!r}: "
-                f"it has no schema suffix, so its state lives in prod "
-                f"({LIBRARY_SCHEMA}). Clearing prod state isn't offered — set "
-                f"SCHEMA_SUFFIX for an ephemeral environment, or delete the rows "
-                f"by hand if you truly must."
+            raise ClearStateRefusedError(
+                self.model.target.full_name, LIBRARY_SCHEMA
             )
         conn = self._require_conn()
         schema = self._library_schema()
@@ -713,4 +699,4 @@ class Rows(_PostgresStateBase):
                         ),
                         [full_name],
                     )
-        logger.info("state: cleared all state for %s (schema %s)", full_name, schema)
+        info_state_cleared(logger, full_name, schema)

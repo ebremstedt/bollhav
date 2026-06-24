@@ -3,6 +3,8 @@ from dataclasses import dataclass, field
 from datetime import timezone, tzinfo
 from roskarl import IntervalExpression, IntervalExpressionExtended
 
+from bollhav.model.messages.error import BatchSizeExceedsMaxError
+
 logger = logging.getLogger(__name__)
 
 MAX_BATCH_SIZE = 100000
@@ -12,9 +14,7 @@ def validate_batch_size(batch_size: int, source: str) -> None:
     """Raise if `batch_size` exceeds the hard cap. `source` names where the
     value came from for the error message (e.g. 'Batch.size')."""
     if batch_size > MAX_BATCH_SIZE:
-        raise ValueError(
-            f"{source} batch_size={batch_size} exceeds max {MAX_BATCH_SIZE}"
-        )
+        raise BatchSizeExceedsMaxError(source, batch_size, MAX_BATCH_SIZE)
 
 
 @dataclass
@@ -39,7 +39,7 @@ class TimeChunking:
     *identity* (`True`, the default and today's only behavior) or a free
     slicing of a coverage set (`False`). When `True`, state is a grid — one
     row per `(since, until)` chunk; the chunk is part of identity, so changing
-    it requires a state reset (`STATE_MODE=nuke`), and downstreams may gate
+    it requires a state reset (`STATE_MODE=torch`), and downstreams may gate
     `EXACT` on it. `False` is an **attestation** that the model's output is
     invariant to how time is partitioned (its query is window-decomposable AND
     its write is order-independent/idempotent), allowing variable-grain

@@ -1,6 +1,7 @@
 from dataclasses import dataclass, fields
 from enum import Enum
 from bollhav.model.database import DatabaseColumn
+from bollhav.mssql.messages.error import NullablePrimaryKeyColumnError
 
 
 class MssqlType(Enum):
@@ -50,9 +51,7 @@ class MssqlColumn(DatabaseColumn):
 
     def __post_init__(self) -> None:
         if self.primary_key and self.nullable:
-            raise ValueError(
-                f"Column {self.name!r}: primary_key=True cannot be nullable"
-            )
+            raise NullablePrimaryKeyColumnError(self.name)
 
     def __repr__(self) -> str:
         base_parts = [

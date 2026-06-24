@@ -20,6 +20,12 @@ from typing import TYPE_CHECKING
 
 from icron import croniter
 from bollhav.model.intervals import TZInterval
+from bollhav.model.messages.error import (
+    BackfillRequiresSinceError,
+    BackfillRequiresUntilError,
+    CronSeedingInvariantError,
+    ReloadRequiresContractBeginError,
+)
 from roskarl.cron import INTERVAL_EXPRESSION_SHORTCUTS
 
 if TYPE_CHECKING:
@@ -55,10 +61,7 @@ def latest_complete_interval(expression: str, tz: tzinfo = timezone.utc) -> TZIn
     # least 2 ticks have been consumed before the break and both `prev` and
     # `curr` are populated.
     if prev is None or curr is None:
-        raise RuntimeError(
-            f"cron seeding invariant violated for {cron!r}: the iterator "
-            f"returned a tick >= now within the first two steps"
-        )
+        raise CronSeedingInvariantError(cron)
     return TZInterval(prev, curr)
 
 
@@ -109,9 +112,7 @@ def resolve_window(
 
     if reload:
         if contract.begin is None:
-            raise ValueError(
-                f"reload requires contract.begin to be set on model {name!r}"
-            )
+            raise ReloadRequiresContractBeginError(name)
         window_since = contract.begin
         window_until = contract.end or latest_complete_interval(expr, tz).until
     elif latest:
@@ -121,17 +122,9 @@ def resolve_window(
     else:
         window_since = since or contract.begin
         if window_since is None:
-            raise ValueError(
-                f"backfill requires a since value — set contract.begin on model "
-                f"{name!r} or pass --since at runtime"
-            )
+            raise BackfillRequiresSinceError(name)
         if until is None:
-            raise ValueError(
-                f"backfill requires an explicit until on model {name!r} — set "
-                f'BACKFILL_UNTIL. Backfill means a specific window; for "to the '
-                f'latest complete tick" use latest mode, for "to contract.end" use '
-                f"reload mode."
-            )
+            raise BackfillRequiresUntilError(name)
         window_until = until
 
     if batching.time.lookback:

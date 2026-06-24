@@ -27,7 +27,7 @@ Under `STATE_MODE=discover` (the default), `prefill` keeps `applied` rows untouc
 
 Under `STATE_MODE=bulldozer`, every *existing* row resets to the computed status regardless of prior value (`applied_at` cleared too) — but the rows keep their `(since, until)` boundaries, so the chunk granularity is unchanged.
 
-Under `STATE_MODE=nuke`, every state row for the model is **deleted** first, then `prefill` rediscovers intervals from scratch at the *current* chunk. Use it to **change chunk granularity** (e.g. hourly → monthly — `bulldozer` can't, since it only resets existing boundaries) or to wipe a stale backlog. It's destructive (applied history is lost, so the next run reprocesses everything — safe for MERGE / recreate writes, but `APPEND` would duplicate) and never fires during `DRY_STATE`. It does **not** touch the model's data, and it's scoped to the `TAGS`-matched models.
+Under `STATE_MODE=torch`, every state row for the model is **deleted** first, then `prefill` rediscovers intervals from scratch at the *current* chunk. Use it to **change chunk granularity** (e.g. hourly → monthly — `bulldozer` can't, since it only resets existing boundaries) or to wipe a stale backlog. It's destructive (applied history is lost, so the next run reprocesses everything — safe for MERGE / recreate writes, but `APPEND` would duplicate) and never fires during `DRY_STATE`. It does **not** touch the model's data, and it's scoped to the `TAGS`-matched models.
 
 ## Concurrency: per-interval advisory locks
 
@@ -134,7 +134,7 @@ python src/main.py
 
 | Variable | Default | Effect |
 |---|---|---|
-| `STATE_MODE` | `discover` | `discover` preserves `applied` rows on re-evaluation and adds new pending intervals as discovered; `bulldozer` resets every existing row to the freshly-computed status (boundaries kept); `nuke` deletes every row then re-prefills at the current chunk (for changing chunk granularity / wiping a backlog — destructive) |
+| `STATE_MODE` | `discover` | `discover` preserves `applied` rows on re-evaluation and adds new pending intervals as discovered; `bulldozer` resets every existing row to the freshly-computed status (boundaries kept); `torch` deletes every row then re-prefills at the current chunk (for changing chunk granularity / wiping a backlog — destructive) |
 | `STATE_DISABLED` | `false` | When `true`, force no-state behavior on every matched model (data without state) |
 | `STATE_MARK_APPLIED` | `false` | When `true`, stamp the matched window's intervals `applied` without running them (state without data) — to record an out-of-band load. Scoped to `compute_intervals(run)`, never the backlog. An assertion, not a verification |
 | `DRY_STATE` | `false` | When `true`, run the state bootstrap and print each model's resolved plan (would-run / applied / blocked), then exit without creating assets, writing data, or running model logic |

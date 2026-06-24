@@ -6,6 +6,11 @@ from typing import cast, LiteralString
 from datetime import datetime
 from bollhav.model.model import Model
 from bollhav.postgres.columns import PostgresColumn
+from bollhav.postgres.messages.error import (
+    NaiveDatetimeError,
+    RecreatePartitionRequiresPartitionColumnError,
+    CreateReplaceViewRequiresSourceModelError,
+)
 from bollhav.postgres.schema import ensure_schema
 
 logger = logging.getLogger(__name__)
@@ -16,7 +21,7 @@ def _assert_aware(dt: datetime, name: str) -> None:
     # `timestamptz` by instant — so any zone is allowed, not just UTC. Only a
     # naive datetime is rejected: its instant depends on the session timezone.
     if dt.tzinfo is None:
-        raise ValueError(f"{name} must be timezone-aware, got naive {dt!r}")
+        raise NaiveDatetimeError(name, dt)
 
 
 def append(
@@ -48,10 +53,7 @@ def recreate_partition(
     _assert_aware(until, "until")
     partition_col = model.target.partitioned_by
     if partition_col is None:
-        raise ValueError(
-            f"recreate_partition requires model.target to have a column with "
-            f"partition_on=True (got none on {model.target.full_name!r})"
-        )
+        raise RecreatePartitionRequiresPartitionColumnError(model.target.full_name)
     with conn.transaction():
         conn.execute(
             sql.SQL(
@@ -150,11 +152,7 @@ def create_replace_view(
     )
     source = src.type if src is not None else None
     if not isinstance(source, SourceModel) or source.query is None:
-        raise ValueError(
-            f"create_replace_view requires a Source with a SourceModel type "
-            f"whose .query is set, in upstream=[...] on "
-            f"{model.target.full_name!r}"
-        )
+        raise CreateReplaceViewRequiresSourceModelError(model.target.full_name)
 
     with conn.transaction():
         ensure_schema(conn, model.target.schema_resolved)

@@ -19,7 +19,7 @@ windows under a monthly override" surprise.
 Two coherent answers:
 
 - **FIXED (today):** the chunk is identity. One state row per chunk. Changing
-  the chunk is a migration → `STATE_MODE=nuke`. Downstreams may gate `EXACT`.
+  the chunk is a migration → `STATE_MODE=torch`. Downstreams may gate `EXACT`.
 - **FLEXIBLE (this note):** state is a *coverage set* (covered time ranges). The
   chunk is purely how you slice work, not identity. Re-chunk freely; fill gaps.
 
@@ -50,7 +50,7 @@ The framework can only *partially* verify this (see Guards). A wrong
 ## The engine (step 2 — the bulk, NOT built)
 
 The three `STATE_MODE`s collapse into "how much coverage to uncover before
-computing gaps": `discover` = nothing, `bulldozer` = the run window, `nuke` =
+computing gaps": `discover` = nothing, `bulldozer` = the run window, `torch` =
 everything. One path.
 
 **Storage** — barely changes. An `applied` row *is* a covered interval. Add a
@@ -92,7 +92,7 @@ erases fine-grained provenance** — see landmines).
 
 **Invalidation = range subtraction.** `uncover(span)` = `applied_mr - span`,
 which may split a range in two. The three modes are then just: `discover` →
-uncover nothing; `bulldozer` → `uncover(run.window)`; `nuke` → uncover all.
+uncover nothing; `bulldozer` → `uncover(run.window)`; `torch` → uncover all.
 
 ## Guards (step 3 — small but mandatory, NOT built)
 

@@ -20,7 +20,7 @@ class StateMode(Enum):
                  regardless of prior status. The whole window reruns, but the
                  rows keep their (since, until) boundaries — so the chunk
                  granularity is fixed.
-    NUKE      — DELETE every state row for the model first, then prefill fresh
+    TORCH      — DELETE every state row for the model first, then prefill fresh
                  at the current chunk. The escape hatch for changing chunk
                  granularity (e.g. hourly → monthly) or wiping a stale backlog:
                  unlike BULLDOZER it clears the rows entirely, so the new
@@ -31,7 +31,7 @@ class StateMode(Enum):
 
     DISCOVER = "discover"
     BULLDOZER = "bulldozer"
-    NUKE = "nuke"
+    TORCH = "torch"
 
 
 @dataclass
