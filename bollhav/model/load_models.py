@@ -116,12 +116,16 @@ def load_models(
                                       prints the exhaustive per-model block
                                       (schema, bounds, tags, source, upstream,
                                       …). Implies DRY_RUN=true
-        STATE_MODE                    discover (default) | bulldozer. For
-                                      state-enabled models, controls how the
-                                      `@model_lifecycle` prefill treats
+        STATE_MODE                    discover (default) | bulldozer | nuke.
+                                      For state-enabled models, controls how
+                                      the `@model_lifecycle` prefill treats
                                       existing state rows. discover = preserve
                                       applied rows; bulldozer = reset every
-                                      row to pending.
+                                      existing row to pending (boundaries kept);
+                                      nuke = DELETE every row, then prefill fresh
+                                      at the current chunk (for changing chunk
+                                      granularity or wiping a backlog —
+                                      destructive, reprocesses everything).
         STATE_DISABLED                bool; when true, force the pipeline to
                                       run with NO state tracking — even for
                                       models that declare state=State(...).
@@ -160,6 +164,7 @@ def load_models(
                 lookback_override=cfg.lookback_override,
                 tz_override=cfg.tz_override,
                 state_disabled=cfg.state_disabled,
+                state_mode=cfg.state_mode,
             )
             if cfg.state_disabled:
                 logger.info(

@@ -333,6 +333,15 @@ def model_lifecycle(func: Callable) -> Callable:
                         f"run it windowed (LATEST_ENABLED or a BACKFILL window)."
                     )
 
+                # STATE_MODE=nuke: wipe this model's existing state rows before
+                # prefill so a chunk-granularity change (or a stale backlog)
+                # re-discovers from scratch. Never during DRY_STATE — a preview
+                # must not delete.
+                from bollhav.model.state import StateMode
+
+                if model.state.mode is StateMode.NUKE and not dry_state:
+                    postgres_state.nuke_rows()
+
                 # A NULL-window one-shot row when there's no window to track —
                 # a timeless model, or a temporal one with no declared range.
                 # Otherwise one row per window: a batched run splits its window

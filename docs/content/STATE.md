@@ -25,7 +25,9 @@ Under `STATE_MODE=discover` (the default), `prefill` keeps `applied` rows untouc
 - `error` rows → `pending` (automatic retry)
 - `running` rows orphaned by a process crash → `pending` (automatic recovery)
 
-Under `STATE_MODE=bulldozer`, every row resets to the computed status regardless of prior value (`applied_at` cleared too).
+Under `STATE_MODE=bulldozer`, every *existing* row resets to the computed status regardless of prior value (`applied_at` cleared too) — but the rows keep their `(since, until)` boundaries, so the chunk granularity is unchanged.
+
+Under `STATE_MODE=nuke`, every state row for the model is **deleted** first, then `prefill` rediscovers intervals from scratch at the *current* chunk. Use it to **change chunk granularity** (e.g. hourly → monthly — `bulldozer` can't, since it only resets existing boundaries) or to wipe a stale backlog. It's destructive (applied history is lost, so the next run reprocesses everything — safe for MERGE / recreate writes, but `APPEND` would duplicate) and never fires during `DRY_STATE`. It does **not** touch the model's data, and it's scoped to the `TAGS`-matched models.
 
 ## Concurrency: per-interval advisory locks
 
@@ -102,7 +104,7 @@ When set: `@load_models` clears `state` and `target.staging` on every matched mo
 
 | Variable | Default | Effect |
 |---|---|---|
-| `STATE_MODE` | `discover` | `discover` preserves `applied` rows on re-evaluation and adds new pending intervals as discovered; `bulldozer` resets every row to the freshly-computed status |
+| `STATE_MODE` | `discover` | `discover` preserves `applied` rows on re-evaluation and adds new pending intervals as discovered; `bulldozer` resets every existing row to the freshly-computed status (boundaries kept); `nuke` deletes every row then re-prefills at the current chunk (for changing chunk granularity / wiping a backlog — destructive) |
 | `STATE_DISABLED` | `false` | When `true`, force no-state behavior on every matched model |
 | `DRY_STATE` | `false` | When `true`, run the state bootstrap and print each model's resolved plan (would-run / applied / blocked), then exit without creating assets, writing data, or running model logic |
 
