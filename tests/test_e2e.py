@@ -1448,6 +1448,65 @@ def test_e2e_dry_state_cascade_shows_will_run_after(schema_name, capsys, monkeyp
     assert "blocked:" not in out  # nothing actually blocked
 
 
+# ── 15b. STATE_MARK_APPLIED ─────────────────────────────────────────────────
+
+
+def test_e2e_mark_applied_stamps_window_only(schema_name, monkeypatch):
+    """STATE_MARK_APPLIED=true stamps exactly the run's window intervals `applied`
+    without running the model, and leaves a pre-existing pending backlog row
+    (outside the window) untouched — proving it scopes to compute_intervals(run),
+    not the actionable set."""
+    from bollhav.model.lifecycle import model_lifecycle
+
+    monkeypatch.setenv("STATE_MARK_APPLIED", "true")
+    ran = {"executed": False}
+
+    @model_lifecycle
+    def run_model(run, data_conn, state_conn=None):
+        ran["executed"] = True  # must not happen under STATE_MARK_APPLIED
+
+    run = _orders_model(schema_name, name="orders_mark", state=State())
+    window_n = len(compute_intervals(run))
+    backlog_since = datetime(2099, 1, 1, tzinfo=timezone.utc)
+    backlog_until = datetime(2099, 1, 2, tzinfo=timezone.utc)
+
+    with psycopg.connect(_dsn(), autocommit=True) as conn:
+        # First pass: creates the state table + stamps the window applied.
+        run_model(run, conn, conn)
+
+        # Seed a pending backlog row OUTSIDE the window — what the actionable set
+        # would pick up but STATE_MARK_APPLIED must not.
+        st = PostgresState(run.model, conn)._state_table()
+        conn.execute(
+            f'INSERT INTO "z_bollhav"."{st}" '
+            "(model_name, run_id, since, until, status) "
+            "VALUES (%s, %s, %s, %s, 'pending')",
+            [run.model.target.full_name, str(run.run_id), backlog_since, backlog_until],
+        )
+
+        # Second pass: re-stamps the window, must NOT touch the backlog.
+        run_model(run, conn, conn)
+
+    rows = _state_rows("z_bollhav", st)
+    applied = [(s, u) for status, s, u in rows if status == "applied"]
+    pending = [(s, u) for status, s, u in rows if status == "pending"]
+
+    assert ran["executed"] is False  # no data ran
+    assert len(applied) == window_n  # the whole window, nothing more
+    assert pending == [(backlog_since, backlog_until)]  # backlog left alone
+
+    # asset DDL was skipped (like DRY_STATE) — no target data table created.
+    with psycopg.connect(_dsn(), autocommit=True) as conn:
+        assert (
+            conn.execute(
+                "SELECT 1 FROM information_schema.tables "
+                "WHERE table_schema=%s AND table_name='orders_mark'",
+                [schema_name],
+            ).fetchone()
+            is None
+        )
+
+
 # ── 12. ephemeral-environment teardown (clear_state / drop_environment) ──
 
 

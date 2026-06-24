@@ -98,6 +98,16 @@ def _dry_state_extra() -> bool:
     return _truthy("DRY_STATE_EXTRA")
 
 
+def _mark_applied() -> bool:
+    """`STATE_MARK_APPLIED=true` — stamp the run's window intervals `applied` in state
+    WITHOUT running them (the data was loaded out of band, e.g. a STATE_DISABLED
+    bulk load or a manual script). The complement of STATE_DISABLED: state
+    without data. No target DDL, no read/write/staging — only the matched
+    models' `compute_intervals(run)` (the supplied window, at its chunk) are
+    marked, never the actionable backlog. An assertion, not a verification."""
+    return _truthy("STATE_MARK_APPLIED")
+
+
 def _fmt_window(interval) -> str:
     """A compact window label for one unit of work; `None` is the whole-table
     / view oneshot."""
@@ -239,6 +249,7 @@ def model_lifecycle(func: Callable) -> Callable:
         from bollhav.model.state import StateBackend
 
         dry_state = _dry_state()
+        mark_applied = _mark_applied()
         postgres_state = None
 
         # Curfew early-out (real runs only): if the curfew is in effect right
@@ -268,10 +279,10 @@ def model_lifecycle(func: Callable) -> Callable:
             postgres_state = PostgresState(model=model, conn=state_conn)
             locked = postgres_state.acquire_model_lock()
 
-        # DRY_STATE does no target-schema work — no data backend, so the
-        # asset-DDL block below is skipped entirely (no CREATE TABLE etc.).
+        # DRY_STATE and STATE_MARK_APPLIED do no target-schema work — no data backend,
+        # so the asset-DDL block below is skipped entirely (no CREATE TABLE etc.).
         data = None
-        if not dry_state:
+        if not dry_state and not mark_applied:
             if model.target.database is Database.POSTGRES:
                 from bollhav.postgres.data import PostgresData
 
@@ -356,10 +367,29 @@ def model_lifecycle(func: Callable) -> Callable:
                     )
                 run.intervals = postgres_state.get_actionable_intervals()
 
+                # STATE_MARK_APPLIED: the data was loaded out of band — stamp exactly
+                # THIS window's intervals applied (compute_intervals, NEVER the
+                # actionable backlog) and run no model logic. Not during a
+                # DRY_STATE preview.
+                if mark_applied and not dry_state:
+                    ivs = compute_intervals(run)
+                    for interval in ivs:
+                        postgres_state.mark_applied(
+                            run_id=run.run_id, interval=interval
+                        )
+                    logger.warning(
+                        "STATE_MARK_APPLIED: stamped %d interval(s) applied for %s "
+                        "WITHOUT running it",
+                        len(ivs),
+                        model.target.full_name,
+                    )
+
             PROGRESS.begin_model_for(model, total=len(run.intervals))
             if dry_state:
                 _print_state_plan(run, postgres_state)
                 return None
+            if mark_applied:
+                return None  # state stamped above; run no model logic
             return func(*args, **kwargs)
         finally:
             PROGRESS.finish_model()
