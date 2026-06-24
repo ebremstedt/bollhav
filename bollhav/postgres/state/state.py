@@ -13,7 +13,7 @@ from ._base import _PostgresStateBase
 from ._ddl import LIBRARY_SCHEMA
 from .library import Library
 from .locks import Locks
-from .rows import Rows
+from .state_table import StateTable
 from .satisfaction import Satisfaction
 
 if TYPE_CHECKING:
@@ -22,7 +22,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class PostgresState(Library, Rows, Satisfaction, Locks, _PostgresStateBase):
+class PostgresState(Library, StateTable, Satisfaction, Locks, _PostgresStateBase):
     """Postgres-backed state store for a single model.
 
     Construct with the model and the caller-owned state connection
@@ -31,9 +31,9 @@ class PostgresState(Library, Rows, Satisfaction, Locks, _PostgresStateBase):
     connection unset; every DB method requires it.
 
     Implementation is split by concern across this package: `_base`
-    (connection / naming), `rows` (per-model state rows), `satisfaction`
-    (upstream gating), `locks` (advisory locks), and `library` (the
-    cross-pipeline model library)."""
+    (connection / naming), `state_table` (the per-model state table + interval
+    status lifecycle), `satisfaction` (upstream gating), `locks` (advisory
+    locks), and `library` (the cross-pipeline model library)."""
 
 
 def drop_environment(conn: psycopg.Connection, models: Sequence["Model"]) -> None:

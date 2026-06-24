@@ -1,7 +1,7 @@
 """Postgres-backed state store, split by concern.
 
 `PostgresState` (in `state`) is assembled from per-concern building blocks:
-`library`, `rows`, `satisfaction`, `locks`, over `_base` (connection / naming).
+`library`, `state_table`, `satisfaction`, `locks`, over `_base` (connection / naming).
 This module is only the public re-export surface — every existing
 `from bollhav.postgres.state import …` keeps working.
 """
