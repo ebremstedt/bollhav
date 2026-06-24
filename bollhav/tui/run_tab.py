@@ -302,7 +302,8 @@ class RunTab(Vertical):
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.STDOUT,
             )
-            assert proc.stdout is not None
+            if proc.stdout is None:
+                return
             async for raw in proc.stdout:
                 log.write(Text(raw.decode(errors="replace").rstrip()))
             rc = await proc.wait()

@@ -205,11 +205,12 @@ def _orders_model(
     upstream: list[Source] | None = None,
     sources: list[Source] | None = None,
     schema_suffix: str = "",
+    fixed_intervals: bool = True,
 ) -> ModelRun:
     # `apply_runtime_overrides` normally resolves the window from env vars and
     # returns a ModelRun. E2E tests call the bootstrap directly, so we build
     # the model + resolve the window by hand to the test's fixed window.
-    batching = Batch(time=TimeChunking(chunk="@daily"))
+    batching = Batch(time=TimeChunking(chunk="@daily", fixed_intervals=fixed_intervals))
     contract = Contract(begin=SINCE, end=bounds_end)
     model = Model(
         target=Target(
@@ -1942,3 +1943,255 @@ def test_e2e_contract_freshness_requires_contract():
             contract=UpstreamContract.EXISTS,
             freshness=Freshness(within=timedelta(days=1)),
         )
+
+
+# ── flexible vs fixed intervals + lineage contracts ──────────────────
+
+
+def _fixed_intervals_in_library(full_name: str) -> bool:
+    with _conn() as c:
+        row = c.execute(
+            "SELECT fixed_intervals FROM z_bollhav.library WHERE full_name = %s",
+            [full_name],
+        ).fetchone()
+    return row[0]
+
+
+def test_e2e_fixed_intervals_round_trips(schema_name):
+    """register_model stores TimeChunking.fixed_intervals on the library row,
+    and lookup_model reads it back onto the LibraryEntry. A grid model stores
+    True (the default); a coverage model stores False."""
+    grid = _orders_model(schema_name, name="grid", state=State(), staging=Staging())
+    cover = _orders_model(
+        schema_name,
+        name="cover",
+        state=State(),
+        staging=Staging(),
+        fixed_intervals=False,
+    )
+    _bootstrap([grid, cover])
+
+    assert _fixed_intervals_in_library(grid.model.target.full_name) is True
+    assert _fixed_intervals_in_library(cover.model.target.full_name) is False
+
+    # …and through the typed lookup that the gating code actually reads.
+    with _conn() as c:
+        grid_entry = PostgresState.lookup_model(c, grid.model.target.full_name)
+        cover_entry = PostgresState.lookup_model(c, cover.model.target.full_name)
+    assert grid_entry.fixed_intervals is True
+    assert cover_entry.fixed_intervals is False
+
+
+def test_e2e_flexible_upstream_with_encapsulate_downstream_is_satisfied(schema_name):
+    """The headline valid combination: a FLEXIBLE upstream
+    (fixed_intervals=False) feeding a downstream that gates ENCAPSULATE.
+    Coverage works fine against a flexible upstream — once the upstream's
+    windows are applied, the downstream's matching windows are satisfied."""
+    raw = _orders_model(
+        schema_name,
+        name="raw_events",
+        state=State(),
+        staging=Staging(),
+        fixed_intervals=False,
+    )
+    clean = _orders_model(
+        schema_name,
+        name="clean_events",
+        state=State(),
+        staging=Staging(),
+        upstream=[
+            Source(
+                f"{CAT}.{schema_name}.raw_events",
+                type=SourceModel(),
+                contract=UpstreamContract.ENCAPSULATE,
+            )
+        ],
+    )
+    _bootstrap([raw, clean])
+    _run_intervals(raw)  # drive the flexible upstream's windows to `applied`
+
+    with _conn() as c:
+        cs = PostgresState(clean.model, c)
+        for interval in compute_intervals(clean):
+            assert cs.is_upstream_satisfied_live(interval).satisfied is True
+
+
+def test_e2e_exact_on_flexible_upstream_raises(schema_name):
+    """Guard A, end-to-end against the live library: an EXACT contract on a
+    FLEXIBLE upstream is a hard error (it could never match a coalesced range,
+    so the downstream would block forever)."""
+    from bollhav.postgres.messages.error import (
+        ExactContractOnFlexibleUpstreamError,
+    )
+
+    raw = _orders_model(
+        schema_name,
+        name="raw_flex",
+        state=State(),
+        staging=Staging(),
+        fixed_intervals=False,
+    )
+    bad = _orders_model(
+        schema_name,
+        name="bad_exact",
+        state=State(),
+        staging=Staging(),
+        upstream=[
+            Source(
+                f"{CAT}.{schema_name}.raw_flex",
+                type=SourceModel(),
+                contract=UpstreamContract.EXACT,
+            )
+        ],
+    )
+    _bootstrap([raw, bad])
+    _run_intervals(raw)
+
+    with _conn() as c:
+        bs = PostgresState(bad.model, c)
+        interval = next(iter(compute_intervals(bad)))
+        with pytest.raises(ExactContractOnFlexibleUpstreamError):
+            bs.is_upstream_satisfied_live(interval)
+
+
+def test_e2e_flexible_fixed_lineage_plethora(schema_name):
+    """A plethora of interdependent models covering the (shape × contract)
+    matrix end-to-end:
+
+        raw_fixed  (FIXED)
+          ├─ ENCAPSULATE → clean_flex (FLEXIBLE)
+          │                  └─ ENCAPSULATE → report_fixed (FIXED)   ✓ valid
+          └─ EXACT       → audit_exact (FIXED)                       ✓ valid
+        clean_flex (FLEXIBLE)
+          └─ EXACT       → bad_exact (FIXED)                         ✗ Guard A
+
+    Asserts: the library stores each model's fixed_intervals; the valid
+    contracts resolve satisfied; the EXACT-on-flexible edge raises."""
+    from bollhav.postgres.messages.error import (
+        ExactContractOnFlexibleUpstreamError,
+    )
+
+    def ref(name, contract):
+        return Source(
+            f"{CAT}.{schema_name}.{name}", type=SourceModel(), contract=contract
+        )
+
+    raw_fixed = _orders_model(
+        schema_name, name="raw_fixed", state=State(), staging=Staging()
+    )
+    clean_flex = _orders_model(
+        schema_name,
+        name="clean_flex",
+        state=State(),
+        staging=Staging(),
+        fixed_intervals=False,
+        upstream=[ref("raw_fixed", UpstreamContract.ENCAPSULATE)],
+    )
+    report_fixed = _orders_model(
+        schema_name,
+        name="report_fixed",
+        state=State(),
+        staging=Staging(),
+        upstream=[ref("clean_flex", UpstreamContract.ENCAPSULATE)],
+    )
+    audit_exact = _orders_model(
+        schema_name,
+        name="audit_exact",
+        state=State(),
+        staging=Staging(),
+        upstream=[ref("raw_fixed", UpstreamContract.EXACT)],
+    )
+    bad_exact = _orders_model(
+        schema_name,
+        name="bad_exact",
+        state=State(),
+        staging=Staging(),
+        upstream=[ref("clean_flex", UpstreamContract.EXACT)],
+    )
+
+    _bootstrap([raw_fixed, clean_flex, report_fixed, audit_exact, bad_exact])
+    # Drive the two upstreams that get consumed to `applied`.
+    _run_intervals(raw_fixed)
+    _run_intervals(clean_flex)
+
+    # 1) Library records each model's shape.
+    assert _fixed_intervals_in_library(raw_fixed.model.target.full_name) is True
+    assert _fixed_intervals_in_library(clean_flex.model.target.full_name) is False
+    assert _fixed_intervals_in_library(report_fixed.model.target.full_name) is True
+    assert _fixed_intervals_in_library(audit_exact.model.target.full_name) is True
+
+    with _conn() as c:
+        # 2) ENCAPSULATE on a FLEXIBLE upstream — valid, satisfied.
+        rs = PostgresState(report_fixed.model, c)
+        for interval in compute_intervals(report_fixed):
+            assert rs.is_upstream_satisfied_live(interval).satisfied is True
+
+        # 3) EXACT on a FIXED upstream at the same grain — valid, satisfied.
+        aus = PostgresState(audit_exact.model, c)
+        for interval in compute_intervals(audit_exact):
+            assert aus.is_upstream_satisfied_live(interval).satisfied is True
+
+        # 4) EXACT on a FLEXIBLE upstream — Guard A, hard error.
+        bs = PostgresState(bad_exact.model, c)
+        bad_interval = next(iter(compute_intervals(bad_exact)))
+        with pytest.raises(ExactContractOnFlexibleUpstreamError):
+            bs.is_upstream_satisfied_live(bad_interval)
+
+
+def test_e2e_composite_primary_key_ddl_and_upsert(schema_name):
+    """A composite PRIMARY KEY (two `primary_key=True` columns) is emitted as a
+    single table-level constraint — so `create_table` succeeds and an
+    UPSERT_NO_DELETE merge can target the full key (previously impossible: two
+    inline `PRIMARY KEY` clauses are rejected by Postgres)."""
+    cols = [
+        PostgresColumn(
+            name="tenant", data_type=PostgresType.BIGINT, nullable=False, primary_key=True
+        ),
+        PostgresColumn(
+            name="id", data_type=PostgresType.BIGINT, nullable=False, primary_key=True
+        ),
+        PostgresColumn(name="val", data_type=PostgresType.NUMERIC, nullable=False),
+    ]
+    model = Model(
+        target=Target(
+            name="ckey",
+            schema=schema_name,
+            catalog=CAT,
+            database=Database.POSTGRES,
+            write_mode=WriteMode.UPSERT_NO_DELETE,
+            dsn_env_var="TARGET_DSN",
+            columns=cols,
+        ),
+        temporality=Temporality.TIMELESS,
+    )
+    # merge_key_columns prefers the composite PK.
+    assert [c.name for c in model.target.merge_key_columns] == ["tenant", "id"]
+
+    with psycopg.connect(_dsn(), autocommit=True) as conn:
+        data = PostgresData(model=model, conn=conn)
+        data.create_schema()
+        data.create_table()
+
+        # one PRIMARY KEY constraint, over both columns
+        pk = conn.execute(
+            "SELECT a.attname FROM pg_index i "
+            "JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey) "
+            "WHERE i.indrelid = %s::regclass AND i.indisprimary "
+            "ORDER BY a.attname",
+            [f"{schema_name}.ckey"],
+        ).fetchall()
+        assert [r[0] for r in pk] == ["id", "tenant"]
+
+        # the composite key supports ON CONFLICT — re-cover updates, not duplicates
+        conn.execute(
+            f"INSERT INTO {schema_name}.ckey (tenant, id, val) "
+            "VALUES (1, 1, 10), (1, 2, 20)"
+        )
+        conn.execute(
+            f"INSERT INTO {schema_name}.ckey (tenant, id, val) VALUES (1, 1, 99) "
+            "ON CONFLICT (tenant, id) DO UPDATE SET val = EXCLUDED.val"
+        )
+        rows = conn.execute(
+            f"SELECT tenant, id, val FROM {schema_name}.ckey ORDER BY tenant, id"
+        ).fetchall()
+        assert rows == [(1, 1, 99), (1, 2, 20)]

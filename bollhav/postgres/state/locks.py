@@ -67,10 +67,12 @@ class Locks(_PostgresStateBase):
         lock was taken. Raises `ModelLockedError` if another run already
         holds the lock. Only call on a state-activated model — the
         lifecycle hook guards the call on `model.stateful`."""
-        assert self.model.state is not None, (
-            "acquire_model_lock requires a state-activated model (model.state is None)"
-        )
-        if self.model.state.allow_concurrent_runs:
+        state = self.model.state
+        if state is None:
+            from bollhav.postgres.messages.error import StateActivationRequiredError
+
+            raise StateActivationRequiredError(self.model.target.full_name)
+        if state.allow_concurrent_runs:
             return False
         if not self.try_acquire_lock():
             from bollhav.model.state import ModelLockedError

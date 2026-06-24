@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+from typing import NamedTuple, TYPE_CHECKING
 
 import psycopg
 from psycopg import sql
@@ -9,6 +9,7 @@ from psycopg import sql
 from bollhav.postgres.messages.error import (
     UnregisteredUpstreamError,
     TimelessUpstreamContractError,
+    ExactContractOnFlexibleUpstreamError,
 )
 
 from ._base import _PostgresStateBase
@@ -19,6 +20,18 @@ if TYPE_CHECKING:
     from bollhav.model.upstream import UpstreamCheck
 
 logger = logging.getLogger(__name__)
+
+
+class IntervalClassification(NamedTuple):
+    """How one actionable interval would resolve under `DRY_STATE`.
+
+    `status` is `"run"` (every gate already applied), `"after"` (gated only on
+    upstreams that would themselves run earlier this pass), or `"blocked"`
+    (gated on an upstream that would not run). `upstreams` names the gates
+    behind an `"after"` / `"blocked"` verdict — empty for `"run"`."""
+
+    status: str
+    upstreams: list[str]
 
 
 def _windows_cover(windows, interval) -> bool:
@@ -119,7 +132,10 @@ class Satisfaction(_PostgresStateBase):
                 # environments.
                 continue
             name = src.name
-            assert src.contract is not None  # gated ⇒ contract is not None
+            # gated_upstreams only ever holds sources that carry a contract;
+            # this guard documents that invariant and narrows the type.
+            if src.contract is None:
+                continue
             level = src.contract.value
             # Look the upstream up under THIS env's identity + library: a
             # suffixed run resolves against its own env, never prod's.
@@ -144,6 +160,15 @@ class Satisfaction(_PostgresStateBase):
                 # (loaded) or EXISTS (registered) instead.
                 raise TimelessUpstreamContractError(
                     name, level, self.model.target.full_name
+                )
+            if level == "exact" and match.fixed_intervals is False:
+                # A flexible upstream coalesces its applied rows into maximal
+                # covered ranges, erasing the exact-grain row EXACT needs to
+                # match. The downstream would block forever — make it a loud
+                # definition error. ENCAPSULATE (coverage) is the right level
+                # against a flexible upstream.
+                raise ExactContractOnFlexibleUpstreamError(
+                    name, self.model.target.full_name
                 )
             satisfied = self.is_satisfied(
                 conn, entry=match, interval=interval, level=level
@@ -198,7 +223,7 @@ class Satisfaction(_PostgresStateBase):
 
     def dry_state_classify(
         self, interval: "TZInterval | None", assume_applied: dict | None = None
-    ) -> tuple[str, list[str]]:
+    ) -> IntervalClassification:
         """Classify one actionable interval for `DRY_STATE` into three outcomes,
         accounting for the cascade. `assume_applied` is
         `{upstream_full_name: [windows that would run this pass]}` — an upstream
@@ -223,7 +248,10 @@ class Satisfaction(_PostgresStateBase):
                 # is_upstream_satisfied_live). A prod run gates it normally.
                 continue
             name = src.name
-            assert src.contract is not None  # gated ⇒ contract is not None
+            # gated_upstreams only ever holds sources that carry a contract;
+            # this guard documents that invariant and narrows the type.
+            if src.contract is None:
+                continue
             level = src.contract.value
             lookup = self._suffix_upstream_name(name)
             if assume_applied and _overlay_covers(
@@ -238,10 +266,10 @@ class Satisfaction(_PostgresStateBase):
                 continue  # already applied
             blocked.append(f"{name} ({level})")
         if blocked:
-            return ("blocked", blocked)
+            return IntervalClassification("blocked", blocked)
         if after:
-            return ("after", after)
-        return ("run", [])
+            return IntervalClassification("after", after)
+        return IntervalClassification("run", [])
 
     @staticmethod
     def is_satisfied(

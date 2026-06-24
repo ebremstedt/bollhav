@@ -32,11 +32,13 @@ def _col_ddl(col: "DatabaseColumn") -> LiteralString:
         pg_type = f"{pg_type}({col.precision}, {col.scale})"
     elif col.length is not None:
         pg_type = f"{pg_type}({col.length})"
-    constraints = " PRIMARY KEY" if col.primary_key else ""
+    # PRIMARY KEY is emitted as a table-level constraint by `create_table`
+    # (and the staging DDL), not inline — so a composite PK across several
+    # columns is expressible. A lone inline `PRIMARY KEY` per column can't be.
     null_clause = "NOT NULL" if not col.nullable else ""
     return cast(
         LiteralString,
-        f'    "{col.name}" {pg_type}{constraints} {null_clause}'.rstrip(),
+        f'    "{col.name}" {pg_type} {null_clause}'.rstrip(),
     )
 
 
@@ -130,16 +132,30 @@ class PostgresData:
         from bollhav.postgres.columns import PostgresColumn
 
         target = self.model.target
-        col_defs = sql.SQL(",\n").join(
+        elements = [
             sql.SQL(_col_ddl(c))
             for c in target.columns
             if isinstance(c, PostgresColumn)
-        )
+        ]
+        # Table-level PRIMARY KEY — one constraint over all `primary_key=True`
+        # columns, so a composite key works (single is just a one-column case).
+        # Read live off `columns` (matches the old inline `_col_ddl`).
+        pk_cols = [
+            c
+            for c in target.columns
+            if isinstance(c, PostgresColumn) and getattr(c, "primary_key", False)
+        ]
+        if pk_cols:
+            elements.append(
+                sql.SQL("    PRIMARY KEY ({})").format(
+                    sql.SQL(", ").join(sql.Identifier(c.name) for c in pk_cols)
+                )
+            )
         self.conn.execute(
             sql.SQL("CREATE TABLE IF NOT EXISTS {}.{} (\n{}\n)").format(
                 sql.Identifier(target.schema_resolved),
                 sql.Identifier(target.name_resolved),
-                col_defs,
+                sql.SQL(",\n").join(elements),
             )
         )
 
@@ -207,11 +223,24 @@ class PostgresData:
         table = self._staging_table_name(run_id)
         table_keyword = "TABLE" if self._staging_logged() else "UNLOGGED TABLE"
 
-        col_defs = sql.SQL(",\n").join(
+        elements = [
             sql.SQL(_col_ddl(col))
             for col in target.columns
             if isinstance(col, PostgresColumn)
-        )
+        ]
+        # Mirror the target's PRIMARY KEY onto the staging table (the
+        # temp→staging dedup path upserts against it). Read live off `columns`.
+        pk_cols = [
+            c
+            for c in target.columns
+            if isinstance(c, PostgresColumn) and getattr(c, "primary_key", False)
+        ]
+        if pk_cols:
+            elements.append(
+                sql.SQL("    PRIMARY KEY ({})").format(
+                    sql.SQL(", ").join(sql.Identifier(c.name) for c in pk_cols)
+                )
+            )
         self.conn.execute(
             sql.SQL(
                 f"CREATE {table_keyword} IF NOT EXISTS "
@@ -219,7 +248,7 @@ class PostgresData:
             ).format(
                 schema=sql.Identifier(schema),
                 table=sql.Identifier(table),
-                col_defs=col_defs,
+                col_defs=sql.SQL(",\n").join(elements),
             )
         )
         logger.debug("created staging table %s.%s", schema, table)

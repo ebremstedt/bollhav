@@ -175,6 +175,18 @@ class MissingStateConnError(PostgresError):
         )
 
 
+class StateActivationRequiredError(PostgresError):
+    """A state-only operation (e.g. `acquire_model_lock`) was called on a model
+    with no `state=State(...)`. The lifecycle only invokes these on stateful
+    models, so reaching here is a wiring bug in the caller."""
+
+    def __init__(self, full_name: str) -> None:
+        super().__init__(
+            f"acquire_model_lock requires a state-activated model, but "
+            f"{full_name!r} has model.state is None"
+        )
+
+
 class StateHashCollisionError(PostgresError):
     """The ~1e-12 case where two different models hash to the same state table.
     The table already holds rows for a different model, so sharing it would
@@ -272,6 +284,22 @@ class TimelessUpstreamContractError(PostgresError):
         )
 
 
+class ExactContractOnFlexibleUpstreamError(PostgresError):
+    """An EXACT contract gates on an applied row whose `(since, until)` equals
+    the window exactly, but the upstream is flexible (`fixed_intervals=False`)
+    — it coalesces its applied rows into maximal covered ranges, so no
+    exact-grain row survives to match. The downstream would block forever. Use
+    ENCAPSULATE (coverage) against a flexible upstream instead."""
+
+    def __init__(self, name: str, full_name: str) -> None:
+        super().__init__(
+            f"upstream contract {name!r} (exact) on {full_name!r} targets a "
+            f"flexible upstream (fixed_intervals=False), which coalesces away "
+            f"its exact-grain rows — EXACT can never match and the model would "
+            f"block forever. Use ENCAPSULATE instead."
+        )
+
+
 class DropEnvironmentRefusedError(PostgresError):
     """`drop_environment` refuses to run when no model carries a schema suffix —
     it would target prod schemas. Set `SCHEMA_SUFFIX` for an ephemeral
@@ -303,6 +331,7 @@ __all__ = [
     "StagedRecreatePartitionRequiresWindowError",
     "UnsupportedTargetWriteModeError",
     "MissingStateConnError",
+    "StateActivationRequiredError",
     "StateHashCollisionError",
     "PrefillRequiresStateError",
     "OneshotRequiresStateError",
@@ -311,5 +340,6 @@ __all__ = [
     "ClearStateRefusedError",
     "UnregisteredUpstreamError",
     "TimelessUpstreamContractError",
+    "ExactContractOnFlexibleUpstreamError",
     "DropEnvironmentRefusedError",
 ]

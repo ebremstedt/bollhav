@@ -31,6 +31,7 @@ class LibraryEntry(NamedTuple):
     state_schema: str | None
     state_table: str | None
     temporality: str
+    fixed_intervals: bool = True
     sources: list[dict] = []
     metadata: dict = {}
 
