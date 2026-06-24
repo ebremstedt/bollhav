@@ -29,6 +29,8 @@ from ._ddl import (
 )
 
 if TYPE_CHECKING:
+    import psycopg
+
     from bollhav.model.intervals import TZInterval
 
 logger = logging.getLogger(__name__)
@@ -714,3 +716,103 @@ class StateTable(_PostgresStateBase):
                         [full_name],
                     )
         logger.info("state: cleared all state for %s (schema %s)", full_name, schema)
+
+    def uncover(self, since, until) -> int:
+        """Range-subtraction invalidation for a flexible (coverage) model: remove
+        `[since, until)` from this model's applied coverage, splitting an applied
+        row that straddles a boundary. The flexible counterpart of flipping a
+        fixed grid row to `pending`. Returns the number of applied rows removed."""
+        return uncover_span(
+            self._require_conn(),
+            self._state_schema(),
+            self._state_table(),
+            since,
+            until,
+        )
+
+
+# Overlap predicate shared by uncover's read/delete: an applied, windowed row
+# whose range intersects the target span. `%(s)s` / `%(u)s` are bound params.
+_UNCOVER_OVERLAP = (
+    "status = 'applied' AND since IS NOT NULL "
+    "AND tstzrange(since, until, '[)') && tstzrange(%(s)s, %(u)s, '[)')"
+)
+
+
+def uncover_span(
+    conn: psycopg.Connection, schema: str, table: str, since, until
+) -> int:
+    """Subtract `[since, until)` from a state table's applied coverage (the
+    flexible invalidation primitive — the engine's `uncover(span)`).
+
+    Coverage is the union of the `applied` rows' ranges. Subtracting a span
+    re-materializes that union minus the span: rows fully inside the span
+    vanish, and a row straddling a boundary is **split** so only the overlap is
+    uncovered. PG multirange arithmetic does the set math (`range_agg(...) −
+    span`); `running` rows are never considered. Returns the number of applied
+    rows removed (0 if nothing overlapped).
+
+    Cases (`█` = applied/covered, `·` = uncovered, `^^^` = the span removed)::
+
+        1. span strictly inside one row  →  the row splits in two
+           before:   ████████████████████        [Jan ─────────── Apr)
+           span:           ^^^^^^                      [Feb ─ Mar)
+           after:    █████·······████████        [Jan,Feb)  ·  [Mar,Apr)
+
+        2. span flush to a boundary      →  the row shrinks (one remainder)
+           before:   ████████████████              [Jan ─────── Mar)
+           span:               ^^^^^^                       [Feb ─ Apr)
+           after:    ████████····                  [Jan ─ Feb)
+
+        3. span ⊇ the row                →  the row is deleted (no remainder)
+           before:        ████████                      [Feb ─ Mar)
+           span:        ^^^^^^^^^^^^                  [Jan ───── Apr)
+           after:        ········                   (fully uncovered)
+
+        4. span spans several rows       →  each trimmed/merged via the union
+           before:   ███████   ██████   ███       three coalesced islands
+           span:        ^^^^^^^^^^^^^^                a span across the gap
+           after:    ███····· · ·····██       outer parts kept, middle gone
+
+    A re-materialized remainder row keeps `status='applied'`; the uncovered
+    slice becomes a gap the next run's coverage query re-discovers."""
+    ident = {"schema": sql.Identifier(schema), "table": sql.Identifier(table)}
+    params = {"s": since, "u": until}
+    with conn.transaction():
+        meta = conn.execute(
+            sql.SQL(
+                "SELECT model_name, run_id, temporality "
+                "FROM {schema}.{table} WHERE " + _UNCOVER_OVERLAP + " LIMIT 1"
+            ).format(**ident),
+            params,
+        ).fetchone()
+        if meta is None:
+            return 0
+        model_name, run_id, temporality = meta
+        # remainder = coverage(overlapping rows) − span
+        remainder = conn.execute(
+            sql.SQL(
+                "SELECT lower(r), upper(r) FROM unnest(("
+                "SELECT COALESCE("
+                "range_agg(tstzrange(since, until, '[)')), '{{}}'::tstzmultirange"
+                ") FROM {schema}.{table} WHERE " + _UNCOVER_OVERLAP + ") "
+                "- tstzmultirange(tstzrange(%(s)s, %(u)s, '[)'))) AS r"
+            ).format(**ident),
+            params,
+        ).fetchall()
+        removed = conn.execute(
+            sql.SQL("DELETE FROM {schema}.{table} WHERE " + _UNCOVER_OVERLAP).format(
+                **ident
+            ),
+            params,
+        ).rowcount
+        for s, u in remainder:
+            conn.execute(
+                sql.SQL(
+                    "INSERT INTO {schema}.{table} (model_name, run_id, since, until, "
+                    "status, applied_at, temporality) "
+                    "VALUES (%s, %s, %s, %s, 'applied', now(), %s)"
+                ).format(**ident),
+                [model_name, run_id, s, u, temporality],
+            )
+    return removed

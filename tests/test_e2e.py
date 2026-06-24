@@ -206,10 +206,13 @@ def _orders_model(
     sources: list[Source] | None = None,
     schema_suffix: str = "",
     fixed_intervals: bool = True,
+    tags: set[str] | None = None,
 ) -> ModelRun:
     # `apply_runtime_overrides` normally resolves the window from env vars and
     # returns a ModelRun. E2E tests call the bootstrap directly, so we build
     # the model + resolve the window by hand to the test's fixed window.
+    from bollhav.model import Tags
+
     batching = Batch(time=TimeChunking(chunk="@daily", fixed_intervals=fixed_intervals))
     contract = Contract(begin=SINCE, end=bounds_end)
     model = Model(
@@ -233,6 +236,7 @@ def _orders_model(
         contract=contract,
         # Gated upstreams and ungated sources are one list now.
         upstream=(upstream or []) + (sources or []),
+        tagging=Tags(tags=tags) if tags else Tags(),
     )
     return ModelRun(
         model=model,
@@ -1112,7 +1116,7 @@ def _registry_models(schema_name):
 
 
 def test_e2e_registry_get_lineage_matches_model_lineage(schema_name):
-    from bollhav.postgres import registry
+    from bollhav.postgres.state import read as registry
 
     orders, summary = _registry_models(schema_name)
     _bootstrap([orders, summary])
@@ -1139,7 +1143,7 @@ def test_e2e_registry_get_lineage_matches_model_lineage(schema_name):
 
 
 def test_e2e_registry_list_and_downstreams_and_graph(schema_name):
-    from bollhav.postgres import registry
+    from bollhav.postgres.state import read as registry
 
     orders, summary = _registry_models(schema_name)
     _bootstrap([orders, summary])
@@ -1180,7 +1184,7 @@ def test_e2e_registry_list_and_downstreams_and_graph(schema_name):
 
 
 def test_e2e_registry_get_upstream_tree_nests(schema_name):
-    from bollhav.postgres import registry
+    from bollhav.postgres.state import read as registry
 
     # orders -> summary -> rollup : a 3-deep chain.
     orders = _orders_model(schema_name, name="orders", state=State(), staging=Staging())
@@ -1225,7 +1229,7 @@ def test_e2e_registry_get_upstream_tree_nests(schema_name):
 
 
 def test_e2e_registry_get_recent_state(schema_name):
-    from bollhav.postgres import registry
+    from bollhav.postgres.state import read as registry
 
     m = _orders_model(schema_name, name="orders", state=State(), staging=Staging())
     _run_intervals(m)  # bootstrap + run all intervals -> applied state rows
@@ -1240,7 +1244,7 @@ def test_e2e_registry_get_recent_state(schema_name):
 
 
 def test_e2e_registry_get_errors(schema_name):
-    from bollhav.postgres import registry
+    from bollhav.postgres.state import read as registry
 
     m = _orders_model(schema_name, name="orders", state=State(), staging=Staging())
     _bootstrap([m])
@@ -2195,3 +2199,187 @@ def test_e2e_composite_primary_key_ddl_and_upsert(schema_name):
             f"SELECT tenant, id, val FROM {schema_name}.ckey ORDER BY tenant, id"
         ).fetchall()
         assert rows == [(1, 1, 99), (1, 2, 20)]
+
+
+# ── operator state edits (state_admin) ───────────────────────────────
+
+
+def test_e2e_state_admin_reset_interval(schema_name):
+    """reset_interval flips one applied row back to pending so the next run
+    re-runs it; the rest stay applied."""
+    from bollhav.postgres.state.write import reset_interval
+
+    run = _orders_model(schema_name, state=State(), staging=Staging())
+    _run_intervals(run)  # 3 intervals → applied
+    full = run.model.target.full_name
+    st = state_table_name(full)
+    target = list(compute_intervals(run))[0]
+
+    with psycopg.connect(_dsn(), autocommit=True) as conn:
+        n = reset_interval(conn, full, target.since, target.until)
+    assert n == 1
+
+    rows = {(s, u): status for status, s, u in _state_rows(LIBRARY_SCHEMA, st)}
+    assert rows[(target.since, target.until)] == "pending"
+    assert sum(1 for v in rows.values() if v == "applied") == 2
+
+
+def test_e2e_state_admin_reset_model(schema_name):
+    """reset_model flips every row of a model's state table to pending."""
+    from bollhav.postgres.state.write import reset_model
+
+    run = _orders_model(schema_name, state=State(), staging=Staging())
+    _run_intervals(run)
+    full = run.model.target.full_name
+    st = state_table_name(full)
+
+    with psycopg.connect(_dsn(), autocommit=True) as conn:
+        n = reset_model(conn, full)
+    assert n == 3
+    assert all(s == "pending" for s, _, _ in _state_rows(LIBRARY_SCHEMA, st))
+
+
+def test_e2e_state_admin_reset_models_by_list_and_tags(schema_name):
+    """Bulk reset across many tables, by explicit full_name list and by tag
+    expression — both reach the same models."""
+    from bollhav.postgres.state.write import reset_models
+
+    a = _orders_model(
+        schema_name, name="aa", state=State(), staging=Staging(), tags={"reset_demo"}
+    )
+    b = _orders_model(
+        schema_name, name="bb", state=State(), staging=Staging(), tags={"reset_demo"}
+    )
+    _run_intervals(a)
+    _run_intervals(b)
+    fa, fb = a.model.target.full_name, b.model.target.full_name
+
+    # explicit list
+    with psycopg.connect(_dsn(), autocommit=True) as conn:
+        out = reset_models(conn, [fa, fb])
+    assert out == {fa: 3, fb: 3}
+
+    # re-apply, then reset the same two by tag expression
+    _run_intervals(a)
+    _run_intervals(b)
+    with psycopg.connect(_dsn(), autocommit=True) as conn:
+        out2 = reset_models(conn, "[reset_demo]")
+    assert {fa, fb} <= set(out2)
+    assert out2[fa] == 3 and out2[fb] == 3
+
+
+def test_e2e_state_admin_reset_skips_running_rows(schema_name):
+    """A `running` row is owned by a live run — reset never touches it."""
+    from bollhav.postgres.state.write import reset_model
+
+    run = _orders_model(schema_name, state=State(), staging=Staging())
+    _run_intervals(run)
+    full = run.model.target.full_name
+    st = state_table_name(full)
+    keep = list(compute_intervals(run))[0]
+
+    with psycopg.connect(_dsn(), autocommit=True) as conn:
+        conn.execute(
+            f'UPDATE "{LIBRARY_SCHEMA}"."{st}" SET status = %s '
+            "WHERE since = %s AND until = %s",
+            ["running", keep.since, keep.until],
+        )
+        n = reset_model(conn, full)
+
+    rows = {(s, u): status for status, s, u in _state_rows(LIBRARY_SCHEMA, st)}
+    assert rows[(keep.since, keep.until)] == "running"  # untouched
+    assert n == 2  # the other two reset
+
+
+def test_e2e_state_admin_reset_works_for_flexible_models(schema_name):
+    """The same flip-to-pending reset works on a FLEXIBLE model: rows are
+    flipped (not deleted), and a non-applied row reads as uncovered, so the
+    next run re-backfills it."""
+    from bollhav.postgres.state.write import reset_model
+
+    run = _orders_model(
+        schema_name, state=State(), staging=Staging(), fixed_intervals=False
+    )
+    _run_intervals(run)
+    full = run.model.target.full_name
+    st = state_table_name(full)
+
+    with psycopg.connect(_dsn(), autocommit=True) as conn:
+        n = reset_model(conn, full)
+    rows = _state_rows(LIBRARY_SCHEMA, st)
+    assert n == 3
+    assert len(rows) == 3  # rows kept, not deleted
+    assert all(status == "pending" for status, _, _ in rows)
+
+
+def _seed_coalesced(conn, st, full, since, until):
+    """Replace a model's state rows with one coalesced applied row [since, until)
+    — simulating what the flexible coverage engine would produce."""
+    conn.execute(f'DELETE FROM "{LIBRARY_SCHEMA}"."{st}"')
+    conn.execute(
+        f'INSERT INTO "{LIBRARY_SCHEMA}"."{st}" '
+        "(model_name, run_id, since, until, status, applied_at) "
+        "VALUES (%s, gen_random_uuid(), %s, %s, 'applied', now())",
+        [full, since, until],
+    )
+
+
+def test_e2e_uncover_span_splits_coalesced_row(schema_name):
+    """uncover_span subtracts a sub-range from a coalesced applied row, splitting
+    it into the two surrounding covered ranges."""
+    from bollhav.postgres.state.state_table import uncover_span
+
+    run = _orders_model(
+        schema_name, state=State(), staging=Staging(), fixed_intervals=False
+    )
+    _bootstrap([run])
+    full, st = run.model.target.full_name, state_table_name(run.model.target.full_name)
+    mid_s, mid_u = SINCE + timedelta(days=1), SINCE + timedelta(days=2)
+
+    with psycopg.connect(_dsn(), autocommit=True) as conn:
+        _seed_coalesced(conn, st, full, SINCE, UNTIL)
+        removed = uncover_span(conn, LIBRARY_SCHEMA, st, mid_s, mid_u)
+
+    assert removed == 1
+    rows = sorted(_state_rows(LIBRARY_SCHEMA, st), key=lambda r: r[1])
+    assert [(s, u) for _, s, u in rows] == [(SINCE, mid_s), (mid_u, UNTIL)]
+    assert all(status == "applied" for status, _, _ in rows)
+
+
+def test_e2e_uncover_span_deletes_when_span_covers_row(schema_name):
+    """A span covering the whole row leaves no remainder — fully uncovered."""
+    from bollhav.postgres.state.state_table import uncover_span
+
+    run = _orders_model(
+        schema_name, state=State(), staging=Staging(), fixed_intervals=False
+    )
+    _bootstrap([run])
+    full, st = run.model.target.full_name, state_table_name(run.model.target.full_name)
+
+    with psycopg.connect(_dsn(), autocommit=True) as conn:
+        _seed_coalesced(conn, st, full, SINCE + timedelta(days=1), SINCE + timedelta(days=2))
+        removed = uncover_span(conn, LIBRARY_SCHEMA, st, SINCE, UNTIL)
+
+    assert removed == 1
+    assert _state_rows(LIBRARY_SCHEMA, st) == []
+
+
+def test_e2e_state_admin_reset_interval_flexible_uncovers(schema_name):
+    """reset_interval on a FLEXIBLE model uncovers (range subtraction) rather
+    than flipping the whole coalesced row."""
+    from bollhav.postgres.state.write import reset_interval
+
+    run = _orders_model(
+        schema_name, state=State(), staging=Staging(), fixed_intervals=False
+    )
+    _bootstrap([run])
+    full, st = run.model.target.full_name, state_table_name(run.model.target.full_name)
+    mid_s, mid_u = SINCE + timedelta(days=1), SINCE + timedelta(days=2)
+
+    with psycopg.connect(_dsn(), autocommit=True) as conn:
+        _seed_coalesced(conn, st, full, SINCE, UNTIL)
+        n = reset_interval(conn, full, mid_s, mid_u)
+
+    assert n == 1
+    rows = sorted(_state_rows(LIBRARY_SCHEMA, st), key=lambda r: r[1])
+    assert [(s, u) for _, s, u in rows] == [(SINCE, mid_s), (mid_u, UNTIL)]
