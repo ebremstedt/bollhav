@@ -157,6 +157,29 @@ class Library(_PostgresStateBase):
                 LIBRARY_TABLE,
             )
 
+        has_fixed_intervals = conn.execute(
+            "SELECT 1 FROM information_schema.columns "
+            "WHERE table_schema = %s AND table_name = %s "
+            "  AND column_name = 'fixed_intervals' LIMIT 1",
+            [self._library_schema(), LIBRARY_TABLE],
+        ).fetchone()
+        if not has_fixed_intervals:
+            conn.execute(
+                sql.SQL(
+                    "ALTER TABLE {schema}.{table} "
+                    "ADD COLUMN fixed_intervals BOOLEAN NOT NULL DEFAULT true"
+                ).format(
+                    schema=sql.Identifier(self._library_schema()),
+                    table=sql.Identifier(LIBRARY_TABLE),
+                )
+            )
+            logger.info(
+                "library: migrated %s.%s — added fixed_intervals column (default true "
+                "so older images keep registering fixed-grid models)",
+                self._library_schema(),
+                LIBRARY_TABLE,
+            )
+
         for col in ("state_schema", "state_table"):
             is_nullable = conn.execute(
                 "SELECT is_nullable FROM information_schema.columns "
@@ -251,6 +274,7 @@ class Library(_PostgresStateBase):
                     "window": batching.time.window,
                     "lookback": batching.time.lookback,
                     "size": batching.size,
+                    "fixed_intervals": batching.time.fixed_intervals,
                 }
                 if batching is not None
                 else None
@@ -274,17 +298,24 @@ class Library(_PostgresStateBase):
         state_schema = self._state_schema() if has_state_table else None
         state_table = self._state_table() if has_state_table else None
         model_type = "VIEW" if model.is_view else "TABLE"
+        # `fixed_intervals` is the per-model attestation (state is a fixed grid
+        # vs a coverage set). It lives on `TimeChunking`; a model with no
+        # batching (monolithic / view) is trivially a fixed single unit.
+        fixed_intervals = (
+            model.batching.time.fixed_intervals if model.batching is not None else True
+        )
         upsert = sql.SQL(
             "INSERT INTO {schema}.{table} "
             "(full_name, upstream, model_type, state_schema, state_table, temporality, "
-            "sources, metadata, last_seen) "
-            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, now()) "
+            "fixed_intervals, sources, metadata, last_seen) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, now()) "
             "ON CONFLICT (full_name) DO UPDATE SET "
             "upstream = EXCLUDED.upstream, "
             "model_type = EXCLUDED.model_type, "
             "state_schema = EXCLUDED.state_schema, "
             "state_table = EXCLUDED.state_table, "
             "temporality = EXCLUDED.temporality, "
+            "fixed_intervals = EXCLUDED.fixed_intervals, "
             "sources = EXCLUDED.sources, "
             "metadata = EXCLUDED.metadata, "
             "last_seen = EXCLUDED.last_seen"
@@ -302,6 +333,7 @@ class Library(_PostgresStateBase):
                     state_schema,
                     state_table,
                     model.temporality.value,
+                    fixed_intervals,
                     Jsonb(model.source_specs),
                     Jsonb(self._build_metadata(model)),
                 ],
@@ -330,7 +362,8 @@ class Library(_PostgresStateBase):
         to the prod `z_bollhav`."""
         row = conn.execute(
             sql.SQL(
-                "SELECT upstream, model_type, state_schema, state_table, temporality, sources "
+                "SELECT upstream, model_type, state_schema, state_table, temporality, "
+                "fixed_intervals, sources "
                 "FROM {schema}.{table} WHERE full_name = %s"
             ).format(
                 schema=sql.Identifier(library_schema),
@@ -340,12 +373,21 @@ class Library(_PostgresStateBase):
         ).fetchone()
         if row is None:
             return None
-        upstream, model_type, state_schema, state_table, temporality, sources = row
+        (
+            upstream,
+            model_type,
+            state_schema,
+            state_table,
+            temporality,
+            fixed_intervals,
+            sources,
+        ) = row
         return LibraryEntry(
             upstream=list(upstream),
             model_type=model_type,
             state_schema=state_schema,
             state_table=state_table,
             temporality=temporality,
+            fixed_intervals=fixed_intervals,
             sources=list(sources) if sources else [],
         )

@@ -174,13 +174,13 @@ def _upsert_to_staging(
     staging_schema_id = sql.Identifier(_staging_schema(model))
     staging_table_id = sql.Identifier(_staging_table(model, run_id))
     pg_cols = [c for c in model.target.columns if isinstance(c, PostgresColumn)]
-    unique_column_names = [c.name for c in model.target.unique_columns]
+    key_column_names = [c.name for c in model.target.merge_key_columns]
     col_names = sql.SQL(", ").join(sql.Identifier(c.name) for c in pg_cols)
-    pk_cols = sql.SQL(", ").join(sql.Identifier(c) for c in unique_column_names)
+    pk_cols = sql.SQL(", ").join(sql.Identifier(c) for c in key_column_names)
     update_set = sql.SQL(", ").join(
         sql.SQL("{col} = EXCLUDED.{col}").format(col=sql.Identifier(c.name))
         for c in pg_cols
-        if c.name not in unique_column_names
+        if c.name not in key_column_names
     )
     col_defs = sql.SQL(", ").join(
         sql.SQL("{name} {type}").format(
@@ -282,13 +282,13 @@ def _apply_upsert(
 ) -> None:
     """target.write_mode = UPSERT_NO_DELETE — INSERT FROM staging
     with ON CONFLICT DO UPDATE."""
-    unique_column_names = [c.name for c in model.target.unique_columns]
+    key_column_names = [c.name for c in model.target.merge_key_columns]
     col_names = sql.SQL(", ").join(sql.Identifier(c.name) for c in model.target.columns)
-    pk_cols = sql.SQL(", ").join(sql.Identifier(c) for c in unique_column_names)
+    pk_cols = sql.SQL(", ").join(sql.Identifier(c) for c in key_column_names)
     update_set = sql.SQL(", ").join(
         sql.SQL("{col} = EXCLUDED.{col}").format(col=sql.Identifier(c.name))
         for c in model.target.columns
-        if c.name not in unique_column_names
+        if c.name not in key_column_names
     )
     conn.execute(
         sql.SQL(

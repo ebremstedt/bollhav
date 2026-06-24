@@ -216,6 +216,7 @@ class TestLookup:
                 "z_warehouse",
                 "orders_state",
                 "temporal",
+                True,
                 [{"name": "raw.landing", "kind": "database"}],
             )
         )
@@ -226,18 +227,22 @@ class TestLookup:
         assert result.state_schema == "z_warehouse"
         assert result.state_table == "orders_state"
         assert result.temporality == "temporal"
+        assert result.fixed_intervals is True
         assert result.sources == [{"name": "raw.landing", "kind": "database"}]
 
     def test_returns_entry_for_view_with_null_state_pointers(self) -> None:
         from bollhav.postgres.state import PostgresState
 
-        conn = _mock_conn(fetchone_value=([], "VIEW", None, None, "timeless", []))
+        conn = _mock_conn(
+            fetchone_value=([], "VIEW", None, None, "timeless", True, [])
+        )
         result = PostgresState.lookup_model(conn, "warehouse.v_orders")
         assert result.model_type == "VIEW"
         assert result.state_schema is None
         assert result.state_table is None
         assert result.sources == []
         assert result.temporality == "timeless"
+        assert result.fixed_intervals is True
 
 
 # ── is_satisfied ─────────────────────────────────────────────────────
@@ -414,6 +419,62 @@ class TestUpstreamSatisfiedLive:
 
         assert check.satisfied
         assert check.reason is None
+
+    def _exact_gated(self, m):
+        # Replace the default ENCAPSULATE gate with an EXACT one.
+        from bollhav.model.source import Source, SourceModel
+        from bollhav.model.upstream import UpstreamContract
+
+        m.gated_upstreams = [
+            Source("raw.orders", type=SourceModel(), contract=UpstreamContract.EXACT)
+        ]
+        return m
+
+    def _entry_for(self, *, fixed_intervals):
+        from bollhav.postgres.state import LibraryEntry
+
+        return LibraryEntry(
+            upstream=[],
+            model_type="TABLE",
+            state_schema="z_raw",
+            state_table="orders_state",
+            temporality="temporal",
+            fixed_intervals=fixed_intervals,
+        )
+
+    def test_exact_contract_on_flexible_upstream_raises(self) -> None:
+        # Guard A: a flexible upstream (fixed_intervals=False) coalesces away
+        # its exact-grain rows, so EXACT can never match → block forever. Make
+        # it a loud definition error instead.
+        from unittest.mock import patch
+
+        import pytest
+
+        from bollhav.postgres.state import PostgresState
+
+        m = self._exact_gated(_model(upstream=["raw.orders"]))
+        conn = _mock_conn()
+        flexible = self._entry_for(fixed_intervals=False)
+        with patch.object(PostgresState, "lookup_model", return_value=flexible):
+            with pytest.raises(ValueError, match="flexible upstream"):
+                self._state(m, conn).is_upstream_satisfied_live(INTERVAL)
+
+    def test_exact_contract_on_fixed_upstream_is_allowed(self) -> None:
+        # The complement: EXACT against a fixed-grid upstream is fine — it
+        # proceeds to the normal satisfaction check.
+        from unittest.mock import patch
+
+        from bollhav.postgres.state import PostgresState
+
+        m = self._exact_gated(_model(upstream=["raw.orders"]))
+        conn = _mock_conn()
+        fixed = self._entry_for(fixed_intervals=True)
+        with (
+            patch.object(PostgresState, "lookup_model", return_value=fixed),
+            patch.object(PostgresState, "is_satisfied", return_value=True),
+        ):
+            check = self._state(m, conn).is_upstream_satisfied_live(INTERVAL)
+        assert check.satisfied
 
 
 # ── prefill row normalization ────────────────────────────────────────
