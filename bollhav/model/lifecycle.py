@@ -8,25 +8,12 @@ from datetime import datetime, timezone
 from functools import wraps
 from typing import Callable
 
-from bollhav.model.messages.debug import (
-    debug_gate_skipped_applied,
-    debug_interval_lock_held,
-)
 from bollhav.model.messages.error import (
     MissingDataConnError,
     MissingRunError,
     MssqlStateRequiresPostgresConnError,
     RecreatePartitionWithoutIntervalError,
     RecreatePartitionWithoutWindowError,
-)
-from bollhav.model.messages.info import (
-    info_curfew_skip_interval,
-    info_curfew_skip_model,
-)
-from bollhav.model.messages.warning import (
-    warn_interval_lock_release_failed,
-    warn_lock_release_failed,
-    warn_mark_applied,
 )
 from bollhav.model.progress_bar import PROGRESS
 from bollhav.model.state_dry_plan import _fmt_window, _print_state_plan
@@ -126,7 +113,7 @@ def model_lifecycle(func: Callable) -> Callable:
             and model.curfew is not None
             and model.curfew.blocks(datetime.now(timezone.utc))
         ):
-            info_curfew_skip_model(logger, model.target.full_name)
+            logger.info("curfew: skipping model %s (stays pending)", model.target.full_name)
             return None
 
         locked = False
@@ -205,8 +192,11 @@ def model_lifecycle(func: Callable) -> Callable:
                         state_handler.mark_applied(
                             run_id=run.run_id, interval=interval
                         )
-                    warn_mark_applied(
-                        logger, model.target.full_name, len(intervals)
+                    logger.warning(
+                        "STATE_MARK_APPLIED: stamped %d interval(s) applied for %s "
+                        "WITHOUT running it",
+                        len(intervals),
+                        model.target.full_name,
                     )
 
             PROGRESS.begin_model_for(model, total=len(run.intervals))
@@ -229,7 +219,11 @@ def model_lifecycle(func: Callable) -> Callable:
                     state_handler = PostgresState(model=model, conn=state_conn)
                     state_handler.release_lock()
                 except Exception:
-                    warn_lock_release_failed(logger, model.target.full_name)
+                    logger.warning(
+                        "state: failed to release model lock for %s (will release on session end)",
+                        model.target.full_name,
+                        exc_info=True,
+                    )
 
     return wrapper
 
@@ -270,8 +264,10 @@ def execute_lifecycle(func: Callable) -> Callable:
         model = run.model
 
         if model.curfew is not None and model.curfew.blocks(datetime.now(timezone.utc)):
-            info_curfew_skip_interval(
-                logger, _fmt_window(interval), model.target.full_name
+            logger.info(
+                "curfew: skipping %s for %s (stays pending)",
+                _fmt_window(interval),
+                model.target.full_name,
             )
             return None
 
@@ -307,11 +303,15 @@ def execute_lifecycle(func: Callable) -> Callable:
             state_handler = PostgresState(model=model, conn=state_conn)
 
             if state_handler.is_applied(interval):
-                debug_gate_skipped_applied(logger, interval, model.target.full_name)
+                logger.debug("state: gate skipped applied %s for %s", interval, model.target.full_name)
                 return None
 
             if not state_handler.try_acquire_interval_lock(interval):
-                debug_interval_lock_held(logger, interval, model.target.full_name)
+                logger.debug(
+                    "state: lock held by another worker, skipping %s on %s",
+                    interval,
+                    model.target.full_name,
+                )
                 return None
 
             try:
@@ -348,8 +348,12 @@ def execute_lifecycle(func: Callable) -> Callable:
                 try:
                     state_handler.release_interval_lock(interval)
                 except Exception:
-                    warn_interval_lock_release_failed(
-                        logger, interval, model.target.full_name
+                    logger.warning(
+                        "state: failed to release interval lock %s for %s "
+                        "(will release on session end)",
+                        interval,
+                        model.target.full_name,
+                        exc_info=True,
                     )
 
         with PROGRESS.interval():

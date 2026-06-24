@@ -8,12 +8,6 @@ import psycopg
 from psycopg import sql
 from psycopg.types.json import Jsonb
 
-from bollhav.model.messages.info import (
-    info_library_model_type_added,
-    info_library_notnull_relaxed,
-    info_library_temporality_added,
-)
-
 from ._base import _PostgresStateBase
 from ._ddl import (
     _ERRORS_DDL,
@@ -133,8 +127,11 @@ class Library(_PostgresStateBase):
                     table=sql.Identifier(LIBRARY_TABLE),
                 )
             )
-            info_library_model_type_added(
-                logger, self._library_schema(), LIBRARY_TABLE
+            logger.info(
+                "library: migrated %s.%s — added model_type column "
+                "(default 'TABLE' so older images can keep writing)",
+                self._library_schema(),
+                LIBRARY_TABLE,
             )
 
         has_temporality = conn.execute(
@@ -153,8 +150,11 @@ class Library(_PostgresStateBase):
                     table=sql.Identifier(LIBRARY_TABLE),
                 )
             )
-            info_library_temporality_added(
-                logger, self._library_schema(), LIBRARY_TABLE
+            logger.info(
+                "library: migrated %s.%s — added temporality column (default 'temporal' "
+                "so older images keep registering temporal models)",
+                self._library_schema(),
+                LIBRARY_TABLE,
             )
 
         for col in ("state_schema", "state_table"):
@@ -174,8 +174,12 @@ class Library(_PostgresStateBase):
                         col=sql.Identifier(col),
                     )
                 )
-                info_library_notnull_relaxed(
-                    logger, self._library_schema(), LIBRARY_TABLE, col
+                logger.info(
+                    "library: migrated %s.%s — relaxed NOT NULL on %s "
+                    "(view / library-only rows store NULL here)",
+                    self._library_schema(),
+                    LIBRARY_TABLE,
+                    col,
                 )
 
     @staticmethod

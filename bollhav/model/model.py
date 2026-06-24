@@ -72,9 +72,7 @@ class Model:
         self._validate_kind_consistency()
         self._validate_upstream_requires_state()
 
-        logger.debug(
-            "Initialized model %r (enabled=%s)", self.target.full_name, self.enabled
-        )
+        logger.debug("Initialized model %r (enabled=%s)", self.target.full_name, self.enabled)
         if self.debug:
             self.pretty()
 

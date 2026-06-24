@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING
 import psycopg
 from psycopg import sql
 
-from bollhav.model.messages.info import info_dropped_environment
 from bollhav.postgres.messages.error import DropEnvironmentRefusedError
 
 from ._base import _PostgresStateBase
@@ -81,6 +80,8 @@ def drop_environment(conn: psycopg.Connection, models: Sequence["Model"]) -> Non
             conn.execute(
                 sql.SQL("DROP SCHEMA IF EXISTS {} CASCADE").format(sql.Identifier(s))
             )
-    info_dropped_environment(
-        logger, sorted(target_schemas), sorted(state_schemas)
+    logger.info(
+        "dropped environment: target schemas %s, state schemas %s",
+        sorted(target_schemas),
+        sorted(state_schemas),
     )
