@@ -10,7 +10,7 @@ class UpstreamContract(str, Enum):
 
     You pick *how strict*; the upstream's **shape** (interval vs whole-table) is
     read from the library at check time, so you never restate it. A source
-    without a contract is ungated (never waited on); to gate, name a level::
+    without a contract is ungated (never waited on); to gate, name a level:
 
         Source("warehouse.orders", type=SourceModel(...), contract=UpstreamContract.ENCAPSULATE)
         Source("warehouse.orders", ..., contract=UpstreamContract.WHOLE)

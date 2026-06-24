@@ -478,7 +478,7 @@ class TestNukeRows:
         conn.transaction.return_value.__enter__ = MagicMock(return_value=None)
         conn.transaction.return_value.__exit__ = MagicMock(return_value=None)
         regclass = MagicMock()
-        regclass.fetchone.return_value = (("public.x",) if table_exists else (None,))
+        regclass.fetchone.return_value = ("public.x",) if table_exists else (None,)
         delete = MagicMock()
         delete.rowcount = deleted
         # first execute = to_regclass probe, second = DELETE
