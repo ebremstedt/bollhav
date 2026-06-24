@@ -13,7 +13,7 @@ if TYPE_CHECKING:
 @dataclass
 class ModelRun:
     """One invocation of a model — the immutable `model` definition paired with
-    this run's temporal state.
+    the run of it.
 
     `Model` answers *what / where / how* (target, batching, contract, kind); a
     `ModelRun` answers *when / how-far*:

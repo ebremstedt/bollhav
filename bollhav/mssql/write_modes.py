@@ -7,6 +7,11 @@ from bollhav.model.model import Model
 from bollhav.model.modelrun import ModelRun
 from bollhav.model.write_modes import WriteMode
 from bollhav.mssql.modes import append, merge
+from bollhav.mssql.messages.error import (
+    UnhandledWriteModeError,
+    WriteOnViewError,
+    MissingDataframeGeneratorError,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -29,9 +34,7 @@ def write_dataframes(
         case WriteMode.UPSERT_NO_DELETE:
             write_function = merge
         case _:
-            raise ValueError(
-                f"Unhandled write mode for MSSQL: {model.target.write_mode}"
-            )
+            raise UnhandledWriteModeError(model.target.write_mode)
 
     for df in df_gen:
         if len(df) == 0:
@@ -80,22 +83,17 @@ def write(
     """
     model = run.model
     if model.is_view:
-        raise ValueError(
-            f"{model.target.full_name!r} is a VIEW — created by "
-            f"@model_lifecycle, not write()."
-        )
+        raise WriteOnViewError(model.target.full_name)
 
     if model.target.write_mode not in (
         WriteMode.APPEND,
         WriteMode.UPSERT_NO_DELETE,
         WriteMode.RECREATE_PARTITION,
     ):
-        raise ValueError(f"Unhandled write mode for MSSQL: {model.target.write_mode}")
+        raise UnhandledWriteModeError(model.target.write_mode)
 
     if not df_gen:
-        raise ValueError(
-            f"{model.target.write_mode.value} requires a dataframe generator"
-        )
+        raise MissingDataframeGeneratorError(model.target.write_mode.value)
 
     if model.target.stage:
         _write_staged(conn=conn, run=run, df_gen=df_gen)

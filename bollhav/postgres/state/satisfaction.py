@@ -6,6 +6,11 @@ from typing import TYPE_CHECKING
 import psycopg
 from psycopg import sql
 
+from bollhav.postgres.messages.error import (
+    UnregisteredUpstreamError,
+    TimelessUpstreamContractError,
+)
+
 from ._base import _PostgresStateBase
 from ._base import LibraryEntry
 
@@ -126,12 +131,8 @@ class Satisfaction(_PostgresStateBase):
                 # an unregistered upstream is a real error (a typo, or the
                 # upstream was never deployed / run). (An ungated source isn't
                 # checked here at all — it's never iterated.)
-                raise ValueError(
-                    f"upstream contract {name!r} ({level}) on "
-                    f"{self.model.target.full_name!r} is not registered in "
-                    f"the library — it has never run. A gated upstream demands "
-                    f"the upstream exists; fix the name or run the upstream "
-                    f"first. (An ungated source would not block.)"
+                raise UnregisteredUpstreamError(
+                    name, level, self.model.target.full_name
                 )
             if (
                 level in ("exact", "encapsulate", "through")
@@ -141,11 +142,8 @@ class Satisfaction(_PostgresStateBase):
                 # TIMELESS upstream has no window to match. Make it a definition
                 # error, not a silent never-satisfied: the author must say WHOLE
                 # (loaded) or EXISTS (registered) instead.
-                raise ValueError(
-                    f"upstream contract {name!r} ({level}) on "
-                    f"{self.model.target.full_name!r} targets a TIMELESS "
-                    f"upstream, which has no window to match. Use WHOLE "
-                    f"(loaded) or EXISTS (registered) instead."
+                raise TimelessUpstreamContractError(
+                    name, level, self.model.target.full_name
                 )
             satisfied = self.is_satisfied(
                 conn, entry=match, interval=interval, level=level

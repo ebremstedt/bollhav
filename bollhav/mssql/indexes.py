@@ -1,5 +1,9 @@
 from dataclasses import dataclass, field
 from bollhav.model.database import DatabaseIndex
+from bollhav.mssql.messages.error import (
+    EmptyIndexColumnsError,
+    OverlappingIndexColumnsError,
+)
 
 
 @dataclass
@@ -23,10 +27,7 @@ class MssqlIndex(DatabaseIndex):
 
     def __post_init__(self) -> None:
         if not self.columns:
-            raise ValueError(f"Index {self.name!r}: columns must be non-empty")
+            raise EmptyIndexColumnsError(self.name)
         overlap = set(self.columns) & set(self.included)
         if overlap:
-            raise ValueError(
-                f"Index {self.name!r}: columns and included must be disjoint, "
-                f"got overlap: {sorted(overlap)}"
-            )
+            raise OverlappingIndexColumnsError(self.name, sorted(overlap))

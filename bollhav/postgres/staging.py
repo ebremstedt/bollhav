@@ -12,6 +12,13 @@ from psycopg import sql
 
 from bollhav.model.staging import Staging
 from bollhav.model.write_modes import WriteMode
+from bollhav.postgres.messages.error import (
+    UnsupportedStagingWriteModeError,
+    RecreatePartitionRequiresAwareWindowError,
+    RecreatePartitionRequiresPartitionedByError,
+    StagedRecreatePartitionRequiresWindowError,
+    UnsupportedTargetWriteModeError,
+)
 
 if TYPE_CHECKING:
     from bollhav.model.model import Model
@@ -228,7 +235,7 @@ def write_to_staging(
         case WriteMode.UPSERT_NO_DELETE:
             _upsert_to_staging(conn, model, run_id, df)
         case _ as wm:  # pragma: no cover — guarded by Staging.__post_init__
-            raise NotImplementedError(f"unsupported staging.write_mode {wm!r}")
+            raise UnsupportedStagingWriteModeError(wm)
     logger.debug(
         "wrote %d rows to staging table (%s)",
         len(df),
@@ -315,10 +322,10 @@ def _apply_recreate_partition(
     INSERT FROM staging. Same transaction, so concurrent readers never
     see a gap (only the new contents of the window)."""
     if since.tzinfo is None or until.tzinfo is None:
-        raise ValueError("RECREATE_PARTITION requires since/until to be UTC-aware")
+        raise RecreatePartitionRequiresAwareWindowError()
     partition_col_name = model.target.partitioned_by
     if partition_col_name is None:
-        raise ValueError("RECREATE_PARTITION requires target.partitioned_by to be set")
+        raise RecreatePartitionRequiresPartitionedByError()
     col_names = sql.SQL(", ").join(sql.Identifier(c.name) for c in model.target.columns)
     conn.execute(
         sql.SQL(
@@ -400,15 +407,12 @@ def apply_atomically_to_target(
                 _apply_upsert(conn, model, **table_names)
             case WriteMode.RECREATE_PARTITION:
                 if since is None or until is None:
-                    raise ValueError(
-                        "RECREATE_PARTITION requires a window (since/until) — "
-                        "run the model windowed."
-                    )
+                    raise StagedRecreatePartitionRequiresWindowError()
                 _apply_recreate_partition(
                     conn, model, **table_names, since=since, until=until
                 )
             case _ as wm:  # pragma: no cover — guarded by _assert_supported
-                raise NotImplementedError(f"unsupported target.write_mode {wm!r}")
+                raise UnsupportedTargetWriteModeError(wm)
         if drop_after_apply:
             conn.execute(
                 sql.SQL("DROP TABLE {schema}.{table}").format(

@@ -3,6 +3,8 @@ from __future__ import annotations
 from collections import deque
 from typing import TYPE_CHECKING
 
+from bollhav.model.messages.error import CircularDependencyError
+
 if TYPE_CHECKING:
     from bollhav.model.model import Model
 
@@ -48,6 +50,6 @@ def topological_sort(results: list[Model]) -> list[Model]:
 
     if len(ordered) != len(results):
         remaining = matched_names - {m.target.full_name for m in ordered}
-        raise ValueError(f"Circular dependency detected among: {remaining}")
+        raise CircularDependencyError(remaining)
 
     return ordered

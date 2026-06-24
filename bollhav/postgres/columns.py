@@ -1,5 +1,6 @@
 from dataclasses import dataclass, fields
 from bollhav.model.database import DatabaseColumn
+from bollhav.postgres.messages.error import PrimaryKeyNotNullableError
 from enum import Enum
 
 
@@ -95,9 +96,7 @@ class PostgresColumn(DatabaseColumn):
 
     def __post_init__(self) -> None:
         if self.primary_key and self.nullable:
-            raise ValueError(
-                f"Column {self.name!r}: primary_key=True cannot be nullable"
-            )
+            raise PrimaryKeyNotNullableError(self.name)
 
     def __repr__(self) -> str:
         base_parts = [

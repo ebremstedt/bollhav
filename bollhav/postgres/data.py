@@ -7,6 +7,8 @@ from uuid import UUID
 import psycopg
 from psycopg import sql
 
+from bollhav.postgres.messages.error import CreateIndexesWithoutPartitionError
+
 if TYPE_CHECKING:
     import polars as pl
 
@@ -154,10 +156,7 @@ class PostgresData:
         target = self.model.target
         col = target.partitioned_by
         if col is None:
-            raise RuntimeError(
-                f"create_indexes ran for {target.full_name!r} but partitioned_by "
-                f"is None — guard the call on `target.partitioned_by is not None`"
-            )
+            raise CreateIndexesWithoutPartitionError(target.full_name)
         index_name = f"{target.name_resolved}_{col}_idx"
         self.conn.execute(
             sql.SQL("CREATE INDEX IF NOT EXISTS {} ON {}.{} ({})").format(

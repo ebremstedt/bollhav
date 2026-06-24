@@ -58,11 +58,10 @@ def _name_and_mode(model) -> tuple[str, str]:
     if not (model and hasattr(model, "target") and hasattr(model.target, "full_name")):
         return ("", "")
     name = model.target.full_name
-    # No batching = no mode label — model runs once, unfiltered.
+
     if getattr(model, "batching", None) is None:
         return (name, "")
-    # Strip the leading "@" from cron aliases for cleaner display
-    # (`@hourly` -> `hourly`); raw crons pass through unchanged.
+
     return (name, model.batching.time.chunk.lstrip("@"))
 
 

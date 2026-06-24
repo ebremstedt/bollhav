@@ -233,7 +233,7 @@ class TestStateAndStagingCarryThrough:
 
     def test_state_mode_is_applied(self) -> None:
         # Regression: STATE_MODE used to be resolved + displayed but never
-        # stamped onto model.state.mode, so bulldozer / nuke were silent no-ops.
+        # stamped onto model.state.mode, so bulldozer / torch were silent no-ops.
         from bollhav.model.state import State, StateMode
 
         m = Model(
@@ -242,15 +242,15 @@ class TestStateAndStagingCarryThrough:
             state=State(),  # defaults to DISCOVER
             temporality=Temporality.TEMPORAL,
         )
-        out = _apply(m, state_mode=StateMode.NUKE).model
+        out = _apply(m, state_mode=StateMode.TORCH).model
         assert out.state is not None
-        assert out.state.mode is StateMode.NUKE
+        assert out.state.mode is StateMode.TORCH
 
     def test_state_mode_ignored_when_no_state(self) -> None:
         # A stateless model stays stateless regardless of STATE_MODE.
         from bollhav.model.state import StateMode
 
-        out = _apply(_model(), state_mode=StateMode.NUKE).model
+        out = _apply(_model(), state_mode=StateMode.TORCH).model
         assert out.state is None
 
     def test_staging_carries_through(self) -> None:

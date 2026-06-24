@@ -5,6 +5,10 @@ from typing import cast, LiteralString
 from bollhav.model.model import Model
 from bollhav.mssql.columns import MssqlColumn, MssqlType
 from bollhav.mssql.schema import _bracket_quote, _col_type
+from bollhav.mssql.messages.error import (
+    UnhandledMssqlTypeError,
+    MissingSourceModelQueryError,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -101,7 +105,7 @@ def _input_size_for(col: MssqlColumn):
 
     # If we get here, MssqlType has gained a value this function doesn't
     # cover yet — fail loudly rather than silently fall back to autodetect.
-    raise ValueError(f"_input_size_for: unhandled MssqlType {t!r}")
+    raise UnhandledMssqlTypeError(t)
 
 
 def _set_input_sizes(cursor: pyodbc.Cursor, columns: list[MssqlColumn]) -> None:
@@ -221,11 +225,7 @@ def create_replace_view(conn: pyodbc.Connection, model: Model) -> None:
         None,
     )
     if src is None:
-        raise ValueError(
-            f"create_replace_view requires a Source with a SourceModel type "
-            f"whose .query is set, in upstream=[...] on "
-            f"{model.target.full_name!r}"
-        )
+        raise MissingSourceModelQueryError(model.target.full_name)
     schema = model.target.schema_resolved
     view = model.target.name_resolved
     # The filter above guarantees this, but it doesn't narrow `src.type`.

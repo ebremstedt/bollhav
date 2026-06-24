@@ -1,6 +1,11 @@
 from dataclasses import dataclass
 from datetime import datetime
 
+from bollhav.model.messages.error import (
+    NaiveContractBeginError,
+    NaiveContractEndError,
+)
+
 
 @dataclass
 class Contract:
@@ -12,6 +17,6 @@ class Contract:
 
     def __post_init__(self) -> None:
         if self.begin is not None and self.begin.tzinfo is None:
-            raise ValueError("contract.begin must be timezone-aware")
+            raise NaiveContractBeginError()
         if self.end is not None and self.end.tzinfo is None:
-            raise ValueError("contract.end must be timezone-aware")
+            raise NaiveContractEndError()

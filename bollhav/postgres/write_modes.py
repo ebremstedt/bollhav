@@ -12,6 +12,12 @@ from bollhav.postgres.modes import (
     upsert_no_delete,
     append,
 )
+from bollhav.postgres.messages.error import (
+    RecreatePartitionRequiresWindowError,
+    UnhandledWriteModeError,
+    WriteOnViewError,
+    MissingDataFrameError,
+)
 from bollhav.postgres.data import PostgresData
 
 logger = logging.getLogger(__name__)
@@ -50,12 +56,12 @@ def write_dataframes(
             write_function = append
         case WriteMode.RECREATE_PARTITION:
             if since is None or until is None:
-                raise ValueError("Since and until must be set for RECREATE_PARTITION")
+                raise RecreatePartitionRequiresWindowError()
             write_function = partial(recreate_partition, since=since, until=until)
         case WriteMode.UPSERT_NO_DELETE:
             write_function = upsert_no_delete
         case _:
-            raise ValueError(f"Unhandled write mode: {model.target.write_mode}")
+            raise UnhandledWriteModeError(model.target.write_mode)
 
     for df in df_gen:
         if len(df) == 0:
@@ -113,24 +119,17 @@ def write(
     """
     model = run.model
     if model.is_view:
-        raise ValueError(
-            f"write() is for data, not views — {model.target.full_name!r} is "
-            f"a VIEW. Views are created by @model_lifecycle "
-            f"(PostgresData.create_or_replace_view); a view's execute body "
-            f"has nothing to write."
-        )
+        raise WriteOnViewError(model.target.full_name)
 
     if model.target.write_mode not in (
         WriteMode.APPEND,
         WriteMode.RECREATE_PARTITION,
         WriteMode.UPSERT_NO_DELETE,
     ):
-        raise ValueError(f"Unhandled write mode: {model.target.write_mode}")
+        raise UnhandledWriteModeError(model.target.write_mode)
 
     if not df_gen:
-        raise ValueError(
-            "Modes APPEND, RECREATE_PARTITION, UPSERT_NO_DELETE need a dataframe"
-        )
+        raise MissingDataFrameError()
 
     if model.target.stage:
         _write_staged(conn=conn, run=run, df_gen=df_gen)

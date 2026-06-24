@@ -17,7 +17,7 @@ from roskarl import (
 
 from bollhav.model.runtime import apply_runtime_overrides
 from bollhav.model.modelrun import ModelRun
-from bollhav.model.errors import (
+from bollhav.model.messages.error import (
     ConflictingRunModeError,
     InvalidStateModeError,
     InvalidTimezoneError,
@@ -26,6 +26,8 @@ from bollhav.model.errors import (
     NegativeLookbackError,
     WindowOverrideWithoutLatestError,
 )
+from bollhav.model.messages.debug import debug_defaulting_to_backfill
+from bollhav.model.messages.info import info_state_disabled
 from bollhav.model.window import compute_intervals
 from bollhav.model.progress_bar import get_progress_level, PROGRESS, ProgressLevel
 from bollhav.model.state import StateMode
@@ -116,13 +118,13 @@ def load_models(
                                       prints the exhaustive per-model block
                                       (schema, bounds, tags, source, upstream,
                                       …). Implies DRY_RUN=true
-        STATE_MODE                    discover (default) | bulldozer | nuke.
+        STATE_MODE                    discover (default) | bulldozer | torch.
                                       For state-enabled models, controls how
                                       the `@model_lifecycle` prefill treats
                                       existing state rows. discover = preserve
                                       applied rows; bulldozer = reset every
                                       existing row to pending (boundaries kept);
-                                      nuke = DELETE every row, then prefill fresh
+                                      torch = DELETE every row, then prefill fresh
                                       at the current chunk (for changing chunk
                                       granularity or wiping a backlog —
                                       destructive, reprocesses everything).
@@ -156,10 +158,7 @@ def load_models(
                 and "LATEST_ENABLED" not in os.environ
                 and "BACKFILL_ENABLED" not in os.environ
             ):
-                logger.debug(
-                    "no run mode set — defaulting to backfill; "
-                    "set LATEST_ENABLED=true for latest-tick mode"
-                )
+                debug_defaulting_to_backfill(logger)
             runs = apply_runtime_overrides(
                 folder=folder,
                 tags=cfg.tags,
@@ -176,10 +175,7 @@ def load_models(
                 state_mode=cfg.state_mode,
             )
             if cfg.state_disabled:
-                logger.info(
-                    "STATE_DISABLED: state + staging cleared on %d matched model(s)",
-                    len(runs),
-                )
+                info_state_disabled(logger, len(runs))
 
             # Split each run's resolved window into its interval contract once
             # (apply_runtime_overrides already baked the window in) — and stash

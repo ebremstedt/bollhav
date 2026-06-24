@@ -23,10 +23,6 @@ class Tags:
     unpascal_catalog_for_tags: bool = False
     full_name_add_to_tags: bool = True
     fully_qualified_name_add_to_tags: bool = True
-    # When a schema suffix (dev/PR env) is applied, add the suffix and its date
-    # appendix as tags too — so a suffixed deployment is filterable by env. The
-    # logical tags are unchanged (so `TAGS=` run-selection is env-independent);
-    # these only land in the library/lineage at registration.
     suffix_add_to_tags: bool = True
 
     def assemble(self, name: str, schema: str, catalog: str | None = None) -> set[str]:

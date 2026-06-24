@@ -14,6 +14,12 @@ from bollhav.model.write_modes import WriteMode
 from bollhav.mssql.columns import MssqlColumn
 from bollhav.mssql.modes import _bulk_insert
 from bollhav.mssql.schema import _bracket_quote, _col_ddl
+from bollhav.mssql.messages.error import (
+    UnsupportedStagingWriteModeError,
+    RecreatePartitionRequiresTzAwareError,
+    RecreatePartitionRequiresPartitionedByError,
+    RecreatePartitionRequiresWindowError,
+)
 
 if TYPE_CHECKING:
     from bollhav.model.model import Model
@@ -175,7 +181,7 @@ def write_to_staging(
         case WriteMode.UPSERT_NO_DELETE:
             _merge_into_staging(cursor, model, run_id, df)
         case _ as wm:  # pragma: no cover — guarded by Staging.__post_init__
-            raise NotImplementedError(f"unsupported staging.write_mode {wm!r}")
+            raise UnsupportedStagingWriteModeError(wm)
     cursor.commit()
     logger.debug(
         "wrote %d rows to staging table (%s)",
@@ -261,10 +267,10 @@ def _apply_recreate_partition(
     INSERT FROM staging. Same transaction, so concurrent readers never
     see a gap (only the new contents of the window)."""
     if since.tzinfo is None or until.tzinfo is None:
-        raise ValueError("RECREATE_PARTITION requires since/until to be UTC-aware")
+        raise RecreatePartitionRequiresTzAwareError()
     partition_col_name = model.target.partitioned_by
     if partition_col_name is None:
-        raise ValueError("RECREATE_PARTITION requires target.partitioned_by to be set")
+        raise RecreatePartitionRequiresPartitionedByError()
 
     mssql_cols = [c for c in model.target.columns if isinstance(c, MssqlColumn)]
     col_list = ", ".join(_bracket_quote(c.name) for c in mssql_cols)
@@ -327,10 +333,7 @@ def apply_atomically_to_target(
                 _apply_upsert(cursor, model, **table_names)
             case WriteMode.RECREATE_PARTITION:
                 if since is None or until is None:
-                    raise ValueError(
-                        "RECREATE_PARTITION requires a window (since/until) — "
-                        "run the model windowed."
-                    )
+                    raise RecreatePartitionRequiresWindowError()
                 _apply_recreate_partition(
                     cursor, model, **table_names, since=since, until=until
                 )

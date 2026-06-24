@@ -4,6 +4,8 @@ from typing import NamedTuple, TYPE_CHECKING
 
 import psycopg
 
+from bollhav.postgres.messages.error import MissingStateConnError
+
 from ._naming import state_table_name
 from ._ddl import LIBRARY_SCHEMA
 
@@ -63,11 +65,7 @@ class _PostgresStateBase:
         open its own — the caller owns it (opened in `main()`, threaded
         through the lifecycle hooks). Raises if none was passed."""
         if self.conn is None:
-            raise ValueError(
-                "a state connection is required — construct "
-                "PostgresState(model, conn=<state_conn>). PostgresState "
-                "does not self-connect."
-            )
+            raise MissingStateConnError()
         return self.conn
 
     def _env_schema(self, base: str) -> str:
