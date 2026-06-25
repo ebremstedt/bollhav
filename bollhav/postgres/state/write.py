@@ -186,9 +186,7 @@ def reset_models(
     out: dict[str, int] = {}
     with conn.transaction():
         for full_name in full_names:
-            out[full_name] = reset_model(
-                conn, full_name, library_schema=library_schema
-            )
+            out[full_name] = reset_model(conn, full_name, library_schema=library_schema)
     total = sum(out.values())
     logger.info(
         "state.write: bulk reset %d interval(s) across %d model(s)", total, len(out)

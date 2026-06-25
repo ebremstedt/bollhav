@@ -344,7 +344,9 @@ def apply_atomically_to_target(
     except Exception:
         cursor.rollback()
         raise
-    logger.debug("moved data from staging to target (%s)", model.target.write_mode.value)
+    logger.debug(
+        "moved data from staging to target (%s)", model.target.write_mode.value
+    )
 
 
 def cleanup_orphaned_staging_tables(

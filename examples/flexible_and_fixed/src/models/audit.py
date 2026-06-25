@@ -41,7 +41,9 @@ audit = Model(
             PostgresColumn(
                 name="day", data_type=PostgresType.TIMESTAMPTZ, nullable=False
             ),
-            PostgresColumn(name="checked", data_type=PostgresType.BOOLEAN, nullable=False),
+            PostgresColumn(
+                name="checked", data_type=PostgresType.BOOLEAN, nullable=False
+            ),
         ],
     ),
     temporality=Temporality.TEMPORAL,

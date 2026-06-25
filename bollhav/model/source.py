@@ -155,9 +155,7 @@ class Source:
 
     def __post_init__(self) -> None:
         if self.contract is not None and not isinstance(self.type, SourceModel):
-            raise SourceContractWithoutModelError(
-                self.name, type(self.type).__name__
-            )
+            raise SourceContractWithoutModelError(self.name, type(self.type).__name__)
         if self.freshness is not None:
             # Freshness reads the upstream's applied_at, so it needs a gated
             # upstream with state — and EXISTS never inspects state at all.

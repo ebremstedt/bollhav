@@ -77,9 +77,10 @@ def _conns(arguments: dict):
     model = run.model if run is not None else None
     if model is not None and model.stateful:
         from bollhav.model.database import Database
+
         if model.target.database is Database.MSSQL and state_conn is data_conn:
             raise MssqlStateRequiresPostgresConnError(model.target.full_name)
-            
+
     return data_conn, state_conn
 
 
@@ -113,7 +114,9 @@ def model_lifecycle(func: Callable) -> Callable:
             and model.curfew is not None
             and model.curfew.blocks(datetime.now(timezone.utc))
         ):
-            logger.info("curfew: skipping model %s (stays pending)", model.target.full_name)
+            logger.info(
+                "curfew: skipping model %s (stays pending)", model.target.full_name
+            )
             return None
 
         locked = False
@@ -169,11 +172,10 @@ def model_lifecycle(func: Callable) -> Callable:
                     run.window is None
                     and model.target.write_mode is WriteMode.RECREATE_PARTITION
                 ):
-                    raise RecreatePartitionWithoutWindowError(
-                        model.target.full_name
-                    )
+                    raise RecreatePartitionWithoutWindowError(model.target.full_name)
 
                 from bollhav.model.state import StateMode
+
                 if model.state.mode is StateMode.TORCH and not dry_state:
                     state_handler.torch_rows()
 
@@ -189,9 +191,7 @@ def model_lifecycle(func: Callable) -> Callable:
                 if mark_applied and not dry_state:
                     intervals = compute_intervals(run)
                     for interval in intervals:
-                        state_handler.mark_applied(
-                            run_id=run.run_id, interval=interval
-                        )
+                        state_handler.mark_applied(run_id=run.run_id, interval=interval)
                     logger.warning(
                         "STATE_MARK_APPLIED: stamped %d interval(s) applied for %s "
                         "WITHOUT running it",
@@ -282,11 +282,14 @@ def execute_lifecycle(func: Callable) -> Callable:
                 raise RecreatePartitionWithoutIntervalError(model.target.full_name)
 
             from bollhav.model.database import Database
+
             if model.target.database is Database.MSSQL:
                 from bollhav.mssql.data import MssqlData
+
                 data_handler = MssqlData(model=model, conn=data_conn)
             else:
                 from bollhav.postgres.data import PostgresData
+
                 data_handler = PostgresData(model=model, conn=data_conn)
 
             data_handler.create_staging_table(run.run_id)
@@ -300,10 +303,15 @@ def execute_lifecycle(func: Callable) -> Callable:
 
         def run_with_state(execute):
             from bollhav.postgres.state import PostgresState
+
             state_handler = PostgresState(model=model, conn=state_conn)
 
             if state_handler.is_applied(interval):
-                logger.debug("state: gate skipped applied %s for %s", interval, model.target.full_name)
+                logger.debug(
+                    "state: gate skipped applied %s for %s",
+                    interval,
+                    model.target.full_name,
+                )
                 return None
 
             if not state_handler.try_acquire_interval_lock(interval):
@@ -341,9 +349,9 @@ def execute_lifecycle(func: Callable) -> Callable:
                     raise
 
                 state_handler.mark_applied(run_id=run.run_id, interval=interval)
-                
+
                 return result
-                
+
             finally:
                 try:
                     state_handler.release_interval_lock(interval)
