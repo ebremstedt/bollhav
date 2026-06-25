@@ -1,8 +1,8 @@
 # Run modes redesign — window source × state mode
 
-Status: **design, not built.** Captures a design conversation; no code committed for it
-yet. (One small in-progress edit exists in `bollhav/model/window.py` — see "Current
-state" at the bottom — that predates and must be reconciled with this note.)
+Status: **implemented** (2026-06-25). The core is built and tested (suite green). The
+design conversation below is preserved; what landed and what's still deferred is in
+"Implementation status" near the bottom.
 
 ## The problem
 
@@ -62,7 +62,7 @@ The window requirement *is* the spec for each mode:
 Notes:
 - **bulldozer needs a window** (nothing to bulldoze otherwise) → no-window is an error.
 - **discover no-window** does *not* prefill (no window to seed), so on **empty state** it's
-  a no-op — correct, nothing outstanding. Seed the grid with a windowed run first; after
+  a no-op — correct, nothing outstanding. Seed the table with a windowed run first; after
   that, no-window discover reconciles it. This is the answer to the original ask:
   "run with no dates, let state find the work" = `discover` + no window.
 - **torch + a window is forbidden**: a windowed torch *orphans* history (wipe all, reseed
@@ -70,6 +70,39 @@ Notes:
   bulldozer does *safely*. So torch has exactly one coherent meaning: clean reload of the
   contract range. Raise loudly on torch + window: "torch reloads the contract range; use
   bulldozer to redo a window."
+
+## Prefill vs invalidation — state mirrors the contract
+
+A later refinement, and an important one: **prefill is decoupled from the run mode.**
+Every run first *fills the state table with the contract* — one row per interval the
+contract declares (`begin` → `end`, or the latest tick for an open contract), inserting
+only the rows not already present (`ON CONFLICT (since, until) DO NOTHING`). This is mode-
+and window-independent and incremental: the table is a complete, honest mirror of the
+contract, and as the forward edge advances the new row just appears (prior runs laid down
+the rest).
+
+The mode then decides only **invalidation** — what to do with the window's *existing* rows,
+layered on top of that constant prefill:
+
+| mode | invalidation step |
+|---|---|
+| **bulldozer** | reset *the run window's* rows to `pending` (`reset_window`) |
+| **discover** | nothing — run only what's still outstanding |
+| **torch** | delete every row first (`torch_rows`); the prefill then refills all-`pending` |
+
+So the modes share one prefill and differ in a single step — and a bulldozer over one day
+never disturbs the rest of the contract (prefill touched the whole range, but the reset is
+window-scoped). The pieces:
+
+- `window.contract_intervals(run)` — the intervals the contract declares (vs
+  `compute_intervals`, the run's window). Falls back to the run window when there's no
+  `contract.begin`.
+- `StateTable.prefill(...)` — insert-missing-preserve, mode-independent.
+- `StateTable.reset_window(...)` — bulldozer's window-scoped reset.
+
+Consequence to know: the *first* run on a fresh model with a long contract materializes the
+entire declared range as `pending` (then runs only its window). The backlog is real and
+visible from run one; drain it with a backfill or a no-window discover reconcile.
 
 ## Defaults
 
@@ -108,29 +141,43 @@ Notes:
 - **discover no-window scope**: drains the model's own state table (per-run = one model),
   not cross-model. Confirm.
 
-## Build order (NOT built)
+## Implementation status
 
-1. **Window-scoped execution** — `get_actionable_intervals(window=…)` filters to
-   `[since, until]` when a window is given; the no-window `discover` path keeps today's
-   unscoped "drain all" behavior. This is the foundational change.
-2. **Collapse window modes** — one window-source resolution
-   (`explicit ?? contract ?? latest`); make `BACKFILL_UNTIL` optional
-   (`?? contract.end ?? latest`). Replace/retire `LATEST_ENABLED` / `BACKFILL_ENABLED` and
-   the tag-driven `reload` in favour of the unified source.
-3. **Default `STATE_MODE` → bulldozer**; bulldozer scopes invalidation + execution to the
-   window.
-4. **Mode × window validation** — bulldozer requires a window; torch forbids one (uses the
-   contract); discover optional.
-5. **Docs + tests** — STATE.md, UPSTREAM.md ("two axes"), BATCH.md, the `load_models` env
-   table; update/replace the mode tests.
+**Built (suite green, 682 passed):**
 
-## Current state of the tree (reconcile before continuing)
+1. ✅ **Window-scoped execution** — `get_actionable_intervals(window=…)` filters rows to
+   `[since, until)` when a window is given; `window=None` keeps the "drain everything"
+   reconcile path. Threaded `window=run.window` at the lifecycle bootstrap + e2e harness.
+2. ✅ **Window-source collapse** — `BACKFILL_UNTIL` is optional
+   (`?? contract.end ?? latest tick`), so a no-dates backfill runs the contract range.
+   `BackfillRequiresUntilError` removed.
+3. ✅ **Defaults flipped** — `latest` is the default run mode (`_resolve_latest` defaults
+   to `not backfill`; `_resolve_backfill_enabled` defaults False); `STATE_MODE` defaults
+   to `bulldozer` (`_resolve_state_mode`).
+4. ✅ **torch validation** — `STATE_MODE=torch` + an explicit `BACKFILL_SINCE/UNTIL` window
+   raises `TorchWithWindowError`; otherwise torch forces the contract range (reload),
+   ignoring latest. Implemented in `runtime._apply_to_model`.
+5. ✅ **Tests** — `TestRunModeWindowMatrix` in `test_runtime.py` (the full mode × window
+   resolution + torch guard), plus e2e `get_actionable_is_window_scoped` /
+   `bulldozer_reruns_the_applied_window` / `discover_skips_the_applied_window`.
+6. ✅ **Prefill decoupled from mode** — prefill fills the table with the contract
+   (`StateTable.prefill` + `window.contract_intervals`), mode-independent and incremental;
+   invalidation is a separate step (`reset_window` for bulldozer, `torch_rows` for torch).
+   Tests: `prefill_fills_the_whole_contract_not_just_the_window` /
+   `bulldozer_window_spares_the_rest_of_the_contract` (e2e) + `TestContractIntervals`
+   (unit). See "Prefill vs invalidation" above.
 
-`bollhav/model/window.py` has a small **uncommitted, half-finished** edit from an earlier
-aborted attempt at the "backfill `until` optional" piece: the `resolve_window` backfill
-branch was changed to `window_until = until or contract.end or latest_complete_interval(...)`,
-the `BackfillRequiresUntilError` import was dropped, and the docstring was updated — but the
-error class itself was **not** removed and the two tests that assert it
-(`test_model.py`, `test_batch.py`) were **not** updated, so the suite is red on that file.
-Decide whether to revert that edit and redo it as part of step 2 above, or finish it.
-Nothing else was implemented.
+**Deferred / not done:**
+
+- **Retiring `LATEST_ENABLED` / `BACKFILL_ENABLED` flags + the tag-driven `reload`.** The
+  flags still exist (latest is just their default now); `reload` (tag `[r:…]`) still works
+  and is redundant with backfill-no-dates. Full removal of the old flag names is a
+  follow-up cleanup.
+- **The no-prefill "drain only existing rows" discover variant.** Today `discover` +
+  contract-range reconciles the declared range (prefills it); the lighter "only run rows
+  already in state, don't materialize new ones" path is not built.
+- **Flexible-model mode mapping** — `bulldozer`/`torch` as *uncover the window / uncover
+  all* (range subtraction) rather than status flips, for `fixed_intervals=False` models.
+  See `flexible-intervals.md` + the `state.write.uncover_span` primitive.
+- **Doc sweep** — STATE.md / UPSTREAM.md updated for the new default + window-scoping;
+  BATCH.md not yet revisited.

@@ -16,18 +16,22 @@ Each model's state lives in its own digest-named table in the one central bollha
 | `blocked` | Cannot run: an out-of-pipeline upstream isn't fulfilled. See `blocked_reason` for the [BLOCK CODE](#block-codes). |
 | `error` | Execute raised. Full details (type, message, traceback) are in the shared central `errors` table (`z_bollhav.errors`), keyed by `full_name`. Auto-retried on next run under `STATE_MODE=discover`. |
 
-## Re-evaluation on rerun
+## Prefill and re-evaluation on rerun
 
-Under `STATE_MODE=discover` (the default), `prefill` keeps `applied` rows untouched and re-evaluates everything else against the current upstream state. So:
+Every run **prefills first — it fills the state table with the contract.** For every interval the contract declares (`begin` → `end`, or the latest complete tick for an open contract) it inserts a `pending` row that isn't already there, and leaves every existing row exactly as it is. This step is **mode-independent and incremental**: the table stays a complete mirror of the contract — as a new tick rolls over, its row simply appears — and since prior runs already laid down the rest, a run only inserts the new edge. Prefill never changes a row's status; it only makes sure the row *exists*. (Consequence: the *first* run on a brand-new model with a long contract materializes the whole declared range as `pending`, then runs only its window — the backlog is real and visible from run one.)
+
+Execution is then **window-scoped**: a run does exactly the intervals in its resolved window (the `latest` complete tick, an explicit `BACKFILL` range, or — a no-dates backfill — the contract's declared range). Nothing outside the window leaks in. `STATE_MODE` decides only how the window's *existing* state is invalidated before it runs — orthogonal to prefill.
+
+Under `STATE_MODE=bulldozer` (the **default**), the window's rows reset to `pending` and run — even already-`applied` ones — while everything outside the window is left untouched. "Do exactly this window, fresh." Boundaries are kept (chunk granularity unchanged). Note the split: prefill may have touched the whole contract, but the bulldozer reset is scoped to *this run's window* — redoing one day never disturbs the other applied days.
+
+Under `STATE_MODE=discover`, nothing is invalidated: `applied` rows stay applied and the run takes only the window's still-outstanding rows — the idempotent, skip-what's-done mode. With **no** window it reconciles *every* outstanding row (the "no dates, let state find the work" catch-up):
 
 - `pending` rows whose upstreams have since regressed → `blocked`
 - `blocked` rows whose upstreams now satisfy → `pending`
 - `error` rows → `pending` (automatic retry)
 - `running` rows orphaned by a process crash → `pending` (automatic recovery)
 
-Under `STATE_MODE=bulldozer`, every *existing* row resets to the computed status regardless of prior value (`applied_at` cleared too) — but the rows keep their `(since, until)` boundaries, so the chunk granularity is unchanged.
-
-Under `STATE_MODE=torch`, every state row for the model is **deleted** first, then `prefill` rediscovers intervals from scratch at the *current* chunk. Use it to **change chunk granularity** (e.g. hourly → monthly — `bulldozer` can't, since it only resets existing boundaries) or to wipe a stale backlog. It's destructive (applied history is lost, so the next run reprocesses everything — safe for MERGE / recreate writes, but `APPEND` would duplicate) and never fires during `DRY_STATE`. It does **not** touch the model's data, and it's scoped to the `TAGS`-matched models.
+Under `STATE_MODE=torch`, every state row for the model is **deleted** first; the prefill above then refills the whole **contract range** as `pending` — a clean reload. It **forbids** an explicit `BACKFILL` window (that would orphan history — use `bulldozer` to redo a specific window) and is also how you **change chunk granularity** (hourly → monthly). Destructive (applied history is lost, so the next run reprocesses everything — safe for MERGE / recreate writes, but `APPEND` would duplicate); never fires during `DRY_STATE`; does **not** touch the model's data; scoped to the `TAGS`-matched models.
 
 ## Concurrency: per-interval advisory locks
 
@@ -134,7 +138,7 @@ python src/main.py
 
 | Variable | Default | Effect |
 |---|---|---|
-| `STATE_MODE` | `discover` | `discover` preserves `applied` rows on re-evaluation and adds new pending intervals as discovered; `bulldozer` resets every existing row to the freshly-computed status (boundaries kept); `torch` deletes every row then re-prefills at the current chunk (for changing chunk granularity / wiping a backlog — destructive) |
+| `STATE_MODE` | `bulldozer` | how much of the run's window to invalidate. `bulldozer` (default) resets the window's rows to `pending` and runs exactly them (boundaries kept); `discover` preserves `applied` and runs only the window's outstanding (no window → reconcile all); `torch` deletes every row then reloads the **contract range** — forbids an explicit window, for changing chunk granularity / a clean reload (destructive) |
 | `STATE_DISABLED` | `false` | When `true`, force no-state behavior on every matched model (data without state) |
 | `STATE_MARK_APPLIED` | `false` | When `true`, stamp the matched window's intervals `applied` without running them (state without data) — to record an out-of-band load. Scoped to `compute_intervals(run)`, never the backlog. An assertion, not a verification |
 | `DRY_STATE` | `false` | When `true`, run the state bootstrap and print each model's resolved plan (would-run / applied / blocked), then exit without creating assets, writing data, or running model logic |

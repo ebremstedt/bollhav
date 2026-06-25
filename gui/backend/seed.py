@@ -5,7 +5,7 @@ GUI shows true-to-life, deliberately long 3-part `catalog.schema.table` names
 Managed models live in `AnalyticsLakehouse.curated_clean_entities` /
 `AnalyticsLakehouse.consumption_reporting_marts` and read from unmanaged
 `UpstreamSourceWarehouse.raw_operational_datamart.*` source tables. A mix of
-contract kinds (interval / monolithic / view), per-model run history, and a few
+contract kinds (interval / oneshot / view), per-model run history, and a few
 historic errors. All names are invented placeholders. Wipes z_bollhav first.
 """
 
@@ -413,7 +413,7 @@ def _seed_runs(
     flight), which lights the blue dot. With `stale_latest` the newest interval
     is left `blocked` with a freshness-stale reason, which lights the yellow dot.
 
-    Monolithic/view models get one applied whole-table row."""
+    Oneshot/view models get one applied whole-table row."""
     st = PostgresState(model=model, conn=conn)
     st.ensure_tables()
     rid = uuid.uuid4()  # bollhav 3.0: run_id lives on ModelRun, mint one per run

@@ -67,7 +67,7 @@ check the model's **upstream contracts** → mark `running` → run your body �
 staging table and merges it into the target around your body. So `execute` is
 just read + write.
 
-`interval` is a time window for a batched model, or `None` for a monolith (its
+`interval` is a time window for a batched model, or `None` for a oneshot (its
 unit of work is the whole thing). If any upstream contract is unsatisfied the
 unit is left `blocked` — the reason names every missing upstream — and runs on a
 later pass once they're satisfied.

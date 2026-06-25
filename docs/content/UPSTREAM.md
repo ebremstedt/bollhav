@@ -41,7 +41,7 @@ The three window-scoped levels (`EXACT` ⊂ `ENCAPSULATE`, and `EXISTS` below th
 
 ### When to use which
 
-- **`EXISTS`** — you only need *ordering + lineage*, not data: a config/seed table that just has to be registered, or a windowless consumer (view / monolithic) that wants a managed edge to an interval upstream without waiting for it.
+- **`EXISTS`** — you only need *ordering + lineage*, not data: a config/seed table that just has to be registered, or a windowless consumer (view / oneshot) that wants a managed edge to an interval upstream without waiting for it.
 - **`EXACT`** — the upstream is **aggregated at exactly my grain** and that alignment is load-bearing: a daily rollup consuming a daily upstream rollup, where you want *that day's own* aggregate row and a coarser backfill that merged several days must **not** count as ready.
 - **`ENCAPSULATE`** — the default for a **window-local transform**: my window's output is a pure function of my window's input (filter / segment / reshape this slice). Pipelines per-window and tolerates the upstream being at any grain — coarser *or* finer — as long as my window is covered. Use this whenever `WINDOW` was your instinct.
 - **`THROUGH`** — my window's output **depends on history `1..N`**, not just window N: running totals, cumulative balances, snapshots-as-of. Waits for the gap-free prefix; a hole in old history correctly blocks me.
@@ -75,10 +75,10 @@ Because a flexible upstream coalesces away its exact-grain rows, **`EXACT` again
 `fixed_intervals` and [`STATE_MODE`](STATE.md) are **orthogonal** — one says what a model's state *is*, the other says how much of it a run *throws away* before re-evaluating:
 
 - **Identity — `fixed_intervals`** (per-model, declared in code): **fixed** = a grid keyed by `(since, until)`, where the chunk *is* the state's identity; **flexible** = a coverage set, where the chunk is just how work is sliced.
-- **Invalidation — `STATE_MODE`** (per-run, an env var): how much existing state the run resets first —
-    - **`discover`** (default) — reset nothing: keep every `applied` row, only add / re-check the rest.
-    - **`bulldozer`** — reset the run's window back to `pending` (the `(since, until)` boundaries are kept).
-    - **`torch`** — drop *all* state and re-prefill from scratch at the current chunk.
+- **Invalidation — `STATE_MODE`** (per-run, an env var): how much of the run's window the run resets first. Execution is **window-scoped** — a run does exactly its window, nothing leaks in from the backlog.
+    - **`bulldozer`** (default) — reset the window's rows to `pending` and run exactly them (boundaries kept); leave everything outside the window alone.
+    - **`discover`** — keep every `applied` row, run only the window's outstanding; with **no** window, reconcile *all* outstanding state.
+    - **`torch`** — drop *all* state and reload the **contract range** (forbids an explicit window — a clean reload / chunk-granularity change).
 
 What each mode *does* depends on the identity axis:
 

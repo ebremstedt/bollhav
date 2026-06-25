@@ -254,15 +254,15 @@ class TestStateAndStagingCarryThrough:
             state=State(),  # defaults to DISCOVER
             temporality=Temporality.TEMPORAL,
         )
-        out = _apply(m, state_mode=StateMode.TORCH).model
+        out = _apply(m, state_mode=StateMode.BULLDOZER).model
         assert out.state is not None
-        assert out.state.mode is StateMode.TORCH
+        assert out.state.mode is StateMode.BULLDOZER
 
     def test_state_mode_ignored_when_no_state(self) -> None:
         # A stateless model stays stateless regardless of STATE_MODE.
         from bollhav.model.state import StateMode
 
-        out = _apply(_model(), state_mode=StateMode.TORCH).model
+        out = _apply(_model(), state_mode=StateMode.BULLDOZER).model
         assert out.state is None
 
     def test_staging_carries_through(self) -> None:
@@ -360,3 +360,80 @@ class TestCurfewPreservedThroughOverrides:
         run = _apply(m)
         assert run.model.curfew is not None
         assert run.model.curfew.windows == [(time(9), time(17))]
+
+
+class TestRunModeWindowMatrix:
+    """The run-mode combinatorics at the resolution layer: STATE_MODE
+    (bulldozer / discover / torch) × window source (latest / explicit backfill /
+    contract range). torch is the constrained one — it forbids an explicit
+    window and always reloads the contract range."""
+
+    def _m(self):
+        from bollhav.model.state import State
+
+        return Model(
+            target=Target(name="t", schema="s", schema_suffix_appendix=None),
+            batching=Batch(time=TimeChunking(chunk="@daily", tz=UTC)),
+            state=State(),
+            temporality=Temporality.TEMPORAL,
+            contract=Contract(begin=_SINCE, end=_UNTIL),
+        )
+
+    @travel(datetime(2024, 1, 15, 12, 0, tzinfo=UTC))
+    def test_latest_resolves_to_the_tick(self) -> None:
+        from bollhav.model.state import StateMode
+
+        for mode in (StateMode.BULLDOZER, StateMode.DISCOVER):
+            run = _apply(
+                self._m(),
+                state_mode=mode,
+                latest=True,
+                backfill_since=None,
+                backfill_until=None,
+            )
+            assert run.window.since == datetime(2024, 1, 14, tzinfo=UTC)
+            assert run.window.until == datetime(2024, 1, 15, tzinfo=UTC)
+
+    def test_explicit_backfill_resolves_to_the_range(self) -> None:
+        from bollhav.model.state import StateMode
+
+        s, u = datetime(2024, 1, 1, tzinfo=UTC), datetime(2024, 1, 3, tzinfo=UTC)
+        for mode in (StateMode.BULLDOZER, StateMode.DISCOVER):
+            run = _apply(self._m(), state_mode=mode, backfill_since=s, backfill_until=u)
+            assert (run.window.since, run.window.until) == (s, u)
+
+    def test_backfill_no_dates_resolves_to_contract_range(self) -> None:
+        from bollhav.model.state import StateMode
+
+        for mode in (StateMode.BULLDOZER, StateMode.DISCOVER):
+            run = _apply(
+                self._m(), state_mode=mode, backfill_since=None, backfill_until=None
+            )
+            assert (run.window.since, run.window.until) == (_SINCE, _UNTIL)
+
+    def test_torch_forbids_an_explicit_window(self) -> None:
+        import pytest
+
+        from bollhav.model.messages.error import TorchWithWindowError
+        from bollhav.model.state import StateMode
+
+        with pytest.raises(TorchWithWindowError):
+            _apply(
+                self._m(),
+                state_mode=StateMode.TORCH,
+                backfill_since=_SINCE,
+                backfill_until=_UNTIL,
+            )
+
+    def test_torch_always_reloads_the_contract_range(self) -> None:
+        from bollhav.model.state import StateMode
+
+        # latest is ignored; no explicit dates → the contract range
+        run = _apply(
+            self._m(),
+            state_mode=StateMode.TORCH,
+            latest=True,
+            backfill_since=None,
+            backfill_until=None,
+        )
+        assert (run.window.since, run.window.until) == (_SINCE, _UNTIL)

@@ -23,7 +23,7 @@ class UpstreamContract(str, Enum):
         The upstream is a registered model. No window, no applied state — just
         "it's a known model". Gives run-ordering + a managed lineage edge
         without waiting for any data. The only level a **windowless** consumer
-        (view / monolithic) can use to depend on an *interval* upstream without
+        (view / oneshot) can use to depend on an *interval* upstream without
         waiting (the stricter levels make it wait for the whole upstream).
 
     ``EXACT`` (window-scoped)

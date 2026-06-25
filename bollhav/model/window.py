@@ -175,3 +175,26 @@ def compute_intervals(run: "ModelRun") -> tuple[TZInterval, ...] | tuple[None]:
     if model.batching is None:
         return (run.window,)
     return tuple(split_window(run.window, model.batching.time.chunk))
+
+
+def contract_intervals(run: "ModelRun") -> tuple[TZInterval, ...] | tuple[None]:
+    """Every interval the **contract declares** — the full set of `(since,
+    until)` rows that *should* exist, from `contract.begin` to `contract.end`
+    (or the latest complete tick for an open contract), split by the model's
+    chunk. This is what *prefill* materializes, independent of the run's
+    window/mode: state stays complete against the contract, and as the
+    contract's forward edge advances the new ticks appear here. The storage
+    layer inserts only the rows not already present (incremental — prior runs
+    laid down the rest).
+
+    Contrast `compute_intervals`, which returns just *this run's* window. Falls
+    back to that window when there's nothing to declare against — an unbatched
+    model, or a batched one with no `contract.begin`."""
+    model = run.model
+    if model.batching is not None and model.contract.begin is not None:
+        contract_window = resolve_window(
+            model.batching, model.contract, reload=True, name=model.target.full_name
+        )
+        if contract_window is not None:
+            return tuple(split_window(contract_window, model.batching.time.chunk))
+    return compute_intervals(run)

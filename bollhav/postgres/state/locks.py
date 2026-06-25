@@ -13,7 +13,7 @@ class Locks(_PostgresStateBase):
         """Hash key for an interval-scoped lock: identifies the specific
         `(model, since, until)` triple. Used by `@execute_lifecycle` so two
         workers can race on the same model but different intervals
-        without conflict. A monolithic / view row has a NULL window, so its
+        without conflict. A oneshot / view row has a NULL window, so its
         key collapses to a single per-model `…|oneshot` slot."""
         if interval is None:
             return f"{self.model.target.full_name}|oneshot"

@@ -33,6 +33,21 @@ class ConflictingRunModeError(RuntimeConfigError):
         super().__init__("LATEST_ENABLED and BACKFILL_ENABLED cannot both be true")
 
 
+class TorchWithWindowError(RuntimeConfigError):
+    """`STATE_MODE=torch` was combined with an explicit `BACKFILL_SINCE`/`UNTIL`
+    window. torch wipes *all* state and reloads the contract's declared range,
+    so a narrower window can't be honoured (it would orphan the rest). To redo a
+    specific window, use `STATE_MODE=bulldozer` instead. `name` is the model."""
+
+    def __init__(self, name: str) -> None:
+        super().__init__(
+            f"STATE_MODE=torch on model {name!r} cannot take an explicit "
+            f"BACKFILL_SINCE/UNTIL window — torch reloads the whole contract "
+            f"range (a narrower window would orphan the rest). Use "
+            f"STATE_MODE=bulldozer to redo a specific window."
+        )
+
+
 class MissingSchemaSuffixError(RuntimeConfigError):
     """`USE_SCHEMA_SUFFIX=True` was set without a non-empty `SCHEMA_SUFFIX` to
     apply, so there's nothing to suffix the schema with."""
@@ -588,23 +603,10 @@ class BackfillRequiresSinceError(ModelDefinitionError):
         )
 
 
-class BackfillRequiresUntilError(ModelDefinitionError):
-    """A backfill window was requested with no `until` — backfill means a
-    specific window, so an explicit end (`BACKFILL_UNTIL`) is required.
-    `name` is the model name."""
-
-    def __init__(self, name: str) -> None:
-        super().__init__(
-            f"backfill requires an explicit until on model {name!r} — set "
-            f'BACKFILL_UNTIL. Backfill means a specific window; for "to the '
-            f'latest complete tick" use latest mode, for "to contract.end" use '
-            f"reload mode."
-        )
-
-
 __all__ = [
     "RuntimeConfigError",
     "LifecycleError",
+    "TorchWithWindowError",
     "MissingRunError",
     "MissingDataConnError",
     "MssqlStateRequiresPostgresConnError",
@@ -655,5 +657,4 @@ __all__ = [
     "CronSeedingInvariantError",
     "ReloadRequiresContractBeginError",
     "BackfillRequiresSinceError",
-    "BackfillRequiresUntilError",
 ]

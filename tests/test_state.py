@@ -423,14 +423,14 @@ class TestReadStatusSummary:
 class TestStateMode_EnvVar:
     """STATE_MODE env var → cfg.state_mode → bootstrap argument."""
 
-    def test_default_is_respect(self) -> None:
+    def test_default_is_bulldozer(self) -> None:
         from bollhav.model.load_models import _resolve_state_mode
 
         with patch(
             "bollhav.model.load_models.env_var",
             lambda name, **kw: None,
         ):
-            assert _resolve_state_mode() is StateMode.DISCOVER
+            assert _resolve_state_mode() is StateMode.BULLDOZER
 
     def test_respect_explicit(self) -> None:
         from bollhav.model.load_models import _resolve_state_mode

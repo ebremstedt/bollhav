@@ -17,7 +17,7 @@ from bollhav.model.messages.error import (
 )
 from bollhav.model.progress_bar import PROGRESS
 from bollhav.model.state_dry_plan import _fmt_window, _print_state_plan
-from bollhav.model.window import compute_intervals
+from bollhav.model.window import compute_intervals, contract_intervals
 from bollhav.model.write_modes import WriteMode
 
 logger = logging.getLogger(__name__)
@@ -176,17 +176,32 @@ def model_lifecycle(func: Callable) -> Callable:
 
                 from bollhav.model.state import StateMode
 
+                # torch wipes all state first; the prefill below then refills the
+                # table from the contract (every row pending) → a clean reload.
                 if model.state.mode is StateMode.TORCH and not dry_state:
                     state_handler.torch_rows()
 
                 if run.window is None:
                     state_handler.insert_oneshot(run_id=run.run_id)
                 else:
-                    state_handler.insert_intervals(
+                    # Fill the state table with the contract — every interval it
+                    # declares — independent of this run's window/mode. Incremental:
+                    # only intervals not already present are inserted, the rest left
+                    # untouched. Then invalidate per mode *on top*: bulldozer resets
+                    # this run's window to pending (redo exactly it); discover resets
+                    # nothing (run only what's still outstanding); torch already
+                    # wiped above, so its refill comes back all-pending.
+                    state_handler.prefill(
                         run_id=run.run_id,
-                        intervals=compute_intervals(run),
+                        intervals=contract_intervals(run),
                     )
-                run.intervals = state_handler.get_actionable_intervals()
+                    if model.state.mode is StateMode.BULLDOZER:
+                        state_handler.reset_window(
+                            run_id=run.run_id, window=run.window
+                        )
+                run.intervals = state_handler.get_actionable_intervals(
+                    window=run.window
+                )
 
                 if mark_applied and not dry_state:
                     intervals = compute_intervals(run)
