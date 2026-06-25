@@ -196,9 +196,7 @@ def model_lifecycle(func: Callable) -> Callable:
                         intervals=contract_intervals(run),
                     )
                     if model.state.mode is StateMode.BULLDOZER:
-                        state_handler.reset_window(
-                            run_id=run.run_id, window=run.window
-                        )
+                        state_handler.reset_window(run_id=run.run_id, window=run.window)
                 run.intervals = state_handler.get_actionable_intervals(
                     window=run.window
                 )
