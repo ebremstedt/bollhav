@@ -17,7 +17,12 @@ from bollhav.model.messages.error import (
 )
 from bollhav.model.progress_bar import PROGRESS
 from bollhav.model.state_dry_plan import _fmt_window, _print_state_plan
-from bollhav.model.window import compute_intervals, contract_intervals
+from bollhav.model.window import (
+    compute_intervals,
+    contract_intervals,
+    resolve_window,
+    split_window,
+)
 from bollhav.model.write_modes import WriteMode
 
 logger = logging.getLogger(__name__)
@@ -176,20 +181,54 @@ def model_lifecycle(func: Callable) -> Callable:
 
                 from bollhav.model.state import StateMode
 
-                # torch wipes all state first; the prefill below then refills the
-                # table from the contract (every row pending) → a clean reload.
+                # torch wipes all state first; the prefill below then refills from
+                # scratch — a fixed grid, or (flexible) the whole range as gaps.
                 if model.state.mode is StateMode.TORCH and not dry_state:
                     state_handler.torch_rows()
 
+                batching = model.batching
+                is_flexible = batching is not None and not batching.time.fixed_intervals
+
                 if run.window is None:
                     state_handler.insert_oneshot(run_id=run.run_id)
+                elif is_flexible:
+                    # Flexible (coverage) model: state is the set of covered
+                    # ranges, the chunk is just how work is sliced. Invalidation
+                    # is range-subtraction and work is the *gaps* in coverage, not
+                    # a fixed grid:
+                    #   bulldozer → clear the run window (uncover its coverage +
+                    #               drop stale rows) so it re-opens as a gap,
+                    #   discover  → leave coverage as-is, fill only what's still
+                    #               uncovered,
+                    #   torch     → already wiped above → the whole range is a gap.
+                    # prefill then materializes the gaps (sliced by *this run's*
+                    # chunk), so a re-chunk re-covers cleanly instead of layering
+                    # a second grain on top.
+                    if model.state.mode is StateMode.BULLDOZER and not dry_state:
+                        state_handler.clear_window(run.window)
+                    if model.contract.begin is not None:
+                        horizon = resolve_window(
+                            batching,
+                            model.contract,
+                            reload=True,
+                            name=model.target.full_name,
+                        )
+                    else:
+                        horizon = run.window
+                    units = tuple(
+                        unit
+                        for gap in state_handler.uncovered_gaps(
+                            horizon.since, horizon.until
+                        )
+                        for unit in split_window(gap, batching.time.chunk)
+                    )
+                    state_handler.prefill(run_id=run.run_id, intervals=units)
                 else:
-                    # Fill the state table with the contract — every interval it
-                    # declares — independent of this run's window/mode. Incremental:
-                    # only intervals not already present are inserted, the rest left
-                    # untouched. Then invalidate per mode *on top*: bulldozer resets
-                    # this run's window to pending (redo exactly it); discover resets
-                    # nothing (run only what's still outstanding); torch already
+                    # Fixed grid model. Fill the state table with the contract —
+                    # every interval it declares — independent of this run's
+                    # window/mode (incremental: only missing rows inserted). Then
+                    # invalidate per mode on top: bulldozer resets this run's
+                    # window to pending; discover resets nothing; torch already
                     # wiped above, so its refill comes back all-pending.
                     state_handler.prefill(
                         run_id=run.run_id,

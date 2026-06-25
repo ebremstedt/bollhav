@@ -1,9 +1,12 @@
 # Flexible intervals / coverage-based state — design note
 
-Status: **partially built.** The attestation field `TimeChunking.fixed_intervals`
-(default `True`) is declared and plumbed through the runtime rebuild. Nothing
-reads it yet — only the `True` (grid) path exists. This note captures the rest
-so it isn't lost.
+Status: **engine live (2026-06-25).** The coverage executor is built and tested:
+prefill computes the uncovered gaps and slices them by the run's chunk, and
+`bulldozer` / `torch` invalidate by range-subtraction (`uncover`) so a re-chunk
+re-covers cleanly. Still deferred: **coalescing** covered units into one island
+row (today one `applied` row per unit, `range_agg`'d at query time), the
+GiST index, the overlap-aware concurrency lock, and Guard B. See "Build order"
+at the bottom. This note captures the full design.
 
 ## The problem it solves
 
@@ -176,7 +179,25 @@ on `fixed_intervals`. Roughly backward-compatible.
 
 1. ✅ `TimeChunking.fixed_intervals: bool = True` declared + plumbed (carries
    through the runtime rebuild).
-2. ☐ Store it in the library (`register_model`) so downstreams can read it.
-3. ☐ Branch `prefill` + actionable selection on it: grid (today) vs coverage.
-4. ☐ Guards A (`EXACT`-on-flexible) + B (`APPEND`-on-flexible).
-5. ☐ Range-lock exclusion constraint for the flexible path.
+2. ✅ Store it in the library (`register_model` + `fixed_intervals` column) so
+   downstreams can read it.
+3. ✅ Branch `prefill` + actionable selection on it: grid vs coverage. The
+   bootstrap branches on `fixed_intervals` — flexible runs `uncovered_gaps`
+   (multirange complement of `applied` coverage) sliced by the run's chunk;
+   `bulldozer` calls `clear_window` (`uncover` + drop stale non-applied), `torch`
+   wipes, `discover` leaves coverage. Reuses the whole execution loop
+   (`mark_running`/`mark_applied`/`get_actionable`). Tests in `test_e2e.py`
+   (`flexible_fills_gaps…`, `…bulldozer_partial_window…`, `…torch_rechunks…`).
+4. ◐ Guards: **A** (`EXACT`-on-flexible) ✅ live in `satisfaction.py`. **B**
+   (`APPEND`-on-flexible) ☐ still not built.
+5. ☐ Range-lock exclusion constraint for the flexible path (run single-worker
+   until then).
+
+**Also still deferred (sub-pieces of step 3):**
+
+- **Coalescing on success** — today `mark_applied` leaves one `applied` row per
+  unit; the gap query `range_agg`s them, so coverage is correct but the row count
+  is "per unit," not "per island." Coalesce touching/overlapping applied rows to
+  compact (the lossy-provenance tradeoff in *Landmines*).
+- **GiST index** on `tstzrange(since, until)` for the coverage queries — they run
+  without it (full scan of `applied` rows), fine while islands are few.

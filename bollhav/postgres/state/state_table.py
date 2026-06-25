@@ -822,6 +822,92 @@ class StateTable(_PostgresStateBase):
             until,
         )
 
+    def uncovered_gaps(self, since, until) -> list:
+        """The uncovered ranges of `[since, until)` for a flexible (coverage)
+        model — the complement of this model's `applied` coverage within that
+        horizon, as maximal gaps. The bootstrap slices each gap by the run's
+        chunk into the units to run, so work is *the holes in coverage*, not a
+        fixed grid. A fully-covered model returns `[]`.
+
+        This is the flexible counterpart of `contract_intervals` (which is the
+        whole grid): here only what isn't `applied` yet becomes work."""
+        from bollhav.model.intervals import TZInterval
+
+        schema = self._state_schema()
+        table = self._state_table()
+        # multirange([since, until)) − range_agg(applied) = the gaps. Mirrors
+        # `uncover_span`'s set math, reversed (horizon minus coverage). `%(s)s` /
+        # `%(u)s` are bound params; the rest is constant.
+        rows = (
+            self._require_conn()
+            .execute(
+                sql.SQL(
+                    "SELECT lower(g), upper(g) FROM unnest("
+                    "tstzmultirange(tstzrange(%(s)s, %(u)s, '[)')) - ("
+                    "SELECT COALESCE("
+                    "range_agg(tstzrange(since, until, '[)')), '{{}}'::tstzmultirange"
+                    ") FROM {schema}.{table} "
+                    "WHERE status = 'applied' AND since IS NOT NULL"
+                    ")) AS g ORDER BY lower(g)"
+                ).format(schema=sql.Identifier(schema), table=sql.Identifier(table)),
+                {"s": since, "u": until},
+            )
+            .fetchall()
+        )
+        # Return gaps in the chunk's own timezone: PG hands timestamps back in the
+        # session tz, and `split_window` walks cron ticks in whatever tz the
+        # boundary carries — so a daily/monthly slice off a session-tz boundary
+        # would land off midnight (a partial first/last unit). Re-frame to the
+        # chunk's tz, the same frame `resolve_window` builds the grid in.
+        tz = self.model.batching.time.tz if self.model.batching else None
+        gaps = [
+            TZInterval(
+                s.astimezone(tz) if tz else s,
+                u.astimezone(tz) if tz else u,
+            )
+            for s, u in rows
+        ]
+        logger.debug(
+            "state: %d coverage gap(s) in [%s, %s) for %s",
+            len(gaps),
+            since,
+            until,
+            self.model.target.full_name,
+        )
+        return gaps
+
+    def clear_window(self, window: "TZInterval") -> int:
+        """Flexible bulldozer invalidation: make `window` a clean gap so the next
+        prefill re-discovers the whole window as work. Two steps:
+
+          1. `uncover` its applied coverage (range-subtraction, straddle-safe —
+             a coalesced island wider than the window is split, not lost).
+          2. delete any leftover non-`applied` rows fully inside it (stale
+             pending/blocked/error from an earlier, possibly differently-chunked
+             run), so they don't linger at the old grain. A `running` row is
+             spared — a live worker owns it.
+
+        The flexible counterpart of `reset_window`. Returns the number of applied
+        rows uncovered."""
+        removed = self.uncover(window.since, window.until)
+        schema = self._state_schema()
+        table = self._state_table()
+        self._require_conn().execute(
+            sql.SQL(
+                "DELETE FROM {schema}.{table} WHERE status <> 'applied' "
+                "AND status <> 'running' AND since >= %s AND until <= %s"
+            ).format(schema=sql.Identifier(schema), table=sql.Identifier(table)),
+            [window.since, window.until],
+        )
+        logger.debug(
+            "state: cleared window [%s, %s) of %s (uncovered %d applied island(s))",
+            window.since,
+            window.until,
+            self.model.target.full_name,
+            removed,
+        )
+        return removed
+
 
 # Overlap predicate shared by uncover's read/delete: an applied, windowed row
 # whose range intersects the target span. `%(s)s` / `%(u)s` are bound params.

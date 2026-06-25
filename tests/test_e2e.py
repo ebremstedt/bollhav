@@ -50,7 +50,12 @@ from bollhav.model import (
     WriteMode,
 )
 from bollhav.model.state import StateMode
-from bollhav.model.window import compute_intervals, contract_intervals, resolve_window
+from bollhav.model.window import (
+    compute_intervals,
+    contract_intervals,
+    resolve_window,
+    split_window,
+)
 from bollhav.postgres import (
     PostgresColumn,
     PostgresType,
@@ -206,6 +211,7 @@ def _orders_model(
     sources: list[Source] | None = None,
     schema_suffix: str = "",
     fixed_intervals: bool = True,
+    chunk: str = "@daily",
     tags: set[str] | None = None,
 ) -> ModelRun:
     # `apply_runtime_overrides` normally resolves the window from env vars and
@@ -213,7 +219,7 @@ def _orders_model(
     # the model + resolve the window by hand to the test's fixed window.
     from bollhav.model import Tags
 
-    batching = Batch(time=TimeChunking(chunk="@daily", fixed_intervals=fixed_intervals))
+    batching = Batch(time=TimeChunking(chunk=chunk, fixed_intervals=fixed_intervals))
     contract = Contract(begin=SINCE, end=bounds_end)
     model = Model(
         target=Target(
@@ -309,8 +315,33 @@ def _bootstrap(models, *, state_mode: StateMode = StateMode.DISCOVER) -> None:
                 state.ensure_library()
                 state.register_model()
                 state.ensure_tables()
+
+                if model.state.mode is StateMode.TORCH:
+                    state.torch_rows()
+
+                batching = model.batching
+                is_flexible = batching is not None and not batching.time.fixed_intervals
+
                 if run.window is None:
                     state.insert_oneshot(run_id=run.run_id)
+                elif is_flexible:
+                    if model.state.mode is StateMode.BULLDOZER:
+                        state.clear_window(run.window)
+                    if model.contract.begin is not None:
+                        horizon = resolve_window(
+                            batching,
+                            model.contract,
+                            reload=True,
+                            name=model.target.full_name,
+                        )
+                    else:
+                        horizon = run.window
+                    units = tuple(
+                        unit
+                        for gap in state.uncovered_gaps(horizon.since, horizon.until)
+                        for unit in split_window(gap, batching.time.chunk)
+                    )
+                    state.prefill(run_id=run.run_id, intervals=units)
                 else:
                     state.prefill(
                         run_id=run.run_id,
@@ -2482,3 +2513,78 @@ def test_e2e_bulldozer_window_spares_the_rest_of_the_contract(schema_name):
         ("pending", SINCE + timedelta(days=2), UNTIL),
     ]
     assert [(i.since, i.until) for i in run2.intervals] == [(day3.since, day3.until)]
+
+
+# ── flexible (coverage) models: gap-fill + range-subtraction invalidation ──
+
+
+def test_e2e_flexible_fills_gaps_then_is_idempotent(schema_name):
+    """A flexible model's work is the *gaps* in its coverage, not a fixed grid.
+    A fresh run fills the whole contract (one gap, sliced by chunk); a second
+    discover run sees full coverage → no gaps → nothing to do."""
+    run = _orders_model(
+        schema_name, state=State(), staging=Staging(), fixed_intervals=False
+    )
+    _run_intervals(run)  # contract is one gap → 3 daily units → applied
+    st = state_table_name(run.model.target.full_name)
+    assert all(s == "applied" for s, _, _ in _state_rows(LIBRARY_SCHEMA, st))
+
+    run2 = _orders_model(
+        schema_name, state=State(), staging=Staging(), fixed_intervals=False
+    )
+    _bootstrap([run2], state_mode=StateMode.DISCOVER)
+    assert len(run2.intervals) == 0  # fully covered → no gaps
+
+
+def test_e2e_flexible_bulldozer_partial_window_keeps_the_rest_covered(schema_name):
+    """bulldozer on a flexible model is *range-subtraction*: it uncovers only the
+    run window, which re-opens as a gap and re-runs — the surrounding coverage
+    stays applied. (Contrast the fixed grid, which flips whole rows.)"""
+    from bollhav.model.intervals import TZInterval
+
+    run = _orders_model(
+        schema_name, state=State(), staging=Staging(), fixed_intervals=False
+    )
+    _run_intervals(run)  # covers [SINCE, UNTIL)
+    st = state_table_name(run.model.target.full_name)
+
+    run2 = _orders_model(
+        schema_name, state=State(), staging=Staging(), fixed_intervals=False
+    )
+    mid = TZInterval(SINCE + timedelta(days=1), SINCE + timedelta(days=2))
+    run2.window = mid
+    _bootstrap([run2], state_mode=StateMode.BULLDOZER)
+
+    # Only the middle day re-opened; the first and last days stay covered.
+    assert _state_rows(LIBRARY_SCHEMA, st) == [
+        ("applied", SINCE, SINCE + timedelta(days=1)),
+        ("pending", SINCE + timedelta(days=1), SINCE + timedelta(days=2)),
+        ("applied", SINCE + timedelta(days=2), UNTIL),
+    ]
+    assert [(i.since, i.until) for i in run2.intervals] == [(mid.since, mid.until)]
+
+
+def test_e2e_flexible_torch_rechunks_coverage(schema_name):
+    """The fix for the daily→yearly surprise: torch on a flexible model wipes the
+    old-grain coverage, then prefill re-covers the contract at *this run's* chunk
+    — no mixed granularity. Here daily coverage becomes one monthly-grain unit."""
+    run = _orders_model(
+        schema_name, state=State(), staging=Staging(), fixed_intervals=False
+    )
+    _run_intervals(run)  # 3 daily applied rows
+    st = state_table_name(run.model.target.full_name)
+    assert len(_state_rows(LIBRARY_SCHEMA, st)) == 3
+
+    # Re-chunk to monthly under torch: the 3-day contract is one monthly unit.
+    run2 = _orders_model(
+        schema_name,
+        state=State(),
+        staging=Staging(),
+        fixed_intervals=False,
+        chunk="@monthly",
+    )
+    _bootstrap([run2], state_mode=StateMode.TORCH)
+
+    # Old daily rows gone; one pending unit spanning the contract at the new grain.
+    assert _state_rows(LIBRARY_SCHEMA, st) == [("pending", SINCE, UNTIL)]
+    assert [(i.since, i.until) for i in run2.intervals] == [(SINCE, UNTIL)]
