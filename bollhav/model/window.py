@@ -22,7 +22,6 @@ from icron import croniter
 from bollhav.model.intervals import TZInterval
 from bollhav.model.messages.error import (
     BackfillRequiresSinceError,
-    BackfillRequiresUntilError,
     CronSeedingInvariantError,
     ReloadRequiresContractBeginError,
 )
@@ -94,9 +93,16 @@ def resolve_window(
 
         reload   — `contract.begin` .. (`contract.end` or the latest complete tick)
         latest   — the latest complete `window` tick
-        backfill — `since` (or `contract.begin`) .. `until` (required)
+        backfill — `since` (or `contract.begin`) .. `until` (or `contract.end`,
+                   or the latest complete tick)
 
-    Pure apart from the clock read in `latest` / open-ended `reload`."""
+    `until` is optional: a no-dates backfill runs the contract's declared range —
+    the same window `reload` resolves (reload is just a backfill whose bounds
+    come from the contract rather than explicit dates). `since` still needs a
+    source — `BACKFILL_SINCE` or `contract.begin`.
+
+    Pure apart from the clock read in `latest` / open-ended `reload` / a
+    no-`until` backfill."""
     if batching is None:
         # Unbatched: the model runs once over its whole declared range. A
         # temporal model with a closed contract window [begin, end] records a
@@ -123,9 +129,10 @@ def resolve_window(
         window_since = since or contract.begin
         if window_since is None:
             raise BackfillRequiresSinceError(name)
-        if until is None:
-            raise BackfillRequiresUntilError(name)
-        window_until = until
+        # `until` is optional — fall back to the contract's end, or the latest
+        # complete tick for an open contract. A no-dates backfill thus runs the
+        # declared range (the same window reload resolves).
+        window_until = until or contract.end or latest_complete_interval(expr, tz).until
 
     if batching.time.lookback:
         window_since = _apply_lookback(
