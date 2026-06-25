@@ -4,7 +4,7 @@ requires-python = ">=3.11.0"
 
 [[package]]
 name = "bollhav"
-version = "3.0.7rc1"
+version = "3.0.7rc2"
 source = { editable = "." }
 dependencies = [
     { name = "polars" },

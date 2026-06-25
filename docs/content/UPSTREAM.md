@@ -67,8 +67,8 @@ Because a flexible upstream coalesces away its exact-grain rows, **`EXACT` again
 
 `fixed_intervals` is **per-model and does not propagate**: a flexible upstream feeding a fixed downstream is fine — the downstream reads the upstream's *data* (by coverage), not its partitioning, and declaring flexible *means* that data is partition-invariant. So a flexible upstream is in fact the safest to build coverage contracts on; only `EXACT` (which demands a specific grain) is off the table.
 
-!!! note "Forward-looking"
-    The `EXACT`-on-flexible rule above is **enforced today** (it raises at gate-check time). The flexible *execution* engine — coverage gap-filling and range coalescing — is still being built (see `design/flexible-intervals.md`); until it lands, leave `fixed_intervals` at its default `True`.
+!!! note "Mostly live"
+    The `EXACT`-on-flexible rule above is **enforced today** (it raises at gate-check time), and the flexible *execution* engine — coverage gap-filling plus the `uncover`/re-cover invalidation in the table below — is **live too** (see `design/flexible-intervals.md`). Two refinements are still deferred: **coalescing** (today there's one `applied` row per covered unit, merged with `range_agg` at query time — correct coverage, just more rows than the "one row per island" ideal) and the **overlap-aware concurrency lock**, so run a flexible model **single-worker** for now.
 
 ### Two axes: identity (`fixed_intervals`) and invalidation (`STATE_MODE`)
 
@@ -90,7 +90,7 @@ What each mode *does* depends on the identity axis:
 
 For a **flexible** model the three modes collapse into one idea — *how much coverage to uncover before computing gaps*: `discover` = nothing, `bulldozer` = the run window, `torch` = all. That's also why **re-chunking** behaves differently per axis: a fixed model's grain is its identity, so [`INTERVAL_OVERRIDE`](BATCH.md) is **ignored** on it (re-chunking would fork the grid into mixed granularity — migrate with `STATE_MODE=torch` instead); a flexible model's chunk isn't identity, so `INTERVAL_OVERRIDE` **applies** to it and re-chunks freely.
 
-(The flexible column is forward-looking — the engine that uncovers / re-covers is still being built, per the note above. `INTERVAL_OVERRIDE`'s fixed-vs-flexible gating and the `EXACT`-on-flexible guard, however, are live today.)
+(The flexible column is **live**: prefill computes the coverage gaps and slices them by *this run's* chunk; `bulldozer` / `torch` `uncover` coverage by range-subtraction so a re-chunk re-covers cleanly instead of layering a second grain. Still deferred — coalescing covered units into one island row, and the overlap lock for concurrent workers; see the note above.)
 
 ### Combinations that don't fit — and the damage
 
