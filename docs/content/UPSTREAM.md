@@ -70,6 +70,28 @@ Because a flexible upstream coalesces away its exact-grain rows, **`EXACT` again
 !!! note "Forward-looking"
     The `EXACT`-on-flexible rule above is **enforced today** (it raises at gate-check time). The flexible *execution* engine — coverage gap-filling and range coalescing — is still being built (see `design/flexible-intervals.md`); until it lands, leave `fixed_intervals` at its default `True`.
 
+### Two axes: identity (`fixed_intervals`) and invalidation (`STATE_MODE`)
+
+`fixed_intervals` and [`STATE_MODE`](STATE.md) are **orthogonal** — one says what a model's state *is*, the other says how much of it a run *throws away* before re-evaluating:
+
+- **Identity — `fixed_intervals`** (per-model, declared in code): **fixed** = a grid keyed by `(since, until)`, where the chunk *is* the state's identity; **flexible** = a coverage set, where the chunk is just how work is sliced.
+- **Invalidation — `STATE_MODE`** (per-run, an env var): how much existing state the run resets first —
+    - **`discover`** (default) — reset nothing: keep every `applied` row, only add / re-check the rest.
+    - **`bulldozer`** — reset the run's window back to `pending` (the `(since, until)` boundaries are kept).
+    - **`torch`** — drop *all* state and re-prefill from scratch at the current chunk.
+
+What each mode *does* depends on the identity axis:
+
+| `STATE_MODE` | **fixed** (grid) | **flexible** (coverage) |
+|---|---|---|
+| `discover` | keep `applied` rows; re-check the rest | leave coverage as-is, fill only the gaps |
+| `bulldozer` | re-`pending` the window's rows (same boundaries) | uncover the run window, then re-cover it |
+| `torch` | delete all rows, re-prefill at the (possibly new) chunk | uncover everything, re-cover from zero |
+
+For a **flexible** model the three modes collapse into one idea — *how much coverage to uncover before computing gaps*: `discover` = nothing, `bulldozer` = the run window, `torch` = all. That's also why **re-chunking** behaves differently per axis: a fixed model's grain is its identity, so [`INTERVAL_OVERRIDE`](BATCH.md) is **ignored** on it (re-chunking would fork the grid into mixed granularity — migrate with `STATE_MODE=torch` instead); a flexible model's chunk isn't identity, so `INTERVAL_OVERRIDE` **applies** to it and re-chunks freely.
+
+(The flexible column is forward-looking — the engine that uncovers / re-covers is still being built, per the note above. `INTERVAL_OVERRIDE`'s fixed-vs-flexible gating and the `EXACT`-on-flexible guard, however, are live today.)
+
 ### Combinations that don't fit — and the damage
 
 Not every (upstream shape × contract) or (model attestation × write/query) pairing is safe. Some are **caught** for you (a loud error at definition or gate-check); the dangerous ones are **silent** — they corrupt data with no crash. Severity legend: ⛔ caught (safe — you can't ship it) · ⏳ blocks forever (visible, recoverable) · 🔴 silent divergence (disastrous — wrong data, no error).
