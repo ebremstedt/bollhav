@@ -2149,7 +2149,10 @@ def test_e2e_composite_primary_key_ddl_and_upsert(schema_name):
     inline `PRIMARY KEY` clauses are rejected by Postgres)."""
     cols = [
         PostgresColumn(
-            name="tenant", data_type=PostgresType.BIGINT, nullable=False, primary_key=True
+            name="tenant",
+            data_type=PostgresType.BIGINT,
+            nullable=False,
+            primary_key=True,
         ),
         PostgresColumn(
             name="id", data_type=PostgresType.BIGINT, nullable=False, primary_key=True
@@ -2357,7 +2360,9 @@ def test_e2e_uncover_span_deletes_when_span_covers_row(schema_name):
     full, st = run.model.target.full_name, state_table_name(run.model.target.full_name)
 
     with psycopg.connect(_dsn(), autocommit=True) as conn:
-        _seed_coalesced(conn, st, full, SINCE + timedelta(days=1), SINCE + timedelta(days=2))
+        _seed_coalesced(
+            conn, st, full, SINCE + timedelta(days=1), SINCE + timedelta(days=2)
+        )
         removed = uncover_span(conn, LIBRARY_SCHEMA, st, SINCE, UNTIL)
 
     assert removed == 1

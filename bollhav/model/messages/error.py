@@ -315,9 +315,7 @@ class MultiplePartitionColumnsError(ModelDefinitionError):
     lists the offending columns."""
 
     def __init__(self, names: str) -> None:
-        super().__init__(
-            f"At most one column can have partition_on=True, got: {names}"
-        )
+        super().__init__(f"At most one column can have partition_on=True, got: {names}")
 
 
 class UpsertWithoutKeyError(ModelDefinitionError):
@@ -575,9 +573,7 @@ class ReloadRequiresContractBeginError(ModelDefinitionError):
     required. `name` is the model name."""
 
     def __init__(self, name: str) -> None:
-        super().__init__(
-            f"reload requires contract.begin to be set on model {name!r}"
-        )
+        super().__init__(f"reload requires contract.begin to be set on model {name!r}")
 
 
 class BackfillRequiresSinceError(ModelDefinitionError):

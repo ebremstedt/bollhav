@@ -686,9 +686,7 @@ class StateTable(_PostgresStateBase):
         (`z_bollhav`) is intentionally not offered — the suffix marks the
         ephemeral environment this is meant for. Do it by hand if you must."""
         if not self.model.target.schema_suffix:
-            raise ClearStateRefusedError(
-                self.model.target.full_name, LIBRARY_SCHEMA
-            )
+            raise ClearStateRefusedError(self.model.target.full_name, LIBRARY_SCHEMA)
         conn = self._require_conn()
         schema = self._library_schema()
         full_name = self.model.target.full_name

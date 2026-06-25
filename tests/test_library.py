@@ -233,9 +233,7 @@ class TestLookup:
     def test_returns_entry_for_view_with_null_state_pointers(self) -> None:
         from bollhav.postgres.state import PostgresState
 
-        conn = _mock_conn(
-            fetchone_value=([], "VIEW", None, None, "timeless", True, [])
-        )
+        conn = _mock_conn(fetchone_value=([], "VIEW", None, None, "timeless", True, []))
         result = PostgresState.lookup_model(conn, "warehouse.v_orders")
         assert result.model_type == "VIEW"
         assert result.state_schema is None

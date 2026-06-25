@@ -82,8 +82,7 @@ class WriteOnViewError(MssqlError):
 
     def __init__(self, full_name: str) -> None:
         super().__init__(
-            f"{full_name!r} is a VIEW — created by "
-            f"@model_lifecycle, not write()."
+            f"{full_name!r} is a VIEW — created by @model_lifecycle, not write()."
         )
 
 
@@ -108,9 +107,7 @@ class RecreatePartitionRequiresPartitionedByError(MssqlError):
     The DELETE+INSERT keys on the partition column, so it must be set."""
 
     def __init__(self) -> None:
-        super().__init__(
-            "RECREATE_PARTITION requires target.partitioned_by to be set"
-        )
+        super().__init__("RECREATE_PARTITION requires target.partitioned_by to be set")
 
 
 class RecreatePartitionRequiresWindowError(MssqlError):

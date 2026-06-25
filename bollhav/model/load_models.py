@@ -143,7 +143,7 @@ def load_models(
                                       Scoped to `compute_intervals(run)` (the
                                       supplied window + chunk), never the backlog.
                                       No DDL, no data writes. An assertion, not a
-                                      verification — only what you select.
+                                      verification — only what you select
     """
 
     def decorator(func: Callable[..., None]) -> Callable[[], None]:

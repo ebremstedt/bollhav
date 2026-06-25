@@ -112,9 +112,7 @@ def model(full_name: str, env: str | None = None):
 @app.get("/errors")
 def errors(full_name: str | None = None, limit: int = 100, env: str | None = None):
     with _conn() as c:
-        return read.get_errors(
-            c, full_name=full_name, limit=limit, schema=_schema(env)
-        )
+        return read.get_errors(c, full_name=full_name, limit=limit, schema=_schema(env))
 
 
 @app.get("/runs")
