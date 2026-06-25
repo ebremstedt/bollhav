@@ -105,7 +105,11 @@ def load_models(
         BACKFILL_ENABLED              default !LATEST_ENABLED
         BACKFILL_SINCE                ISO 8601 datetime
         BACKFILL_UNTIL                ISO 8601 datetime
-        INTERVAL_OVERRIDE  cron / @alias
+        INTERVAL_OVERRIDE  cron / @alias — re-chunks at runtime. Applies ONLY
+                                      to flexible models (fixed_intervals=False);
+                                      ignored (logged at INFO) on fixed models,
+                                      since re-chunking a fixed grid forks its
+                                      state — use STATE_MODE=torch for that.
         WINDOW_OVERRIDE    cron / @alias (latest mode only)
         LOOKBACK_OVERRIDE             non-negative int (cron-ticks)
         DRY_RUN                       bool; when true, print a concise summary
