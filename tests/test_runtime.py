@@ -87,12 +87,22 @@ class TestSchemaSuffix:
 
 
 class TestPipeOverrides:
-    def test_interval_override(self) -> None:
+    def test_interval_override_applies_to_flexible(self) -> None:
+        # INTERVAL_OVERRIDE re-chunks only a flexible model (it can absorb it).
         m = _apply(
-            _model(chunk="@daily"),
+            _model(chunk="@daily", fixed_intervals=False),
             interval_override="0 * * * *",
         ).model
         assert m.batching.time.chunk == "0 * * * *"
+
+    def test_interval_override_ignored_on_fixed(self) -> None:
+        # A fixed grid can't be re-chunked at runtime without forking state, so
+        # the override is ignored (logged at INFO) — the chunk is left as-is.
+        m = _apply(
+            _model(chunk="@daily"),  # fixed_intervals defaults to True
+            interval_override="0 * * * *",
+        ).model
+        assert m.batching.time.chunk == "@daily"
 
     def test_window_override(self) -> None:
         m = _apply(_model(), latest=True, window_override="@daily").model
@@ -172,7 +182,9 @@ class TestBatchingCarryThrough:
         assert out.batching.retries == 7  # Batch-level fields carry too
 
     def test_pipe_override_sets_interval_expression(self) -> None:
-        m = _model(chunk="@hourly")
+        m = _model(
+            chunk="@hourly", fixed_intervals=False
+        )  # flexible → override applies
         out = _apply(m, interval_override="*/15 * * * *").model
         assert out.batching.time.chunk == "*/15 * * * *"
 

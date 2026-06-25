@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import replace
 from datetime import datetime, tzinfo
 
@@ -10,6 +11,8 @@ from bollhav.model.model import Model
 from bollhav.model.modelrun import ModelRun
 from bollhav.model.state import StateMode
 from bollhav.model.target import Target
+
+logger = logging.getLogger(__name__)
 
 
 def apply_runtime_overrides(
@@ -94,6 +97,7 @@ def _apply_to_model(
         window_override=window_override,
         lookback_override=lookback_override,
         tz_override=tz_override,
+        full_name=model.target.full_name,
     )
     # `reload` (from matching) and the pipe args together pick the window mode;
     # `resolve_window` applies the precedence (reload > latest > backfill).
@@ -176,9 +180,28 @@ def _batching_with_overrides(
     window_override: str | None,
     lookback_override: int | None,
     tz_override: tzinfo | None,
+    full_name: str | None = None,
 ) -> Batch | None:
     if batching is None:
         return None
+    # INTERVAL_OVERRIDE re-chunks at runtime, but only a flexible model
+    # (fixed_intervals=False) can absorb that — re-chunking a FIXED grid would
+    # fork its state into mixed granularity. So the override is ignored on fixed
+    # models (change a fixed model's chunk via STATE_MODE=torch instead).
+    chunk = batching.time.chunk
+    if interval_override:
+        if batching.time.fixed_intervals:
+            logger.info(
+                "INTERVAL_OVERRIDE=%r ignored for %s: it has fixed intervals "
+                "(fixed_intervals=True), so re-chunking at runtime would fork its "
+                "state — keeping chunk=%r. Change a fixed model's chunk with "
+                "STATE_MODE=torch instead.",
+                interval_override,
+                full_name or "this model",
+                batching.time.chunk,
+            )
+        else:
+            chunk = interval_override
     # `replace` carries through every field NOT overridden here — so any new
     # `TimeChunking` / `Batch` field survives the rebuild automatically, instead
     # of silently reverting to its default (an explicit constructor was an
@@ -189,7 +212,7 @@ def _batching_with_overrides(
         batching,
         time=replace(
             batching.time,
-            chunk=interval_override or batching.time.chunk,
+            chunk=chunk,
             window=window_override or batching.time.window,
             lookback=lookback_override
             if lookback_override is not None

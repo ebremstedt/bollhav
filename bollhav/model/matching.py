@@ -82,7 +82,8 @@ def matched_with_reload(
         r:[foo & bar]           match "foo" and "bar", reload=True for all
 
     Interval and chunk size are model config, not tag overrides. To change
-    the interval expression at runtime, use INTERVAL_OVERRIDE.
+    the interval expression at runtime, use INTERVAL_OVERRIDE (flexible models
+    only — it's ignored on fixed-interval models).
 
     Raises:
         ValueError: If tags is not provided or the expression is invalid.
