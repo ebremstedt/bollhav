@@ -156,7 +156,9 @@ class TestEnvReading:
     def test_backfill_window_passes_through(self) -> None:
         since = datetime(2024, 1, 1, tzinfo=timezone.utc)
         until = datetime(2024, 1, 2, tzinfo=timezone.utc)
-        apm, _ = _run_decorator(backfill_since=since, backfill_until=until)
+        apm, _ = _run_decorator(
+            backfill_enabled=True, backfill_since=since, backfill_until=until
+        )
         assert apm["backfill_since"] == since
         assert apm["backfill_until"] == until
 

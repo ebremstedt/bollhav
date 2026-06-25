@@ -130,7 +130,7 @@ class StateTable(_PostgresStateBase):
         concurrent old-image writers. Runs inside the caller's transaction.
         Additive only (per the shared-table rule): add the `temporality` and
         `model_name` columns, and relax `since`/`until` to nullable so
-        monolithic / view rows carry a NULL window. Each step checks
+        oneshot / view rows carry a NULL window. Each step checks
         information_schema first, so it's idempotent."""
         conn = self._require_conn()
 
@@ -188,7 +188,7 @@ class StateTable(_PostgresStateBase):
                 )
                 logger.info(
                     "state: migrated %s.%s — relaxed NOT NULL on %s "
-                    "(monolithic / view rows carry a NULL window)",
+                    "(oneshot / view rows carry a NULL window)",
                     state_schema,
                     state_table,
                     col,
@@ -283,6 +283,88 @@ class StateTable(_PostgresStateBase):
             pending,
             blocked,
         )
+
+    def prefill(self, *, run_id: UUID, intervals: tuple) -> None:
+        """Prefill the state table: insert one **pending** row per interval that
+        isn't already present, leaving every existing row exactly as it was
+        (`ON CONFLICT (since, until) DO NOTHING`).
+
+        This is *materialization only* — keep the table complete against the
+        contract — and it is **mode-independent**: a row that's `applied`,
+        `blocked`, or `pending` is never disturbed here. It is also incremental:
+        prior runs have already inserted most of the declared intervals, so a
+        run only adds the new ticks at the contract's advancing edge.
+
+        Invalidation — redoing rows that are already `applied` — is a separate,
+        explicit step: `reset_window` (bulldozer, the run's window) or
+        `torch_rows` (torch, everything). Decoupling the two is what lets a
+        plain `latest` run keep the table honest without re-running history."""
+        model = self.model
+        if model.state is None:
+            raise PrefillRequiresStateError(model.target.full_name)
+        if not intervals:
+            return
+
+        rows = [self._normalize_prefill_row(item) for item in intervals]
+        schema = self._state_schema()
+        table = self._state_table()
+
+        insert = sql.SQL(
+            "INSERT INTO {schema}.{table} "
+            "(model_name, run_id, since, until, status, blocked_reason) "
+            "VALUES (%s, %s, %s, %s, %s, %s) "
+            "ON CONFLICT (since, until) DO NOTHING"
+        ).format(schema=sql.Identifier(schema), table=sql.Identifier(table))
+
+        conn = self._require_conn()
+        with conn.transaction():
+            for interval, status, reason in rows:
+                conn.execute(
+                    insert,
+                    [
+                        model.target.full_name,
+                        str(run_id),
+                        interval.since,
+                        interval.until,
+                        status,
+                        reason,
+                    ],
+                )
+        logger.debug(
+            "state: prefilled %s from contract (%d interval(s) offered; only "
+            "missing rows inserted, existing preserved)",
+            model.target.full_name,
+            len(rows),
+        )
+
+    def reset_window(self, *, run_id: UUID, window: "TZInterval") -> int:
+        """Bulldozer invalidation: flip every row whose `[since, until)` falls
+        inside `window` back to `pending` — clearing the applied/blocked marks —
+        so it re-runs. Rows outside the window are left untouched, and a
+        `running` row is skipped. Returns the number of rows reset.
+
+        Scoped to the run window on purpose: bulldozer redoes exactly what the
+        run named, never the whole table (that's `torch_rows`)."""
+        model = self.model
+        schema = self._state_schema()
+        table = self._state_table()
+        conn = self._require_conn()
+        n = conn.execute(
+            sql.SQL(
+                "UPDATE {schema}.{table} SET status = 'pending', "
+                "applied_at = NULL, blocked_reason = NULL, run_id = %s "
+                "WHERE status <> 'running' AND since >= %s AND until <= %s"
+            ).format(schema=sql.Identifier(schema), table=sql.Identifier(table)),
+            [str(run_id), window.since, window.until],
+        ).rowcount
+        logger.debug(
+            "state: bulldozed %d row(s) in [%s, %s) of %s back to pending",
+            n,
+            window.since,
+            window.until,
+            model.target.full_name,
+        )
+        return n
 
     def insert_oneshot(self, *, run_id: UUID) -> None:
         """Prefill the single NULL-window row for a model with no window to
@@ -414,31 +496,43 @@ class StateTable(_PostgresStateBase):
         )
         return [TZInterval(since=since, until=until) for since, until in rows]
 
-    def get_actionable_intervals(self) -> tuple:
-        """Return every row whose status is NOT `'applied'` — i.e.
-        pending, blocked, running, or error — ordered oldest first.
+    def get_actionable_intervals(self, window: "TZInterval | None" = None) -> tuple:
+        """Return rows whose status is NOT `'applied'` — i.e. pending, blocked,
+        running, or error — ordered oldest first.
 
-        Used by `@load_models` to populate `model.intervals`. The
-        decorator re-evaluates each row at run time: blocked rows whose
-        upstream now satisfies become processable; pending rows whose
-        upstream regressed get marked blocked. So `blocked` is transient
-        — a snapshot of what's currently waiting, not a terminal state.
+        **Window-scoped.** When `window` is given, only rows that fall fully
+        inside `[window.since, window.until)` are returned — the run executes
+        exactly its window, nothing leaks in from the backlog. When `window` is
+        `None` (a oneshot / view row, or a deliberate reconcile), every
+        non-applied row is returned (the historical "drain everything").
 
-        A monolithic / view model has a single NULL-window row: this yields
-        `(None,)` when it's actionable (so the user's loop runs once with
-        `interval=None`) and `()` when it's already applied (loop skips)."""
+        Used by `@load_models` to populate `model.intervals`. The decorator
+        re-evaluates each row at run time: blocked rows whose upstream now
+        satisfies become processable; pending rows whose upstream regressed get
+        marked blocked. So `blocked` is transient — a snapshot of what's
+        currently waiting, not a terminal state.
+
+        A oneshot / view model has a single NULL-window row: with no
+        `window` this yields `(None,)` when actionable (the user's loop runs
+        once with `interval=None`) and `()` when already applied."""
         from bollhav.model.intervals import TZInterval
 
         schema = self._state_schema()
         table = self._state_table()
+        # Rows fully inside the half-open run window — the honest bound. The
+        # `%s` are bound params; the rest of the string is constant.
+        where = "status <> 'applied'"
+        params: list = []
+        if window is not None:
+            where += " AND since >= %s AND until <= %s"
+            params = [window.since, window.until]
         query = sql.SQL(
             "SELECT since, until FROM {schema}.{table} "
-            "WHERE status <> 'applied' "
-            "ORDER BY since, until"
+            "WHERE " + where + " ORDER BY since, until"
         ).format(schema=sql.Identifier(schema), table=sql.Identifier(table))
 
         conn = self._require_conn()
-        rows = conn.execute(query).fetchall()
+        rows = conn.execute(query, params).fetchall()
         logger.debug(
             "state: read %d actionable intervals for %s",
             len(rows),
@@ -505,7 +599,7 @@ class StateTable(_PostgresStateBase):
     @staticmethod
     def _window_match(interval: "TZInterval | None"):
         """SQL predicate + params identifying one state row by its window.
-        `interval` is a TZInterval, or None for a monolithic / view row whose
+        `interval` is a TZInterval, or None for a oneshot / view row whose
         window is NULL — matched on `IS NULL` rather than `=` (which never
         matches NULL)."""
         if interval is None:

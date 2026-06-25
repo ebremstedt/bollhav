@@ -95,10 +95,10 @@ class Satisfaction(_PostgresStateBase):
         `UpstreamCheck` verdict carrying one block reason per
         unsatisfied upstream. For each upstream `UpstreamContract`, look it up
         in the library and check satisfaction by the contract's level
-        (interval → window cover; view / monolithic → existence row
+        (interval → window cover; view / oneshot → existence row
         applied). A bare-string upstream has no declared level, so it falls
         back to the upstream's own registered `temporality`. `interval` is the
-        downstream's window, or None for a monolithic / view downstream
+        downstream's window, or None for a oneshot / view downstream
         (whole-table / existence work).
 
         A declared `UpstreamContract` whose upstream is not registered raises — an

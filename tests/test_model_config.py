@@ -34,8 +34,8 @@ def make_db() -> MagicMock:
 
 def make_model(**overrides) -> Model:
     # These config/tag tests build whole-table models with no batching, so
-    # default kind=MONOLITHIC (a kind is now required on every Model).
-    overrides.setdefault("kind", Temporality.TIMELESS)
+    # default them to TIMELESS (no time axis — one oneshot row, run once).
+    overrides.setdefault("temporality", Temporality.TIMELESS)
     return Model(
         target=overrides.pop("target", Target(name="test_table")),
         **overrides,

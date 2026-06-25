@@ -287,10 +287,10 @@ class Library(_PostgresStateBase):
         So renaming an upstream, moving the state table, or flipping a
         TABLE to a VIEW all propagate the next time `register_model` runs.
 
-        Every state-tracked model — interval, monolithic, or view — now has
+        Every state-tracked model — interval, oneshot, or view — now has
         a state table, so all of them write `state_schema` / `state_table`
         and a `temporality`. `temporality` drives how an upstream's satisfaction is
-        resolved (`is_satisfied`): interval covers a window, monolithic /
+        resolved (`is_satisfied`): interval covers a window, oneshot /
         view check the single existence row."""
         model = self.model
         conn = self._require_conn()
@@ -300,7 +300,7 @@ class Library(_PostgresStateBase):
         model_type = "VIEW" if model.is_view else "TABLE"
         # `fixed_intervals` is the per-model attestation (state is a fixed grid
         # vs a coverage set). It lives on `TimeChunking`; a model with no
-        # batching (monolithic / view) is trivially a fixed single unit.
+        # batching (oneshot / view) is trivially a fixed single unit.
         fixed_intervals = (
             model.batching.time.fixed_intervals if model.batching is not None else True
         )

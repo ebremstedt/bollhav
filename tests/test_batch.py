@@ -9,6 +9,7 @@ from bollhav.model.window import (
     _resolve_cron,
     _apply_lookback,
     compute_intervals,
+    contract_intervals,
     latest_complete_interval,
     resolve_window,
     split_window,
@@ -275,19 +276,23 @@ class TestIntervalsLookback:
 
 
 class TestIntervalsNoneInputs:
-    """Backfill mode is now strict: an explicit `until` must be set, no silent
-    fallback to `latest_complete_interval()`. The window is resolved at
-    construction (in runtime / the `_model` helper), so an unsatisfiable
-    backfill raises there rather than in `compute_intervals`. These tests pin
-    that behaviour so a future refactor can't bring the implicit fallback back."""
+    """Backfill bounds fall back to the contract: `since` → `contract.begin`,
+    `until` → `contract.end` (or the latest complete tick for an open contract).
+    A no-dates backfill therefore runs the declared range — the same window
+    `reload` resolves. `since` still needs *a* source (explicit or
+    `contract.begin`); with neither it raises."""
 
-    def test_until_none_in_backfill_raises(self) -> None:
-        with pytest.raises(ValueError, match="backfill requires an explicit until"):
-            _model(
-                interval_expression="@hourly",
-                interval_override="0 * * * *",
-                since=datetime(2024, 6, 15, 12, 0, tzinfo=UTC),
-            )
+    @travel(datetime(2024, 6, 15, 14, 35, tzinfo=UTC))
+    def test_until_none_falls_back_to_latest_tick(self) -> None:
+        # No `contract.end` → `until` falls back to the latest complete tick.
+        model = _model(
+            interval_expression="@hourly",
+            interval_override="0 * * * *",
+            since=datetime(2024, 6, 15, 12, 0, tzinfo=UTC),
+        )
+        intervals = list(compute_intervals(model))
+        assert intervals[0].since == datetime(2024, 6, 15, 12, 0, tzinfo=UTC)
+        assert intervals[-1].until == datetime(2024, 6, 15, 14, 0, tzinfo=UTC)
 
     @travel(datetime(2024, 6, 15, 14, 35, tzinfo=UTC))
     def test_until_set_explicitly_in_backfill_is_honored(self) -> None:
@@ -352,3 +357,35 @@ class TestIntervalsNoneInputs:
         assert len(intervals) == 2
         assert intervals[0].since == datetime(2024, 6, 15, 12, 0, tzinfo=UTC)
         assert intervals[0].until == datetime(2024, 6, 15, 13, 0, tzinfo=UTC)
+
+
+class TestContractIntervals:
+    """`contract_intervals` returns the full contract range — what *prefill*
+    materializes — independent of the run's (possibly narrower) window."""
+
+    def test_fills_the_contract_not_the_window(self) -> None:
+        # Contract spans three hours; the run targets only the last one.
+        contract = Contract(
+            begin=datetime(2024, 1, 1, 0, tzinfo=UTC),
+            end=datetime(2024, 1, 1, 3, tzinfo=UTC),
+        )
+        run = _model(
+            interval_expression="@hourly",
+            contract=contract,
+            since=datetime(2024, 1, 1, 2, tzinfo=UTC),
+            until=datetime(2024, 1, 1, 3, tzinfo=UTC),
+        )
+        # The run's window is a single hour...
+        assert len(compute_intervals(run)) == 1
+        # ...but prefill fills every hour the contract declares.
+        ivs = list(contract_intervals(run))
+        assert [(i.since.hour, i.until.hour) for i in ivs] == [(0, 1), (1, 2), (2, 3)]
+
+    def test_falls_back_to_window_without_contract_begin(self) -> None:
+        # No contract.begin → nothing declared to fill against → the run window.
+        run = _model(
+            interval_expression="@hourly",
+            since=datetime(2024, 1, 1, 0, tzinfo=UTC),
+            until=datetime(2024, 1, 1, 2, tzinfo=UTC),
+        )
+        assert list(contract_intervals(run)) == list(compute_intervals(run))

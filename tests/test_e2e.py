@@ -50,7 +50,7 @@ from bollhav.model import (
     WriteMode,
 )
 from bollhav.model.state import StateMode
-from bollhav.model.window import compute_intervals, resolve_window
+from bollhav.model.window import compute_intervals, contract_intervals, resolve_window
 from bollhav.postgres import (
     PostgresColumn,
     PostgresType,
@@ -312,11 +312,13 @@ def _bootstrap(models, *, state_mode: StateMode = StateMode.DISCOVER) -> None:
                 if run.window is None:
                     state.insert_oneshot(run_id=run.run_id)
                 else:
-                    state.insert_intervals(
+                    state.prefill(
                         run_id=run.run_id,
-                        intervals=compute_intervals(run),
+                        intervals=contract_intervals(run),
                     )
-                run.intervals = state.get_actionable_intervals()
+                    if model.state.mode is StateMode.BULLDOZER:
+                        state.reset_window(run_id=run.run_id, window=run.window)
+                run.intervals = state.get_actionable_intervals(window=run.window)
 
 
 def _run_intervals(run: ModelRun, *, error_on_interval: int | None = None):
@@ -2388,3 +2390,95 @@ def test_e2e_state_admin_reset_interval_flexible_uncovers(schema_name):
     assert n == 1
     rows = sorted(_state_rows(LIBRARY_SCHEMA, st), key=lambda r: r[1])
     assert [(s, u) for _, s, u in rows] == [(SINCE, mid_s), (mid_u, UNTIL)]
+
+
+# ── run modes: window-scoped execution + bulldozer/discover behavior ──
+
+
+def test_e2e_get_actionable_is_window_scoped(schema_name):
+    """A run executes only its window — backlog rows outside it don't leak in.
+    With no window, every non-applied row is returned (the reconcile path)."""
+    from bollhav.model.intervals import TZInterval
+
+    run = _orders_model(schema_name, state=State(), staging=Staging())
+    _bootstrap([run])  # three pending daily rows: day1, day2, day3
+    st = state_table_name(run.model.target.full_name)
+
+    day2 = TZInterval(SINCE + timedelta(days=1), SINCE + timedelta(days=2))
+    with _conn() as c:
+        state = PostgresState(run.model, c)
+        scoped = state.get_actionable_intervals(window=day2)
+        assert [(i.since, i.until) for i in scoped] == [(day2.since, day2.until)]
+        # no window → all three rows
+        assert len(state.get_actionable_intervals()) == 3
+    assert len(_state_rows(LIBRARY_SCHEMA, st)) == 3
+
+
+def test_e2e_bulldozer_reruns_the_applied_window(schema_name):
+    """bulldozer resets the window's already-applied rows to pending — so a
+    re-run of the same window runs them again."""
+    run = _orders_model(schema_name, state=State(), staging=Staging())
+    _run_intervals(run)  # 3 intervals → applied
+
+    run2 = _orders_model(schema_name, state=State(), staging=Staging())
+    _bootstrap([run2], state_mode=StateMode.BULLDOZER)
+    assert len(run2.intervals) == 3  # reset to pending → re-run
+
+
+def test_e2e_discover_skips_the_applied_window(schema_name):
+    """discover leaves applied rows applied — a re-run of the same window does
+    nothing (the idempotent / opt-in catch-up mode)."""
+    run = _orders_model(schema_name, state=State(), staging=Staging())
+    _run_intervals(run)  # 3 intervals → applied
+
+    run2 = _orders_model(schema_name, state=State(), staging=Staging())
+    _bootstrap([run2], state_mode=StateMode.DISCOVER)
+    assert len(run2.intervals) == 0  # all applied → skipped
+
+
+def test_e2e_prefill_fills_the_whole_contract_not_just_the_window(schema_name):
+    """Prefill materializes every interval the *contract* declares, even when
+    the run's window is a single tick. The state table mirrors the contract;
+    window-scoped execution then runs only the tick — the rest sits pending."""
+    from bollhav.model.intervals import TZInterval
+
+    run = _orders_model(schema_name, state=State(), staging=Staging())
+    # A `latest`-style run: window is the last day only, contract still spans all
+    # three (2024-01-01 .. 01-04, @daily).
+    day3 = TZInterval(SINCE + timedelta(days=2), UNTIL)
+    run.window = day3
+    _bootstrap([run])
+    st = state_table_name(run.model.target.full_name)
+
+    rows = _state_rows(LIBRARY_SCHEMA, st)
+    # The full contract is materialized — three rows, all pending.
+    assert [(s, since, until) for s, since, until in rows] == [
+        ("pending", SINCE, SINCE + timedelta(days=1)),
+        ("pending", SINCE + timedelta(days=1), SINCE + timedelta(days=2)),
+        ("pending", SINCE + timedelta(days=2), UNTIL),
+    ]
+    # ...but execution is scoped to the window — only the last day runs.
+    assert [(i.since, i.until) for i in run.intervals] == [(day3.since, day3.until)]
+
+
+def test_e2e_bulldozer_window_spares_the_rest_of_the_contract(schema_name):
+    """Prefill touches the whole contract, but bulldozer's reset is scoped to
+    the run window: redoing one day leaves the other applied days untouched."""
+    from bollhav.model.intervals import TZInterval
+
+    run = _orders_model(schema_name, state=State(), staging=Staging())
+    _run_intervals(run)  # all three days → applied
+
+    run2 = _orders_model(schema_name, state=State(), staging=Staging())
+    day3 = TZInterval(SINCE + timedelta(days=2), UNTIL)
+    run2.window = day3
+    _bootstrap([run2], state_mode=StateMode.BULLDOZER)
+    st = state_table_name(run2.model.target.full_name)
+
+    # Only the windowed day is reset; the rest of the contract stays applied.
+    assert _state_rows(LIBRARY_SCHEMA, st) == [
+        ("applied", SINCE, SINCE + timedelta(days=1)),
+        ("applied", SINCE + timedelta(days=1), SINCE + timedelta(days=2)),
+        ("pending", SINCE + timedelta(days=2), UNTIL),
+    ]
+    assert [(i.since, i.until) for i in run2.intervals] == [(day3.since, day3.until)]

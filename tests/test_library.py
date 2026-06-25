@@ -11,7 +11,7 @@ functions became methods/staticmethods on `PostgresState`:
   * `is_satisfied` (static) — state-tracked tables check the applied row;
     VIEW / library-only entries are satisfied by mere presence
 
-`LibraryEntry` now carries a `kind` field (`interval` | `monolithic` |
+`LibraryEntry` now carries a `kind` field (`interval` | `oneshot` |
 `view`). Postgres connection is mocked throughout.
 """
 

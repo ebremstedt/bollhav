@@ -22,7 +22,7 @@ class ModelRun:
                      `runtime.resolve_window` from contract + the run instruction).
         intervals  — the window split into the chunk contract; narrowed to the
                      still-actionable subset during the state bootstrap. `(None,)`
-                     for a model with no window (monolithic / view).
+                     for a model with no window (oneshot / view).
         run_id     — minted once here and shared across this run's state
                      transitions (insert / mark_running / mark_applied / …).
 

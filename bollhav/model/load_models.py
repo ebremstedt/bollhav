@@ -101,10 +101,16 @@ def load_models(
         USE_TABLE_SUFFIX              default false
         DEBUG                         default false
         TIMEZONE_OVERRIDE             IANA timezone name
-        LATEST_ENABLED                default false
-        BACKFILL_ENABLED              default !LATEST_ENABLED
-        BACKFILL_SINCE                ISO 8601 datetime
-        BACKFILL_UNTIL                ISO 8601 datetime
+        LATEST_ENABLED                run the latest complete tick. The DEFAULT
+                                      run mode (when neither flag is set).
+        BACKFILL_ENABLED              a windowed range run. Mutually exclusive
+                                      with latest. The window is BACKFILL_SINCE/
+                                      UNTIL, each falling back to the contract
+                                      (begin / end-or-latest) — so a no-dates
+                                      backfill runs the declared range.
+        BACKFILL_SINCE                ISO 8601 datetime (optional; ?? contract.begin)
+        BACKFILL_UNTIL                ISO 8601 datetime (optional; ?? contract.end
+                                      ?? latest complete tick)
         INTERVAL_OVERRIDE  cron / @alias — re-chunks at runtime. Applies ONLY
                                       to flexible models (fixed_intervals=False);
                                       ignored (logged at INFO) on fixed models,
@@ -120,16 +126,14 @@ def load_models(
                                       prints the exhaustive per-model block
                                       (schema, bounds, tags, source, upstream,
                                       …). Implies DRY_RUN=true
-        STATE_MODE                    discover (default) | bulldozer | torch.
-                                      For state-enabled models, controls how
-                                      the `@model_lifecycle` prefill treats
-                                      existing state rows. discover = preserve
-                                      applied rows; bulldozer = reset every
-                                      existing row to pending (boundaries kept);
-                                      torch = DELETE every row, then prefill fresh
-                                      at the current chunk (for changing chunk
-                                      granularity or wiping a backlog —
-                                      destructive, reprocesses everything).
+        STATE_MODE                    bulldozer (default) | discover | torch.
+                                      How much state a run invalidates within its
+                                      window. bulldozer = reset the window's rows
+                                      to pending and run exactly them (leave the
+                                      rest); discover = skip already-applied (run
+                                      only the window's outstanding); torch =
+                                      DELETE all rows + reload the contract range
+                                      (forbids an explicit window — destructive).
         STATE_DISABLED                bool; when true, force the pipeline to
                                       run with NO state tracking — even for
                                       models that declare state=State(...).
@@ -155,14 +159,12 @@ def load_models(
         def wrapper() -> None:
             cfg = _read_env()
             if (
-                cfg.backfill_enabled
-                and not cfg.latest
-                and "LATEST_ENABLED" not in os.environ
+                "LATEST_ENABLED" not in os.environ
                 and "BACKFILL_ENABLED" not in os.environ
             ):
                 logger.debug(
-                    "no run mode set — defaulting to backfill; "
-                    "set LATEST_ENABLED=true for latest-tick mode"
+                    "no run mode set — defaulting to latest (the latest complete "
+                    "tick); set BACKFILL_ENABLED=true for a range run"
                 )
             runs = apply_runtime_overrides(
                 folder=folder,
@@ -231,8 +233,8 @@ def load_models(
 
 
 def _read_env() -> _RuntimeConfig:
-    latest = _resolve_latest()
-    backfill_enabled = _resolve_backfill_enabled(latest=latest)
+    backfill_enabled = _resolve_backfill_enabled()
+    latest = _resolve_latest(backfill=backfill_enabled)
     tz_override = _resolve_tz_override()
 
     return _RuntimeConfig(
@@ -260,19 +262,23 @@ def _resolve_tags() -> str:
     return cast(str, env_var(name="TAGS", required=True))
 
 
-def _resolve_latest() -> bool:
+def _resolve_backfill_enabled() -> bool:
+    """`BACKFILL_ENABLED` — a windowed *range* run (`BACKFILL_SINCE`/`UNTIL`, or
+    the contract's declared range when no dates are given). Defaults False; the
+    unset run mode is `latest`."""
     # env_var_bool is typed `bool | None` even when `default` is given;
     # `default=...` guarantees a non-None result at runtime, so cast.
-    return cast(bool, env_var_bool(name="LATEST_ENABLED", default=False))
+    return cast(bool, env_var_bool(name="BACKFILL_ENABLED", default=False))
 
 
-def _resolve_backfill_enabled(*, latest: bool) -> bool:
-    """`BACKFILL_ENABLED` (defaults to the opposite of `latest`). Backfill and
-    latest are mutually exclusive — raises if both are on."""
-    backfill = cast(bool, env_var_bool(name="BACKFILL_ENABLED", default=not latest))
+def _resolve_latest(*, backfill: bool) -> bool:
+    """`LATEST_ENABLED` — run the latest complete tick. This is the **default**
+    run mode (when neither flag is set), so it defaults to `not backfill`.
+    Mutually exclusive with backfill — raises if both are explicitly on."""
+    latest = cast(bool, env_var_bool(name="LATEST_ENABLED", default=not backfill))
     if latest and backfill:
         raise ConflictingRunModeError()
-    return backfill
+    return latest
 
 
 def _backfill_dt(
@@ -364,7 +370,9 @@ def _resolve_lookback_override() -> int | None:
 def _resolve_state_mode() -> StateMode:
     raw = env_var(name="STATE_MODE", should_print_unset=False)
     if raw is None:
-        return StateMode.DISCOVER
+        # bulldozer is the default: run *exactly* the resolved window (reset its
+        # rows, leave the rest). discover (skip-applied / reconcile) is opt-in.
+        return StateMode.BULLDOZER
     valid = {m.value: m for m in StateMode}
     mode = valid.get(raw.strip().lower())
     if mode is None:
