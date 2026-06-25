@@ -74,6 +74,31 @@ def _apply_lookback(expression: str, since: datetime, lookback: int) -> datetime
     return since - (tick_size * lookback)
 
 
+def _trailing_edge(contract: "Contract", batching: "Batch", tz: tzinfo) -> datetime:
+    """The *inferred* end of a run window (reload / no-dates backfill), factoring
+    in `contract.end` and the `TimeChunking` trailing-edge knobs:
+
+      * open contract               → the **completeness floor**: the latest
+        *complete* unit of `no_partial_below` (defaulting to `chunk`). So a
+        coarse chunk can trail off at a finer boundary (e.g. `@yearly` chunk,
+        `no_partial_below="@daily"` → through the last complete day).
+      * explicit end + `future_data` → the end, honoured literally — it may lead
+        the clock (forecasts / booked-ahead schedules).
+      * explicit end, otherwise     → `min(end, floor)` — a *future* end is
+        clamped to the clock (no empty future periods); a *past* end is already
+        smaller, so it wins.
+
+    Pure apart from the clock read in the floor."""
+    floor_expr = batching.time.no_partial_below or batching.time.chunk
+    floor = latest_complete_interval(floor_expr, tz).until
+    end = contract.end
+    if end is None:
+        return floor
+    if batching.time.future_data:
+        return end
+    return min(end, floor)
+
+
 def resolve_window(
     batching: "Batch | None",
     contract: "Contract",
@@ -120,7 +145,7 @@ def resolve_window(
         if contract.begin is None:
             raise ReloadRequiresContractBeginError(name)
         window_since = contract.begin
-        window_until = contract.end or latest_complete_interval(expr, tz).until
+        window_until = _trailing_edge(contract, batching, tz)
     elif latest:
         window_expr = batching.time.window or expr
         interval = latest_complete_interval(window_expr, tz)
@@ -129,10 +154,13 @@ def resolve_window(
         window_since = since or contract.begin
         if window_since is None:
             raise BackfillRequiresSinceError(name)
-        # `until` is optional — fall back to the contract's end, or the latest
-        # complete tick for an open contract. A no-dates backfill thus runs the
-        # declared range (the same window reload resolves).
-        window_until = until or contract.end or latest_complete_interval(expr, tz).until
+        # `until` is optional — when absent, the trailing edge is inferred (the
+        # contract's end, or the latest complete unit of the completeness grain
+        # for an open contract). A no-dates backfill thus runs the declared
+        # range, the same window reload resolves.
+        window_until = (
+            until if until is not None else _trailing_edge(contract, batching, tz)
+        )
 
     if batching.time.lookback:
         window_since = _apply_lookback(

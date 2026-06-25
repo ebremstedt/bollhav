@@ -26,9 +26,20 @@ class TimeChunking:
     "0 * * * *" means each chunk is one hour, "0 0 * * *" means one day.
     Can be overridden at runtime via the pipe's batch expression env var.
 
-    `window` defines the scope to catch up on in `latest` mode — i.e.
-    "one of what" counts as the latest complete unit. Defaults to `chunk`
-    when unset. Only consulted in `latest` mode.
+    `window` defines the catch-up bite in `latest` mode — "one of what" a
+    latest run loads. Defaults to `chunk` when unset. Only consulted in `latest`
+    mode (the trailing edge of an *inferred* window is governed by
+    `no_partial_below`, below).
+
+    `no_partial_below` is the **completeness grain** the inferred trailing edge
+    snaps to: when a run's window is implied (reload / no-dates backfill) and the
+    contract is open-ended, the edge advances to the latest *complete* unit of
+    this grain rather than the chunk. So a `@yearly` chunk with
+    `no_partial_below="@daily"` loads through the last complete day — the current
+    year as a partial, snapped to a whole day — instead of stopping at the last
+    complete *year*. Can be finer *or* coarser than `chunk`; defaults to `chunk`
+    (snap to the latest complete chunk — today's behavior). It's the end knob;
+    `lookback` is the start knob.
 
     `tz` is the timezone used for interval resolution. Defaults to UTC.
 
@@ -36,20 +47,24 @@ class TimeChunking:
     useful for reprocessing recent history to account for late-arriving data.
 
     `fixed_intervals` declares whether this chunk grid is the model's state
-    *identity* (`True`, the default and today's only behavior) or a free
-    slicing of a coverage set (`False`). When `True`, state is a grid — one
-    row per `(since, until)` chunk; the chunk is part of identity, so changing
-    it requires a state reset (`STATE_MODE=torch`), and downstreams may gate
-    `EXACT` on it. `False` is an **attestation** that the model's output is
-    invariant to how time is partitioned (its query is window-decomposable AND
-    its write is order-independent/idempotent), allowing variable-grain
-    coverage-based state.
+    *identity* (`True`, the default) or a free slicing of a coverage set
+    (`False`). When `True`, state is a grid — one row per `(since, until)`
+    chunk; the chunk is part of identity, so changing it requires a state reset
+    (`STATE_MODE=torch`), and downstreams may gate `EXACT` on it. `False` is an
+    **attestation** that the model's output is invariant to how time is
+    partitioned (its query is window-decomposable AND its write is
+    order-independent/idempotent), allowing variable-grain coverage-based state.
+    The coverage engine is live; the `APPEND` guard and overlap locking it
+    implies are still deferred — see `design/flexible-intervals.md`.
 
-    NOTE: only the `True` path exists today. The coverage engine, the
-    `EXACT`/`APPEND` guards, and range locking that `False` implies are not yet
-    built — see `design/flexible-intervals.md`. The field is declared now so it
-    is plumbed (it carries through the runtime rebuild); setting `False` has no
-    effect yet.
+    `future_data` is an **attestation** that the model's data runs *ahead* of
+    the clock (forecasts, schedules — booked-ahead records). When `True`, an
+    explicit `contract.end` in the future is honoured literally (load the
+    declared horizon) instead of being clamped to the latest complete unit;
+    when `False` (default), a future end is clamped, so an elapsed-only model
+    never prefills empty future periods. Requires `contract.end` to be set — it
+    is the horizon `future_data` trusts — so `True` with an open contract raises
+    at construction.
     """
 
     chunk: IntervalExpression | IntervalExpressionExtended = "@daily"
@@ -57,6 +72,8 @@ class TimeChunking:
     tz: tzinfo = timezone.utc
     lookback: int | None = None
     fixed_intervals: bool = True
+    no_partial_below: IntervalExpression | IntervalExpressionExtended | None = None
+    future_data: bool = False
 
 
 @dataclass
