@@ -8,6 +8,7 @@ from uuid import uuid4
 from bollhav.model.target import Target
 from bollhav.model.messages.error import (
     FrozenModelError,
+    FutureDataRequiresContractEndError,
     GatedUpstreamWithoutStateError,
     NotSqlAddressableError,
     TimelessModelWithBatchingError,
@@ -71,6 +72,7 @@ class Model:
         self.extra = kwargs
         self._validate_kind_consistency()
         self._validate_upstream_requires_state()
+        self._validate_future_data()
 
         logger.debug(
             "Initialized model %r (enabled=%s)", self.target.full_name, self.enabled
@@ -121,6 +123,19 @@ class Model:
         sources need no state."""
         if self.gated_upstreams and self.state is None:
             raise GatedUpstreamWithoutStateError(self.target.name)
+
+    def _validate_future_data(self) -> None:
+        """`future_data=True` only governs how an *explicit* `contract.end` is
+        treated (honoured ahead of the clock vs clamped to it), so it needs an
+        end to act on — otherwise the inferred edge still snaps to the latest
+        complete unit and the flag is a silent no-op. Declaring future data
+        means declaring how far it runs."""
+        if (
+            self.batching is not None
+            and self.batching.time.future_data
+            and self.contract.end is None
+        ):
+            raise FutureDataRequiresContractEndError(self.target.name)
 
     def pretty(self) -> None:
         cols = self.target.columns

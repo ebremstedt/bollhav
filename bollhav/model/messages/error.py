@@ -391,6 +391,22 @@ class TimelessModelWithContractWindowError(ModelDefinitionError):
         )
 
 
+class FutureDataRequiresContractEndError(ModelDefinitionError):
+    """`future_data=True` was set without a `contract.end`. `future_data` only
+    governs how an *explicit* end is treated (honoured ahead of the clock vs
+    clamped to it); with no end there is nothing for it to act on — the trailing
+    edge still snaps to the latest complete unit, so the flag silently does
+    nothing. Declaring future data means declaring how far it runs."""
+
+    def __init__(self, name: str) -> None:
+        super().__init__(
+            f"model {name!r} sets future_data=True but its contract has no "
+            f"end — future_data needs an explicit contract.end as the horizon "
+            f"it loads ahead of the clock. With an open contract it has no "
+            f"effect. Set contract.end (or drop future_data)."
+        )
+
+
 class ViewWithBatchingError(ModelDefinitionError):
     """A `view=True` model declared `batching` — a view isn't materialized
     per-window (it's one CREATE VIEW), so it can't be batched."""
@@ -638,6 +654,7 @@ __all__ = [
     "UpsertWithoutKeyError",
     "RecreatePartitionWithoutColumnError",
     "UnknownIndexColumnError",
+    "FutureDataRequiresContractEndError",
     "TimelessModelWithBatchingError",
     "TimelessModelWithContractWindowError",
     "ViewWithBatchingError",

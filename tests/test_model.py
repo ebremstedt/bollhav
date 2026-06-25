@@ -2,8 +2,9 @@ from datetime import datetime, timezone
 
 import pytest
 
-from bollhav.model.batch import Batch
+from bollhav.model.batch import Batch, TimeChunking
 from bollhav.model.contract import Contract
+from bollhav.model.messages.error import FutureDataRequiresContractEndError
 from bollhav.model.model import Model
 from bollhav.model.temporality import Temporality
 from bollhav.model.target import Target
@@ -287,3 +288,29 @@ class TestUpstreamRequiresState:
         m = make_model()
         assert m.upstream_names == []
         assert m.inputs_known is False
+
+
+class TestFutureDataGuard:
+    """`future_data=True` honours an explicit `contract.end` ahead of the clock,
+    so it needs an end to act on — without one it's a silent no-op, and
+    construction raises rather than letting future data quietly not load."""
+
+    def _build(self, *, future_data, end):
+        return Model(
+            target=Target(name="orders", schema="public", schema_suffix_appendix=None),
+            batching=Batch(time=TimeChunking(chunk="@daily", future_data=future_data)),
+            contract=Contract(begin=datetime(2024, 1, 1, tzinfo=timezone.utc), end=end),
+            temporality=Temporality.TEMPORAL,
+        )
+
+    def test_future_data_without_end_raises(self):
+        with pytest.raises(FutureDataRequiresContractEndError, match="future_data"):
+            self._build(future_data=True, end=None)
+
+    def test_future_data_with_end_constructs(self):
+        m = self._build(future_data=True, end=datetime(2030, 1, 1, tzinfo=timezone.utc))
+        assert m.batching.time.future_data is True
+
+    def test_future_data_false_open_contract_is_fine(self):
+        m = self._build(future_data=False, end=None)
+        assert m.batching.time.future_data is False

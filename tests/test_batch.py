@@ -389,3 +389,133 @@ class TestContractIntervals:
             until=datetime(2024, 1, 1, 2, tzinfo=UTC),
         )
         assert list(contract_intervals(run)) == list(compute_intervals(run))
+
+
+# ── trailing edge: no_partial_below × future_data × contract.end ──
+
+# 'now' for every case below; the latest-complete boundaries follow from it.
+_NOW = datetime(2026, 6, 25, 12, 0, tzinfo=UTC)
+_BEGIN = datetime(2024, 1, 1, tzinfo=UTC)
+_PAST = datetime(2025, 6, 1, tzinfo=UTC)  # before _NOW
+_FUTURE = datetime(2027, 6, 1, tzinfo=UTC)  # after _NOW
+_LCY = datetime(2026, 1, 1, tzinfo=UTC)  # latest complete @yearly end
+_LCM = datetime(2026, 6, 1, tzinfo=UTC)  # latest complete @monthly end
+_LCD = datetime(2026, 6, 25, tzinfo=UTC)  # latest complete @daily end (00:00)
+
+
+def _edge_batch(chunk="@yearly", no_partial_below=None, future_data=False) -> Batch:
+    return Batch(
+        time=TimeChunking(
+            chunk=chunk,
+            no_partial_below=no_partial_below,
+            future_data=future_data,
+            tz=UTC,
+        )
+    )
+
+
+# (contract.end, future_data, no_partial_below) -> expected window.until, chunk=@yearly.
+_EDGE_CASES = [
+    # open contract → the completeness floor. future_data is a no-op here
+    # (resolve_window falls through to the floor; the Model guard forbids the
+    # combo upstream, but the resolver itself must stay well-defined).
+    (None, False, None, _LCY),
+    (None, False, "@daily", _LCD),
+    (None, False, "@monthly", _LCM),
+    (None, True, None, _LCY),
+    (None, True, "@daily", _LCD),
+    # past end → its own value either way (already before the floor).
+    (_PAST, False, None, _PAST),
+    (_PAST, False, "@daily", _PAST),
+    (_PAST, True, None, _PAST),
+    # future end → clamped to the floor, unless future_data honours it.
+    (_FUTURE, False, None, _LCY),
+    (_FUTURE, False, "@daily", _LCD),
+    (_FUTURE, False, "@monthly", _LCM),
+    (_FUTURE, True, None, _FUTURE),
+    (_FUTURE, True, "@daily", _FUTURE),
+]
+_EDGE_IDS = [
+    "open/fd0/chunk",
+    "open/fd0/day",
+    "open/fd0/month",
+    "open/fd1/chunk",
+    "open/fd1/day",
+    "past/fd0/chunk",
+    "past/fd0/day",
+    "past/fd1/chunk",
+    "future/fd0/chunk",
+    "future/fd0/day",
+    "future/fd0/month",
+    "future/fd1/chunk",
+    "future/fd1/day",
+]
+
+
+class TestTrailingEdge:
+    """`no_partial_below` (inferred-edge completeness grain) × `future_data`
+    (honour a future end) × `contract.end`, over the inferred-window modes
+    (reload + no-dates backfill). chunk=`@yearly` so the default floor (year)
+    differs visibly from a finer grain. 'now' = 2026-06-25 12:00 UTC."""
+
+    @pytest.mark.parametrize("mode", ["reload", "backfill"])
+    @pytest.mark.parametrize("end,future_data,npb,expected", _EDGE_CASES, ids=_EDGE_IDS)
+    def test_edge_matrix(self, end, future_data, npb, expected, mode) -> None:
+        with travel(_NOW, tick=False):
+            batch = _edge_batch(no_partial_below=npb, future_data=future_data)
+            w = resolve_window(
+                batch, Contract(begin=_BEGIN, end=end), reload=(mode == "reload")
+            )
+        assert w.since == _BEGIN
+        assert w.until == expected
+
+    def test_default_edge_is_latest_complete_chunk(self) -> None:
+        # npb unset + future_data False → exactly the legacy behavior.
+        with travel(_NOW, tick=False):
+            w = resolve_window(_edge_batch(), Contract(begin=_BEGIN), reload=True)
+        assert w.until == _LCY
+
+    def test_no_partial_below_coarser_than_chunk(self) -> None:
+        # hourly chunks, but only release whole days: the edge is the last
+        # complete day (00:00), not the latest complete hour (12:00).
+        with travel(_NOW, tick=False):
+            batch = _edge_batch(chunk="@hourly", no_partial_below="@daily")
+            w = resolve_window(batch, Contract(begin=_BEGIN), reload=True)
+        assert w.until == _LCD
+
+    def test_latest_mode_ignores_no_partial_below(self) -> None:
+        # latest mode uses `window` (the bite), not the inferred-edge knobs.
+        with travel(_NOW, tick=False):
+            batch = Batch(
+                time=TimeChunking(
+                    chunk="@yearly",
+                    window="@monthly",
+                    no_partial_below="@daily",
+                    tz=UTC,
+                )
+            )
+            w = resolve_window(batch, Contract(begin=_BEGIN), latest=True)
+        assert (w.since, w.until) == (datetime(2026, 5, 1, tzinfo=UTC), _LCM)
+
+    def test_explicit_until_overrides_the_inferred_edge(self) -> None:
+        # An explicit BACKFILL_UNTIL wins over end / future_data / no_partial_below.
+        until = datetime(2025, 3, 1, tzinfo=UTC)
+        with travel(_NOW, tick=False):
+            batch = _edge_batch(no_partial_below="@daily", future_data=True)
+            w = resolve_window(
+                batch, Contract(begin=_BEGIN, end=_FUTURE), since=_BEGIN, until=until
+            )
+        assert w.until == until
+
+    def test_lookback_shifts_start_independently_of_the_edge(self) -> None:
+        # lookback is the start knob; no_partial_below is the end knob — orthogonal.
+        begin = datetime(2026, 6, 20, tzinfo=UTC)
+        with travel(_NOW, tick=False):
+            batch = Batch(
+                time=TimeChunking(
+                    chunk="@daily", no_partial_below="@daily", lookback=2, tz=UTC
+                )
+            )
+            w = resolve_window(batch, Contract(begin=begin), reload=True)
+        assert w.until == _LCD  # end snapped to the last complete day
+        assert w.since == datetime(2026, 6, 18, tzinfo=UTC)  # start pulled back 2 days

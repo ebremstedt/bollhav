@@ -207,6 +207,27 @@ class TestBatchingCarryThrough:
         out = _apply(_model(fixed_intervals=False)).model
         assert out.batching.time.fixed_intervals is False
 
+    def test_no_partial_below_survives_no_override(self) -> None:
+        # The inferred-edge grain isn't named by _batching_with_overrides, so it
+        # must survive the rebuild via `replace`.
+        assert _model().batching.time.no_partial_below is None
+        out = _apply(_model(chunk="@yearly", no_partial_below="@daily")).model
+        assert out.batching.time.no_partial_below == "@daily"
+
+    def test_future_data_survives_no_override(self) -> None:
+        # future_data needs a contract.end (the guard), so build directly; it
+        # still has to carry through the rebuild untouched.
+        m = Model(
+            target=Target(name="orders", schema="public", schema_suffix_appendix=None),
+            batching=Batch(time=TimeChunking(chunk="@daily", future_data=True, tz=UTC)),
+            contract=Contract(
+                begin=datetime(2024, 1, 1, tzinfo=UTC),
+                end=datetime(2030, 1, 1, tzinfo=UTC),
+            ),
+            temporality=Temporality.TEMPORAL,
+        )
+        assert _apply(m).model.batching.time.future_data is True
+
 
 class TestBatchingNone:
     def test_no_batching_skips_interval_baking(self) -> None:
