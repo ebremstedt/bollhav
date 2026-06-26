@@ -4,13 +4,27 @@ from typing import NamedTuple, TYPE_CHECKING
 
 import psycopg
 
-from bollhav.postgres.messages.error import MissingStateConnError
+from bollhav.postgres.errors import PostgresError
 
 from ._naming import state_table_name
 from ._ddl import LIBRARY_SCHEMA
 
 if TYPE_CHECKING:
     from bollhav.model.model import Model
+
+
+# ── errors ──
+class MissingStateConnError(PostgresError):
+    """`PostgresState` was used without an injected connection. It doesn't open
+    its own — the caller owns it (opened in `main()`, threaded through the
+    lifecycle hooks) — so a missing connection is a wiring error."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "a state connection is required — construct "
+            "PostgresState(model, conn=<state_conn>). PostgresState "
+            "does not self-connect."
+        )
 
 
 class LibraryEntry(NamedTuple):

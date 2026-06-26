@@ -5,14 +5,76 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from bollhav.model.messages.error import (
-    FreshnessWithExistsContractError,
-    FreshnessWithoutContractError,
-    HardcodedSourceFormError,
-    HardcodedSqlWithoutConnError,
-    SourceContractWithoutModelError,
-)
+from bollhav.model.errors import ModelDefinitionError
 from bollhav.model.upstream import Freshness, UpstreamContract
+
+
+# ── errors ──
+
+
+class SourceContractWithoutModelError(ModelDefinitionError):
+    """A `Source` carries a `contract` but its `type` isn't a `SourceModel` —
+    only managed models can be state-gated (files / APIs / hardcoded data
+    aren't state-tracked). `name` is the source name; `type_name` is the
+    actual type."""
+
+    def __init__(self, name: str, type_name: str) -> None:
+        super().__init__(
+            f"source {name!r} has a contract but type="
+            f"{type_name} — only a SourceModel can be gated "
+            f"(files / APIs / hardcoded data aren't state-tracked). Drop the "
+            f"contract or make it a SourceModel."
+        )
+
+
+class FreshnessWithoutContractError(ModelDefinitionError):
+    """A `Source` sets `freshness` but has no `contract` — freshness is a
+    recency bound on a gated upstream's state, so it needs a contract."""
+
+    def __init__(self, name: str) -> None:
+        super().__init__(
+            f"source {name!r} sets `freshness` but has no contract "
+            f"— freshness is a recency bound on a gated upstream's state. "
+            f"Add a contract (ENCAPSULATE / THROUGH / WHOLE) or drop freshness."
+        )
+
+
+class FreshnessWithExistsContractError(ModelDefinitionError):
+    """A `Source` sets `freshness` with `contract=EXISTS` — EXISTS never
+    inspects state (registration is the whole gate), so there's no
+    `applied_at` to age."""
+
+    def __init__(self, name: str) -> None:
+        super().__init__(
+            f"source {name!r} sets `freshness` with contract=EXISTS, "
+            f"but EXISTS never inspects state (registration is the whole "
+            f"gate) — there's no applied_at to age. Use ENCAPSULATE / "
+            f"THROUGH / WHOLE, or drop freshness."
+        )
+
+
+class HardcodedSourceFormError(ModelDefinitionError):
+    """A `SourceHardcoded` didn't set exactly one of `rows` (inline Python
+    rows) or `sql` (an inline SQL literal). `rows_set` says whether `rows`
+    was the one provided (used to phrase 'both' vs 'neither')."""
+
+    def __init__(self, rows_set: bool) -> None:
+        super().__init__(
+            "SourceHardcoded needs exactly one of `rows` (inline Python "
+            "rows) or `sql` (an inline SQL literal) — "
+            + ("both were set." if rows_set else "neither was set.")
+        )
+
+
+class HardcodedSqlWithoutConnError(ModelDefinitionError):
+    """A `SourceHardcoded(sql=...)` was materialized without a `conn` — the
+    SQL literal needs the data connection to run against."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "SourceHardcoded(sql=...) needs a `conn` to materialize "
+            "(it runs the SQL); pass the data connection to to_dataframe()."
+        )
 
 if TYPE_CHECKING:
     import polars as pl

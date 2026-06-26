@@ -6,11 +6,7 @@ from typing import NamedTuple, TYPE_CHECKING
 import psycopg
 from psycopg import sql
 
-from bollhav.postgres.messages.error import (
-    UnregisteredUpstreamError,
-    TimelessUpstreamContractError,
-    ExactContractOnFlexibleUpstreamError,
-)
+from bollhav.postgres.errors import PostgresError
 
 from ._base import _PostgresStateBase
 from ._base import LibraryEntry
@@ -20,6 +16,52 @@ if TYPE_CHECKING:
     from bollhav.model.upstream import UpstreamCheck
 
 logger = logging.getLogger(__name__)
+
+
+# ── errors ──
+class UnregisteredUpstreamError(PostgresError):
+    """A gated upstream contract names an upstream that isn't registered in the
+    library — it has never run. The gate demands the upstream exists, so this is
+    a real error (a typo, or the upstream was never deployed/run)."""
+
+    def __init__(self, name: str, level: str, full_name: str) -> None:
+        super().__init__(
+            f"upstream contract {name!r} ({level}) on "
+            f"{full_name!r} is not registered in "
+            f"the library — it has never run. A gated upstream demands "
+            f"the upstream exists; fix the name or run the upstream "
+            f"first. (An ungated source would not block.)"
+        )
+
+
+class TimelessUpstreamContractError(PostgresError):
+    """An EXACT / ENCAPSULATE / THROUGH contract gates on a per-window match,
+    but its upstream is TIMELESS and has no window to match. Use WHOLE (loaded)
+    or EXISTS (registered) instead."""
+
+    def __init__(self, name: str, level: str, full_name: str) -> None:
+        super().__init__(
+            f"upstream contract {name!r} ({level}) on "
+            f"{full_name!r} targets a TIMELESS "
+            f"upstream, which has no window to match. Use WHOLE "
+            f"(loaded) or EXISTS (registered) instead."
+        )
+
+
+class ExactContractOnFlexibleUpstreamError(PostgresError):
+    """An EXACT contract gates on an applied row whose `(since, until)` equals
+    the window exactly, but the upstream is flexible (`fixed_intervals=False`)
+    — it coalesces its applied rows into maximal covered ranges, so no
+    exact-grain row survives to match. The downstream would block forever. Use
+    ENCAPSULATE (coverage) against a flexible upstream instead."""
+
+    def __init__(self, name: str, full_name: str) -> None:
+        super().__init__(
+            f"upstream contract {name!r} (exact) on {full_name!r} targets a "
+            f"flexible upstream (fixed_intervals=False), which coalesces away "
+            f"its exact-grain rows — EXACT can never match and the model would "
+            f"block forever. Use ENCAPSULATE instead."
+        )
 
 
 class IntervalClassification(NamedTuple):

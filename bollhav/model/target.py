@@ -4,26 +4,105 @@ from datetime import datetime, timezone
 from typing import Callable
 
 from bollhav.model.database import Database, DatabaseColumn, DatabaseIndex
-from bollhav.model.messages.error import (
-    ColumnsWithoutDatabaseError,
-    DatabaseWithoutColumnsError,
-    MissingCatalogError,
-    MultiplePartitionColumnsError,
-    RecreateAndTruncateError,
-    RecreatePartitionWithoutColumnError,
-    UnknownIndexColumnError,
-    UpsertWithoutKeyError,
-)
+from bollhav.model.errors import ModelDefinitionError
 from bollhav.model.staging import Staging
 from bollhav.model.write_modes import WriteMode
 from bollhav.model.column_sorting import sort_columns
+
+
+# ── errors ──
+
+
+class RecreateAndTruncateError(ModelDefinitionError):
+    """A `Target` set both `recreate_table` and `truncate_table` — recreate
+    already leaves the table empty, so truncate is redundant and the two
+    together are contradictory."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "recreate_table and truncate_table cannot both be True — "
+            "recreate already leaves the table empty"
+        )
+
+
+class ColumnsWithoutDatabaseError(ModelDefinitionError):
+    """A `Target` declared `columns` without a `database` — columns describe a
+    database-backed table's schema, so the `database` must be set too."""
+
+    def __init__(self) -> None:
+        super().__init__("database must be set when columns is provided")
+
+
+class DatabaseWithoutColumnsError(ModelDefinitionError):
+    """A `Target` set `database` without any `columns` — a database-backed
+    table needs its column schema, so `columns` must be set too."""
+
+    def __init__(self) -> None:
+        super().__init__("columns must be set when database is provided")
+
+
+class MissingCatalogError(ModelDefinitionError):
+    """A database-backed `Target` left `catalog` unset. A model's identity is
+    `catalog.schema.table`, so the catalog is required to keep names unique
+    across databases in the shared library."""
+
+    def __init__(self, name: str) -> None:
+        super().__init__(
+            f"catalog must be set on model {name!r} — a database-backed "
+            f"model's identity is catalog.schema.table, so the catalog is "
+            f"required to keep names unique across databases in the shared "
+            f"library (referencing by anything less risks collisions)."
+        )
+
+
+class MultiplePartitionColumnsError(ModelDefinitionError):
+    """A `Target` marked more than one column `partition_on=True`. A table
+    has a single partition key, so at most one column may carry it. `names`
+    lists the offending columns."""
+
+    def __init__(self, names: str) -> None:
+        super().__init__(f"At most one column can have partition_on=True, got: {names}")
+
+
+class UpsertWithoutKeyError(ModelDefinitionError):
+    """A `Target` uses `WriteMode.UPSERT_NO_DELETE` but no column is marked
+    `primary_key=True` or `unique=True` — the upsert needs a merge key to
+    join on."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "WriteMode.UPSERT_NO_DELETE requires at least one column with "
+            "primary_key=True or unique=True"
+        )
+
+
+class RecreatePartitionWithoutColumnError(ModelDefinitionError):
+    """A `Target` uses `WriteMode.RECREATE_PARTITION` but no column is marked
+    `partition_on=True` — the write targets a specific partition, so it needs
+    a partition column."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "WriteMode.RECREATE_PARTITION requires one column with partition_on=True"
+        )
+
+
+class UnknownIndexColumnError(ModelDefinitionError):
+    """An index on a `Target` references column(s) that aren't declared on the
+    table. `index_name` names the index; `unknown` lists the missing
+    column(s)."""
+
+    def __init__(self, index_name: str, unknown: list) -> None:
+        super().__init__(
+            f"Index {index_name!r} references unknown column(s): {unknown}"
+        )
 
 
 def resolve_schema_name(name: str, suffix: str, appendix: str | None) -> str:
     """Apply a rotating `suffix` (and optional date `appendix`) to a schema
     name — `warehouse` → `warehouse_pr123_2425_` — or return it unchanged when
     no suffix is set. Pure: callers pass the base name, never a resolved one,
-    so it's idempotent. (Note the trailing `_`, kept for back-compat.)"""
+    so it's idempotent. (Note the trailing `_`, kept for back-compat)"""
     if not suffix:
         return name
     s = f"{name}_{suffix}"

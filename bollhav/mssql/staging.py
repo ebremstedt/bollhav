@@ -14,17 +14,51 @@ from bollhav.model.write_modes import WriteMode
 from bollhav.mssql.columns import MssqlColumn
 from bollhav.mssql.modes import _bulk_insert
 from bollhav.mssql.schema import _bracket_quote, _col_ddl
-from bollhav.mssql.messages.error import (
-    UnsupportedStagingWriteModeError,
-    RecreatePartitionRequiresTzAwareError,
-    RecreatePartitionRequiresPartitionedByError,
-    RecreatePartitionRequiresWindowError,
-)
+from bollhav.mssql.errors import MssqlError
 
 if TYPE_CHECKING:
     from bollhav.model.model import Model
 
 logger = logging.getLogger(__name__)
+
+
+# ── errors ──────────────────────────────────────────────────────────
+
+
+class RecreatePartitionRequiresTzAwareError(MssqlError):
+    """A `RECREATE_PARTITION` apply was given naive `since`/`until`. The
+    partition window is matched in UTC, so both bounds must be UTC-aware."""
+
+    def __init__(self) -> None:
+        super().__init__("RECREATE_PARTITION requires since/until to be UTC-aware")
+
+
+class RecreatePartitionRequiresPartitionedByError(MssqlError):
+    """A `RECREATE_PARTITION` apply ran on a target with no `partitioned_by`.
+    The DELETE+INSERT keys on the partition column, so it must be set."""
+
+    def __init__(self) -> None:
+        super().__init__("RECREATE_PARTITION requires target.partitioned_by to be set")
+
+
+class RecreatePartitionRequiresWindowError(MssqlError):
+    """A `RECREATE_PARTITION` apply resolved no window (since/until). The write
+    targets a specific partition window, so the model must be run windowed."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "RECREATE_PARTITION requires a window (since/until) — "
+            "run the model windowed."
+        )
+
+
+class UnsupportedStagingWriteModeError(NotImplementedError):
+    """The staging write dispatch hit a `write_mode` it doesn't implement.
+    Subclasses `NotImplementedError`: it marks an unimplemented branch (guarded
+    upstream by `Staging.__post_init__`), not bad user config."""
+
+    def __init__(self, wm: object) -> None:
+        super().__init__(f"unsupported staging.write_mode {wm!r}")
 
 
 @dataclass

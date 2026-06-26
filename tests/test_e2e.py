@@ -2057,7 +2057,7 @@ def test_e2e_exact_on_flexible_upstream_raises(schema_name):
     """Guard A, end-to-end against the live library: an EXACT contract on a
     FLEXIBLE upstream is a hard error (it could never match a coalesced range,
     so the downstream would block forever)."""
-    from bollhav.postgres.messages.error import (
+    from bollhav.postgres.state.satisfaction import (
         ExactContractOnFlexibleUpstreamError,
     )
 
@@ -2104,7 +2104,7 @@ def test_e2e_flexible_fixed_lineage_plethora(schema_name):
 
     Asserts: the library stores each model's fixed_intervals; the valid
     contracts resolve satisfied; the EXACT-on-flexible edge raises."""
-    from bollhav.postgres.messages.error import (
+    from bollhav.postgres.state.satisfaction import (
         ExactContractOnFlexibleUpstreamError,
     )
 

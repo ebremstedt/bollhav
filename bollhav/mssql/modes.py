@@ -5,12 +5,34 @@ from typing import cast, LiteralString
 from bollhav.model.model import Model
 from bollhav.mssql.columns import MssqlColumn, MssqlType
 from bollhav.mssql.schema import _bracket_quote, _col_type
-from bollhav.mssql.messages.error import (
-    UnhandledMssqlTypeError,
-    MissingSourceModelQueryError,
-)
+from bollhav.mssql.errors import MssqlError
 
 logger = logging.getLogger(__name__)
+
+
+# ── errors ──────────────────────────────────────────────────────────
+
+
+class UnhandledMssqlTypeError(MssqlError):
+    """`_input_size_for` was given a `MssqlType` it has no input-size mapping
+    for — the type gained a value this function doesn't cover yet. Raised
+    loudly rather than silently falling back to driver autodetect."""
+
+    def __init__(self, t: object) -> None:
+        super().__init__(f"_input_size_for: unhandled MssqlType {t!r}")
+
+
+class MissingSourceModelQueryError(MssqlError):
+    """`create_replace_view` found no upstream `Source` with a `SourceModel`
+    type whose `.query` is set. A view is defined by that query, so without
+    one there's nothing to create the view from."""
+
+    def __init__(self, full_name: str) -> None:
+        super().__init__(
+            f"create_replace_view requires a Source with a SourceModel type "
+            f"whose .query is set, in upstream=[...] on "
+            f"{full_name!r}"
+        )
 
 
 def _bulk_insert(

@@ -7,13 +7,39 @@ from bollhav.model.model import Model
 from bollhav.model.modelrun import ModelRun
 from bollhav.model.write_modes import WriteMode
 from bollhav.mssql.modes import append, merge
-from bollhav.mssql.messages.error import (
-    UnhandledWriteModeError,
-    WriteOnViewError,
-    MissingDataframeGeneratorError,
-)
+from bollhav.mssql.errors import MssqlError
 
 logger = logging.getLogger(__name__)
+
+
+# ── errors ──────────────────────────────────────────────────────────
+
+
+class UnhandledWriteModeError(MssqlError):
+    """The model's `write_mode` isn't one the MSSQL writer can handle. Raised
+    when dispatching a write so an unsupported mode fails loudly."""
+
+    def __init__(self, write_mode: object) -> None:
+        super().__init__(f"Unhandled write mode for MSSQL: {write_mode}")
+
+
+class WriteOnViewError(MssqlError):
+    """`write()` was called for a VIEW model. Views are created by
+    `@model_lifecycle`, not written to, so a view's execute body has nothing
+    to write."""
+
+    def __init__(self, full_name: str) -> None:
+        super().__init__(
+            f"{full_name!r} is a VIEW — created by @model_lifecycle, not write()."
+        )
+
+
+class MissingDataframeGeneratorError(MssqlError):
+    """`write()` was called without a DataFrame generator. The write mode
+    needs rows to land, so a `df_gen` is required for non-view models."""
+
+    def __init__(self, write_mode_value: str) -> None:
+        super().__init__(f"{write_mode_value} requires a dataframe generator")
 
 
 def write_dataframes(

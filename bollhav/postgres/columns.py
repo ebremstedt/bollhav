@@ -1,7 +1,16 @@
 from dataclasses import dataclass, fields
 from bollhav.model.database import DatabaseColumn
-from bollhav.postgres.messages.error import PrimaryKeyNotNullableError
+from bollhav.postgres.errors import PostgresError
 from enum import Enum
+
+
+# ── errors ──
+class PrimaryKeyNotNullableError(PostgresError):
+    """A column was declared both `primary_key=True` and `nullable=True`. A
+    primary key can never be NULL, so the two flags conflict."""
+
+    def __init__(self, name: str) -> None:
+        super().__init__(f"Column {name!r}: primary_key=True cannot be nullable")
 
 
 class PostgresType(Enum):
