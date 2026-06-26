@@ -127,7 +127,7 @@ upstream=[
 ]
 ```
 
-`SourceModel` is the only **SQL-addressable** type — `model.ref("raw.orders")` resolves it into a `FROM`. It's also the only type that can be **gated**: attach a `contract` to make it a managed upstream. A [view](TEMPORALITY.md) model's (`view=True`) SQL definition is set via `query=` on the `Model` itself — that's what `CREATE OR REPLACE VIEW` runs.
+`SourceModel` is the only **SQL-addressable** type — `model.ref("raw.orders")` resolves it into a `FROM`. It's also the only type that can be **gated**: attach a `contract` to make it a managed upstream. A [view](TEMPORALITY.md) model's (`view=True`) SQL definition is set via `query=` on the `Model` — the `Source` entries in `upstream` declare the tables the view reads from, for lineage and dependency ordering.
 
 | Field | Type · Default | Purpose |
 |---|---|---|
