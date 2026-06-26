@@ -263,8 +263,12 @@ def test_run_since_prefers_new_var_over_legacy_backfill():
     new = datetime(2025, 5, 5, tzinfo=timezone.utc)
     legacy = datetime(2024, 1, 1, tzinfo=timezone.utc)
     parsed = {"RUN_SINCE": new, "BACKFILL_SINCE": legacy}
-    with patch.dict("os.environ", {"RUN_SINCE": "x", "BACKFILL_SINCE": "y"}), patch(
-        "bollhav.model.load_models.env_var_iso8601_datetime", lambda name: parsed.get(name)
+    with (
+        patch.dict("os.environ", {"RUN_SINCE": "x", "BACKFILL_SINCE": "y"}),
+        patch(
+            "bollhav.model.load_models.env_var_iso8601_datetime",
+            lambda name: parsed.get(name),
+        ),
     ):
         assert _window_dt("RUN_SINCE", "BACKFILL_SINCE", True, None) == new
 
@@ -274,8 +278,11 @@ def test_deprecated_backfill_since_alias_when_run_since_unset():
     from bollhav.model.load_models import _window_dt
 
     legacy = datetime(2024, 1, 1, tzinfo=timezone.utc)
-    with patch.dict("os.environ", {"BACKFILL_SINCE": "y"}), patch(
-        "bollhav.model.load_models.env_var_iso8601_datetime",
-        lambda name: legacy if name == "BACKFILL_SINCE" else None,
+    with (
+        patch.dict("os.environ", {"BACKFILL_SINCE": "y"}),
+        patch(
+            "bollhav.model.load_models.env_var_iso8601_datetime",
+            lambda name: legacy if name == "BACKFILL_SINCE" else None,
+        ),
     ):
         assert _window_dt("RUN_SINCE", "BACKFILL_SINCE", True, None) == legacy
