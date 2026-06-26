@@ -212,11 +212,6 @@
       <p class="tag">An interactive example to see how bollhav actually works</p>
       <p class="tldr"><strong>TL;DR:</strong> it does DDL work + moves data + keeps track of what has moved by storing state</p>
     </div>
-    <div class="legend">
-      {#each LEGEND as [cls, label] (cls)}
-        <span class="chip"><i class="dot {cls}"></i>{label}</span>
-      {/each}
-    </div>
   </header>
 
   <div class="controls">
@@ -347,6 +342,12 @@
     Pacing is illustrative and does <strong>not</strong> reflect real run speed — actual runs may be far
     faster or far slower, and timing depends on data volume, the database, and worker parallelism.
   </p>
+
+  <div class="legend">
+    {#each LEGEND as [cls, label] (cls)}
+      <span class="chip"><i class="dot {cls}"></i>{label}</span>
+    {/each}
+  </div>
 </div>
 
 <style>
@@ -358,7 +359,7 @@
   .tldr { margin: 0.15rem 0 0; font-size: 0.8rem; color: #8b97a8; }
   .tldr strong { color: #c7d2e2; }
 
-  .legend { display: flex; gap: 0.55rem; flex-wrap: wrap; }
+  .legend { display: flex; justify-content: center; gap: 0.8rem; flex-wrap: wrap; margin-top: 1.1rem; padding-top: 0.9rem; border-top: 1px solid #1c2636; }
   .chip { display: inline-flex; align-items: center; gap: 0.3rem; font-size: 0.74rem; color: #9aa6b8; }
   .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; flex: none; }
 
