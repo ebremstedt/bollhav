@@ -5,14 +5,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from bollhav.model.errors import ModelDefinitionError
 from bollhav.model.upstream import Freshness, UpstreamContract
 
 
 # ── errors ──
 
 
-class SourceContractWithoutModelError(ModelDefinitionError):
+class SourceContractWithoutModelError(ValueError):
     """A `Source` carries a `contract` but its `type` isn't a `SourceModel` —
     only managed models can be state-gated (files / APIs / hardcoded data
     aren't state-tracked). `name` is the source name; `type_name` is the
@@ -27,7 +26,7 @@ class SourceContractWithoutModelError(ModelDefinitionError):
         )
 
 
-class FreshnessWithoutContractError(ModelDefinitionError):
+class FreshnessWithoutContractError(ValueError):
     """A `Source` sets `freshness` but has no `contract` — freshness is a
     recency bound on a gated upstream's state, so it needs a contract."""
 
@@ -39,7 +38,7 @@ class FreshnessWithoutContractError(ModelDefinitionError):
         )
 
 
-class FreshnessWithExistsContractError(ModelDefinitionError):
+class FreshnessWithExistsContractError(ValueError):
     """A `Source` sets `freshness` with `contract=EXISTS` — EXISTS never
     inspects state (registration is the whole gate), so there's no
     `applied_at` to age."""
@@ -53,7 +52,7 @@ class FreshnessWithExistsContractError(ModelDefinitionError):
         )
 
 
-class HardcodedSourceFormError(ModelDefinitionError):
+class HardcodedSourceFormError(ValueError):
     """A `SourceHardcoded` didn't set exactly one of `rows` (inline Python
     rows) or `sql` (an inline SQL literal). `rows_set` says whether `rows`
     was the one provided (used to phrase 'both' vs 'neither')."""
@@ -66,7 +65,7 @@ class HardcodedSourceFormError(ModelDefinitionError):
         )
 
 
-class HardcodedSqlWithoutConnError(ModelDefinitionError):
+class HardcodedSqlWithoutConnError(ValueError):
     """A `SourceHardcoded(sql=...)` was materialized without a `conn` — the
     SQL literal needs the data connection to run against."""
 

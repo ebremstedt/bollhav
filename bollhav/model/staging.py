@@ -2,14 +2,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from bollhav.model.errors import ModelDefinitionError
 from bollhav.model.write_modes import WriteMode
 
 
 # ── errors ──
 
 
-class StagingWriteModeError(ModelDefinitionError):
+class StagingWriteModeError(ValueError):
     """A `Staging.write_mode` was set to something other than `APPEND` or
     `UPSERT_NO_DELETE`. `RECREATE_PARTITION` / `VIEW` are target-side
     concepts that don't apply to chunks landing in a staging table."""

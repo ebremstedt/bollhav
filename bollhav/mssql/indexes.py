@@ -1,12 +1,11 @@
 from dataclasses import dataclass, field
 from bollhav.model.database import DatabaseIndex
-from bollhav.mssql.errors import MssqlError
 
 
 # ── errors ──────────────────────────────────────────────────────────
 
 
-class EmptyIndexColumnsError(MssqlError):
+class EmptyIndexColumnsError(ValueError):
     """An `Index` was declared with no key columns. An index needs at least
     one column to order/seek on, so an empty `columns` list is invalid."""
 
@@ -14,7 +13,7 @@ class EmptyIndexColumnsError(MssqlError):
         super().__init__(f"Index {name!r}: columns must be non-empty")
 
 
-class OverlappingIndexColumnsError(MssqlError):
+class OverlappingIndexColumnsError(ValueError):
     """An `Index`'s key `columns` and `included` columns overlap. Included
     columns are stored at the leaf only and must be disjoint from the key,
     so the same column can't appear in both."""

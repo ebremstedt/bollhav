@@ -5,7 +5,6 @@ from typing import cast, LiteralString
 from bollhav.model.model import Model
 from bollhav.mssql.columns import MssqlColumn, MssqlType
 from bollhav.mssql.schema import _bracket_quote, _col_type
-from bollhav.mssql.errors import MssqlError
 
 logger = logging.getLogger(__name__)
 
@@ -13,7 +12,7 @@ logger = logging.getLogger(__name__)
 # ── errors ──────────────────────────────────────────────────────────
 
 
-class UnhandledMssqlTypeError(MssqlError):
+class UnhandledMssqlTypeError(ValueError):
     """`_input_size_for` was given a `MssqlType` it has no input-size mapping
     for — the type gained a value this function doesn't cover yet. Raised
     loudly rather than silently falling back to driver autodetect."""
@@ -22,7 +21,7 @@ class UnhandledMssqlTypeError(MssqlError):
         super().__init__(f"_input_size_for: unhandled MssqlType {t!r}")
 
 
-class MissingSourceModelQueryError(MssqlError):
+class MissingSourceModelQueryError(ValueError):
     """`create_replace_view` found no upstream `Source` with a `SourceModel`
     type whose `.query` is set. A view is defined by that query, so without
     one there's nothing to create the view from."""

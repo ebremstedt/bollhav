@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING
 import psycopg
 from psycopg import sql
 
-from bollhav.postgres.errors import PostgresError
 
 from ._base import _PostgresStateBase
 from ._ddl import LIBRARY_SCHEMA
@@ -23,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 
 # ── errors ──
-class DropEnvironmentRefusedError(PostgresError):
+class DropEnvironmentRefusedError(ValueError):
     """`drop_environment` refuses to run when no model carries a schema suffix —
     it would target prod schemas. Set `SCHEMA_SUFFIX` for an ephemeral
     environment, or drop prod schemas by hand."""

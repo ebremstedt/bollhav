@@ -17,7 +17,6 @@ from roskarl import (
 
 from bollhav.model.runtime import apply_runtime_overrides
 from bollhav.model.modelrun import ModelRun
-from bollhav.model.errors import RuntimeConfigError
 from bollhav.model.window import compute_intervals
 from bollhav.model.progress_bar import get_progress_level, PROGRESS, ProgressLevel
 from bollhav.model.state import StateMode
@@ -30,7 +29,7 @@ logger = logging.getLogger(__name__)
 # ── errors ──
 
 
-class ConflictingRunModeError(RuntimeConfigError):
+class ConflictingRunModeError(ValueError):
     """`LATEST_ENABLED` and `BACKFILL_ENABLED` were both set — they pick
     mutually exclusive run modes, so exactly one (or neither) may be true."""
 
@@ -38,7 +37,7 @@ class ConflictingRunModeError(RuntimeConfigError):
         super().__init__("LATEST_ENABLED and BACKFILL_ENABLED cannot both be true")
 
 
-class MissingSchemaSuffixError(RuntimeConfigError):
+class MissingSchemaSuffixError(ValueError):
     """`USE_SCHEMA_SUFFIX=True` was set without a non-empty `SCHEMA_SUFFIX` to
     apply, so there's nothing to suffix the schema with."""
 
@@ -46,7 +45,7 @@ class MissingSchemaSuffixError(RuntimeConfigError):
         super().__init__("USE_SCHEMA_SUFFIX=True requires non-empty SCHEMA_SUFFIX")
 
 
-class MissingTableSuffixError(RuntimeConfigError):
+class MissingTableSuffixError(ValueError):
     """`USE_TABLE_SUFFIX=True` was set without a non-empty `TABLE_SUFFIX` to
     apply, so there's nothing to suffix the table with."""
 
@@ -54,7 +53,7 @@ class MissingTableSuffixError(RuntimeConfigError):
         super().__init__("USE_TABLE_SUFFIX=True requires non-empty TABLE_SUFFIX")
 
 
-class WindowOverrideWithoutLatestError(RuntimeConfigError):
+class WindowOverrideWithoutLatestError(ValueError):
     """`WINDOW_OVERRIDE` was set outside `LATEST_ENABLED` mode. It only adjusts
     the inferred latest-window; in backfill mode since/until are explicit and
     no window is inferred, so the override has nothing to act on."""
@@ -66,7 +65,7 @@ class WindowOverrideWithoutLatestError(RuntimeConfigError):
         )
 
 
-class NegativeLookbackError(RuntimeConfigError):
+class NegativeLookbackError(ValueError):
     """`LOOKBACK_OVERRIDE` was given a negative value — a lookback extends the
     window backwards by a non-negative amount, so negatives are meaningless."""
 
@@ -74,7 +73,7 @@ class NegativeLookbackError(RuntimeConfigError):
         super().__init__(f"LOOKBACK_OVERRIDE must be non-negative, got {value}")
 
 
-class InvalidStateModeError(RuntimeConfigError):
+class InvalidStateModeError(ValueError):
     """`STATE_MODE` was set to a value outside the known modes
     (`discover` / `bulldozer` / `torch`)."""
 
@@ -82,7 +81,7 @@ class InvalidStateModeError(RuntimeConfigError):
         super().__init__(f"STATE_MODE must be one of {valid}, got {value!r}")
 
 
-class InvalidTimezoneError(RuntimeConfigError):
+class InvalidTimezoneError(ValueError):
     """`TIMEZONE_OVERRIDE` was not a valid IANA timezone name (e.g.
     `Europe/Stockholm`), so it can't be resolved to a zone."""
 

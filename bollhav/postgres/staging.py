@@ -12,7 +12,6 @@ from psycopg import sql
 
 from bollhav.model.staging import Staging
 from bollhav.model.write_modes import WriteMode
-from bollhav.postgres.errors import PostgresError
 
 if TYPE_CHECKING:
     from bollhav.model.model import Model
@@ -30,7 +29,7 @@ class UnsupportedStagingWriteModeError(NotImplementedError):
         super().__init__(f"unsupported staging.write_mode {wm!r}")
 
 
-class RecreatePartitionRequiresAwareWindowError(PostgresError):
+class RecreatePartitionRequiresAwareWindowError(ValueError):
     """A staged `RECREATE_PARTITION` apply got a naive since/until. The DELETE
     window must be an unambiguous instant, so both bounds must be UTC-aware."""
 
@@ -38,7 +37,7 @@ class RecreatePartitionRequiresAwareWindowError(PostgresError):
         super().__init__("RECREATE_PARTITION requires since/until to be UTC-aware")
 
 
-class RecreatePartitionRequiresPartitionedByError(PostgresError):
+class RecreatePartitionRequiresPartitionedByError(ValueError):
     """A staged `RECREATE_PARTITION` apply ran on a target with no
     `partitioned_by` — there's no column to scope the window DELETE/INSERT to."""
 
@@ -46,7 +45,7 @@ class RecreatePartitionRequiresPartitionedByError(PostgresError):
         super().__init__("RECREATE_PARTITION requires target.partitioned_by to be set")
 
 
-class StagedRecreatePartitionRequiresWindowError(PostgresError):
+class StagedRecreatePartitionRequiresWindowError(ValueError):
     """A staged `RECREATE_PARTITION` apply was reached with no since/until — the
     mode overwrites a specific window, so it needs one. Run the model windowed."""
 

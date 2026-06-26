@@ -1,13 +1,12 @@
 import re
 from dataclasses import dataclass
 
-from bollhav.model.errors import ModelDiscoveryError
 
 
 # ── errors ──
 
 
-class InvalidTagExpressionError(ModelDiscoveryError):
+class InvalidTagExpressionError(ValueError):
     """A tag expression didn't contain any `[group]` — the parser found no
     bracketed groups, so the expression is malformed. `expr` is the bad
     expression."""

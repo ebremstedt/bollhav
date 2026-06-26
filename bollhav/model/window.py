@@ -20,7 +20,6 @@ from typing import TYPE_CHECKING
 
 from icron import croniter
 from bollhav.model.intervals import TZInterval
-from bollhav.model.errors import ModelDefinitionError
 from roskarl.cron import INTERVAL_EXPRESSION_SHORTCUTS
 
 if TYPE_CHECKING:
@@ -48,7 +47,7 @@ class CronSeedingInvariantError(RuntimeError):
         )
 
 
-class ReloadRequiresContractBeginError(ModelDefinitionError):
+class ReloadRequiresContractBeginError(ValueError):
     """A `reload` window was requested but `contract.begin` isn't set — reload
     spans `contract.begin` .. (`contract.end` or latest tick), so a begin is
     required. `name` is the model name."""
@@ -57,7 +56,7 @@ class ReloadRequiresContractBeginError(ModelDefinitionError):
         super().__init__(f"reload requires contract.begin to be set on model {name!r}")
 
 
-class BackfillRequiresSinceError(ModelDefinitionError):
+class BackfillRequiresSinceError(ValueError):
     """A backfill window was requested with no `since` — backfill needs an
     explicit start. Set `contract.begin` on the model or pass `--since` at
     runtime. `name` is the model name."""

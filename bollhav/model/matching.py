@@ -6,7 +6,6 @@ from contextlib import contextmanager
 from pathlib import Path
 from bollhav.model.tagexpr import PotentialTagGroup, parse_expression, group_matches
 from bollhav.model.model import Model
-from bollhav.model.errors import ModelDiscoveryError
 from bollhav.model.ordering import topological_sort
 
 logger = logging.getLogger(__name__)
@@ -15,7 +14,7 @@ logger = logging.getLogger(__name__)
 # ── errors ──
 
 
-class EmptyTagsError(ModelDiscoveryError):
+class EmptyTagsError(ValueError):
     """`load_models` was called with no tag expression. Tags select which
     models to run, so a non-empty expression is required (use a catch-all
     like `"*"` to match everything)."""
@@ -24,7 +23,7 @@ class EmptyTagsError(ModelDiscoveryError):
         super().__init__("tags must be a non-empty expression.")
 
 
-class DuplicateModelError(ModelDiscoveryError):
+class DuplicateModelError(ValueError):
     """Two model files declare the same `full_name` (catalog.schema.table).
     A model's full name must be unique across the scanned folder, since it
     keys the target, the state rows, and the dependency graph."""

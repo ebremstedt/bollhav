@@ -8,7 +8,6 @@ from datetime import datetime, timezone
 from functools import wraps
 from typing import Callable
 
-from bollhav.model.errors import LifecycleError, RuntimeConfigError
 from bollhav.model.progress_bar import PROGRESS
 from bollhav.model.state_dry_plan import _fmt_window, _print_state_plan
 from bollhav.model.window import (
@@ -25,7 +24,7 @@ logger = logging.getLogger(__name__)
 # ── errors ──
 
 
-class MissingRunError(LifecycleError):
+class MissingRunError(ValueError):
     """A lifecycle hook ran without a `run`. The wrapper needs the `ModelRun`
     to resolve the model, window, and state, so a missing run is a wiring bug
     in the caller, not a user config error. `hook` names the entry point for
@@ -38,7 +37,7 @@ class MissingRunError(LifecycleError):
         )
 
 
-class MissingDataConnError(LifecycleError):
+class MissingDataConnError(ValueError):
     """A lifecycle-wrapped function was called with no `data_conn`. It's the
     required connection for target DDL and writes — open it in `main()`
     (autocommit) and thread it through to the wrapped function."""
@@ -50,7 +49,7 @@ class MissingDataConnError(LifecycleError):
         )
 
 
-class MssqlStateRequiresPostgresConnError(LifecycleError):
+class MssqlStateRequiresPostgresConnError(ValueError):
     """A stateful MSSQL model was given one connection for both data and state.
     State always lives in Postgres, so it needs its own Postgres `state_conn`
     (psycopg) passed alongside the MSSQL `data_conn` (pyodbc) — state
@@ -65,7 +64,7 @@ class MssqlStateRequiresPostgresConnError(LifecycleError):
         )
 
 
-class RecreatePartitionWithoutWindowError(RuntimeConfigError):
+class RecreatePartitionWithoutWindowError(ValueError):
     """A `RECREATE_PARTITION` model's run resolved no window at all, so there's
     no partition to recreate. Raised during state setup (before execution),
     when the run mode produced no since/until. Run it windowed instead."""
@@ -78,7 +77,7 @@ class RecreatePartitionWithoutWindowError(RuntimeConfigError):
         )
 
 
-class RecreatePartitionWithoutIntervalError(RuntimeConfigError):
+class RecreatePartitionWithoutIntervalError(ValueError):
     """A `RECREATE_PARTITION` model reached execution with no interval — the
     per-unit counterpart of `RecreatePartitionWithoutWindowError`. The write
     targets a specific partition, so a NULL interval has nothing to recreate.

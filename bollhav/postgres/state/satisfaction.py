@@ -6,7 +6,6 @@ from typing import NamedTuple, TYPE_CHECKING
 import psycopg
 from psycopg import sql
 
-from bollhav.postgres.errors import PostgresError
 
 from ._base import _PostgresStateBase
 from ._base import LibraryEntry
@@ -19,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 
 # ── errors ──
-class UnregisteredUpstreamError(PostgresError):
+class UnregisteredUpstreamError(ValueError):
     """A gated upstream contract names an upstream that isn't registered in the
     library — it has never run. The gate demands the upstream exists, so this is
     a real error (a typo, or the upstream was never deployed/run)."""
@@ -34,7 +33,7 @@ class UnregisteredUpstreamError(PostgresError):
         )
 
 
-class TimelessUpstreamContractError(PostgresError):
+class TimelessUpstreamContractError(ValueError):
     """An EXACT / ENCAPSULATE / THROUGH contract gates on a per-window match,
     but its upstream is TIMELESS and has no window to match. Use WHOLE (loaded)
     or EXISTS (registered) instead."""
@@ -48,7 +47,7 @@ class TimelessUpstreamContractError(PostgresError):
         )
 
 
-class ExactContractOnFlexibleUpstreamError(PostgresError):
+class ExactContractOnFlexibleUpstreamError(ValueError):
     """An EXACT contract gates on an applied row whose `(since, until)` equals
     the window exactly, but the upstream is flexible (`fixed_intervals=False`)
     — it coalesces its applied rows into maximal covered ranges, so no

@@ -7,7 +7,6 @@ from bollhav.model.model import Model
 from bollhav.model.modelrun import ModelRun
 from bollhav.model.write_modes import WriteMode
 from bollhav.mssql.modes import append, merge
-from bollhav.mssql.errors import MssqlError
 
 logger = logging.getLogger(__name__)
 
@@ -15,7 +14,7 @@ logger = logging.getLogger(__name__)
 # ── errors ──────────────────────────────────────────────────────────
 
 
-class UnhandledWriteModeError(MssqlError):
+class UnhandledWriteModeError(ValueError):
     """The model's `write_mode` isn't one the MSSQL writer can handle. Raised
     when dispatching a write so an unsupported mode fails loudly."""
 
@@ -23,7 +22,7 @@ class UnhandledWriteModeError(MssqlError):
         super().__init__(f"Unhandled write mode for MSSQL: {write_mode}")
 
 
-class WriteOnViewError(MssqlError):
+class WriteOnViewError(ValueError):
     """`write()` was called for a VIEW model. Views are created by
     `@model_lifecycle`, not written to, so a view's execute body has nothing
     to write."""
@@ -34,7 +33,7 @@ class WriteOnViewError(MssqlError):
         )
 
 
-class MissingDataframeGeneratorError(MssqlError):
+class MissingDataframeGeneratorError(ValueError):
     """`write()` was called without a DataFrame generator. The write mode
     needs rows to land, so a `df_gen` is required for non-view models."""
 

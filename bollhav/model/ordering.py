@@ -3,7 +3,6 @@ from __future__ import annotations
 from collections import deque
 from typing import TYPE_CHECKING
 
-from bollhav.model.errors import ModelDiscoveryError
 
 if TYPE_CHECKING:
     from bollhav.model.model import Model
@@ -12,7 +11,7 @@ if TYPE_CHECKING:
 # ── errors ──
 
 
-class CircularDependencyError(ModelDiscoveryError):
+class CircularDependencyError(ValueError):
     """The model set has a dependency cycle — topological sort couldn't order
     every model because some still depend on each other. `remaining` is the
     set of models left unordered."""

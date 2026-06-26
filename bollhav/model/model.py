@@ -6,7 +6,6 @@ from datetime import datetime, timezone
 from uuid import uuid4
 
 from bollhav.model.target import Target
-from bollhav.model.errors import ModelDefinitionError
 from bollhav.model.contract import Contract
 from bollhav.model.batch import Batch
 from bollhav.model.temporality import Temporality
@@ -21,7 +20,7 @@ logger = logging.getLogger(__name__)
 # ── errors ──
 
 
-class TimelessModelWithBatchingError(ModelDefinitionError):
+class TimelessModelWithBatchingError(ValueError):
     """A `temporality=TIMELESS` model declared `batching` — a timeless model
     is one whole unit, not windowed, so it can't be batched."""
 
@@ -33,7 +32,7 @@ class TimelessModelWithBatchingError(ModelDefinitionError):
         )
 
 
-class TimelessModelWithContractWindowError(ModelDefinitionError):
+class TimelessModelWithContractWindowError(ValueError):
     """A `temporality=TIMELESS` model declared a `contract` begin/end — a
     timeless model has no time axis to bound."""
 
@@ -45,7 +44,7 @@ class TimelessModelWithContractWindowError(ModelDefinitionError):
         )
 
 
-class ViewWithBatchingError(ModelDefinitionError):
+class ViewWithBatchingError(ValueError):
     """A `view=True` model declared `batching` — a view isn't materialized
     per-window (it's one CREATE VIEW), so it can't be batched."""
 
@@ -58,7 +57,7 @@ class ViewWithBatchingError(ModelDefinitionError):
         )
 
 
-class ViewWithStagingError(ModelDefinitionError):
+class ViewWithStagingError(ValueError):
     """A `view=True` model declared `staging` — a view has nothing to
     stage."""
 
@@ -69,7 +68,7 @@ class ViewWithStagingError(ModelDefinitionError):
         )
 
 
-class ViewWithRecreateOrTruncateError(ModelDefinitionError):
+class ViewWithRecreateOrTruncateError(ValueError):
     """A `view=True` model set `recreate_table` / `truncate_table` — those are
     materialized-table operations that don't apply to views."""
 
@@ -80,7 +79,7 @@ class ViewWithRecreateOrTruncateError(ModelDefinitionError):
         )
 
 
-class GatedUpstreamWithoutStateError(ModelDefinitionError):
+class GatedUpstreamWithoutStateError(ValueError):
     """A model declared a gated upstream (a `Source` with a contract) but has
     no `state` — contracts are only checked for state-tracked models, so a
     gated upstream without state would silently never enforce."""
@@ -111,7 +110,7 @@ class FrozenModelError(AttributeError):
         )
 
 
-class UndeclaredInputError(ModelDefinitionError):
+class UndeclaredInputError(ValueError):
     """`ref(name)` was called for a name that isn't a declared input of the
     model — it must be added to `upstream=[...]` before it can be referenced.
     `declared` lists the inputs that are declared."""
@@ -124,7 +123,7 @@ class UndeclaredInputError(ModelDefinitionError):
         )
 
 
-class NotSqlAddressableError(ModelDefinitionError):
+class NotSqlAddressableError(ValueError):
     """`ref(name)` was called for an input that isn't SQL-addressable (a file
     / api / hardcoded source), so it can't go in a `FROM`. `kind` is the
     input's kind; read it in the read function instead."""
