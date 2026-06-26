@@ -7,7 +7,7 @@ hide:
 <h1 style="display:none"></h1>
 
 <p align="center" style="margin-bottom: 0.4rem;">
-  <img src="bollhav_logo_large.png" alt="bollhav" width="300" style="position: relative; left: 12px;">
+  <img src="bollhav_logo_large.png" alt="bollhav" width="300" class="hero-logo">
 </p>
 
 <p class="hero-lead" markdown>
@@ -24,7 +24,7 @@ that takes the model as a parameter.
 
 <p class="hero-orch">
   Orchestrate the models with a classical tool like <strong>Airflow</strong>, or
-  use the built-in orchestration in <strong>bollhav state</strong>.
+  use the built-in choreography in <strong>bollhav state</strong>.
 </p>
 
 </div>

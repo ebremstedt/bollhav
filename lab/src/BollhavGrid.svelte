@@ -209,7 +209,7 @@
   <header>
     <div>
       <h1>bollhav <span class="accent">lab</span></h1>
-      <p class="tag">An interactive example to see what bollhav actually does</p>
+      <p class="tag">An interactive example to see how bollhav actually works</p>
       <p class="tldr"><strong>TL;DR:</strong> it does DDL work + moves data + keeps track of what has moved by storing state</p>
     </div>
     <div class="legend">
