@@ -36,9 +36,9 @@
       ['ddl', `CREATE INDEX ${m.table}_window_idx`],
       ['staging', 'garbage collect old staging tables'],
       ['state', 'made sure that model library exist and that the errors table exists'],
-      ['state', `state: registered ${m.full} (TABLE, temporal, upstream=[${m.up}])`],
-      ['state', `state: ensured state table for ${m.full} (z_bollhav.${m.schema}__${m.table})`],
-      ['state', `state: prefilled 6 intervals for ${m.full} (mode=bulldozer, pending=6, blocked=0)`],
+      ['state', `state: registered the model ${m.full} in the model library`],
+      ['state', `state: ensured state table exists for model ${m.full} (z_bollhav.${m.schema}__${m.table})`],
+      ['state', `state: prefilled 6 intervals for model ${m.full} in the state table (z_bollhav.${m.schema}__${m.table})`],
       ['state', `state: read 6 actionable intervals for ${m.full}`],
     ]
   }
@@ -109,6 +109,16 @@
   const trace = _ev.slice().sort((a, b) => a.t - b.t || a.id - b.id)
   const total = Math.max(R.total, C.total) + 0.5
 
+  // state-table contents per model — the rows only exist once prefill has run
+  const ST_NAME = {
+    raw: `z_bollhav.${RAW.schema}__${RAW.table}`,
+    clean: `z_bollhav.${CLEAN.schema}__${CLEAN.table}`,
+  }
+  const prefillAt = {
+    raw: trace.find((e) => e.model === 'raw' && e.text.includes('prefilled'))?.t ?? 0,
+    clean: trace.find((e) => e.model === 'clean' && e.text.includes('prefilled'))?.t ?? 0,
+  }
+
   const BASE = 9 * 3600
   const p2 = (n) => String(n).padStart(2, '0')
   function ts(t) {
@@ -146,6 +156,14 @@
   let paused = $state(true)
   let speed = $state(0.1)
   let bodyEls = []
+  let openData = $state([false, false])  // data tables collapsed by default
+  let openState = $state([false, false]) // state tables collapsed by default
+  let tablesShown = $state(false)
+  function toggleTables() {
+    tablesShown = !tablesShown
+    openData = [tablesShown, tablesShown]
+    openState = [tablesShown, tablesShown]
+  }
 
   const shown = $derived(trace.filter((e) => e.t <= clock))
   const byModel = $derived({
@@ -207,6 +225,7 @@
       <button onclick={stepPrev} title="previous event">⏮ prev step</button>
       <button onclick={stepNext} title="next event">⏭ next step</button>
       <button onclick={restart}>↻ restart</button>
+      <button onclick={toggleTables}>{tablesShown ? '⊟ minimize tables' : '⊞ maximize tables'}</button>
     </div>
     <label class="speed">
       <input type="range" min="0.1" max="0.5" step="0.1" bind:value={speed} />
@@ -243,20 +262,75 @@
   <div class="terminals">
     {#each TERMS as term, i (term.id)}
       {@const list = byModel[term.id]}
-      <div class="term m-{term.id}">
-        <div class="term-head">
-          <i class="tdot"></i>
-          <span class="mname {term.nameClass}">{term.name}</span><span class="hmeta">{term.meta}</span>{#if term.dep}<span class="mname raw">{term.dep}</span>{/if}
-        </div>
-        <div class="term-body" bind:this={bodyEls[i]}>
-          {#each list as e (e.id)}
-            <div class="row {e.cat} i{e.indent}" class:cur={e === list.at(-1)}>
-              <span class="ts">{ts(e.t)}</span>
-              <i class="dot {e.cat}"></i>
-              <span class="txt">{e.text}</span>
+      {@const lane = LANES[i]}
+      <div class="model-row">
+
+        <!-- data table (the target) — left -->
+        <div class="side data" class:open={openData[i]}>
+          <button class="side-toggle" onclick={() => (openData[i] = !openData[i])} title="show/hide the data table">
+            <span class="side-label {term.nameClass}">{openData[i] ? '▾ data table' : 'data table'}</span>
+          </button>
+          {#if openData[i]}
+            {@const applied = lane.rows.filter((w) => lane.status(w, clock) === 'applied')}
+            <div class="side-body">
+              <div class="side-name {term.nameClass}">{term.name}</div>
+              {#if applied.length}
+                <table class="dt">
+                  <tbody>
+                    {#each applied as w (w.h)}
+                      <tr><td class="dt-win">{w.hour}→{p2(w.h + 1)}:00</td><td class="dt-rows">{rows(w.h).toLocaleString()}</td></tr>
+                    {/each}
+                    <tr class="dt-total"><td>total</td><td class="dt-rows">{applied.reduce((s, w) => s + rows(w.h), 0).toLocaleString()}</td></tr>
+                  </tbody>
+                </table>
+              {:else}
+                <div class="side-empty">table empty — no windows applied yet</div>
+              {/if}
             </div>
-          {/each}
+          {/if}
         </div>
+
+        <!-- terminal — middle -->
+        <div class="term m-{term.id}">
+          <div class="term-head">
+            <i class="tdot"></i>
+            <span class="mname {term.nameClass}">{term.name}</span><span class="hmeta">{term.meta}</span>{#if term.dep}<span class="mname raw">{term.dep}</span>{/if}
+          </div>
+          <div class="term-body" bind:this={bodyEls[i]}>
+            {#each list as e (e.id)}
+              <div class="row {e.cat} i{e.indent}" class:cur={e === list.at(-1)}>
+                <span class="ts">{ts(e.t)}</span>
+                <i class="dot {e.cat}"></i>
+                <span class="txt">{e.text}</span>
+              </div>
+            {/each}
+          </div>
+        </div>
+
+        <!-- state table — right -->
+        <div class="side state" class:open={openState[i]}>
+          <button class="side-toggle" onclick={() => (openState[i] = !openState[i])} title="show/hide the state table">
+            <span class="side-label">{openState[i] ? '▾ state table' : 'state table'}</span>
+          </button>
+          {#if openState[i]}
+            <div class="side-body">
+              <div class="side-name">{ST_NAME[term.id]}</div>
+              {#if clock >= prefillAt[term.id]}
+                <table class="st-table">
+                  <tbody>
+                    {#each lane.rows as w (w.h)}
+                      {@const s = lane.status(w, clock)}
+                      <tr><td class="st-win">{w.hour}→{p2(w.h + 1)}:00</td><td class="st-cell"><span class="sb {s}">{s}</span></td></tr>
+                    {/each}
+                  </tbody>
+                </table>
+              {:else}
+                <div class="side-empty">empty — not prefilled yet</div>
+              {/if}
+            </div>
+          {/if}
+        </div>
+
       </div>
     {/each}
   </div>
@@ -276,7 +350,7 @@
 </div>
 
 <style>
-  .wrap { max-width: 1040px; margin: 1.8rem auto; padding: 0 1rem; font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif; color: #c7d2e2; }
+  .wrap { max-width: 1140px; margin: 1.8rem auto; padding: 0 1rem; font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif; color: #c7d2e2; }
   header { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 0.55rem; }
   h1 { margin: 0; font-size: 1.5rem; font-weight: 700; color: #e8eef7; letter-spacing: -0.01em; }
   .accent { color: #e8833a; }
@@ -319,6 +393,35 @@
   .row.i2 .dot { margin-left: 0.9rem; }
   .ts { flex: none; color: #57647a; font-variant-numeric: tabular-nums; }
   .txt { color: #9aa6b8; }
+
+  /* model row: data table (left) · terminal (middle) · state table (right) */
+  .model-row { display: flex; gap: 0.6rem; align-items: stretch; }
+  .model-row .term { flex: 1 1 auto; min-width: 0; }
+  .side { flex: 0 0 auto; display: flex; flex-direction: column; background: #0b121d; border: 1px solid #1c2636; border-radius: 9px; overflow: hidden; }
+  .side.open { flex: 0 0 212px; }
+  .side-toggle { background: #0e1622; color: #9aa6b8; border: none; cursor: pointer; font-family: ui-monospace, Menlo, monospace; font-size: 0.72rem; font-weight: 700; padding: 0; }
+  .side:not(.open) .side-toggle { flex: 1; writing-mode: vertical-rl; text-orientation: mixed; padding: 0.6rem 0.4rem; letter-spacing: 0.02em; }
+  .side.open .side-toggle { border-bottom: 1px solid #1c2636; padding: 0.45rem 0.6rem; text-align: left; }
+  .side-toggle:hover { color: #d7e0ec; background: #14202f; }
+  .side-label.raw { color: #74bdf2; }
+  .side-label.clean { color: #b884f0; }
+  .side-body { padding: 0.45rem 0.55rem 0.6rem; overflow: auto; }
+  .side-name { font-family: ui-monospace, Menlo, monospace; font-size: 0.63rem; color: #6b7891; margin-bottom: 0.4rem; word-break: break-all; }
+  .side-name.raw { color: #74bdf2; }
+  .side-name.clean { color: #b884f0; }
+  .side-empty { font-size: 0.65rem; color: #6b7891; font-style: italic; padding: 0.4rem 0; }
+  .dt, .st-table { width: 100%; border-collapse: collapse; font-family: ui-monospace, Menlo, monospace; font-size: 0.65rem; }
+  .dt td, .st-table td { padding: 0.12rem 0.2rem; }
+  .dt-win, .st-win { color: #8b97a8; white-space: nowrap; }
+  .dt-rows { text-align: right; color: #cbd5e6; font-variant-numeric: tabular-nums; }
+  .dt-total td { border-top: 1px solid #1c2636; padding-top: 0.25rem; color: #9aa6b8; }
+  .st-cell { text-align: right; }
+  .sb { display: inline-block; padding: 0.03rem 0.4rem; border-radius: 4px; font-size: 0.62rem; font-weight: 700; }
+  .sb.pending { background: #2f3a4d; color: #aeb9ca; }
+  .sb.running { background: #f0a55c; color: #2a1707; }
+  .sb.applied { background: #54c187; color: #062012; }
+  .sb.blocked { background: #a78be6; color: #190b32; }
+  .sb.error   { background: #e26d68; color: #2c0605; }
 
   /* status palette — mini-map bars + the windows tally */
   .cell.pending { background: #38445a; color: #c2cdde; }
