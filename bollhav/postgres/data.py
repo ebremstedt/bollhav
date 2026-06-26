@@ -132,7 +132,7 @@ class PostgresData:
         from bollhav.postgres.columns import PostgresColumn
 
         target = self.model.target
-        elements = [
+        elements: list[sql.Composable] = [
             sql.SQL(_col_ddl(c))
             for c in target.columns
             if isinstance(c, PostgresColumn)
@@ -223,7 +223,7 @@ class PostgresData:
         table = self._staging_table_name(run_id)
         table_keyword = "TABLE" if self._staging_logged() else "UNLOGGED TABLE"
 
-        elements = [
+        elements: list[sql.Composable] = [
             sql.SQL(_col_ddl(col))
             for col in target.columns
             if isinstance(col, PostgresColumn)

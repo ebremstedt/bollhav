@@ -187,11 +187,10 @@ def model_lifecycle(func: Callable) -> Callable:
                     state_handler.torch_rows()
 
                 batching = model.batching
-                is_flexible = batching is not None and not batching.time.fixed_intervals
 
                 if run.window is None:
                     state_handler.insert_oneshot(run_id=run.run_id)
-                elif is_flexible:
+                elif batching is not None and not batching.time.fixed_intervals:
                     # Flexible (coverage) model: state is the set of covered
                     # ranges, the chunk is just how work is sliced. Invalidation
                     # is range-subtraction and work is the *gaps* in coverage, not
@@ -215,6 +214,9 @@ def model_lifecycle(func: Callable) -> Callable:
                         )
                     else:
                         horizon = run.window
+                    # begin set → a reload window; else the run window, which is
+                    # non-None in this branch (past the `run.window is None` arm).
+                    assert horizon is not None
                     units = tuple(
                         unit
                         for gap in state_handler.uncovered_gaps(
