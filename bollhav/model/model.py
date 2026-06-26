@@ -6,17 +6,7 @@ from datetime import datetime, timezone
 from uuid import uuid4
 
 from bollhav.model.target import Target
-from bollhav.model.messages.error import (
-    FrozenModelError,
-    GatedUpstreamWithoutStateError,
-    NotSqlAddressableError,
-    TimelessModelWithBatchingError,
-    TimelessModelWithContractWindowError,
-    UndeclaredInputError,
-    ViewWithBatchingError,
-    ViewWithRecreateOrTruncateError,
-    ViewWithStagingError,
-)
+from bollhav.model.errors import ModelDefinitionError
 from bollhav.model.contract import Contract
 from bollhav.model.batch import Batch
 from bollhav.model.temporality import Temporality
@@ -26,6 +16,125 @@ from bollhav.model.source import Source
 from bollhav.model.curfew import Curfew
 
 logger = logging.getLogger(__name__)
+
+
+# ── errors ──
+
+
+class TimelessModelWithBatchingError(ModelDefinitionError):
+    """A `temporality=TIMELESS` model declared `batching` — a timeless model
+    is one whole unit, not windowed, so it can't be batched."""
+
+    def __init__(self, name: str) -> None:
+        super().__init__(
+            f"model {name!r} is temporality=TIMELESS but has batching — a "
+            f"timeless model is one whole unit, not windowed. "
+            f"Drop `batching` (or pick temporality=TEMPORAL)."
+        )
+
+
+class TimelessModelWithContractWindowError(ModelDefinitionError):
+    """A `temporality=TIMELESS` model declared a `contract` begin/end — a
+    timeless model has no time axis to bound."""
+
+    def __init__(self, name: str) -> None:
+        super().__init__(
+            f"model {name!r} is temporality=TIMELESS but its contract has "
+            f"begin/end — a timeless model has no time axis to bound. "
+            f"Drop the contract window (or pick temporality=TEMPORAL)."
+        )
+
+
+class ViewWithBatchingError(ModelDefinitionError):
+    """A `view=True` model declared `batching` — a view isn't materialized
+    per-window (it's one CREATE VIEW), so it can't be batched."""
+
+    def __init__(self, name: str) -> None:
+        super().__init__(
+            f"model {name!r} is a view but has batching — a view isn't "
+            f"materialized per-window (it's one CREATE VIEW). Drop "
+            f"`batching`. A temporal view declares the range it covers "
+            f"via its Contract begin/end instead."
+        )
+
+
+class ViewWithStagingError(ModelDefinitionError):
+    """A `view=True` model declared `staging` — a view has nothing to
+    stage."""
+
+    def __init__(self, name: str) -> None:
+        super().__init__(
+            f"model {name!r} is a view but has staging — a view has "
+            f"nothing to stage. Drop `staging`."
+        )
+
+
+class ViewWithRecreateOrTruncateError(ModelDefinitionError):
+    """A `view=True` model set `recreate_table` / `truncate_table` — those are
+    materialized-table operations that don't apply to views."""
+
+    def __init__(self, name: str) -> None:
+        super().__init__(
+            f"model {name!r} is a view — recreate_table / "
+            f"truncate_table don't apply to views."
+        )
+
+
+class GatedUpstreamWithoutStateError(ModelDefinitionError):
+    """A model declared a gated upstream (a `Source` with a contract) but has
+    no `state` — contracts are only checked for state-tracked models, so a
+    gated upstream without state would silently never enforce."""
+
+    def __init__(self, name: str) -> None:
+        super().__init__(
+            f"model {name!r} declares a gated upstream (a Source "
+            f"with a contract) but has no state — contracts are only checked "
+            f"for state-tracked models. Add state=State(...), or drop the "
+            f"contract."
+        )
+
+
+class FrozenModelError(AttributeError):
+    """A frozen `Model` (an immutable definition) was mutated after
+    construction. Per-run state belongs on a `ModelRun`, and pipe/tag
+    overrides build a new `Model` via `runtime.apply_runtime_overrides`.
+    `attr` names the attribute that was being set.
+
+    Subclasses `AttributeError` so existing `except AttributeError` handlers
+    keep catching it unchanged."""
+
+    def __init__(self, attr: str) -> None:
+        super().__init__(
+            f"Model is frozen (an immutable definition); cannot set {attr!r}. "
+            f"Per-run state belongs on a ModelRun, and pipe/tag overrides "
+            f"build a new Model via runtime.apply_runtime_overrides."
+        )
+
+
+class UndeclaredInputError(ModelDefinitionError):
+    """`ref(name)` was called for a name that isn't a declared input of the
+    model — it must be added to `upstream=[...]` before it can be referenced.
+    `declared` lists the inputs that are declared."""
+
+    def __init__(self, name: str, full_name: str, declared) -> None:
+        super().__init__(
+            f"{name!r} is not a declared input of "
+            f"{full_name!r} — add it to upstream=[...] before "
+            f"referencing it with ref() (declared: {declared or 'none'})"
+        )
+
+
+class NotSqlAddressableError(ModelDefinitionError):
+    """`ref(name)` was called for an input that isn't SQL-addressable (a file
+    / api / hardcoded source), so it can't go in a `FROM`. `kind` is the
+    input's kind; read it in the read function instead."""
+
+    def __init__(self, name: str, kind: str) -> None:
+        super().__init__(
+            f"input {name!r} is a {kind} — not SQL-addressable, so it "
+            f"can't go in a FROM. Read it in your read function instead; "
+            f"ref() is only for SourceModel inputs."
+        )
 
 
 class Model:

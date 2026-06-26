@@ -7,8 +7,6 @@ from uuid import UUID
 import psycopg
 from psycopg import sql
 
-from bollhav.postgres.messages.error import CreateIndexesWithoutPartitionError
-
 if TYPE_CHECKING:
     import polars as pl
 
@@ -17,6 +15,19 @@ if TYPE_CHECKING:
     from bollhav.model.model import Model
 
 logger = logging.getLogger(__name__)
+
+
+# ── errors ──
+class CreateIndexesWithoutPartitionError(RuntimeError):
+    """`create_indexes` ran for a target with `partitioned_by` None — there's no
+    column to index. Signals a missing guard at the call site (a misuse/bug),
+    so it's a `RuntimeError`, not a config `ValueError`."""
+
+    def __init__(self, full_name: str) -> None:
+        super().__init__(
+            f"create_indexes ran for {full_name!r} but partitioned_by "
+            f"is None — guard the call on `target.partitioned_by is not None`"
+        )
 
 
 def _col_ddl(col: "DatabaseColumn") -> LiteralString:

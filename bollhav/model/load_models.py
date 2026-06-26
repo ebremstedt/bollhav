@@ -17,15 +17,7 @@ from roskarl import (
 
 from bollhav.model.runtime import apply_runtime_overrides
 from bollhav.model.modelrun import ModelRun
-from bollhav.model.messages.error import (
-    ConflictingRunModeError,
-    InvalidStateModeError,
-    InvalidTimezoneError,
-    MissingSchemaSuffixError,
-    MissingTableSuffixError,
-    NegativeLookbackError,
-    WindowOverrideWithoutLatestError,
-)
+from bollhav.model.errors import RuntimeConfigError
 from bollhav.model.window import compute_intervals
 from bollhav.model.progress_bar import get_progress_level, PROGRESS, ProgressLevel
 from bollhav.model.state import StateMode
@@ -33,6 +25,69 @@ from bollhav.model.state import StateMode
 import logging
 
 logger = logging.getLogger(__name__)
+
+
+# ── errors ──
+
+
+class ConflictingRunModeError(RuntimeConfigError):
+    """`LATEST_ENABLED` and `BACKFILL_ENABLED` were both set — they pick
+    mutually exclusive run modes, so exactly one (or neither) may be true."""
+
+    def __init__(self) -> None:
+        super().__init__("LATEST_ENABLED and BACKFILL_ENABLED cannot both be true")
+
+
+class MissingSchemaSuffixError(RuntimeConfigError):
+    """`USE_SCHEMA_SUFFIX=True` was set without a non-empty `SCHEMA_SUFFIX` to
+    apply, so there's nothing to suffix the schema with."""
+
+    def __init__(self) -> None:
+        super().__init__("USE_SCHEMA_SUFFIX=True requires non-empty SCHEMA_SUFFIX")
+
+
+class MissingTableSuffixError(RuntimeConfigError):
+    """`USE_TABLE_SUFFIX=True` was set without a non-empty `TABLE_SUFFIX` to
+    apply, so there's nothing to suffix the table with."""
+
+    def __init__(self) -> None:
+        super().__init__("USE_TABLE_SUFFIX=True requires non-empty TABLE_SUFFIX")
+
+
+class WindowOverrideWithoutLatestError(RuntimeConfigError):
+    """`WINDOW_OVERRIDE` was set outside `LATEST_ENABLED` mode. It only adjusts
+    the inferred latest-window; in backfill mode since/until are explicit and
+    no window is inferred, so the override has nothing to act on."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "WINDOW_OVERRIDE only applies when LATEST_ENABLED=True — "
+            "in backfill mode since/until are set explicitly and no window is inferred"
+        )
+
+
+class NegativeLookbackError(RuntimeConfigError):
+    """`LOOKBACK_OVERRIDE` was given a negative value — a lookback extends the
+    window backwards by a non-negative amount, so negatives are meaningless."""
+
+    def __init__(self, value: int) -> None:
+        super().__init__(f"LOOKBACK_OVERRIDE must be non-negative, got {value}")
+
+
+class InvalidStateModeError(RuntimeConfigError):
+    """`STATE_MODE` was set to a value outside the known modes
+    (`discover` / `bulldozer` / `torch`)."""
+
+    def __init__(self, value: str, valid: list[str]) -> None:
+        super().__init__(f"STATE_MODE must be one of {valid}, got {value!r}")
+
+
+class InvalidTimezoneError(RuntimeConfigError):
+    """`TIMEZONE_OVERRIDE` was not a valid IANA timezone name (e.g.
+    `Europe/Stockholm`), so it can't be resolved to a zone."""
+
+    def __init__(self, value: str) -> None:
+        super().__init__(f"TIMEZONE_OVERRIDE is not a valid IANA timezone: {value!r}")
 
 
 @dataclass

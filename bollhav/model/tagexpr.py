@@ -1,7 +1,19 @@
 import re
 from dataclasses import dataclass
 
-from bollhav.model.messages.error import InvalidTagExpressionError
+from bollhav.model.errors import ModelDiscoveryError
+
+
+# ── errors ──
+
+
+class InvalidTagExpressionError(ModelDiscoveryError):
+    """A tag expression didn't contain any `[group]` — the parser found no
+    bracketed groups, so the expression is malformed. `expr` is the bad
+    expression."""
+
+    def __init__(self, expr: str) -> None:
+        super().__init__(f"Invalid tag expression: {expr!r}. Must use [group] syntax.")
 
 
 @dataclass

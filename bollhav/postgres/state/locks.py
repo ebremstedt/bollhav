@@ -2,10 +2,25 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from bollhav.postgres.errors import PostgresError
+
 from ._base import _PostgresStateBase
 
 if TYPE_CHECKING:
     from bollhav.model.intervals import TZInterval
+
+
+# ── errors ──
+class StateActivationRequiredError(PostgresError):
+    """A state-only operation (e.g. `acquire_model_lock`) was called on a model
+    with no `state=State(...)`. The lifecycle only invokes these on stateful
+    models, so reaching here is a wiring bug in the caller."""
+
+    def __init__(self, full_name: str) -> None:
+        super().__init__(
+            f"acquire_model_lock requires a state-activated model, but "
+            f"{full_name!r} has model.state is None"
+        )
 
 
 class Locks(_PostgresStateBase):
@@ -69,8 +84,6 @@ class Locks(_PostgresStateBase):
         lifecycle hook guards the call on `model.stateful`."""
         state = self.model.state
         if state is None:
-            from bollhav.postgres.messages.error import StateActivationRequiredError
-
             raise StateActivationRequiredError(self.model.target.full_name)
         if state.allow_concurrent_runs:
             return False

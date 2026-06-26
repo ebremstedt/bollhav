@@ -2,8 +2,26 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from bollhav.model.messages.error import StagingWriteModeError
+from bollhav.model.errors import ModelDefinitionError
 from bollhav.model.write_modes import WriteMode
+
+
+# ── errors ──
+
+
+class StagingWriteModeError(ModelDefinitionError):
+    """A `Staging.write_mode` was set to something other than `APPEND` or
+    `UPSERT_NO_DELETE`. `RECREATE_PARTITION` / `VIEW` are target-side
+    concepts that don't apply to chunks landing in a staging table."""
+
+    def __init__(self, write_mode) -> None:
+        super().__init__(
+            f"Staging.write_mode must be WriteMode.APPEND or "
+            f"WriteMode.UPSERT_NO_DELETE — got "
+            f"{write_mode!r}. RECREATE_PARTITION and VIEW are "
+            f"target-side concepts that don't apply to chunks landing "
+            f"in a staging table."
+        )
 
 
 @dataclass

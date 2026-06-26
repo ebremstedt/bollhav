@@ -3,11 +3,25 @@ from dataclasses import dataclass, field
 from datetime import timezone, tzinfo
 from roskarl import IntervalExpression, IntervalExpressionExtended
 
-from bollhav.model.messages.error import BatchSizeExceedsMaxError
+from bollhav.model.errors import ModelDefinitionError
 
 logger = logging.getLogger(__name__)
 
 MAX_BATCH_SIZE = 100000
+
+
+# ── errors ──
+
+
+class BatchSizeExceedsMaxError(ModelDefinitionError):
+    """A `Batch.size` (or another batch size) exceeded the hard cap
+    `MAX_BATCH_SIZE`. `source` names where the value came from for the
+    message (e.g. `Batch.size`)."""
+
+    def __init__(self, source: str, batch_size: int, max_batch_size: int) -> None:
+        super().__init__(
+            f"{source} batch_size={batch_size} exceeds max {max_batch_size}"
+        )
 
 
 def validate_batch_size(batch_size: int, source: str) -> None:

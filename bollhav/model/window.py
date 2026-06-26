@@ -20,17 +20,53 @@ from typing import TYPE_CHECKING
 
 from icron import croniter
 from bollhav.model.intervals import TZInterval
-from bollhav.model.messages.error import (
-    BackfillRequiresSinceError,
-    CronSeedingInvariantError,
-    ReloadRequiresContractBeginError,
-)
+from bollhav.model.errors import ModelDefinitionError
 from roskarl.cron import INTERVAL_EXPRESSION_SHORTCUTS
 
 if TYPE_CHECKING:
     from bollhav.model.batch import Batch
     from bollhav.model.contract import Contract
     from bollhav.model.modelrun import ModelRun
+
+
+# ── errors ──
+
+
+class CronSeedingInvariantError(RuntimeError):
+    """The cron iterator returned a tick `>= now` within its first two steps,
+    violating the seeding invariant that at least two ticks precede `now`.
+    Signals an internal bug in window resolution, not bad config. `cron` is
+    the resolved cron expression.
+
+    Subclasses `RuntimeError` directly (not `ValueError`) so it keeps its
+    original catch semantics."""
+
+    def __init__(self, cron: str) -> None:
+        super().__init__(
+            f"cron seeding invariant violated for {cron!r}: the iterator "
+            f"returned a tick >= now within the first two steps"
+        )
+
+
+class ReloadRequiresContractBeginError(ModelDefinitionError):
+    """A `reload` window was requested but `contract.begin` isn't set — reload
+    spans `contract.begin` .. (`contract.end` or latest tick), so a begin is
+    required. `name` is the model name."""
+
+    def __init__(self, name: str) -> None:
+        super().__init__(f"reload requires contract.begin to be set on model {name!r}")
+
+
+class BackfillRequiresSinceError(ModelDefinitionError):
+    """A backfill window was requested with no `since` — backfill needs an
+    explicit start. Set `contract.begin` on the model or pass `--since` at
+    runtime. `name` is the model name."""
+
+    def __init__(self, name: str) -> None:
+        super().__init__(
+            f"backfill requires a since value — set contract.begin on model "
+            f"{name!r} or pass --since at runtime"
+        )
 
 _CRON_ALIASES = INTERVAL_EXPRESSION_SHORTCUTS
 

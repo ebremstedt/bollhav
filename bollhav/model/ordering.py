@@ -3,10 +3,22 @@ from __future__ import annotations
 from collections import deque
 from typing import TYPE_CHECKING
 
-from bollhav.model.messages.error import CircularDependencyError
+from bollhav.model.errors import ModelDiscoveryError
 
 if TYPE_CHECKING:
     from bollhav.model.model import Model
+
+
+# ── errors ──
+
+
+class CircularDependencyError(ModelDiscoveryError):
+    """The model set has a dependency cycle — topological sort couldn't order
+    every model because some still depend on each other. `remaining` is the
+    set of models left unordered."""
+
+    def __init__(self, remaining) -> None:
+        super().__init__(f"Circular dependency detected among: {remaining}")
 
 
 def topological_sort(results: list[Model]) -> list[Model]:

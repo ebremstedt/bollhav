@@ -8,13 +8,7 @@ from datetime import datetime, timezone
 from functools import wraps
 from typing import Callable
 
-from bollhav.model.messages.error import (
-    MissingDataConnError,
-    MissingRunError,
-    MssqlStateRequiresPostgresConnError,
-    RecreatePartitionWithoutIntervalError,
-    RecreatePartitionWithoutWindowError,
-)
+from bollhav.model.errors import LifecycleError, RuntimeConfigError
 from bollhav.model.progress_bar import PROGRESS
 from bollhav.model.state_dry_plan import _fmt_window, _print_state_plan
 from bollhav.model.window import (
@@ -26,6 +20,75 @@ from bollhav.model.window import (
 from bollhav.model.write_modes import WriteMode
 
 logger = logging.getLogger(__name__)
+
+
+# ── errors ──
+
+
+class MissingRunError(LifecycleError):
+    """A lifecycle hook ran without a `run`. The wrapper needs the `ModelRun`
+    to resolve the model, window, and state, so a missing run is a wiring bug
+    in the caller, not a user config error. `hook` names the entry point for
+    the message (e.g. `execute`, `@model_lifecycle`)."""
+
+    def __init__(self, hook: str = "execute") -> None:
+        super().__init__(
+            f"{hook} was called without a `run` — it's required "
+            f"(the lifecycle hook brackets one model's run)."
+        )
+
+
+class MissingDataConnError(LifecycleError):
+    """A lifecycle-wrapped function was called with no `data_conn`. It's the
+    required connection for target DDL and writes — open it in `main()`
+    (autocommit) and thread it through to the wrapped function."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "data_conn is required and must not be None — open it in "
+            "main() (autocommit) and pass it to the lifecycle-wrapped function."
+        )
+
+
+class MssqlStateRequiresPostgresConnError(LifecycleError):
+    """A stateful MSSQL model was given one connection for both data and state.
+    State always lives in Postgres, so it needs its own Postgres `state_conn`
+    (psycopg) passed alongside the MSSQL `data_conn` (pyodbc) — state
+    coordination can't run on the MSSQL connection."""
+
+    def __init__(self, full_name: str) -> None:
+        super().__init__(
+            f"{full_name!r} is an MSSQL model with state, so state lives in "
+            f"Postgres — pass a separate Postgres `state_conn=` (psycopg) "
+            f"alongside the MSSQL `data_conn=` (pyodbc). State coordination "
+            f"can't run on the MSSQL connection."
+        )
+
+
+class RecreatePartitionWithoutWindowError(RuntimeConfigError):
+    """A `RECREATE_PARTITION` model's run resolved no window at all, so there's
+    no partition to recreate. Raised during state setup (before execution),
+    when the run mode produced no since/until. Run it windowed instead."""
+
+    def __init__(self, full_name: str) -> None:
+        super().__init__(
+            f"{full_name!r} uses WriteMode.RECREATE_PARTITION, which is "
+            f"window-scoped, but this run resolved no window — run it windowed "
+            f"(LATEST_ENABLED or a BACKFILL window)."
+        )
+
+
+class RecreatePartitionWithoutIntervalError(RuntimeConfigError):
+    """A `RECREATE_PARTITION` model reached execution with no interval — the
+    per-unit counterpart of `RecreatePartitionWithoutWindowError`. The write
+    targets a specific partition, so a NULL interval has nothing to recreate.
+    Run it windowed instead."""
+
+    def __init__(self, full_name: str) -> None:
+        super().__init__(
+            f"RECREATE_PARTITION is window-scoped, but {full_name!r} ran with "
+            f"no interval — run it windowed (LATEST_ENABLED or a BACKFILL window)."
+        )
 
 
 def _truthy(name: str) -> bool:

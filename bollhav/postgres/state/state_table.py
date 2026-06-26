@@ -8,14 +8,7 @@ from uuid import UUID
 
 from psycopg import sql
 
-from bollhav.postgres.messages.error import (
-    StateHashCollisionError,
-    PrefillRequiresStateError,
-    OneshotRequiresStateError,
-    InvalidPrefillStatusError,
-    BlockedRowRequiresReasonError,
-    ClearStateRefusedError,
-)
+from bollhav.postgres.errors import PostgresError
 
 from ._base import _PostgresStateBase
 from ._naming import _name_digest
@@ -34,6 +27,76 @@ if TYPE_CHECKING:
     from bollhav.model.intervals import TZInterval
 
 logger = logging.getLogger(__name__)
+
+
+# ── errors ──
+class StateHashCollisionError(PostgresError):
+    """The ~1e-12 case where two different models hash to the same state table.
+    The table already holds rows for a different model, so sharing it would
+    corrupt state — rename a model or widen the digest instead."""
+
+    def __init__(self, schema: str, state_table: str, existing, full_name: str) -> None:
+        super().__init__(
+            f"state hash collision: {schema}.{state_table} already holds "
+            f"state for {existing!r}, not {full_name!r}. "
+            f"Rename one model or widen the digest in state_table_name."
+        )
+
+
+class PrefillRequiresStateError(PostgresError):
+    """`prefill_intervals` was called on a model with no `state`. There's no
+    state table to prefill, so the model must be state-enabled."""
+
+    def __init__(self, full_name: str) -> None:
+        super().__init__(
+            "prefill_intervals requires a state-enabled model "
+            f"({full_name!r} has no `state`)"
+        )
+
+
+class OneshotRequiresStateError(PostgresError):
+    """`insert_oneshot` was called on a model with no `state`. There's no state
+    table to write the oneshot row to, so the model must be state-enabled."""
+
+    def __init__(self, full_name: str) -> None:
+        super().__init__(
+            "insert_oneshot requires a state-enabled model "
+            f"({full_name!r} has no `state`)"
+        )
+
+
+class InvalidPrefillStatusError(PostgresError):
+    """A prefill row carried a status other than `pending` or `blocked` — the
+    only two statuses a prefill may set."""
+
+    def __init__(self, status) -> None:
+        super().__init__(
+            f"prefill status must be 'pending' or 'blocked', got {status!r}"
+        )
+
+
+class BlockedRowRequiresReasonError(PostgresError):
+    """A prefill row marked `blocked` carried no `blocked_reason`. A blocked row
+    must say why it's blocked, so the reason is required."""
+
+    def __init__(self) -> None:
+        super().__init__("blocked rows require a non-empty blocked_reason")
+
+
+class ClearStateRefusedError(PostgresError):
+    """`clear_state` refuses to run on a model with no schema suffix — its state
+    lives in prod (`z_bollhav`), and clearing prod state isn't offered. Set a
+    schema suffix for an ephemeral environment, or delete rows by hand."""
+
+    def __init__(self, full_name: str, library_schema: str) -> None:
+        super().__init__(
+            f"clear_state refuses to run on {full_name!r}: "
+            f"it has no schema suffix, so its state lives in prod "
+            f"({library_schema}). Clearing prod state isn't offered — set "
+            f"SCHEMA_SUFFIX for an ephemeral environment, or delete the rows "
+            f"by hand if you truly must."
+        )
+
 
 # `findall` returns every (name, kind) so the banner lists all the missing
 # upstreams, not just the first. `kind` is optional for older reasons.

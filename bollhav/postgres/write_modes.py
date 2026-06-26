@@ -12,15 +12,52 @@ from bollhav.postgres.modes import (
     upsert_no_delete,
     append,
 )
-from bollhav.postgres.messages.error import (
-    RecreatePartitionRequiresWindowError,
-    UnhandledWriteModeError,
-    WriteOnViewError,
-    MissingDataFrameError,
-)
+from bollhav.postgres.errors import PostgresError
 from bollhav.postgres.data import PostgresData
 
 logger = logging.getLogger(__name__)
+
+
+# ── errors ──
+class RecreatePartitionRequiresWindowError(PostgresError):
+    """A `RECREATE_PARTITION` write was dispatched with no since/until — the
+    mode overwrites a specific window, so it needs one. Run the model windowed."""
+
+    def __init__(self) -> None:
+        super().__init__("Since and until must be set for RECREATE_PARTITION")
+
+
+class UnhandledWriteModeError(PostgresError):
+    """The model's `write_mode` fell through every handled case in the write
+    dispatch — an unknown/unsupported table write mode."""
+
+    def __init__(self, write_mode) -> None:
+        super().__init__(f"Unhandled write mode: {write_mode}")
+
+
+class WriteOnViewError(PostgresError):
+    """`write()` was called for a VIEW model. Views carry no data to write —
+    they're created by `@model_lifecycle`, so a view's execute body has nothing
+    to write."""
+
+    def __init__(self, full_name: str) -> None:
+        super().__init__(
+            f"write() is for data, not views — {full_name!r} is "
+            f"a VIEW. Views are created by @model_lifecycle "
+            f"(PostgresData.create_or_replace_view); a view's execute body "
+            f"has nothing to write."
+        )
+
+
+class MissingDataFrameError(PostgresError):
+    """A table write mode (APPEND / RECREATE_PARTITION / UPSERT_NO_DELETE) was
+    invoked with no DataFrame generator — those modes have nothing to write
+    without one."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "Modes APPEND, RECREATE_PARTITION, UPSERT_NO_DELETE need a dataframe"
+        )
 
 
 def write_dataframes(

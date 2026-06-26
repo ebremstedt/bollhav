@@ -12,18 +12,58 @@ from psycopg import sql
 
 from bollhav.model.staging import Staging
 from bollhav.model.write_modes import WriteMode
-from bollhav.postgres.messages.error import (
-    UnsupportedStagingWriteModeError,
-    RecreatePartitionRequiresAwareWindowError,
-    RecreatePartitionRequiresPartitionedByError,
-    StagedRecreatePartitionRequiresWindowError,
-    UnsupportedTargetWriteModeError,
-)
+from bollhav.postgres.errors import PostgresError
 
 if TYPE_CHECKING:
     from bollhav.model.model import Model
 
 logger = logging.getLogger(__name__)
+
+
+# ── errors ──
+class UnsupportedStagingWriteModeError(NotImplementedError):
+    """The staging write path hit a write mode it doesn't support (guarded
+    upstream by `Staging.__post_init__`). Subclasses `NotImplementedError` so
+    its catch-semantics are preserved."""
+
+    def __init__(self, wm) -> None:
+        super().__init__(f"unsupported staging.write_mode {wm!r}")
+
+
+class RecreatePartitionRequiresAwareWindowError(PostgresError):
+    """A staged `RECREATE_PARTITION` apply got a naive since/until. The DELETE
+    window must be an unambiguous instant, so both bounds must be UTC-aware."""
+
+    def __init__(self) -> None:
+        super().__init__("RECREATE_PARTITION requires since/until to be UTC-aware")
+
+
+class RecreatePartitionRequiresPartitionedByError(PostgresError):
+    """A staged `RECREATE_PARTITION` apply ran on a target with no
+    `partitioned_by` — there's no column to scope the window DELETE/INSERT to."""
+
+    def __init__(self) -> None:
+        super().__init__("RECREATE_PARTITION requires target.partitioned_by to be set")
+
+
+class StagedRecreatePartitionRequiresWindowError(PostgresError):
+    """A staged `RECREATE_PARTITION` apply was reached with no since/until — the
+    mode overwrites a specific window, so it needs one. Run the model windowed."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "RECREATE_PARTITION requires a window (since/until) — "
+            "run the model windowed."
+        )
+
+
+class UnsupportedTargetWriteModeError(NotImplementedError):
+    """The staging→target apply hit a target write mode it doesn't support
+    (guarded upstream by `_assert_supported`). Subclasses `NotImplementedError`
+    so its catch-semantics are preserved."""
+
+    def __init__(self, wm) -> None:
+        super().__init__(f"unsupported target.write_mode {wm!r}")
 
 
 @dataclass
