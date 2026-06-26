@@ -34,6 +34,7 @@ class Model:
         debug: bool = False,
         description: str | None = None,
         upstream: list[Source] | None = None,
+        query: str | None = None,
         **kwargs,
     ):
         self.target = target
@@ -46,6 +47,7 @@ class Model:
         self.enabled = enabled
         self.debug = debug
         self.description = description
+        self.query = query
         self.upstream: list[Source] = upstream or [_unknown_source()]
         # keep the tagging config so registration can add the schema-suffix
         # tags (env-specific) per `suffix_add_to_tags`; default when unset.

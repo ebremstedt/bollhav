@@ -14,6 +14,7 @@ from bollhav.postgres.data import PostgresData  # noqa: E402
 from bollhav.postgres.schema import _col_ddl, ensure_schema  # noqa: E402
 from bollhav.postgres.modes import (  # noqa: E402
     append,
+    create_replace_view,
     recreate_partition,
     upsert_no_delete,
 )
@@ -53,13 +54,12 @@ def _col(
 def _model(
     write_mode: WriteMode = WriteMode.APPEND,
     columns: list[PostgresColumn] | None = None,
-    source_query: str | None = None,
     recreate_table: bool = False,
     truncate_table: bool = False,
 ) -> Model:
     cols = columns or [_col("id"), _col("val")]
     return Model(
-        upstream=[Source("src", type=SourceModel(query=source_query))],
+        upstream=[Source("src", type=SourceModel())],
         target=Target(
             name="test_table",
             schema="test_schema",
@@ -294,3 +294,44 @@ class TestUpdateInsert:
         conn.cursor.return_value.copy.return_value = copy_mock
         upsert_no_delete(conn=conn, model=model, df=df)
         assert conn.transaction.call_count == 1
+
+
+class TestCreateReplaceView:
+    def _view_model(self, query: str | None = None, suffix: str = "") -> Model:
+        return Model(
+            query=query,
+            upstream=[Source("src", type=SourceModel())],
+            target=Target(
+                name="test_view",
+                schema="test_schema",
+                catalog="cat",
+                database=Database.POSTGRES,
+                columns=[_col("id"), _col("val")],
+                suffix=suffix,
+            ),
+            temporality=Temporality.TIMELESS,
+        )
+
+    def test_creates_view_when_query_set(self) -> None:
+        conn = _conn()
+        create_replace_view(conn=conn, model=self._view_model(query="SELECT 1"))
+        statements = [str(call.args[0]) for call in conn.execute.call_args_list]
+        assert any("SELECT 1" in s for s in statements)
+
+    def test_runs_inside_transaction(self) -> None:
+        conn = _conn()
+        create_replace_view(conn=conn, model=self._view_model(query="SELECT 1"))
+        assert conn.transaction.call_count == 1
+
+    def test_raises_value_error_when_query_is_none(self) -> None:
+        conn = _conn()
+        with pytest.raises(ValueError, match="query="):
+            create_replace_view(conn=conn, model=self._view_model(query=None))
+
+    def test_uses_name_resolved_not_name(self) -> None:
+        conn = _conn()
+        model = self._view_model(query="SELECT 1", suffix="dev")
+        assert model.target.name_resolved == "test_view_dev"
+        create_replace_view(conn=conn, model=model)
+        statements = [str(call.args[0]) for call in conn.execute.call_args_list]
+        assert any("test_view_dev" in s for s in statements)

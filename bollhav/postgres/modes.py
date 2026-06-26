@@ -138,30 +138,17 @@ def create_replace_view(
     conn: psycopg.Connection,
     model: Model,
 ) -> None:
-    from bollhav.model.source import SourceModel
-
-    src = next(
-        (
-            s
-            for s in model.upstream
-            if isinstance(s.type, SourceModel) and s.type.query is not None
-        ),
-        None,
-    )
-    source = src.type if src is not None else None
-    if not isinstance(source, SourceModel) or source.query is None:
+    if model.query is None:
         raise ValueError(
-            f"create_replace_view requires a Source with a SourceModel type "
-            f"whose .query is set, in upstream=[...] on "
-            f"{model.target.full_name!r}"
+            f"create_replace_view requires query= to be set on the Model, "
+            f"got None for {model.target.full_name!r}"
         )
-
     with conn.transaction():
         ensure_schema(conn, model.target.schema_resolved)
         conn.execute(
             sql.SQL("CREATE OR REPLACE VIEW {schema}.{view} AS {query}").format(
                 schema=sql.Identifier(model.target.schema_resolved),
-                view=sql.Identifier(model.target.name),
-                query=sql.SQL(cast(LiteralString, source.query)),
+                view=sql.Identifier(model.target.name_resolved),
+                query=sql.SQL(cast(LiteralString, model.query)),
             )
         )

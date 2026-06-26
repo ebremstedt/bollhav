@@ -210,28 +210,14 @@ def append(
 
 def create_replace_view(conn: pyodbc.Connection, model: Model) -> None:
     """Create or alter a view using the query defined on its SourceModel."""
-    from bollhav.model.source import SourceModel
-
-    src = next(
-        (
-            s
-            for s in model.upstream
-            if isinstance(s.type, SourceModel) and s.type.query is not None
-        ),
-        None,
-    )
-    if src is None:
+    if model.query is None:
         raise ValueError(
-            f"create_replace_view requires a Source with a SourceModel type "
-            f"whose .query is set, in upstream=[...] on "
-            f"{model.target.full_name!r}"
+            f"create_replace_view requires query= to be set on the Model, "
+            f"got None for {model.target.full_name!r}"
         )
     schema = model.target.schema_resolved
-    view = model.target.name
-    # The filter above guarantees this, but it doesn't narrow `src.type`.
-    assert isinstance(src.type, SourceModel) and src.type.query is not None
-    query = cast(LiteralString, src.type.query)
-
+    view = model.target.name_resolved
+    query = cast(LiteralString, model.query)
     cursor = conn.cursor()
     cursor.execute(
         f"CREATE OR ALTER VIEW {_bracket_quote(schema)}.{_bracket_quote(view)} AS {query}"

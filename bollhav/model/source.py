@@ -14,7 +14,6 @@ class SourceModel:
     schema: str | None = None
     catalog: str | None = None
     dsn_env_var: str | None = None
-    query: str | None = None
     partitioned_by: str | None = None
     infer_schema_length: int | None = None
     """Passed to polars as infer_schema_length — the max rows to scan for
