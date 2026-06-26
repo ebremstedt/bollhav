@@ -78,7 +78,11 @@ Full reference: [State](STATE.md).
 
 ## STATE_MODE
 
-One of `discover` / `bulldozer`, default `discover`. Controls re-evaluation on rerun. `discover` preserves `applied` rows and re-evaluates the rest against current upstream state; `bulldozer` resets every row to the freshly-computed status (`applied_at` cleared too).
+One of `bulldozer` / `discover` / `torch`, default `bulldozer`. How much of the run's window a run invalidates before executing.
+
+- `bulldozer` (default) — reset the run window's rows to `pending` and rerun them; leave everything outside the window untouched.
+- `discover` — keep `applied` rows; run only the window's still-outstanding rows. With no window, reconcile *all* outstanding state.
+- `torch` — delete *all* state, then refill the contract; the window scopes what runs now, and the rest defers to a later `discover` run. Destructive — for a clean reload or a chunk-granularity change.
 
 ## TABLE_SUFFIX
 

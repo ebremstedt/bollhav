@@ -1,7 +1,7 @@
 # bollhav-tui
 
 A terminal UI for running and exploring [bollhav](../../README.md) models. Set
-the run environment in a form — backfill window, suffixes, state mode, overrides
+the run environment in a form — run window, suffixes, state mode, overrides
 — and fire a **dry run**, a **dry-state** run, or the **real** run, without
 remembering env-var names.
 
@@ -49,12 +49,16 @@ Below it, a collapsible **config menu** (left, ~27% — toggle with `ctrl+b`) an
 The config menu is grouped into sections:
 
 - **TAGS** — which models to run (`[model_a,model_b]`); empty = all discovered.
-- **WINDOW** — a `Mode` of **backfill** or **latest** (mutually exclusive).
-  - *backfill* shows **Backfill since / until** date pickers.
+- **WINDOW** — a `Mode` of **latest** (the default) or **backfill** (mutually exclusive).
   - *latest* shows the **Window expression** override.
+  - *backfill* shows **Since / Until** date pickers (`RUN_SINCE` / `RUN_UNTIL`,
+    both optional — empty runs the contract range).
 - **SUFFIX** — `SCHEMA` / `TABLE` on/off toggles, each with its suffix value.
 - **OVERRIDES** — `Interval expr`, `Lookback` (apply to both modes).
-- **STATE** — `Mode`: `discover` or `bulldozer` (`STATE_MODE`).
+- **STATE** — `Mode` (`STATE_MODE`): **bulldozer** (default — reset & rerun the
+  window), **discover** (run only what's still outstanding), or **torch** (wipe
+  *all* state; the window scopes what runs now, the rest defers to a later
+  discover run).
 - **DIAGNOSTICS** — `Debug`, and `Verbose dry output` (uses the `*_EXTRA`
   variants when you run a dry action).
 
