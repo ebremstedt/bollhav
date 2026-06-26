@@ -26,7 +26,7 @@ class EmptyTagsError(ValueError):
 class DuplicateModelError(ValueError):
     """Two model files declare the same `full_name` (catalog.schema.table).
     A model's full name must be unique across the scanned folder, since it
-    keys the target, the state rows, and the dependency graph"""
+    keys the target, the state rows, and the dependency graph."""
 
     def __init__(self, full_name: str, file, existing) -> None:
         super().__init__(
