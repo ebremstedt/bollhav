@@ -9,7 +9,8 @@ from bollhav.model.upstream import Freshness, UpstreamContract
 @dataclass
 class SourceModel:
     """Relational input — a managed model, an external table, or a view.
-    Carries the config to read it. Set `query` to define a view."""
+    Carries the config to read it. To define a view, set `query` on the
+    `Model` itself."""
 
     schema: str | None = None
     catalog: str | None = None

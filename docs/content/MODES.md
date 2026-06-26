@@ -145,7 +145,7 @@ flowchart LR
 
 ## Views
 
-A view is **not** a write mode — it's `view=True` on the model (timeless, or temporal with a `Contract` range it covers). It writes no data; the lifecycle runs `CREATE OR REPLACE VIEW` from the defining `SourceModel(query=…)` in `upstream`.
+A view is **not** a write mode — it's `view=True` on the model (timeless, or temporal with a `Contract` range it covers). It writes no data; the lifecycle runs `CREATE OR REPLACE VIEW` from `model.query`.
 
 ```mermaid
 flowchart LR

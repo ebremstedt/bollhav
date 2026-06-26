@@ -28,7 +28,7 @@ The one case where `state` becomes **required** is gating: a `Source` that carri
 
 ## View vs table
 
-Materialization is a **separate** flag from the time axis. By default a model produces a materialized table; `view=True` makes it a SQL view (`CREATE OR REPLACE VIEW` from its defining `SourceModel(query=…)`).
+Materialization is a **separate** flag from the time axis. By default a model produces a materialized table; `view=True` makes it a SQL view (`CREATE OR REPLACE VIEW` from `model.query`).
 
 ```python
 Model(temporality=Temporality.TEMPORAL, batching=Batch(...), ...)  # a windowed table

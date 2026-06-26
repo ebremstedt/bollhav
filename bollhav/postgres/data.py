@@ -107,10 +107,9 @@ class PostgresData:
         )
 
     def create_or_replace_view(self) -> None:
-        """`CREATE OR REPLACE VIEW` from the model's defining `SourceModel.query`
-        (the Source in `upstream` whose type carries a query) — the target-side
-        asset for a VIEW model. The lifecycle hook calls this instead of the
-        table DDL when `model.is_view`."""
+        """`CREATE OR REPLACE VIEW` from `model.query` — the target-side asset
+        for a VIEW model. The lifecycle hook calls this instead of the table
+        DDL when `model.is_view`."""
         from bollhav.postgres.modes import create_replace_view
 
         create_replace_view(conn=self.conn, model=self.model)

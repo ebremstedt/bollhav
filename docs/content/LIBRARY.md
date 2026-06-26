@@ -65,7 +65,8 @@ Model(target=Target(...), state=State(), batching=Batch(...))
 Model(
     target=Target(name="v_x", ...),
     temporality=Temporality.TIMELESS, view=True,
-    upstream=[Source("v_x", type=SourceModel(query="SELECT ..."))],
+    query="SELECT ...",
+    upstream=[Source("v_x", type=SourceModel())],
     library=True,
 )
 
