@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 class EmptyTagsError(ValueError):
     """`load_models` was called with no tag expression. Tags select which
     models to run, so a non-empty expression is required (use a catch-all
-    like `"*"` to match everything)."""
+    like `"*"` to match everything)"""
 
     def __init__(self) -> None:
         super().__init__("tags must be a non-empty expression.")

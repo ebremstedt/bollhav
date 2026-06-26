@@ -104,7 +104,11 @@ def _apply_to_model(
     # unrun remainder sits pending for a later discover run to drain). With no
     # explicit window a bare torch reloads the whole contract range — a clean
     # full reload; with a BACKFILL window it runs just that slice now.
-    if state_mode is StateMode.TORCH and backfill_since is None and backfill_until is None:
+    if (
+        state_mode is StateMode.TORCH
+        and backfill_since is None
+        and backfill_until is None
+    ):
         window = resolve_window(
             batching, model.contract, reload=True, name=model.target.full_name
         )

@@ -354,9 +354,7 @@ def _window_dt(
     if not backfill_enabled:
         return None
     if os.environ.get(name) is None and os.environ.get(legacy_name) is not None:
-        logger.warning(
-            "env var %s is deprecated — rename it to %s", legacy_name, name
-        )
+        logger.warning("env var %s is deprecated — rename it to %s", legacy_name, name)
         name = legacy_name
     dt = env_var_iso8601_datetime(name=name)
     return _apply_tz(dt, tz_override) if tz_override else dt

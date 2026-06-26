@@ -75,6 +75,7 @@ class HardcodedSqlWithoutConnError(ValueError):
             "(it runs the SQL); pass the data connection to to_dataframe()."
         )
 
+
 if TYPE_CHECKING:
     import polars as pl
 
