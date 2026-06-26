@@ -4,7 +4,6 @@ from typing import NamedTuple, TYPE_CHECKING
 
 import psycopg
 
-from bollhav.postgres.errors import PostgresError
 
 from ._naming import state_table_name
 from ._ddl import LIBRARY_SCHEMA
@@ -14,7 +13,7 @@ if TYPE_CHECKING:
 
 
 # ── errors ──
-class MissingStateConnError(PostgresError):
+class MissingStateConnError(ValueError):
     """`PostgresState` was used without an injected connection. It doesn't open
     its own — the caller owns it (opened in `main()`, threaded through the
     lifecycle hooks) — so a missing connection is a wiring error."""

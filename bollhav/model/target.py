@@ -4,7 +4,6 @@ from datetime import datetime, timezone
 from typing import Callable
 
 from bollhav.model.database import Database, DatabaseColumn, DatabaseIndex
-from bollhav.model.errors import ModelDefinitionError
 from bollhav.model.staging import Staging
 from bollhav.model.write_modes import WriteMode
 from bollhav.model.column_sorting import sort_columns
@@ -13,7 +12,7 @@ from bollhav.model.column_sorting import sort_columns
 # ── errors ──
 
 
-class RecreateAndTruncateError(ModelDefinitionError):
+class RecreateAndTruncateError(ValueError):
     """A `Target` set both `recreate_table` and `truncate_table` — recreate
     already leaves the table empty, so truncate is redundant and the two
     together are contradictory."""
@@ -25,7 +24,7 @@ class RecreateAndTruncateError(ModelDefinitionError):
         )
 
 
-class ColumnsWithoutDatabaseError(ModelDefinitionError):
+class ColumnsWithoutDatabaseError(ValueError):
     """A `Target` declared `columns` without a `database` — columns describe a
     database-backed table's schema, so the `database` must be set too."""
 
@@ -33,7 +32,7 @@ class ColumnsWithoutDatabaseError(ModelDefinitionError):
         super().__init__("database must be set when columns is provided")
 
 
-class DatabaseWithoutColumnsError(ModelDefinitionError):
+class DatabaseWithoutColumnsError(ValueError):
     """A `Target` set `database` without any `columns` — a database-backed
     table needs its column schema, so `columns` must be set too."""
 
@@ -41,7 +40,7 @@ class DatabaseWithoutColumnsError(ModelDefinitionError):
         super().__init__("columns must be set when database is provided")
 
 
-class MissingCatalogError(ModelDefinitionError):
+class MissingCatalogError(ValueError):
     """A database-backed `Target` left `catalog` unset. A model's identity is
     `catalog.schema.table`, so the catalog is required to keep names unique
     across databases in the shared library."""
@@ -55,7 +54,7 @@ class MissingCatalogError(ModelDefinitionError):
         )
 
 
-class MultiplePartitionColumnsError(ModelDefinitionError):
+class MultiplePartitionColumnsError(ValueError):
     """A `Target` marked more than one column `partition_on=True`. A table
     has a single partition key, so at most one column may carry it. `names`
     lists the offending columns."""
@@ -64,7 +63,7 @@ class MultiplePartitionColumnsError(ModelDefinitionError):
         super().__init__(f"At most one column can have partition_on=True, got: {names}")
 
 
-class UpsertWithoutKeyError(ModelDefinitionError):
+class UpsertWithoutKeyError(ValueError):
     """A `Target` uses `WriteMode.UPSERT_NO_DELETE` but no column is marked
     `primary_key=True` or `unique=True` — the upsert needs a merge key to
     join on."""
@@ -76,7 +75,7 @@ class UpsertWithoutKeyError(ModelDefinitionError):
         )
 
 
-class RecreatePartitionWithoutColumnError(ModelDefinitionError):
+class RecreatePartitionWithoutColumnError(ValueError):
     """A `Target` uses `WriteMode.RECREATE_PARTITION` but no column is marked
     `partition_on=True` — the write targets a specific partition, so it needs
     a partition column."""
@@ -87,7 +86,7 @@ class RecreatePartitionWithoutColumnError(ModelDefinitionError):
         )
 
 
-class UnknownIndexColumnError(ModelDefinitionError):
+class UnknownIndexColumnError(ValueError):
     """An index on a `Target` references column(s) that aren't declared on the
     table. `index_name` names the index; `unknown` lists the missing
     column(s)."""

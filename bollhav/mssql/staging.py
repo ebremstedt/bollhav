@@ -14,7 +14,6 @@ from bollhav.model.write_modes import WriteMode
 from bollhav.mssql.columns import MssqlColumn
 from bollhav.mssql.modes import _bulk_insert
 from bollhav.mssql.schema import _bracket_quote, _col_ddl
-from bollhav.mssql.errors import MssqlError
 
 if TYPE_CHECKING:
     from bollhav.model.model import Model
@@ -25,7 +24,7 @@ logger = logging.getLogger(__name__)
 # ── errors ──────────────────────────────────────────────────────────
 
 
-class RecreatePartitionRequiresTzAwareError(MssqlError):
+class RecreatePartitionRequiresTzAwareError(ValueError):
     """A `RECREATE_PARTITION` apply was given naive `since`/`until`. The
     partition window is matched in UTC, so both bounds must be UTC-aware."""
 
@@ -33,7 +32,7 @@ class RecreatePartitionRequiresTzAwareError(MssqlError):
         super().__init__("RECREATE_PARTITION requires since/until to be UTC-aware")
 
 
-class RecreatePartitionRequiresPartitionedByError(MssqlError):
+class RecreatePartitionRequiresPartitionedByError(ValueError):
     """A `RECREATE_PARTITION` apply ran on a target with no `partitioned_by`.
     The DELETE+INSERT keys on the partition column, so it must be set."""
 
@@ -41,7 +40,7 @@ class RecreatePartitionRequiresPartitionedByError(MssqlError):
         super().__init__("RECREATE_PARTITION requires target.partitioned_by to be set")
 
 
-class RecreatePartitionRequiresWindowError(MssqlError):
+class RecreatePartitionRequiresWindowError(ValueError):
     """A `RECREATE_PARTITION` apply resolved no window (since/until). The write
     targets a specific partition window, so the model must be run windowed."""
 

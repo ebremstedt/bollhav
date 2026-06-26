@@ -8,7 +8,6 @@ from uuid import UUID
 
 from psycopg import sql
 
-from bollhav.postgres.errors import PostgresError
 
 from ._base import _PostgresStateBase
 from ._naming import _name_digest
@@ -30,7 +29,7 @@ logger = logging.getLogger(__name__)
 
 
 # ── errors ──
-class StateHashCollisionError(PostgresError):
+class StateHashCollisionError(ValueError):
     """The ~1e-12 case where two different models hash to the same state table.
     The table already holds rows for a different model, so sharing it would
     corrupt state — rename a model or widen the digest instead."""
@@ -43,7 +42,7 @@ class StateHashCollisionError(PostgresError):
         )
 
 
-class PrefillRequiresStateError(PostgresError):
+class PrefillRequiresStateError(ValueError):
     """`prefill_intervals` was called on a model with no `state`. There's no
     state table to prefill, so the model must be state-enabled."""
 
@@ -54,7 +53,7 @@ class PrefillRequiresStateError(PostgresError):
         )
 
 
-class OneshotRequiresStateError(PostgresError):
+class OneshotRequiresStateError(ValueError):
     """`insert_oneshot` was called on a model with no `state`. There's no state
     table to write the oneshot row to, so the model must be state-enabled."""
 
@@ -65,7 +64,7 @@ class OneshotRequiresStateError(PostgresError):
         )
 
 
-class InvalidPrefillStatusError(PostgresError):
+class InvalidPrefillStatusError(ValueError):
     """A prefill row carried a status other than `pending` or `blocked` — the
     only two statuses a prefill may set."""
 
@@ -75,7 +74,7 @@ class InvalidPrefillStatusError(PostgresError):
         )
 
 
-class BlockedRowRequiresReasonError(PostgresError):
+class BlockedRowRequiresReasonError(ValueError):
     """A prefill row marked `blocked` carried no `blocked_reason`. A blocked row
     must say why it's blocked, so the reason is required."""
 
@@ -83,7 +82,7 @@ class BlockedRowRequiresReasonError(PostgresError):
         super().__init__("blocked rows require a non-empty blocked_reason")
 
 
-class ClearStateRefusedError(PostgresError):
+class ClearStateRefusedError(ValueError):
     """`clear_state` refuses to run on a model with no schema suffix — its state
     lives in prod (`z_bollhav`), and clearing prod state isn't offered. Set a
     schema suffix for an ephemeral environment, or delete rows by hand."""

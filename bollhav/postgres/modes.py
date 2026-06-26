@@ -6,14 +6,13 @@ from typing import cast, LiteralString
 from datetime import datetime
 from bollhav.model.model import Model
 from bollhav.postgres.columns import PostgresColumn
-from bollhav.postgres.errors import PostgresError
 from bollhav.postgres.schema import ensure_schema
 
 logger = logging.getLogger(__name__)
 
 
 # ── errors ──
-class NaiveDatetimeError(PostgresError):
+class NaiveDatetimeError(ValueError):
     """A datetime that must be an unambiguous instant was naive. Postgres
     compares `timestamptz` by instant, so any zone is fine — but a naive value's
     instant depends on the session timezone, so it's rejected."""
@@ -22,7 +21,7 @@ class NaiveDatetimeError(PostgresError):
         super().__init__(f"{name} must be timezone-aware, got naive {dt!r}")
 
 
-class RecreatePartitionRequiresPartitionColumnError(PostgresError):
+class RecreatePartitionRequiresPartitionColumnError(ValueError):
     """`recreate_partition` was called on a target with no partition column —
     there's no window column to DELETE/INSERT against. The target needs a column
     with `partition_on=True`."""
@@ -34,7 +33,7 @@ class RecreatePartitionRequiresPartitionColumnError(PostgresError):
         )
 
 
-class CreateReplaceViewRequiresSourceModelError(PostgresError):
+class CreateReplaceViewRequiresSourceModelError(ValueError):
     """`create_replace_view` found no upstream Source carrying a `SourceModel`
     with a `.query`. A view is defined by that query, so without it there's
     nothing to create."""

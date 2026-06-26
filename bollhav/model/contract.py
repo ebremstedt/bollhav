@@ -1,13 +1,12 @@
 from dataclasses import dataclass
 from datetime import datetime
 
-from bollhav.model.errors import ModelDefinitionError
 
 
 # ── errors ──
 
 
-class NaiveContractBeginError(ModelDefinitionError):
+class NaiveContractBeginError(ValueError):
     """A `Contract.begin` was set to a timezone-naive datetime. Contract
     bounds are absolute instants, so a set `begin` must be timezone-aware."""
 
@@ -15,7 +14,7 @@ class NaiveContractBeginError(ModelDefinitionError):
         super().__init__("contract.begin must be timezone-aware")
 
 
-class NaiveContractEndError(ModelDefinitionError):
+class NaiveContractEndError(ValueError):
     """A `Contract.end` was set to a timezone-naive datetime. Contract bounds
     are absolute instants, so a set `end` must be timezone-aware."""
 

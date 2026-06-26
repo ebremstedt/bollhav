@@ -1,13 +1,12 @@
 from dataclasses import dataclass, fields
 from enum import Enum
 from bollhav.model.database import DatabaseColumn
-from bollhav.mssql.errors import MssqlError
 
 
 # ── errors ──────────────────────────────────────────────────────────
 
 
-class NullablePrimaryKeyColumnError(MssqlError):
+class NullablePrimaryKeyColumnError(ValueError):
     """A `DatabaseColumn` was declared `primary_key=True` and `nullable=True`.
     A primary key can't hold NULLs, so the two flags are contradictory."""
 

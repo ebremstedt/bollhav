@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from bollhav.postgres.errors import PostgresError
 
 from ._base import _PostgresStateBase
 
@@ -11,7 +10,7 @@ if TYPE_CHECKING:
 
 
 # ── errors ──
-class StateActivationRequiredError(PostgresError):
+class StateActivationRequiredError(ValueError):
     """A state-only operation (e.g. `acquire_model_lock`) was called on a model
     with no `state=State(...)`. The lifecycle only invokes these on stateful
     models, so reaching here is a wiring bug in the caller."""

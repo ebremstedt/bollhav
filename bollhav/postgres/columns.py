@@ -1,11 +1,10 @@
 from dataclasses import dataclass, fields
 from bollhav.model.database import DatabaseColumn
-from bollhav.postgres.errors import PostgresError
 from enum import Enum
 
 
 # ── errors ──
-class PrimaryKeyNotNullableError(PostgresError):
+class PrimaryKeyNotNullableError(ValueError):
     """A column was declared both `primary_key=True` and `nullable=True`. A
     primary key can never be NULL, so the two flags conflict."""
 

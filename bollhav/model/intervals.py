@@ -1,13 +1,12 @@
 from dataclasses import dataclass
 from datetime import datetime
 
-from bollhav.model.errors import ModelDefinitionError
 
 
 # ── errors ──
 
 
-class NaiveIntervalBoundsError(ModelDefinitionError):
+class NaiveIntervalBoundsError(ValueError):
     """A `TZInterval` was built with a timezone-naive `since` or `until`.
     Intervals are compared and stored as absolute instants, so both bounds
     must be timezone-aware."""
@@ -16,7 +15,7 @@ class NaiveIntervalBoundsError(ModelDefinitionError):
         super().__init__("since and until must be timezone-aware")
 
 
-class SinceAfterUntilError(ModelDefinitionError):
+class SinceAfterUntilError(ValueError):
     """A `TZInterval` was built with `since` not strictly before `until` — an
     empty or inverted window. The interval is the half-open span `[since,
     until)`, so `since` must come first."""
@@ -25,7 +24,7 @@ class SinceAfterUntilError(ModelDefinitionError):
         super().__init__("since must be before until")
 
 
-class SinceEqualsUntilError(ModelDefinitionError):
+class SinceEqualsUntilError(ValueError):
     """A `TZInterval` was built with `since` equal to `until` — a zero-width
     window covers no time, so it's rejected."""
 
