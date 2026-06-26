@@ -56,15 +56,6 @@ class TimeChunking:
     order-independent/idempotent), allowing variable-grain coverage-based state.
     The coverage engine is live; the `APPEND` guard and overlap locking it
     implies are still deferred — see `design/flexible-intervals.md`.
-
-    `future_data` is an **attestation** that the model's data runs *ahead* of
-    the clock (forecasts, schedules — booked-ahead records). When `True`, an
-    explicit `contract.end` in the future is honoured literally (load the
-    declared horizon) instead of being clamped to the latest complete unit;
-    when `False` (default), a future end is clamped, so an elapsed-only model
-    never prefills empty future periods. Requires `contract.end` to be set — it
-    is the horizon `future_data` trusts — so `True` with an open contract raises
-    at construction.
     """
 
     chunk: IntervalExpression | IntervalExpressionExtended = "@daily"
@@ -73,7 +64,6 @@ class TimeChunking:
     lookback: int | None = None
     fixed_intervals: bool = True
     no_partial_below: IntervalExpression | IntervalExpressionExtended | None = None
-    future_data: bool = False
 
 
 @dataclass

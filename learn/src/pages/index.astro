@@ -1,0 +1,222 @@
+---
+import "../styles/global.css";
+
+const concepts = [
+  {
+    title: "Upstream contracts",
+    body: "How a model gates on its inputs.",
+    more: "EXISTS just needs the upstream registered. EXACT demands the same interval. ENCAPSULATE resolves by the upstream's shape — window coverage for TEMPORAL, an existence row for TIMELESS. THROUGH chains coverage; WHOLE needs the whole table loaded.",
+  },
+  {
+    title: "State modes",
+    body: "How a re-run treats existing state.",
+    more: "discover (default) preserves applied rows and runs only what's pending. bulldozer resets existing rows to pending so the window re-runs. torch DELETEs every row then prefills fresh — for changing chunk grain or wiping a backlog.",
+  },
+  {
+    title: "Batching",
+    body: "Time chunking of a model's work.",
+    more: "A cron expression defines the chunk (@hourly, @daily) whose ticks become the (since, until) windows a model iterates. With fixed_intervals=True (the default) that grid is the model's state identity — one row per chunk — so changing the chunk requires a torch reset, and downstreams may gate EXACT on it.",
+  },
+  {
+    title: "Flexible intervals",
+    body: "One model, more than one grain.",
+    more: "fixed_intervals=False frees a model from a single fixed grid. It's an attestation that the output doesn't depend on how time is partitioned — the query is window-decomposable and the write is order-independent/idempotent. State then becomes a coverage set (the ranges that are done) rather than one chunk grid, so the same model can be sliced at more than one interval — e.g. backfill history @daily and run recent data @hourly — without forking its identity or needing a torch reset.",
+  },
+  {
+    title: "Run modes",
+    body: "What window a run targets.",
+    more: "LATEST_ENABLED catches up the latest complete unit. BACKFILL_ENABLED with SINCE/UNTIL runs a bounded window. reload (r:[tag]) reruns a tag's full contract range.",
+  },
+  {
+    title: "Tags",
+    body: "Selecting which models run.",
+    more: "TAGS is a tag expression: [a & b] is AND, [a][b] is OR groups, not: excludes, r: reloads. A model's literal name is a tag, so [FactCase] selects exactly that one.",
+  },
+  {
+    title: "Temporality",
+    body: "Whether a model has a time axis.",
+    more: "TEMPORAL models carry _data_modified and are chunked into windows. TIMELESS models (e.g. whole-table aggregates) rebuild in one shot and gate WHOLE on their inputs.",
+  },
+  {
+    title: "Write modes",
+    body: "How rows land in the target.",
+    more: "UPSERT_NO_DELETE MERGEs on the key and never deletes. Staging writes to a side table first for an atomic incremental load. Order-independent writes are what make flexible intervals safe.",
+  },
+  {
+    title: "State marking",
+    body: "Adopting out-of-band loads.",
+    more: "STATE_MARK_APPLIED stamps the run's window intervals applied without executing the model — for when you loaded the tables outside of a state run and want state to reflect that.",
+  },
+  {
+    title: "Curfew",
+    body: "Hours a model must not run.",
+    more: "Curfew(...) declares wall-clock hours and/or weekdays when a model is skipped — e.g. don't touch the source during business hours, weekends, or a maintenance window. The skipped work is left pending for a later run. Models default to no curfew.",
+  },
+  {
+    title: "Contract",
+    body: "A model's own time window.",
+    more: "Contract(begin=, end=) is the historical scope a model's runs may target; bollhav walks that range in reload/backfill. Ignored in latest mode (which reads from now()). Distinct from an UpstreamContract — that's a downstream's gating policy on an input.",
+  },
+  {
+    title: "Target",
+    body: "Where data lands.",
+    more: "The destination: table name, schema, database connection, column definitions, indexes, and the write mode — optionally a staging table for an atomic incremental load.",
+  },
+  {
+    title: "Sources",
+    body: "External, unmanaged inputs.",
+    more: "Boundary nodes where data enters the system: SourceModel (a raw table), SourceFile, SourceApi, and SourceHardcoded (inline rows/SQL). Ungated — unlike upstreams they're not state-tracked.",
+  },
+  {
+    title: "Lineage",
+    body: "Where a model's data comes from.",
+    more: "Each model declares its inputs, so you can inspect one model's lineage in code (no database) or read the whole cross-pipeline graph from the library — managed upstreams as internal edges, sources as boundary nodes.",
+  },
+  {
+    title: "Freshness",
+    body: "How old an upstream may be.",
+    more: "A freshness bound (Freshness / FreshnessScope) on an upstream contract: even when the data is present, a downstream is stale if the upstream is older than the bound. Shown as a ❄ on the dependency arrow.",
+  },
+  {
+    title: "Library",
+    body: "The central model + state registry.",
+    more: "The z_bollhav library in Postgres holds the cross-pipeline graph, state rows, and errors. Tooling reads it to colour lineage by status — applied, blocked, stale — closer to an observability graph than a static DAG.",
+  },
+  {
+    title: "Decorators",
+    body: "The framework entry points.",
+    more: "@load_models does discovery — read env, apply overrides, match models by TAGS, resolve each run's window. @model_lifecycle wraps execution with state: prefill, lock, run pending intervals, mark applied.",
+  },
+  {
+    title: "Choreography",
+    body: "Ordering lives in the models.",
+    more: "With state + upstream contracts, the dependency graph lives inside the models, not a central conductor. A downstream interval stays blocked until its upstream's covering window is applied — so a dumb trigger is enough: a cron calling python main.py every few minutes. Each run discovers what's actionable, does it, and leaves the rest blocked for next time. No external DAG that duplicates the graph already in your models.",
+  },
+  {
+    title: "Orchestration",
+    body: "An external conductor owns the DAG.",
+    more: "The stateless alternative: Airflow / Dagster / cron owns the graph — it encodes raw → clean → marts, retries, and schedules, while bollhav just runs the model you point it at (selected by TAGS). It's the only option where state isn't supported (e.g. MSSQL). The two compose — a thin trigger on the outside, contracts doing the real ordering inside; put Airflow in front and it degrades to a timer, not a dependency engine.",
+  },
+  {
+    title: "TUI",
+    body: "Run models from the terminal.",
+    more: "A terminal UI (pip install bollhav[tui], then run bollhav in a folder of models). Set the run environment in a form — backfill window, suffixes, state mode, overrides — and fire a dry run, a dry-state run, or the real run, without remembering env-var names.",
+  },
+  {
+    title: "GUI",
+    body: "Visualize the lineage graph.",
+    more: "A small web app (under gui/) that draws the cross-pipeline model graph from the central z_bollhav library with live state and errors. A FastAPI backend reads Postgres via bollhav.postgres.registry; a Svelte Flow frontend renders managed models vs sources, status lights, and upstream contracts + freshness on the arrows. A 🎄 toggle switches lappland (bare) and stockholm (full detail).",
+  },
+  {
+    title: "Errors table",
+    body: "Full error history, centrally.",
+    more: "When execute raises, the interval's state row goes error and a row lands in the shared z_bollhav.errors table — full_name, run_id, error_type, error_message, traceback, created_at. It keeps history across runs, joinable with a model's state table on (since, until) or on run_id. discover auto-retries the failed interval on the next run.",
+  },
+  {
+    title: "Virtual environments",
+    body: "One env per pipeline.",
+    more: "Pin bollhav plus your connectors (psycopg for Postgres, pyodbc for MSSQL) and polars, captured in requirements.txt so local, CI, and the prod image match. A venv is enough for pure-Python Postgres; MSSQL needs the system ODBC Driver 18 (not pip-installable), so reach for Docker there. Keep the state/target DB separate — a throwaway Docker Postgres.",
+  },
+];
+
+concepts.sort((a, b) => a.title.localeCompare(b.title));
+---
+
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Bollhav concepts</title>
+    <!-- Apply saved/system theme before paint to avoid a flash. -->
+    <script is:inline>
+      const t = localStorage.getItem("theme");
+      if (t === "dark" || (!t && matchMedia("(prefers-color-scheme: dark)").matches))
+        document.documentElement.classList.add("dark");
+    </script>
+  </head>
+  <body class="bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-green-400">
+    <!-- top nav -->
+    <nav class="sticky top-0 z-10 border-b border-slate-200 bg-white/90 backdrop-blur dark:border-green-900/50 dark:bg-slate-950/90">
+      <div class="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
+        <span class="font-semibold dark:text-green-300">Bollhav</span>
+        <div class="flex items-center gap-6 text-sm text-slate-600 dark:text-green-500">
+          <a href="#" class="hover:text-slate-900 dark:hover:text-green-300">Concepts</a>
+          <a href="#" class="hover:text-slate-900 dark:hover:text-green-300">Guides</a>
+          <a href="#" class="hover:text-slate-900 dark:hover:text-green-300">Reference</a>
+          <button
+            id="theme-toggle"
+            aria-label="Toggle dark mode"
+            class="rounded-md p-2 text-slate-600 hover:bg-slate-100 dark:text-green-400 dark:hover:bg-slate-800"
+          >
+            <!-- moon (shown in light) -->
+            <svg class="h-5 w-5 dark:hidden" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z" />
+            </svg>
+            <!-- sun (shown in dark) -->
+            <svg class="hidden h-5 w-5 dark:block" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="4" />
+              <path stroke-linecap="round" d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41" />
+            </svg>
+          </button>
+        </div>
+      </div>
+    </nav>
+
+    <main class="mx-auto max-w-6xl px-6 py-10">
+      <input
+        id="search"
+        type="search"
+        placeholder="Filter concepts…"
+        autocomplete="off"
+        class="mb-6 w-full rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-sm outline-none placeholder:text-slate-400 focus:border-slate-400 dark:border-green-900/50 dark:bg-slate-900 dark:text-green-300 dark:placeholder:text-green-700 dark:focus:border-green-600"
+      />
+      <p id="no-results" class="hidden py-10 text-center text-sm text-slate-500 dark:text-green-600">
+        No concepts match.
+      </p>
+      <!-- 4-wide grid; items-start so an expanded card doesn't stretch its row -->
+      <div id="grid" class="grid grid-cols-1 items-start gap-5 sm:grid-cols-2 lg:grid-cols-4">
+        {concepts.map((c) => (
+          <details data-card class="group rounded-xl border border-slate-200 bg-white shadow-sm transition hover:shadow-md dark:border-green-900/50 dark:bg-slate-900">
+            <summary class="flex min-h-28 cursor-pointer list-none items-start justify-between gap-3 p-5 [&::-webkit-details-marker]:hidden">
+              <div>
+                <h3 class="font-semibold dark:text-green-300">{c.title}</h3>
+                <p class="mt-1 text-sm text-slate-600 dark:text-green-500">{c.body}</p>
+              </div>
+              <svg
+                class="mt-1 h-4 w-4 shrink-0 text-slate-400 transition-transform group-open:rotate-180 dark:text-green-600"
+                fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"
+              >
+                <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" />
+              </svg>
+            </summary>
+            <div class="border-t border-slate-100 px-5 py-4 text-sm leading-relaxed text-slate-700 dark:border-green-900/50 dark:text-green-400">
+              {c.more}
+            </div>
+          </details>
+        ))}
+      </div>
+    </main>
+
+    <script is:inline>
+      document.getElementById("theme-toggle").addEventListener("click", () => {
+        const isDark = document.documentElement.classList.toggle("dark");
+        localStorage.setItem("theme", isDark ? "dark" : "light");
+      });
+
+      // Live filter — matches title, summary, and the expanded text.
+      const search = document.getElementById("search");
+      const cards = [...document.querySelectorAll("[data-card]")];
+      const noResults = document.getElementById("no-results");
+      search.addEventListener("input", () => {
+        const q = search.value.trim().toLowerCase();
+        let visible = 0;
+        cards.forEach((c) => {
+          const match = !q || c.textContent.toLowerCase().includes(q);
+          c.toggleAttribute("hidden", !match);
+          if (match) visible++;
+        });
+        noResults.classList.toggle("hidden", visible > 0);
+      });
+    </script>
+  </body>
+</html>

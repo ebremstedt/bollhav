@@ -31,7 +31,7 @@ since = explicit_since ?? contract.begin
 until = explicit_until ?? contract.end ?? latest_complete_tick
 ```
 
-- **explicit** — `BACKFILL_SINCE` / `BACKFILL_UNTIL`, operator-supplied
+- **explicit** — `RUN_SINCE` / `RUN_UNTIL`, operator-supplied
 - **contract** — the model's `Contract(begin, end)` declared range
 - **latest** — the latest complete tick (the clock)
 
@@ -57,7 +57,7 @@ The window requirement *is* the spec for each mode:
 |---|---|---|
 | **bulldozer** (default) | **required** | reset & run *exactly* this window; leave everything else (old blocked/pending) untouched — it's not the run's job to drain history |
 | **discover** | **optional** | window given → run the window's non-applied (skip applied); **no window → reconcile**: drain *all* outstanding in state (the deliberate "no dates, let state decide" catch-up) |
-| **torch** | **forbidden** | always the contract range — wipe all + reseed contract = clean reload |
+| **torch** | **optional** | wipe *all* state; no window → run the whole contract; a window runs that slice now, the rest defers to a later discover run |
 
 Notes:
 - **bulldozer needs a window** (nothing to bulldoze otherwise) → no-window is an error.
@@ -65,11 +65,19 @@ Notes:
   a no-op — correct, nothing outstanding. Seed the table with a windowed run first; after
   that, no-window discover reconciles it. This is the answer to the original ask:
   "run with no dates, let state find the work" = `discover` + no window.
-- **torch + a window is forbidden**: a windowed torch *orphans* history (wipe all, reseed
-  only the window → the rest is forgotten), and "redo a specific window" is already what
-  bulldozer does *safely*. So torch has exactly one coherent meaning: clean reload of the
-  contract range. Raise loudly on torch + window: "torch reloads the contract range; use
-  bulldozer to redo a window."
+- **torch + a window is allowed** (revised — see below). The wipe is *always total*
+  (`torch_rows` deletes every row); the window only scopes what runs *now*. With no window
+  a torch runs the whole contract (a clean full reload); with a window it runs that slice
+  now and leaves the rest `pending` for a later `discover` run to drain.
+
+  *History:* this was originally **forbidden** (a windowed torch was said to orphan the
+  rest). That reasoning assumed *window-scoped prefill* — back then a windowed torch reseeded
+  only the window. Once prefill changed to always **refill the whole contract** (see "Prefill
+  vs invalidation"), the orphan case vanished: a windowed torch refills the whole contract
+  `pending`, runs the window, and the remainder is simply outstanding, not lost. So
+  `TorchWithWindowError` was removed and torch now resolves its window like the other modes.
+  Use it for "re-load the whole model, prioritise this slice, defer the rest"; for a
+  *surgical* "re-do only this slice later", the state-edit reset API (no wipe) is cleaner.
 
 ## Prefill vs invalidation — state mirrors the contract
 
@@ -108,7 +116,7 @@ visible from run one; drain it with a backfill or a no-window discover reconcile
 
 - bare `python main.py` (no overrides) → **bulldozer + latest** = run the latest complete
   tick (the cron default).
-- `BACKFILL_SINCE` / `BACKFILL_UNTIL` → bulldozer + explicit range.
+- `RUN_SINCE` / `RUN_UNTIL` → bulldozer + explicit range.
 - `STATE_MODE=discover` + no window → reconcile state (the no-dates case).
 - `STATE_MODE=torch` → clean reload of the contract.
 
@@ -148,15 +156,16 @@ visible from run one; drain it with a backfill or a no-window discover reconcile
 1. ✅ **Window-scoped execution** — `get_actionable_intervals(window=…)` filters rows to
    `[since, until)` when a window is given; `window=None` keeps the "drain everything"
    reconcile path. Threaded `window=run.window` at the lifecycle bootstrap + e2e harness.
-2. ✅ **Window-source collapse** — `BACKFILL_UNTIL` is optional
+2. ✅ **Window-source collapse** — `RUN_UNTIL` is optional
    (`?? contract.end ?? latest tick`), so a no-dates backfill runs the contract range.
    `BackfillRequiresUntilError` removed.
 3. ✅ **Defaults flipped** — `latest` is the default run mode (`_resolve_latest` defaults
    to `not backfill`; `_resolve_backfill_enabled` defaults False); `STATE_MODE` defaults
    to `bulldozer` (`_resolve_state_mode`).
-4. ✅ **torch validation** — `STATE_MODE=torch` + an explicit `BACKFILL_SINCE/UNTIL` window
-   raises `TorchWithWindowError`; otherwise torch forces the contract range (reload),
-   ignoring latest. Implemented in `runtime._apply_to_model`.
+4. ✅ **torch window** — a bare torch (no dates) reloads the whole contract range; a torch
+   with a `RUN_SINCE/UNTIL` window runs *that slice* now (the wipe stays total, the
+   remainder defers to discover). Implemented in `runtime._apply_to_model`. *(Superseded the
+   earlier `TorchWithWindowError`, now removed — see "torch + a window is allowed" above.)*
 5. ✅ **Tests** — `TestRunModeWindowMatrix` in `test_runtime.py` (the full mode × window
    resolution + torch guard), plus e2e `get_actionable_is_window_scoped` /
    `bulldozer_reruns_the_applied_window` / `discover_skips_the_applied_window`.

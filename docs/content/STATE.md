@@ -31,7 +31,7 @@ Under `STATE_MODE=discover`, nothing is invalidated: `applied` rows stay applied
 - `error` rows → `pending` (automatic retry)
 - `running` rows orphaned by a process crash → `pending` (automatic recovery)
 
-Under `STATE_MODE=torch`, every state row for the model is **deleted** first; the prefill above then refills the whole **contract range** as `pending` — a clean reload. It **forbids** an explicit `BACKFILL` window (that would orphan history — use `bulldozer` to redo a specific window) and is also how you **change chunk granularity** (hourly → monthly). Destructive (applied history is lost, so the next run reprocesses everything — safe for MERGE / recreate writes, but `APPEND` would duplicate); never fires during `DRY_STATE`; does **not** touch the model's data; scoped to the `TAGS`-matched models.
+Under `STATE_MODE=torch`, every state row for the model is **deleted** first; the prefill above then refills the whole **contract range** as `pending`. The **wipe is always total** — the window only scopes what runs *now*: with no window a torch runs the whole range (a clean full reload); with a `BACKFILL` window it runs just that slice now and leaves the rest `pending` for a later `discover` run to drain (nothing is orphaned — prefill refilled the whole contract). It's also how you **change chunk granularity** (hourly → monthly). Destructive (applied history is lost, so the next run reprocesses everything — safe for MERGE / recreate writes, but `APPEND` would duplicate); never fires during `DRY_STATE`; does **not** touch the model's data; scoped to the `TAGS`-matched models.
 
 ## Concurrency: per-interval advisory locks
 
@@ -119,14 +119,14 @@ Where the four combinations sit:
 | `STATE_DISABLED` | ❌ | ✅ run |
 | **`STATE_MARK_APPLIED`** | ✅ **stamped applied** | ❌ |
 
-**Scope.** It marks exactly the run's **`compute_intervals(run)`** — the `[BACKFILL_SINCE, BACKFILL_UNTIL)` (or `LATEST`) window, split by your chunk — and **nothing else**. Crucially it does *not* go through the normal "drain every actionable row" executor, so a leftover `pending` backlog from other intervals is **left untouched**. Match the chunk (`INTERVAL_OVERRIDE`) to how the data was actually loaded, since that's the grain of the rows it stamps
+**Scope.** It marks exactly the run's **`compute_intervals(run)`** — the `[RUN_SINCE, RUN_UNTIL)` (or `LATEST`) window, split by your chunk — and **nothing else**. Crucially it does *not* go through the normal "drain every actionable row" executor, so a leftover `pending` backlog from other intervals is **left untouched**. Match the chunk (`INTERVAL_OVERRIDE`) to how the data was actually loaded, since that's the grain of the rows it stamps
 
 ```sh
 # you loaded 2025-11-06 out of band; now record it as done:
 export TAGS="[FactCaseVariableDevice]"
 export BACKFILL_ENABLED=true
-export BACKFILL_SINCE=2025-11-06T00:00:00
-export BACKFILL_UNTIL=2025-11-07T00:00:00
+export RUN_SINCE=2025-11-06T00:00:00
+export RUN_UNTIL=2025-11-07T00:00:00
 export INTERVAL_OVERRIDE=@daily        # the grain it was loaded at
 export STATE_MARK_APPLIED=true
 python src/main.py
@@ -138,7 +138,7 @@ python src/main.py
 
 | Variable | Default | Effect |
 |---|---|---|
-| `STATE_MODE` | `bulldozer` | how much of the run's window to invalidate. `bulldozer` (default) resets the window's rows to `pending` and runs exactly them (boundaries kept); `discover` preserves `applied` and runs only the window's outstanding (no window → reconcile all); `torch` deletes every row then reloads the **contract range** — forbids an explicit window, for changing chunk granularity / a clean reload (destructive) |
+| `STATE_MODE` | `bulldozer` | how much of the run's window to invalidate. `bulldozer` (default) resets the window's rows to `pending` and runs exactly them (boundaries kept); `discover` preserves `applied` and runs only the window's outstanding (no window → reconcile all); `torch` deletes every row then refills the contract — no window reloads the whole range, a window runs that slice now and defers the rest (the wipe is always total); for changing chunk granularity / a clean reload (destructive) |
 | `STATE_DISABLED` | `false` | When `true`, force no-state behavior on every matched model (data without state) |
 | `STATE_MARK_APPLIED` | `false` | When `true`, stamp the matched window's intervals `applied` without running them (state without data) — to record an out-of-band load. Scoped to `compute_intervals(run)`, never the backlog. An assertion, not a verification |
 | `DRY_STATE` | `false` | When `true`, run the state bootstrap and print each model's resolved plan (would-run / applied / blocked), then exit without creating assets, writing data, or running model logic |

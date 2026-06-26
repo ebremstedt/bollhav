@@ -104,13 +104,15 @@ def load_models(
         LATEST_ENABLED                run the latest complete tick. The DEFAULT
                                       run mode (when neither flag is set).
         BACKFILL_ENABLED              a windowed range run. Mutually exclusive
-                                      with latest. The window is BACKFILL_SINCE/
-                                      UNTIL, each falling back to the contract
+                                      with latest. The window is RUN_SINCE/
+                                      RUN_UNTIL, each falling back to the contract
                                       (begin / end-or-latest) — so a no-dates
                                       backfill runs the declared range.
-        BACKFILL_SINCE                ISO 8601 datetime (optional; ?? contract.begin)
-        BACKFILL_UNTIL                ISO 8601 datetime (optional; ?? contract.end
-                                      ?? latest complete tick)
+        RUN_SINCE                     ISO 8601 datetime (optional; ?? contract.begin).
+                                      The run window's start, used by any state
+                                      mode. (alias: deprecated BACKFILL_SINCE)
+        RUN_UNTIL                     ISO 8601 datetime (optional; ?? contract.end
+                                      ?? latest complete tick). (alias: BACKFILL_UNTIL)
         INTERVAL_OVERRIDE  cron / @alias — re-chunks at runtime. Applies ONLY
                                       to flexible models (fixed_intervals=False);
                                       ignored (logged at INFO) on fixed models,
@@ -243,8 +245,12 @@ def _read_env() -> _RuntimeConfig:
         table_suffix=_resolve_table_suffix(),
         latest=latest,
         backfill_enabled=backfill_enabled,
-        backfill_since=_backfill_dt("BACKFILL_SINCE", backfill_enabled, tz_override),
-        backfill_until=_backfill_dt("BACKFILL_UNTIL", backfill_enabled, tz_override),
+        backfill_since=_window_dt(
+            "RUN_SINCE", "BACKFILL_SINCE", backfill_enabled, tz_override
+        ),
+        backfill_until=_window_dt(
+            "RUN_UNTIL", "BACKFILL_UNTIL", backfill_enabled, tz_override
+        ),
         interval_override=_resolve_interval_override(),
         window_override=_resolve_window_override(latest=latest),
         lookback_override=_resolve_lookback_override(),
@@ -263,7 +269,7 @@ def _resolve_tags() -> str:
 
 
 def _resolve_backfill_enabled() -> bool:
-    """`BACKFILL_ENABLED` — a windowed *range* run (`BACKFILL_SINCE`/`UNTIL`, or
+    """`BACKFILL_ENABLED` — a windowed *range* run (`RUN_SINCE`/`RUN_UNTIL`, or
     the contract's declared range when no dates are given). Defaults False; the
     unset run mode is `latest`."""
     # env_var_bool is typed `bool | None` even when `default` is given;
@@ -281,14 +287,23 @@ def _resolve_latest(*, backfill: bool) -> bool:
     return latest
 
 
-def _backfill_dt(
-    name: str, backfill_enabled: bool, tz_override: tzinfo | None
+def _window_dt(
+    name: str, legacy_name: str, backfill_enabled: bool, tz_override: tzinfo | None
 ) -> datetime | None:
-    """One backfill window boundary (`BACKFILL_SINCE` / `BACKFILL_UNTIL`):
-    `None` when not in backfill mode, else the ISO-8601 env value with the
-    timezone override stamped on (when one is set)."""
+    """One run-window boundary (`RUN_SINCE` / `RUN_UNTIL`) — the explicit window
+    a run targets, regardless of state mode. `None` when not in a windowed run,
+    else the ISO-8601 env value with the timezone override stamped on (when set).
+
+    `legacy_name` (`BACKFILL_SINCE` / `BACKFILL_UNTIL`) is honoured as a
+    **deprecated alias** when the new var is unset — it warns and will be
+    removed."""
     if not backfill_enabled:
         return None
+    if os.environ.get(name) is None and os.environ.get(legacy_name) is not None:
+        logger.warning(
+            "env var %s is deprecated — rename it to %s", legacy_name, name
+        )
+        name = legacy_name
     dt = env_var_iso8601_datetime(name=name)
     return _apply_tz(dt, tz_override) if tz_override else dt
 

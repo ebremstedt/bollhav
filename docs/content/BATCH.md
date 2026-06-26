@@ -17,7 +17,7 @@ The cron/timezone/lookback knobs live on `batching.time` (the `TimeChunking`); `
 
 Type: `TimeChunking` · Default: `TimeChunking()`
 
-The time-chunking config. Its fields — `chunk`, `window`, `no_partial_below`, `tz`, `lookback`, `future_data` (plus `fixed_intervals`, see [Upstream](UPSTREAM.md)) — are documented below and accessed as `batching.time.chunk`, etc.
+The time-chunking config. Its fields — `chunk`, `window`, `no_partial_below`, `tz`, `lookback` (plus `fixed_intervals`, see [Upstream](UPSTREAM.md)) — are documented below and accessed as `batching.time.chunk`, etc.
 
 ## chunk (`batching.time.chunk`)
 
@@ -51,12 +51,6 @@ Type: `str | None` · Default: `None` (falls back to `chunk`)
 
 The **completeness grain** the *inferred* trailing edge snaps to. When a run's window is implied — `reload`, or a no-dates backfill — and the contract is open-ended, the edge advances to the latest *complete* unit of this grain instead of the chunk. So `chunk="@yearly"` with `no_partial_below="@daily"` loads through the last complete **day** (the current year as a partial, snapped to a whole day) rather than stopping at the last complete *year*. Can be finer *or* coarser than `chunk` — e.g. `chunk="@hourly", no_partial_below="@daily"` processes hourly but only releases settled days. It's the **end** knob; `lookback` is the **start** knob. Not consulted in `latest` mode — that's `window`'s job.
 
-## future_data (`batching.time.future_data`)
-
-Type: `bool` · Default: `False`
-
-An **attestation** that the model's data runs *ahead* of the clock — its source holds rows dated for time that hasn't elapsed yet (a forecast, a plan). When `True`, an explicit **future** `contract.end` is honoured literally (load the declared horizon) instead of being clamped to the latest complete unit; when `False` (the default — elapsed-only data), a future end is clamped, so you never prefill empty future periods. **Requires `contract.end`** — that end is the horizon `future_data` trusts — so `True` on an open contract raises `FutureDataRequiresContractEndError` at construction. Open contracts and past ends are unaffected either way; this only bites when the declared end is still in the future.
-
 ### Worked example: the trailing edge
 
 ```python
@@ -67,17 +61,6 @@ An **attestation** that the model's data runs *ahead* of the clock — its sourc
 Batch(time=TimeChunking(chunk="@yearly", no_partial_below="@daily"))
 # open contract, today 2026-06-25 → window ends 2026-06-25 (not 2026-01-01)
 # without no_partial_below it would end 2026-01-01 — all of 2026 left out
-
-# `future_data` — a source whose rows are dated ahead of now, e.g. a weather
-# forecast table holding next month's predictions. The declared end is the real
-# horizon, so it's honoured instead of clamped to today.
-Model(
-    contract=Contract(begin=START, end=datetime(2027, 1, 1, tzinfo=UTC)),
-    batching=Batch(time=TimeChunking(chunk="@monthly", future_data=True)),
-    ...,
-)
-# window ends 2027-01-01 — the forecast rows for not-yet-elapsed months load now
-# with future_data=False the future end would be clamped back to today
 ```
 
 ## size (`batching.size`)
