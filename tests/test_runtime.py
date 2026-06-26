@@ -214,20 +214,6 @@ class TestBatchingCarryThrough:
         out = _apply(_model(chunk="@yearly", no_partial_below="@daily")).model
         assert out.batching.time.no_partial_below == "@daily"
 
-    def test_future_data_survives_no_override(self) -> None:
-        # future_data needs a contract.end (the guard), so build directly; it
-        # still has to carry through the rebuild untouched.
-        m = Model(
-            target=Target(name="orders", schema="public", schema_suffix_appendix=None),
-            batching=Batch(time=TimeChunking(chunk="@daily", future_data=True, tz=UTC)),
-            contract=Contract(
-                begin=datetime(2024, 1, 1, tzinfo=UTC),
-                end=datetime(2030, 1, 1, tzinfo=UTC),
-            ),
-            temporality=Temporality.TEMPORAL,
-        )
-        assert _apply(m).model.batching.time.future_data is True
-
 
 class TestBatchingNone:
     def test_no_batching_skips_interval_baking(self) -> None:
@@ -432,24 +418,21 @@ class TestRunModeWindowMatrix:
             )
             assert (run.window.since, run.window.until) == (_SINCE, _UNTIL)
 
-    def test_torch_forbids_an_explicit_window(self) -> None:
-        import pytest
-
-        from bollhav.model.messages.error import TorchWithWindowError
+    def test_torch_with_a_window_runs_that_slice(self) -> None:
         from bollhav.model.state import StateMode
 
-        with pytest.raises(TorchWithWindowError):
-            _apply(
-                self._m(),
-                state_mode=StateMode.TORCH,
-                backfill_since=_SINCE,
-                backfill_until=_UNTIL,
-            )
+        # torch + an explicit window: the wipe is still total, the window just
+        # scopes what runs *now* — the rest defers to a later discover run.
+        s, u = datetime(2024, 1, 1, tzinfo=UTC), datetime(2024, 1, 3, tzinfo=UTC)
+        run = _apply(
+            self._m(), state_mode=StateMode.TORCH, backfill_since=s, backfill_until=u
+        )
+        assert (run.window.since, run.window.until) == (s, u)
 
-    def test_torch_always_reloads_the_contract_range(self) -> None:
+    def test_torch_without_a_window_reloads_the_contract_range(self) -> None:
         from bollhav.model.state import StateMode
 
-        # latest is ignored; no explicit dates → the contract range
+        # bare torch (latest ignored, no dates) → the whole contract range
         run = _apply(
             self._m(),
             state_mode=StateMode.TORCH,

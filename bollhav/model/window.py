@@ -75,28 +75,22 @@ def _apply_lookback(expression: str, since: datetime, lookback: int) -> datetime
 
 
 def _trailing_edge(contract: "Contract", batching: "Batch", tz: tzinfo) -> datetime:
-    """The *inferred* end of a run window (reload / no-dates backfill), factoring
-    in `contract.end` and the `TimeChunking` trailing-edge knobs:
+    """The *inferred* end of a run window (reload / no-dates backfill):
 
-      * open contract               → the **completeness floor**: the latest
-        *complete* unit of `no_partial_below` (defaulting to `chunk`). So a
-        coarse chunk can trail off at a finer boundary (e.g. `@yearly` chunk,
-        `no_partial_below="@daily"` → through the last complete day).
-      * explicit end + `future_data` → the end, honoured literally — it may lead
-        the clock (forecasts / booked-ahead schedules).
-      * explicit end, otherwise     → `min(end, floor)` — a *future* end is
-        clamped to the clock (no empty future periods); a *past* end is already
-        smaller, so it wins.
+      * open contract → the **completeness floor**: the latest *complete* unit of
+        `no_partial_below` (defaulting to `chunk`). So a coarse chunk can trail
+        off at a finer boundary — e.g. `@yearly` chunk with
+        `no_partial_below="@daily"` runs through the last complete day.
+      * explicit end  → `min(end, floor)`: a closed (past) end is its own value;
+        a *future* end is clamped to the floor — state windows on the update
+        watermark, so there's no data past the clock to load anyway.
 
     Pure apart from the clock read in the floor."""
-    floor_expr = batching.time.no_partial_below or batching.time.chunk
-    floor = latest_complete_interval(floor_expr, tz).until
+    floor = latest_complete_interval(
+        batching.time.no_partial_below or batching.time.chunk, tz
+    ).until
     end = contract.end
-    if end is None:
-        return floor
-    if batching.time.future_data:
-        return end
-    return min(end, floor)
+    return floor if end is None else min(end, floor)
 
 
 def resolve_window(
@@ -124,7 +118,7 @@ def resolve_window(
     `until` is optional: a no-dates backfill runs the contract's declared range —
     the same window `reload` resolves (reload is just a backfill whose bounds
     come from the contract rather than explicit dates). `since` still needs a
-    source — `BACKFILL_SINCE` or `contract.begin`.
+    source — `RUN_SINCE` or `contract.begin`.
 
     Pure apart from the clock read in `latest` / open-ended `reload` / a
     no-`until` backfill."""

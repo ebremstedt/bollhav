@@ -6,17 +6,21 @@ Reference for every env var bollhav reads, in alphabetical order. The right-side
 
 ## BACKFILL_ENABLED
 
-Bool, default `true` (when `LATEST_ENABLED=false`). Run in backfill mode — walk every interval from `BACKFILL_SINCE` (or model `contract.begin`) up to `BACKFILL_UNTIL` (or `now()`).
+Bool, default `true` (when `LATEST_ENABLED=false`). Run in backfill mode — walk every interval from `RUN_SINCE` (or model `contract.begin`) up to `RUN_UNTIL` (or `now()`).
 
-## BACKFILL_SINCE
+## RUN_SINCE
 
-ISO 8601 datetime, optional. Overrides each model's `contract.begin` for this run.
+ISO 8601 datetime, optional. The run window's start — overrides each model's `contract.begin` for this run. Applies to **any** state mode (it's the window the run targets, not a backfill-only knob).
 
-Example: `BACKFILL_SINCE=2024-01-01T00:00:00Z`
+Example: `RUN_SINCE=2024-01-01T00:00:00Z`
 
-## BACKFILL_UNTIL
+> Renamed from **`BACKFILL_SINCE`**, which still works as a **deprecated alias** (logs a warning; prefer `RUN_SINCE`).
 
-ISO 8601 datetime, optional. Overrides each model's `contract.end` for this run.
+## RUN_UNTIL
+
+ISO 8601 datetime, optional. The run window's end — overrides each model's `contract.end` for this run.
+
+> Renamed from **`BACKFILL_UNTIL`** — still honoured as a **deprecated alias**.
 
 ## DEBUG
 

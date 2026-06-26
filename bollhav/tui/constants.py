@@ -11,8 +11,8 @@ from rich.text import Text
 CONFIG_FIELDS: list[tuple[str, str, str, str, str]] = [
     ("TAGS", "TAGS", "", "[model_a,model_b] — empty = all discovered", "text"),
     ("Window", "WINDOW_MODE", "Mode", "", "mode"),
-    ("Window", "BACKFILL_SINCE", "Backfill since", "", "date"),
-    ("Window", "BACKFILL_UNTIL", "Backfill until", "", "date"),
+    ("Window", "RUN_SINCE", "Since", "", "date"),
+    ("Window", "RUN_UNTIL", "Until", "", "date"),
     (
         "Window",
         "WINDOW_OVERRIDE",
@@ -40,8 +40,8 @@ CONFIG_FIELDS: list[tuple[str, str, str, str, str]] = [
 # Window fields shown only in one mode (the Mode radio itself is always shown).
 # backfill mode → since/until; latest mode → the window expression.
 MODE_ONLY: dict[str, str] = {
-    "BACKFILL_SINCE": "backfill",
-    "BACKFILL_UNTIL": "backfill",
+    "RUN_SINCE": "backfill",
+    "RUN_UNTIL": "backfill",
     "WINDOW_OVERRIDE": "latest",
 }
 
@@ -77,12 +77,19 @@ BOOL_DEFAULTS: dict[str, bool] = {
 }
 
 # The "mode" field is a single radio that expands to the mutually-exclusive
-# LATEST_ENABLED / BACKFILL_ENABLED pair — exactly one is true.
-MODE_DEFAULT = "backfill"
+# LATEST_ENABLED / BACKFILL_ENABLED pair — exactly one is true. `latest` is the
+# default, matching bollhav (a bare run does the latest complete tick).
+MODE_DEFAULT = "latest"
 MODE_ENV = {
     "backfill": {"BACKFILL_ENABLED": "true", "LATEST_ENABLED": "false"},
     "latest": {"BACKFILL_ENABLED": "false", "LATEST_ENABLED": "true"},
 }
+
+# One-line crib for the three STATE_MODE choices, shown under the State radio.
+STATE_MODE_NOTE = (
+    "ⓘ  bulldozer: reset & rerun the window · discover: run only what's "
+    "outstanding · torch: wipe all, run the window (rest defers to discover)"
+)
 
 # The three escalating run actions: mode → (label, env var to set, button id).
 # A None env var means "the real run" — set nothing extra.
@@ -108,7 +115,8 @@ STATUS = {
     "done": ("DONE", "green3"),
     "fail": ("FAILED", "red3"),
 }
-TYPE_ICON = {"INTERVAL": "⏱ interval", "VIEW": "👁 view", "MONOLITHIC": "▣ monolith"}
+# Keyed by `Temporality.name` (the value looked up in explore_tab).
+TYPE_ICON = {"TEMPORAL": "⏱ temporal", "TIMELESS": "▣ timeless"}
 
 
 def pill(state: str) -> Text:

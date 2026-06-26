@@ -7,7 +7,6 @@ from datetime import datetime, tzinfo
 from bollhav.model.batch import Batch
 from bollhav.model.window import resolve_window
 from bollhav.model.matching import matched_with_reload
-from bollhav.model.messages.error import TorchWithWindowError
 from bollhav.model.model import Model
 from bollhav.model.modelrun import ModelRun
 from bollhav.model.state import StateMode
@@ -100,13 +99,12 @@ def _apply_to_model(
         tz_override=tz_override,
         full_name=model.target.full_name,
     )
-    # torch wipes *all* state and reloads the contract's declared range, so it
-    # can't be scoped to a narrower window (that would orphan the rest). An
-    # explicit BACKFILL window with torch is a mistake → error; otherwise torch
-    # forces the contract range (reload), ignoring latest.
-    if state_mode is StateMode.TORCH:
-        if backfill_since is not None or backfill_until is not None:
-            raise TorchWithWindowError(model.target.full_name)
+    # torch wipes *all* state at the bootstrap; the window only scopes what runs
+    # *now* (prefill refills the whole contract, so nothing is orphaned — the
+    # unrun remainder sits pending for a later discover run to drain). With no
+    # explicit window a bare torch reloads the whole contract range — a clean
+    # full reload; with a BACKFILL window it runs just that slice now.
+    if state_mode is StateMode.TORCH and backfill_since is None and backfill_until is None:
         window = resolve_window(
             batching, model.contract, reload=True, name=model.target.full_name
         )

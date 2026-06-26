@@ -391,7 +391,7 @@ class TestContractIntervals:
         assert list(contract_intervals(run)) == list(compute_intervals(run))
 
 
-# ── trailing edge: no_partial_below × future_data × contract.end ──
+# ── trailing edge: no_partial_below × contract.end ──
 
 # 'now' for every case below; the latest-complete boundaries follow from it.
 _NOW = datetime(2026, 6, 25, 12, 0, tzinfo=UTC)
@@ -403,66 +403,49 @@ _LCM = datetime(2026, 6, 1, tzinfo=UTC)  # latest complete @monthly end
 _LCD = datetime(2026, 6, 25, tzinfo=UTC)  # latest complete @daily end (00:00)
 
 
-def _edge_batch(chunk="@yearly", no_partial_below=None, future_data=False) -> Batch:
+def _edge_batch(chunk="@yearly", no_partial_below=None) -> Batch:
     return Batch(
-        time=TimeChunking(
-            chunk=chunk,
-            no_partial_below=no_partial_below,
-            future_data=future_data,
-            tz=UTC,
-        )
+        time=TimeChunking(chunk=chunk, no_partial_below=no_partial_below, tz=UTC)
     )
 
 
-# (contract.end, future_data, no_partial_below) -> expected window.until, chunk=@yearly.
+# (contract.end, no_partial_below) -> expected window.until, with chunk=@yearly.
 _EDGE_CASES = [
-    # open contract → the completeness floor. future_data is a no-op here
-    # (resolve_window falls through to the floor; the Model guard forbids the
-    # combo upstream, but the resolver itself must stay well-defined).
-    (None, False, None, _LCY),
-    (None, False, "@daily", _LCD),
-    (None, False, "@monthly", _LCM),
-    (None, True, None, _LCY),
-    (None, True, "@daily", _LCD),
-    # past end → its own value either way (already before the floor).
-    (_PAST, False, None, _PAST),
-    (_PAST, False, "@daily", _PAST),
-    (_PAST, True, None, _PAST),
-    # future end → clamped to the floor, unless future_data honours it.
-    (_FUTURE, False, None, _LCY),
-    (_FUTURE, False, "@daily", _LCD),
-    (_FUTURE, False, "@monthly", _LCM),
-    (_FUTURE, True, None, _FUTURE),
-    (_FUTURE, True, "@daily", _FUTURE),
+    # open contract → the completeness floor.
+    (None, None, _LCY),
+    (None, "@daily", _LCD),
+    (None, "@monthly", _LCM),
+    # past end → its own value (already before the floor).
+    (_PAST, None, _PAST),
+    (_PAST, "@daily", _PAST),
+    # future end → clamped to the floor (no data past the clock to load).
+    (_FUTURE, None, _LCY),
+    (_FUTURE, "@daily", _LCD),
+    (_FUTURE, "@monthly", _LCM),
 ]
 _EDGE_IDS = [
-    "open/fd0/chunk",
-    "open/fd0/day",
-    "open/fd0/month",
-    "open/fd1/chunk",
-    "open/fd1/day",
-    "past/fd0/chunk",
-    "past/fd0/day",
-    "past/fd1/chunk",
-    "future/fd0/chunk",
-    "future/fd0/day",
-    "future/fd0/month",
-    "future/fd1/chunk",
-    "future/fd1/day",
+    "open/chunk",
+    "open/day",
+    "open/month",
+    "past/chunk",
+    "past/day",
+    "future/chunk",
+    "future/day",
+    "future/month",
 ]
 
 
 class TestTrailingEdge:
-    """`no_partial_below` (inferred-edge completeness grain) × `future_data`
-    (honour a future end) × `contract.end`, over the inferred-window modes
-    (reload + no-dates backfill). chunk=`@yearly` so the default floor (year)
-    differs visibly from a finer grain. 'now' = 2026-06-25 12:00 UTC."""
+    """`no_partial_below` (inferred-edge completeness grain) × `contract.end`,
+    over the inferred-window modes (reload + no-dates backfill). chunk=`@yearly`
+    so the default floor (year) differs visibly from a finer grain; a future end
+    is always clamped to the floor. 'now' = 2026-06-25 12:00 UTC."""
 
     @pytest.mark.parametrize("mode", ["reload", "backfill"])
-    @pytest.mark.parametrize("end,future_data,npb,expected", _EDGE_CASES, ids=_EDGE_IDS)
-    def test_edge_matrix(self, end, future_data, npb, expected, mode) -> None:
+    @pytest.mark.parametrize("end,npb,expected", _EDGE_CASES, ids=_EDGE_IDS)
+    def test_edge_matrix(self, end, npb, expected, mode) -> None:
         with travel(_NOW, tick=False):
-            batch = _edge_batch(no_partial_below=npb, future_data=future_data)
+            batch = _edge_batch(no_partial_below=npb)
             w = resolve_window(
                 batch, Contract(begin=_BEGIN, end=end), reload=(mode == "reload")
             )
@@ -470,7 +453,7 @@ class TestTrailingEdge:
         assert w.until == expected
 
     def test_default_edge_is_latest_complete_chunk(self) -> None:
-        # npb unset + future_data False → exactly the legacy behavior.
+        # npb unset → exactly the legacy behavior (latest complete chunk).
         with travel(_NOW, tick=False):
             w = resolve_window(_edge_batch(), Contract(begin=_BEGIN), reload=True)
         assert w.until == _LCY
@@ -498,10 +481,10 @@ class TestTrailingEdge:
         assert (w.since, w.until) == (datetime(2026, 5, 1, tzinfo=UTC), _LCM)
 
     def test_explicit_until_overrides_the_inferred_edge(self) -> None:
-        # An explicit BACKFILL_UNTIL wins over end / future_data / no_partial_below.
+        # An explicit RUN_UNTIL wins over the contract end and no_partial_below.
         until = datetime(2025, 3, 1, tzinfo=UTC)
         with travel(_NOW, tick=False):
-            batch = _edge_batch(no_partial_below="@daily", future_data=True)
+            batch = _edge_batch(no_partial_below="@daily")
             w = resolve_window(
                 batch, Contract(begin=_BEGIN, end=_FUTURE), since=_BEGIN, until=until
             )

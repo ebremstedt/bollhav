@@ -78,7 +78,7 @@ Because a flexible upstream coalesces away its exact-grain rows, **`EXACT` again
 - **Invalidation — `STATE_MODE`** (per-run, an env var): how much of the run's window the run resets first. Execution is **window-scoped** — a run does exactly its window, nothing leaks in from the backlog.
     - **`bulldozer`** (default) — reset the window's rows to `pending` and run exactly them (boundaries kept); leave everything outside the window alone.
     - **`discover`** — keep every `applied` row, run only the window's outstanding; with **no** window, reconcile *all* outstanding state.
-    - **`torch`** — drop *all* state and reload the **contract range** (forbids an explicit window — a clean reload / chunk-granularity change).
+    - **`torch`** — drop *all* state, then run the window (no window → the whole **contract range**). The wipe is total, so the unrun remainder defers to a later `discover` run — a clean reload / chunk-granularity change.
 
 What each mode *does* depends on the identity axis:
 

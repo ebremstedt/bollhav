@@ -46,8 +46,8 @@ Declaring `upstream=[Source("warehouse.orders", type=SourceModel(), contract=Ups
 Per-interval advisory locks make the same command safe to run many times at once — each process pulls *different* intervals, and the lock guarantees each interval runs exactly once (the loser skips). So to backfill faster, just launch more processes. No coordination code.
 
 ```bash
-export BACKFILL_SINCE='2024-01-01T00:00:00+00:00'
-export BACKFILL_UNTIL='2024-04-01T00:00:00+00:00'
+export RUN_SINCE='2024-01-01T00:00:00+00:00'
+export RUN_UNTIL='2024-04-01T00:00:00+00:00'
 export TAGS='[orders]'
 
 python main.py &      # three workers, same command —
