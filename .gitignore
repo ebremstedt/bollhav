@@ -169,3 +169,5 @@ docs/site/
 
 # bollhav TUI local config (per-checkout, not shared)
 .bollhav-tui.json
+learn/node_modules/
+learn/.astro/
