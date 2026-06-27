@@ -46,7 +46,7 @@ if __name__ == "__main__":
 
 When you call `main()`, the decorator runs the following steps **before** your function body executes:
 
-1. **Read env vars.** Pulls every runtime override from the environment — `TAGS`, `SCHEMA_SUFFIX`, `LATEST_ENABLED`, `BACKFILL_ENABLED`, `BACKFILL_SINCE`, `BACKFILL_UNTIL`, `INTERVAL_OVERRIDE`, `WINDOW_OVERRIDE`, `LOOKBACK_OVERRIDE`, `TIMEZONE_OVERRIDE`, `DRY_RUN`, `DEBUG`. Full list: [Runtime overrides](#runtime-overrides).
+1. **Read env vars.** Pulls every runtime override from the environment — `TAGS`, `SCHEMA_SUFFIX`, `LATEST_ENABLED`, `BACKFILL_ENABLED`, `RUN_SINCE`, `RUN_UNTIL`, `INTERVAL_OVERRIDE`, `WINDOW_OVERRIDE`, `LOOKBACK_OVERRIDE`, `TIMEZONE_OVERRIDE`, `DRY_RUN`, `DEBUG`. Full list: [Runtime overrides](#runtime-overrides).
 2. **Validate the combination.** Rejects illegal mixes — e.g. `LATEST_ENABLED` and `BACKFILL_ENABLED` both `true`, a `WINDOW_OVERRIDE` without `LATEST_ENABLED`, a negative `LOOKBACK_OVERRIDE`, an unknown `TIMEZONE_OVERRIDE`.
 3. **Print the runtime summary.** A short banner showing the resolved mode, tags, suffix, and any overrides in effect — so the first lines of stdout tell you exactly what this run will do.
 4. **Discover models.** Imports every `Model` instance found under `folder` (defaults to `src/models`; pass `@load_models(folder="...")` to change).
@@ -165,8 +165,8 @@ if __name__ == "__main__":
 | **TIMEZONE_OVERRIDE** | string | no | IANA timezone (e.g. `Europe/Stockholm`) that overrides every model's timezone |
 | **LATEST_ENABLED** | bool | no | Enables latest mode. Cannot be `True` along with **BACKFILL_ENABLED** |
 | **BACKFILL_ENABLED** | bool | no | Enables backfill mode, defaults to **True** when **LATEST_ENABLED** is unset. Cannot be `True` along with **LATEST_ENABLED** |
-| **BACKFILL_SINCE** | ISO 8601 datetime | yes (in backfill) | Start of backfill window |
-| **BACKFILL_UNTIL** | ISO 8601 datetime | no | End of backfill window. Defaults to the latest complete interval end |
+| **RUN_SINCE** | ISO 8601 datetime | yes (in backfill) | Start of backfill window |
+| **RUN_UNTIL** | ISO 8601 datetime | no | End of backfill window. Defaults to the latest complete interval end |
 | **INTERVAL_OVERRIDE** | IntervalExpression | no | Overrides every model's `batching.time.chunk` (chunk size, applies in all modes) |
 | **WINDOW_OVERRIDE** | IntervalExpression | no | Overrides every model's `batching.time.window` (latest-mode scope). Errors at startup if set without **LATEST_ENABLED** |
 | **LOOKBACK_OVERRIDE** | non-negative int | no | Overrides every model's `batching.time.lookback`. Shifts each interval's `since` backwards by N cron-ticks of the (post-override) `chunk`. Applies in latest, backfill, and reload modes |
@@ -211,7 +211,7 @@ Applies uniformly in latest, backfill, and reload modes.
 
 ### Backfill mode (default)
 
-Uses an explicit time window, chunked by the interval expression. If `BACKFILL_UNTIL` is unset, it defaults to the end of the latest complete interval.
+Uses an explicit time window, chunked by the interval expression. If `RUN_UNTIL` is unset, it defaults to the end of the latest complete interval.
 
 ### Dry run
 
@@ -242,7 +242,7 @@ Each model defines its own timezone via `Batch(time=TimeChunking(tz=...))`, defa
 
 This affects:
 - **Latest mode** — which hour/day boundary counts as "now"
-- **Backfill mode** — replaces the timezone on `BACKFILL_SINCE` and `BACKFILL_UNTIL`
+- **Backfill mode** — replaces the timezone on `RUN_SINCE` and `RUN_UNTIL`
 
 ### `apply_runtime_overrides` programmatic form
 

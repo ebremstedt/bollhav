@@ -3,18 +3,31 @@ from dataclasses import dataclass, field
 from datetime import timezone, tzinfo
 from roskarl import IntervalExpression, IntervalExpressionExtended
 
+
 logger = logging.getLogger(__name__)
 
 MAX_BATCH_SIZE = 100000
+
+
+# ── errors ──
+
+
+class BatchSizeExceedsMaxError(ValueError):
+    """A `Batch.size` (or another batch size) exceeded the hard cap
+    `MAX_BATCH_SIZE`. `source` names where the value came from for the
+    message (e.g. `Batch.size`)."""
+
+    def __init__(self, source: str, batch_size: int, max_batch_size: int) -> None:
+        super().__init__(
+            f"{source} batch_size={batch_size} exceeds max {max_batch_size}"
+        )
 
 
 def validate_batch_size(batch_size: int, source: str) -> None:
     """Raise if `batch_size` exceeds the hard cap. `source` names where the
     value came from for the error message (e.g. 'Batch.size')."""
     if batch_size > MAX_BATCH_SIZE:
-        raise ValueError(
-            f"{source} batch_size={batch_size} exceeds max {MAX_BATCH_SIZE}"
-        )
+        raise BatchSizeExceedsMaxError(source, batch_size, MAX_BATCH_SIZE)
 
 
 @dataclass
@@ -26,20 +39,44 @@ class TimeChunking:
     "0 * * * *" means each chunk is one hour, "0 0 * * *" means one day.
     Can be overridden at runtime via the pipe's batch expression env var.
 
-    `window` defines the scope to catch up on in `latest` mode — i.e.
-    "one of what" counts as the latest complete unit. Defaults to `chunk`
-    when unset. Only consulted in `latest` mode.
+    `window` defines the catch-up bite in `latest` mode — "one of what" a
+    latest run loads. Defaults to `chunk` when unset. Only consulted in `latest`
+    mode (the trailing edge of an *inferred* window is governed by
+    `no_partial_below`, below).
+
+    `no_partial_below` is the **completeness grain** the inferred trailing edge
+    snaps to: when a run's window is implied (reload / no-dates backfill) and the
+    contract is open-ended, the edge advances to the latest *complete* unit of
+    this grain rather than the chunk. So a `@yearly` chunk with
+    `no_partial_below="@daily"` loads through the last complete day — the current
+    year as a partial, snapped to a whole day — instead of stopping at the last
+    complete *year*. Can be finer *or* coarser than `chunk`; defaults to `chunk`
+    (snap to the latest complete chunk — today's behavior). It's the end knob;
+    `lookback` is the start knob.
 
     `tz` is the timezone used for interval resolution. Defaults to UTC.
 
     `lookback` extends the start of the interval backwards by N cron-ticks,
     useful for reprocessing recent history to account for late-arriving data.
+
+    `fixed_intervals` declares whether this chunk grid is the model's state
+    *identity* (`True`, the default) or a free slicing of a coverage set
+    (`False`). When `True`, state is a grid — one row per `(since, until)`
+    chunk; the chunk is part of identity, so changing it requires a state reset
+    (`STATE_MODE=torch`), and downstreams may gate `EXACT` on it. `False` is an
+    **attestation** that the model's output is invariant to how time is
+    partitioned (its query is window-decomposable AND its write is
+    order-independent/idempotent), allowing variable-grain coverage-based state.
+    The coverage engine is live; the `APPEND` guard and overlap locking it
+    implies are still deferred — see `design/flexible-intervals.md`.
     """
 
     chunk: IntervalExpression | IntervalExpressionExtended = "@daily"
     window: IntervalExpression | IntervalExpressionExtended | None = None
     tz: tzinfo = timezone.utc
     lookback: int | None = None
+    fixed_intervals: bool = True
+    no_partial_below: IntervalExpression | IntervalExpressionExtended | None = None
 
 
 @dataclass

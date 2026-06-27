@@ -11,6 +11,36 @@ from bollhav.mssql.modes import append, merge
 logger = logging.getLogger(__name__)
 
 
+# ── errors ──────────────────────────────────────────────────────────
+
+
+class UnhandledWriteModeError(ValueError):
+    """The model's `write_mode` isn't one the MSSQL writer can handle. Raised
+    when dispatching a write so an unsupported mode fails loudly."""
+
+    def __init__(self, write_mode: object) -> None:
+        super().__init__(f"Unhandled write mode for MSSQL: {write_mode}")
+
+
+class WriteOnViewError(ValueError):
+    """`write()` was called for a VIEW model. Views are created by
+    `@model_lifecycle`, not written to, so a view's execute body has nothing
+    to write."""
+
+    def __init__(self, full_name: str) -> None:
+        super().__init__(
+            f"{full_name!r} is a VIEW — created by @model_lifecycle, not write()."
+        )
+
+
+class MissingDataframeGeneratorError(ValueError):
+    """`write()` was called without a DataFrame generator. The write mode
+    needs rows to land, so a `df_gen` is required for non-view models."""
+
+    def __init__(self, write_mode_value: str) -> None:
+        super().__init__(f"{write_mode_value} requires a dataframe generator")
+
+
 def write_dataframes(
     conn: pyodbc.Connection,
     model: Model,
@@ -29,9 +59,7 @@ def write_dataframes(
         case WriteMode.UPSERT_NO_DELETE:
             write_function = merge
         case _:
-            raise ValueError(
-                f"Unhandled write mode for MSSQL: {model.target.write_mode}"
-            )
+            raise UnhandledWriteModeError(model.target.write_mode)
 
     for df in df_gen:
         if len(df) == 0:
@@ -80,22 +108,17 @@ def write(
     """
     model = run.model
     if model.is_view:
-        raise ValueError(
-            f"{model.target.full_name!r} is a VIEW — created by "
-            f"@model_lifecycle, not write()."
-        )
+        raise WriteOnViewError(model.target.full_name)
 
     if model.target.write_mode not in (
         WriteMode.APPEND,
         WriteMode.UPSERT_NO_DELETE,
         WriteMode.RECREATE_PARTITION,
     ):
-        raise ValueError(f"Unhandled write mode for MSSQL: {model.target.write_mode}")
+        raise UnhandledWriteModeError(model.target.write_mode)
 
     if not df_gen:
-        raise ValueError(
-            f"{model.target.write_mode.value} requires a dataframe generator"
-        )
+        raise MissingDataframeGeneratorError(model.target.write_mode.value)
 
     if model.target.stage:
         _write_staged(conn=conn, run=run, df_gen=df_gen)

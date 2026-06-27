@@ -8,55 +8,67 @@ from enum import Enum
 class UpstreamContract(str, Enum):
     """How ready an upstream must be before a downstream unit may run.
 
-    A weak→strong **ladder** — each level implies the ones below it
-    (``WHOLE`` ⟹ ``THROUGH`` ⟹ ``WINDOW`` ⟹ ``EXISTS``).
     You pick *how strict*; the upstream's **shape** (interval vs whole-table) is
     read from the library at check time, so you never restate it. A source
-    without a contract is ungated (never waited on); to gate, name a level::
+    without a contract is ungated (never waited on); to gate, name a level:
 
-        Source("warehouse.orders", type=SourceModel(...), contract=UpstreamContract.WINDOW)
+        Source("warehouse.orders", type=SourceModel(...), contract=UpstreamContract.ENCAPSULATE)
         Source("warehouse.orders", ..., contract=UpstreamContract.WHOLE)
+
+    Five levels. Three are **window-scoped** — they consult only the upstream
+    rows touching *my* `[since, until)`, nothing outside it — and differ only in
+    the grain they accept; two widen the scope past my window:
 
     ``EXISTS``
         The upstream is a registered model. No window, no applied state — just
         "it's a known model". Gives run-ordering + a managed lineage edge
         without waiting for any data. The only level a **windowless** consumer
-        (view / monolithic) can use to depend on an *interval* upstream without
+        (view / oneshot) can use to depend on an *interval* upstream without
         waiting (the stricter levels make it wait for the whole upstream).
 
-    ``WINDOW`` (the usual choice)
-        The upstream window that lines up with **my** window is ``applied`` — a
-        coarser upstream window that *contains* mine counts too (a daily upstream
-        covers an hourly consumer). This is the per-window, **pipelining** level:
-        my window N runs as soon as the upstream's matching window lands, with no
-        regard for the upstream's other windows.
+    ``EXACT`` (window-scoped)
+        Exactly **my** window — one applied upstream row with the *same*
+        `(since, until)`. A coarser row that merely *contains* my window (a
+        weekly backfill spanning my day) does **not** count, and neither does a
+        union of finer rows. The strict choice when the upstream is aggregated at
+        *my grain* and that alignment is load-bearing: you want that day's own
+        aggregate row, not a coarser one that lumped several of my windows
+        together.
 
-        Resolves by shape: for a **whole-table** upstream (one existence row), or
-        a **windowless** consumer reading *all* of an interval upstream, "the
-        data I read" is the whole thing — so this means the existence row /
-        every interval is applied.
+    ``ENCAPSULATE`` (window-scoped — the usual choice)
+        **My** window's data is present — the applied upstream rows *cover*
+        `[since, until)` by any combination: a single coarser row that contains
+        it (a daily upstream covering my hour), the exact-grain row, or a
+        gap-free **union** of finer rows (24 hourly rows tiling my day). The
+        per-window, **pipelining** level: my window N runs as soon as its slice
+        of the upstream lands, regardless of the upstream's grain or its other
+        windows. Nothing outside `[since, until)` is consulted.
 
-    ``THROUGH``
+    ``THROUGH`` (prefix-scoped)
         Every upstream interval **up to and including my window** is ``applied``
         — a gap-free *prefix*. For **additive / cumulative** windowed models,
-        where window N sums history 1..N: ``WINDOW`` (only N) would
-        undercount; ``WHOLE`` would over-wait. ``THROUGH`` is
-        anchored to my window, so it still pipelines and — unlike ``WHOLE``
-        — stays satisfiable while the upstream grows past me. Differs from
-        ``WHOLE`` only when a consumer runs **behind** a moving upstream
-        (backfill / catch-up).
+        where window N sums history 1..N: ``ENCAPSULATE`` (only my window) would
+        undercount; ``WHOLE`` would over-wait. ``THROUGH`` is anchored to my
+        window's `until`, so it still pipelines and — unlike ``WHOLE`` — stays
+        satisfiable while the upstream grows past me. Unlike the window-scoped
+        levels, a hole *anywhere before* my window blocks it.
 
-    ``WHOLE``
+    ``WHOLE`` (whole-upstream)
         **Every** upstream interval is ``applied`` (and at least one is) — the
         whole upstream, in absolute terms (not relative to my window). For
         aggregates over all of it, snapshots, exports. On a continuously-growing
         upstream it's satisfied whenever the upstream has caught up to its latest
         *elapsed* tick (the in-progress tick isn't in state, so there's no
         permanent pending tail).
+
+    Strength ladder (each implies those below): ``WHOLE`` ⟹ ``THROUGH`` ⟹
+    ``ENCAPSULATE`` ⟹ ``EXISTS``, with ``EXACT`` ⟹ ``ENCAPSULATE`` as the
+    stricter window-scoped sibling (an exact-grain row also covers the window).
     """
 
     EXISTS = "exists"
-    WINDOW = "window"
+    EXACT = "exact"
+    ENCAPSULATE = "encapsulate"
     THROUGH = "through"
     WHOLE = "whole"
 
@@ -64,7 +76,7 @@ class UpstreamContract(str, Enum):
 class FreshnessScope(str, Enum):
     """Which of the upstream's relevant applied rows must be recent.
 
-    The contract level (``WINDOW`` / ``THROUGH`` / ``WHOLE`` / ``timeless``)
+    The contract level (``ENCAPSULATE`` / ``THROUGH`` / ``WHOLE`` / ``timeless``)
     already selects *which* rows count as "the data I read"; the scope then says
     *how much of that selection* has to be fresh:
 

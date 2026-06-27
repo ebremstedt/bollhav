@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from datetime import datetime, tzinfo
 from functools import wraps
@@ -16,15 +17,6 @@ from roskarl import (
 
 from bollhav.model.runtime import apply_runtime_overrides
 from bollhav.model.modelrun import ModelRun
-from bollhav.model.errors import (
-    ConflictingRunModeError,
-    InvalidStateModeError,
-    InvalidTimezoneError,
-    MissingSchemaSuffixError,
-    MissingTableSuffixError,
-    NegativeLookbackError,
-    WindowOverrideWithoutLatestError,
-)
 from bollhav.model.window import compute_intervals
 from bollhav.model.progress_bar import get_progress_level, PROGRESS, ProgressLevel
 from bollhav.model.state import StateMode
@@ -32,6 +24,69 @@ from bollhav.model.state import StateMode
 import logging
 
 logger = logging.getLogger(__name__)
+
+
+# ── errors ──
+
+
+class ConflictingRunModeError(ValueError):
+    """`LATEST_ENABLED` and `BACKFILL_ENABLED` were both set — they pick
+    mutually exclusive run modes, so exactly one (or neither) may be true."""
+
+    def __init__(self) -> None:
+        super().__init__("LATEST_ENABLED and BACKFILL_ENABLED cannot both be true")
+
+
+class MissingSchemaSuffixError(ValueError):
+    """`USE_SCHEMA_SUFFIX=True` was set without a non-empty `SCHEMA_SUFFIX` to
+    apply, so there's nothing to suffix the schema with."""
+
+    def __init__(self) -> None:
+        super().__init__("USE_SCHEMA_SUFFIX=True requires non-empty SCHEMA_SUFFIX")
+
+
+class MissingTableSuffixError(ValueError):
+    """`USE_TABLE_SUFFIX=True` was set without a non-empty `TABLE_SUFFIX` to
+    apply, so there's nothing to suffix the table with."""
+
+    def __init__(self) -> None:
+        super().__init__("USE_TABLE_SUFFIX=True requires non-empty TABLE_SUFFIX")
+
+
+class WindowOverrideWithoutLatestError(ValueError):
+    """`WINDOW_OVERRIDE` was set outside `LATEST_ENABLED` mode. It only adjusts
+    the inferred latest-window; in backfill mode since/until are explicit and
+    no window is inferred, so the override has nothing to act on."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "WINDOW_OVERRIDE only applies when LATEST_ENABLED=True — "
+            "in backfill mode since/until are set explicitly and no window is inferred"
+        )
+
+
+class NegativeLookbackError(ValueError):
+    """`LOOKBACK_OVERRIDE` was given a negative value — a lookback extends the
+    window backwards by a non-negative amount, so negatives are meaningless."""
+
+    def __init__(self, value: int) -> None:
+        super().__init__(f"LOOKBACK_OVERRIDE must be non-negative, got {value}")
+
+
+class InvalidStateModeError(ValueError):
+    """`STATE_MODE` was set to a value outside the known modes
+    (`discover` / `bulldozer` / `torch`)."""
+
+    def __init__(self, value: str, valid: list[str]) -> None:
+        super().__init__(f"STATE_MODE must be one of {valid}, got {value!r}")
+
+
+class InvalidTimezoneError(ValueError):
+    """`TIMEZONE_OVERRIDE` was not a valid IANA timezone name (e.g.
+    `Europe/Stockholm`), so it can't be resolved to a zone."""
+
+    def __init__(self, value: str) -> None:
+        super().__init__(f"TIMEZONE_OVERRIDE is not a valid IANA timezone: {value!r}")
 
 
 @dataclass
@@ -100,11 +155,23 @@ def load_models(
         USE_TABLE_SUFFIX              default false
         DEBUG                         default false
         TIMEZONE_OVERRIDE             IANA timezone name
-        LATEST_ENABLED                default false
-        BACKFILL_ENABLED              default !LATEST_ENABLED
-        BACKFILL_SINCE                ISO 8601 datetime
-        BACKFILL_UNTIL                ISO 8601 datetime
-        INTERVAL_OVERRIDE  cron / @alias
+        LATEST_ENABLED                run the latest complete tick. The DEFAULT
+                                      run mode (when neither flag is set).
+        BACKFILL_ENABLED              a windowed range run. Mutually exclusive
+                                      with latest. The window is RUN_SINCE/
+                                      RUN_UNTIL, each falling back to the contract
+                                      (begin / end-or-latest) — so a no-dates
+                                      backfill runs the declared range.
+        RUN_SINCE                     ISO 8601 datetime (optional; ?? contract.begin).
+                                      The run window's start, used by any state
+                                      mode. (alias: deprecated BACKFILL_SINCE)
+        RUN_UNTIL                     ISO 8601 datetime (optional; ?? contract.end
+                                      ?? latest complete tick). (alias: BACKFILL_UNTIL)
+        INTERVAL_OVERRIDE  cron / @alias — re-chunks at runtime. Applies ONLY
+                                      to flexible models (fixed_intervals=False);
+                                      ignored (logged at INFO) on fixed models,
+                                      since re-chunking a fixed grid forks its
+                                      state — use STATE_MODE=torch for that.
         WINDOW_OVERRIDE    cron / @alias (latest mode only)
         LOOKBACK_OVERRIDE             non-negative int (cron-ticks)
         DRY_RUN                       bool; when true, print a concise summary
@@ -115,12 +182,14 @@ def load_models(
                                       prints the exhaustive per-model block
                                       (schema, bounds, tags, source, upstream,
                                       …). Implies DRY_RUN=true
-        STATE_MODE                    discover (default) | bulldozer. For
-                                      state-enabled models, controls how the
-                                      `@model_lifecycle` prefill treats
-                                      existing state rows. discover = preserve
-                                      applied rows; bulldozer = reset every
-                                      row to pending.
+        STATE_MODE                    bulldozer (default) | discover | torch.
+                                      How much state a run invalidates within its
+                                      window. bulldozer = reset the window's rows
+                                      to pending and run exactly them (leave the
+                                      rest); discover = skip already-applied (run
+                                      only the window's outstanding); torch =
+                                      DELETE all rows + reload the contract range
+                                      (forbids an explicit window — destructive).
         STATE_DISABLED                bool; when true, force the pipeline to
                                       run with NO state tracking — even for
                                       models that declare state=State(...).
@@ -130,12 +199,29 @@ def load_models(
                                       `state` + `target.staging` so the
                                       lifecycle hooks pass through and write()
                                       uses the direct path.
+        STATE_MARK_APPLIED            bool; when true, stamp the matched models'
+                                      window intervals `applied` in state WITHOUT
+                                      running them — for recording an out-of-band
+                                      load (a manual / STATE_DISABLED bulk load)
+                                      so the daily incremental won't reload it.
+                                      Scoped to `compute_intervals(run)` (the
+                                      supplied window + chunk), never the backlog.
+                                      No DDL, no data writes. An assertion, not a
+                                      verification — only what you select
     """
 
     def decorator(func: Callable[..., None]) -> Callable[[], None]:
         @wraps(func)
         def wrapper() -> None:
             cfg = _read_env()
+            if (
+                "LATEST_ENABLED" not in os.environ
+                and "BACKFILL_ENABLED" not in os.environ
+            ):
+                logger.debug(
+                    "no run mode set — defaulting to latest (the latest complete "
+                    "tick); set BACKFILL_ENABLED=true for a range run"
+                )
             runs = apply_runtime_overrides(
                 folder=folder,
                 tags=cfg.tags,
@@ -149,6 +235,7 @@ def load_models(
                 lookback_override=cfg.lookback_override,
                 tz_override=cfg.tz_override,
                 state_disabled=cfg.state_disabled,
+                state_mode=cfg.state_mode,
             )
             if cfg.state_disabled:
                 logger.info(
@@ -202,8 +289,8 @@ def load_models(
 
 
 def _read_env() -> _RuntimeConfig:
-    latest = _resolve_latest()
-    backfill_enabled = _resolve_backfill_enabled(latest=latest)
+    backfill_enabled = _resolve_backfill_enabled()
+    latest = _resolve_latest(backfill=backfill_enabled)
     tz_override = _resolve_tz_override()
 
     return _RuntimeConfig(
@@ -212,8 +299,12 @@ def _read_env() -> _RuntimeConfig:
         table_suffix=_resolve_table_suffix(),
         latest=latest,
         backfill_enabled=backfill_enabled,
-        backfill_since=_backfill_dt("BACKFILL_SINCE", backfill_enabled, tz_override),
-        backfill_until=_backfill_dt("BACKFILL_UNTIL", backfill_enabled, tz_override),
+        backfill_since=_window_dt(
+            "RUN_SINCE", "BACKFILL_SINCE", backfill_enabled, tz_override
+        ),
+        backfill_until=_window_dt(
+            "RUN_UNTIL", "BACKFILL_UNTIL", backfill_enabled, tz_override
+        ),
         interval_override=_resolve_interval_override(),
         window_override=_resolve_window_override(latest=latest),
         lookback_override=_resolve_lookback_override(),
@@ -231,29 +322,40 @@ def _resolve_tags() -> str:
     return cast(str, env_var(name="TAGS", required=True))
 
 
-def _resolve_latest() -> bool:
+def _resolve_backfill_enabled() -> bool:
+    """`BACKFILL_ENABLED` — a windowed *range* run (`RUN_SINCE`/`RUN_UNTIL`, or
+    the contract's declared range when no dates are given). Defaults False; the
+    unset run mode is `latest`."""
     # env_var_bool is typed `bool | None` even when `default` is given;
     # `default=...` guarantees a non-None result at runtime, so cast.
-    return cast(bool, env_var_bool(name="LATEST_ENABLED", default=False))
+    return cast(bool, env_var_bool(name="BACKFILL_ENABLED", default=False))
 
 
-def _resolve_backfill_enabled(*, latest: bool) -> bool:
-    """`BACKFILL_ENABLED` (defaults to the opposite of `latest`). Backfill and
-    latest are mutually exclusive — raises if both are on."""
-    backfill = cast(bool, env_var_bool(name="BACKFILL_ENABLED", default=not latest))
+def _resolve_latest(*, backfill: bool) -> bool:
+    """`LATEST_ENABLED` — run the latest complete tick. This is the **default**
+    run mode (when neither flag is set), so it defaults to `not backfill`.
+    Mutually exclusive with backfill — raises if both are explicitly on."""
+    latest = cast(bool, env_var_bool(name="LATEST_ENABLED", default=not backfill))
     if latest and backfill:
         raise ConflictingRunModeError()
-    return backfill
+    return latest
 
 
-def _backfill_dt(
-    name: str, backfill_enabled: bool, tz_override: tzinfo | None
+def _window_dt(
+    name: str, legacy_name: str, backfill_enabled: bool, tz_override: tzinfo | None
 ) -> datetime | None:
-    """One backfill window boundary (`BACKFILL_SINCE` / `BACKFILL_UNTIL`):
-    `None` when not in backfill mode, else the ISO-8601 env value with the
-    timezone override stamped on (when one is set)."""
+    """One run-window boundary (`RUN_SINCE` / `RUN_UNTIL`) — the explicit window
+    a run targets, regardless of state mode. `None` when not in a windowed run,
+    else the ISO-8601 env value with the timezone override stamped on (when set).
+
+    `legacy_name` (`BACKFILL_SINCE` / `BACKFILL_UNTIL`) is honoured as a
+    **deprecated alias** when the new var is unset — it warns and will be
+    removed."""
     if not backfill_enabled:
         return None
+    if os.environ.get(name) is None and os.environ.get(legacy_name) is not None:
+        logger.warning("env var %s is deprecated — rename it to %s", legacy_name, name)
+        name = legacy_name
     dt = env_var_iso8601_datetime(name=name)
     return _apply_tz(dt, tz_override) if tz_override else dt
 
@@ -335,7 +437,9 @@ def _resolve_lookback_override() -> int | None:
 def _resolve_state_mode() -> StateMode:
     raw = env_var(name="STATE_MODE", should_print_unset=False)
     if raw is None:
-        return StateMode.DISCOVER
+        # bulldozer is the default: run *exactly* the resolved window (reset its
+        # rows, leave the rest). discover (skip-applied / reconcile) is opt-in.
+        return StateMode.BULLDOZER
     valid = {m.value: m for m in StateMode}
     mode = valid.get(raw.strip().lower())
     if mode is None:
@@ -439,6 +543,13 @@ def _print_summary(cfg: _RuntimeConfig, runs: list[ModelRun]) -> None:
         _row("state", "disabled")
     elif has_state:
         _row("state", cfg.state_mode.value)
+    # STATE_MARK_APPLIED is resolved in @model_lifecycle (like DRY_STATE), but flag it
+    # loudly here so it's never run by accident — it writes `applied` without
+    # running any data.
+    from bollhav.model.lifecycle import _mark_applied
+
+    if _mark_applied():
+        _row("mark applied", "stamping window applied — NO data will run")
     # Close the runtime box with a lower border.
     print("────────────────────────────")
 

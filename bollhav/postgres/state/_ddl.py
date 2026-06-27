@@ -86,6 +86,7 @@ CREATE TABLE IF NOT EXISTS {schema}.{table} (
     state_schema   TEXT,
     state_table    TEXT,
     temporality    TEXT NOT NULL DEFAULT 'temporal',
+    fixed_intervals BOOLEAN NOT NULL DEFAULT true,
     metadata       JSONB NOT NULL DEFAULT '{{}}'::jsonb,
     last_seen      TIMESTAMPTZ NOT NULL DEFAULT now()
 )

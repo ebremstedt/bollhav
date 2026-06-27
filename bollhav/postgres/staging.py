@@ -19,6 +19,52 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+# ── errors ──
+class UnsupportedStagingWriteModeError(NotImplementedError):
+    """The staging write path hit a write mode it doesn't support (guarded
+    upstream by `Staging.__post_init__`). Subclasses `NotImplementedError` so
+    its catch-semantics are preserved."""
+
+    def __init__(self, wm) -> None:
+        super().__init__(f"unsupported staging.write_mode {wm!r}")
+
+
+class RecreatePartitionRequiresAwareWindowError(ValueError):
+    """A staged `RECREATE_PARTITION` apply got a naive since/until. The DELETE
+    window must be an unambiguous instant, so both bounds must be UTC-aware."""
+
+    def __init__(self) -> None:
+        super().__init__("RECREATE_PARTITION requires since/until to be UTC-aware")
+
+
+class RecreatePartitionRequiresPartitionedByError(ValueError):
+    """A staged `RECREATE_PARTITION` apply ran on a target with no
+    `partitioned_by` — there's no column to scope the window DELETE/INSERT to."""
+
+    def __init__(self) -> None:
+        super().__init__("RECREATE_PARTITION requires target.partitioned_by to be set")
+
+
+class StagedRecreatePartitionRequiresWindowError(ValueError):
+    """A staged `RECREATE_PARTITION` apply was reached with no since/until — the
+    mode overwrites a specific window, so it needs one. Run the model windowed."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "RECREATE_PARTITION requires a window (since/until) — "
+            "run the model windowed."
+        )
+
+
+class UnsupportedTargetWriteModeError(NotImplementedError):
+    """The staging→target apply hit a target write mode it doesn't support
+    (guarded upstream by `_assert_supported`). Subclasses `NotImplementedError`
+    so its catch-semantics are preserved."""
+
+    def __init__(self, wm) -> None:
+        super().__init__(f"unsupported target.write_mode {wm!r}")
+
+
 @dataclass
 class PostgresStaging(Staging):
     """Postgres-specific extension of `Staging`
@@ -115,12 +161,15 @@ def _staging_table(model: "Model", run_id: UUID) -> str:
 
 
 def drop_staging_table(conn: psycopg.Connection, model: "Model", run_id: UUID) -> None:
+    schema = _staging_schema(model)
+    table = _staging_table(model, run_id)
     conn.execute(
         sql.SQL("DROP TABLE IF EXISTS {schema}.{table}").format(
-            schema=sql.Identifier(_staging_schema(model)),
-            table=sql.Identifier(_staging_table(model, run_id)),
+            schema=sql.Identifier(schema),
+            table=sql.Identifier(table),
         )
     )
+    logger.debug("dropped staging table %s.%s", schema, table)
 
 
 # ── write to staging ─────────────────────────────────────────────────
@@ -164,13 +213,13 @@ def _upsert_to_staging(
     staging_schema_id = sql.Identifier(_staging_schema(model))
     staging_table_id = sql.Identifier(_staging_table(model, run_id))
     pg_cols = [c for c in model.target.columns if isinstance(c, PostgresColumn)]
-    unique_column_names = [c.name for c in model.target.unique_columns]
+    key_column_names = [c.name for c in model.target.merge_key_columns]
     col_names = sql.SQL(", ").join(sql.Identifier(c.name) for c in pg_cols)
-    pk_cols = sql.SQL(", ").join(sql.Identifier(c) for c in unique_column_names)
+    pk_cols = sql.SQL(", ").join(sql.Identifier(c) for c in key_column_names)
     update_set = sql.SQL(", ").join(
         sql.SQL("{col} = EXCLUDED.{col}").format(col=sql.Identifier(c.name))
         for c in pg_cols
-        if c.name not in unique_column_names
+        if c.name not in key_column_names
     )
     col_defs = sql.SQL(", ").join(
         sql.SQL("{name} {type}").format(
@@ -225,7 +274,7 @@ def write_to_staging(
         case WriteMode.UPSERT_NO_DELETE:
             _upsert_to_staging(conn, model, run_id, df)
         case _ as wm:  # pragma: no cover — guarded by Staging.__post_init__
-            raise NotImplementedError(f"unsupported staging.write_mode {wm!r}")
+            raise UnsupportedStagingWriteModeError(wm)
     logger.debug(
         "wrote %d rows to staging table (%s)",
         len(df),
@@ -272,13 +321,13 @@ def _apply_upsert(
 ) -> None:
     """target.write_mode = UPSERT_NO_DELETE — INSERT FROM staging
     with ON CONFLICT DO UPDATE."""
-    unique_column_names = [c.name for c in model.target.unique_columns]
+    key_column_names = [c.name for c in model.target.merge_key_columns]
     col_names = sql.SQL(", ").join(sql.Identifier(c.name) for c in model.target.columns)
-    pk_cols = sql.SQL(", ").join(sql.Identifier(c) for c in unique_column_names)
+    pk_cols = sql.SQL(", ").join(sql.Identifier(c) for c in key_column_names)
     update_set = sql.SQL(", ").join(
         sql.SQL("{col} = EXCLUDED.{col}").format(col=sql.Identifier(c.name))
         for c in model.target.columns
-        if c.name not in unique_column_names
+        if c.name not in key_column_names
     )
     conn.execute(
         sql.SQL(
@@ -312,10 +361,10 @@ def _apply_recreate_partition(
     INSERT FROM staging. Same transaction, so concurrent readers never
     see a gap (only the new contents of the window)."""
     if since.tzinfo is None or until.tzinfo is None:
-        raise ValueError("RECREATE_PARTITION requires since/until to be UTC-aware")
+        raise RecreatePartitionRequiresAwareWindowError()
     partition_col_name = model.target.partitioned_by
     if partition_col_name is None:
-        raise ValueError("RECREATE_PARTITION requires target.partitioned_by to be set")
+        raise RecreatePartitionRequiresPartitionedByError()
     col_names = sql.SQL(", ").join(sql.Identifier(c.name) for c in model.target.columns)
     conn.execute(
         sql.SQL(
@@ -347,8 +396,8 @@ def apply_atomically_to_target(
     model: "Model",
     *,
     run_id: UUID,
-    since: datetime,
-    until: datetime,
+    since: datetime | None = None,
+    until: datetime | None = None,
     drop_after_apply: bool | None = None,
 ) -> None:
     """Apply the staged content to the target using whatever operation
@@ -396,11 +445,13 @@ def apply_atomically_to_target(
             case WriteMode.UPSERT_NO_DELETE:
                 _apply_upsert(conn, model, **table_names)
             case WriteMode.RECREATE_PARTITION:
+                if since is None or until is None:
+                    raise StagedRecreatePartitionRequiresWindowError()
                 _apply_recreate_partition(
                     conn, model, **table_names, since=since, until=until
                 )
             case _ as wm:  # pragma: no cover — guarded by _assert_supported
-                raise NotImplementedError(f"unsupported target.write_mode {wm!r}")
+                raise UnsupportedTargetWriteModeError(wm)
         if drop_after_apply:
             conn.execute(
                 sql.SQL("DROP TABLE {schema}.{table}").format(
@@ -408,6 +459,7 @@ def apply_atomically_to_target(
                     table=sql.Identifier(staging_table),
                 )
             )
+            logger.debug("dropped staging table %s.%s", staging_schema, staging_table)
         # State is flipped to `applied` separately, by the interval
         # lifecycle's `mark_applied` after this returns — not inside the
         # data-move transaction. The data write commits here; the state

@@ -17,6 +17,48 @@ from bollhav.postgres.data import PostgresData
 logger = logging.getLogger(__name__)
 
 
+# ── errors ──
+class RecreatePartitionRequiresWindowError(ValueError):
+    """A `RECREATE_PARTITION` write was dispatched with no since/until — the
+    mode overwrites a specific window, so it needs one. Run the model windowed."""
+
+    def __init__(self) -> None:
+        super().__init__("Since and until must be set for RECREATE_PARTITION")
+
+
+class UnhandledWriteModeError(ValueError):
+    """The model's `write_mode` fell through every handled case in the write
+    dispatch — an unknown/unsupported table write mode."""
+
+    def __init__(self, write_mode) -> None:
+        super().__init__(f"Unhandled write mode: {write_mode}")
+
+
+class WriteOnViewError(ValueError):
+    """`write()` was called for a VIEW model. Views carry no data to write —
+    they're created by `@model_lifecycle`, so a view's execute body has nothing
+    to write."""
+
+    def __init__(self, full_name: str) -> None:
+        super().__init__(
+            f"write() is for data, not views — {full_name!r} is "
+            f"a VIEW. Views are created by @model_lifecycle "
+            f"(PostgresData.create_or_replace_view); a view's execute body "
+            f"has nothing to write."
+        )
+
+
+class MissingDataFrameError(ValueError):
+    """A table write mode (APPEND / RECREATE_PARTITION / UPSERT_NO_DELETE) was
+    invoked with no DataFrame generator — those modes have nothing to write
+    without one."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "Modes APPEND, RECREATE_PARTITION, UPSERT_NO_DELETE need a dataframe"
+        )
+
+
 def write_dataframes(
     conn: Connection,
     model: Model,
@@ -50,12 +92,12 @@ def write_dataframes(
             write_function = append
         case WriteMode.RECREATE_PARTITION:
             if since is None or until is None:
-                raise ValueError("Since and until must be set for RECREATE_PARTITION")
+                raise RecreatePartitionRequiresWindowError()
             write_function = partial(recreate_partition, since=since, until=until)
         case WriteMode.UPSERT_NO_DELETE:
             write_function = upsert_no_delete
         case _:
-            raise ValueError(f"Unhandled write mode: {model.target.write_mode}")
+            raise UnhandledWriteModeError(model.target.write_mode)
 
     for df in df_gen:
         if len(df) == 0:
@@ -113,24 +155,17 @@ def write(
     """
     model = run.model
     if model.is_view:
-        raise ValueError(
-            f"write() is for data, not views — {model.target.full_name!r} is "
-            f"a VIEW. Views are created by @model_lifecycle "
-            f"(PostgresData.create_or_replace_view); a view's execute body "
-            f"has nothing to write."
-        )
+        raise WriteOnViewError(model.target.full_name)
 
     if model.target.write_mode not in (
         WriteMode.APPEND,
         WriteMode.RECREATE_PARTITION,
         WriteMode.UPSERT_NO_DELETE,
     ):
-        raise ValueError(f"Unhandled write mode: {model.target.write_mode}")
+        raise UnhandledWriteModeError(model.target.write_mode)
 
     if not df_gen:
-        raise ValueError(
-            "Modes APPEND, RECREATE_PARTITION, UPSERT_NO_DELETE need a dataframe"
-        )
+        raise MissingDataFrameError()
 
     if model.target.stage:
         _write_staged(conn=conn, run=run, df_gen=df_gen)

@@ -3,6 +3,17 @@ from enum import Enum
 from bollhav.model.database import DatabaseColumn
 
 
+# ── errors ──────────────────────────────────────────────────────────
+
+
+class NullablePrimaryKeyColumnError(ValueError):
+    """A `DatabaseColumn` was declared `primary_key=True` and `nullable=True`.
+    A primary key can't hold NULLs, so the two flags are contradictory."""
+
+    def __init__(self, name: str) -> None:
+        super().__init__(f"Column {name!r}: primary_key=True cannot be nullable")
+
+
 class MssqlType(Enum):
     BIGINT = "BIGINT"
     BIT = "BIT"
@@ -50,9 +61,7 @@ class MssqlColumn(DatabaseColumn):
 
     def __post_init__(self) -> None:
         if self.primary_key and self.nullable:
-            raise ValueError(
-                f"Column {self.name!r}: primary_key=True cannot be nullable"
-            )
+            raise NullablePrimaryKeyColumnError(self.name)
 
     def __repr__(self) -> str:
         base_parts = [

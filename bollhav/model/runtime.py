@@ -1,14 +1,18 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import replace
 from datetime import datetime, tzinfo
 
-from bollhav.model.batch import Batch, TimeChunking
+from bollhav.model.batch import Batch
 from bollhav.model.window import resolve_window
 from bollhav.model.matching import matched_with_reload
 from bollhav.model.model import Model
 from bollhav.model.modelrun import ModelRun
+from bollhav.model.state import StateMode
 from bollhav.model.target import Target
+
+logger = logging.getLogger(__name__)
 
 
 def apply_runtime_overrides(
@@ -25,6 +29,7 @@ def apply_runtime_overrides(
     lookback_override: int | None = None,
     tz_override: tzinfo | None = None,
     state_disabled: bool = False,
+    state_mode: StateMode = StateMode.DISCOVER,
 ) -> list[ModelRun]:
     """Match models against the tag expression and return one `ModelRun` per
     match — a new (immutable) `Model` with all pipe-/tag-driven settings baked
@@ -60,6 +65,7 @@ def apply_runtime_overrides(
             lookback_override=lookback_override,
             tz_override=tz_override,
             state_disabled=state_disabled,
+            state_mode=state_mode,
         )
         for m, reload in matched
     ]
@@ -79,6 +85,7 @@ def _apply_to_model(
     tz_override: tzinfo | None,
     table_suffix: str = "",
     state_disabled: bool = False,
+    state_mode: StateMode = StateMode.DISCOVER,
 ) -> ModelRun:
     """Build a `ModelRun` — a NEW (immutable) model with all pipe/tag-driven
     settings baked in, paired with this run's resolved `window`. The discovered
@@ -90,31 +97,52 @@ def _apply_to_model(
         window_override=window_override,
         lookback_override=lookback_override,
         tz_override=tz_override,
+        full_name=model.target.full_name,
     )
-    # `reload` (from matching) and the pipe args together pick the window mode;
-    # `resolve_window` applies the precedence (reload > latest > backfill).
-    window = resolve_window(
-        batching,
-        model.contract,
-        reload=reload,
-        latest=latest,
-        since=backfill_since,
-        until=backfill_until,
-        name=model.target.full_name,
-    )
+    # torch wipes *all* state at the bootstrap; the window only scopes what runs
+    # *now* (prefill refills the whole contract, so nothing is orphaned — the
+    # unrun remainder sits pending for a later discover run to drain). With no
+    # explicit window a bare torch reloads the whole contract range — a clean
+    # full reload; with a BACKFILL window it runs just that slice now.
+    if (
+        state_mode is StateMode.TORCH
+        and backfill_since is None
+        and backfill_until is None
+    ):
+        window = resolve_window(
+            batching, model.contract, reload=True, name=model.target.full_name
+        )
+    else:
+        # `reload` (from matching) and the pipe args together pick the window
+        # mode; `resolve_window` applies the precedence (reload > latest > backfill).
+        window = resolve_window(
+            batching,
+            model.contract,
+            reload=reload,
+            latest=latest,
+            since=backfill_since,
+            until=backfill_until,
+            name=model.target.full_name,
+        )
     # STATE_DISABLED forces no-state semantics — null `state` + `target.staging`
     # at construction so the lifecycle hooks pass through and write() goes
-    # direct. Born-complete: never mutated onto the model after the fact.
+    # direct. Otherwise carry the model's state, with the run's STATE_MODE
+    # (discover / bulldozer / torch) stamped on — the env override only takes
+    # effect here. Born-complete: never mutated onto the model after the fact.
     target = _target_with_suffix(model.target, schema_suffix, table_suffix)
     if state_disabled:
         target = replace(target, staging=None)
+    if state_disabled or model.state is None:
+        state = None
+    else:
+        state = replace(model.state, mode=state_mode)
     new_model = Model(
         target=target,
         contract=model.contract,
         batching=batching,
         temporality=model.temporality,
         view=model.view,
-        state=None if state_disabled else model.state,
+        state=state,
         curfew=model.curfew,
         enabled=model.enabled,
         debug=False,  # avoid re-printing pretty() on the copy
@@ -166,23 +194,43 @@ def _batching_with_overrides(
     window_override: str | None,
     lookback_override: int | None,
     tz_override: tzinfo | None,
+    full_name: str | None = None,
 ) -> Batch | None:
     if batching is None:
         return None
-    # Pipe-level override wins over the model's static interval expression.
-    expression = interval_override or batching.time.chunk
-    window_expression = window_override or batching.time.window
-    lookback = (
-        lookback_override if lookback_override is not None else batching.time.lookback
-    )
-    tz = tz_override or batching.time.tz
-    return Batch(
-        time=TimeChunking(
-            chunk=expression,
-            window=window_expression,
-            tz=tz,
-            lookback=lookback,
+    # INTERVAL_OVERRIDE re-chunks at runtime, but only a flexible model
+    # (fixed_intervals=False) can absorb that — re-chunking a FIXED grid would
+    # fork its state into mixed granularity. So the override is ignored on fixed
+    # models (change a fixed model's chunk via STATE_MODE=torch instead).
+    chunk = batching.time.chunk
+    if interval_override:
+        if batching.time.fixed_intervals:
+            logger.info(
+                "INTERVAL_OVERRIDE=%r ignored for %s: it has fixed intervals "
+                "(fixed_intervals=True), so re-chunking at runtime would fork its "
+                "state — keeping chunk=%r. Change a fixed model's chunk with "
+                "STATE_MODE=torch instead.",
+                interval_override,
+                full_name or "this model",
+                batching.time.chunk,
+            )
+        else:
+            chunk = interval_override
+    # `replace` carries through every field NOT overridden here — so any new
+    # `TimeChunking` / `Batch` field survives the rebuild automatically, instead
+    # of silently reverting to its default (an explicit constructor was an
+    # accidental allowlist). Pipe-level overrides win over the model's static
+    # values; `lookback` uses an explicit None check because `lookback=0` is
+    # valid and `0 or x` would wrongly fall through.
+    return replace(
+        batching,
+        time=replace(
+            batching.time,
+            chunk=chunk,
+            window=window_override or batching.time.window,
+            lookback=lookback_override
+            if lookback_override is not None
+            else batching.time.lookback,
+            tz=tz_override or batching.time.tz,
         ),
-        size=batching.size,
-        retries=batching.retries,
     )

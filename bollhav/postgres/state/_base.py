@@ -4,11 +4,26 @@ from typing import NamedTuple, TYPE_CHECKING
 
 import psycopg
 
+
 from ._naming import state_table_name
 from ._ddl import LIBRARY_SCHEMA
 
 if TYPE_CHECKING:
     from bollhav.model.model import Model
+
+
+# ── errors ──
+class MissingStateConnError(ValueError):
+    """`PostgresState` was used without an injected connection. It doesn't open
+    its own — the caller owns it (opened in `main()`, threaded through the
+    lifecycle hooks) — so a missing connection is a wiring error."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "a state connection is required — construct "
+            "PostgresState(model, conn=<state_conn>). PostgresState "
+            "does not self-connect."
+        )
 
 
 class LibraryEntry(NamedTuple):
@@ -29,6 +44,7 @@ class LibraryEntry(NamedTuple):
     state_schema: str | None
     state_table: str | None
     temporality: str
+    fixed_intervals: bool = True
     sources: list[dict] = []
     metadata: dict = {}
 
@@ -63,11 +79,7 @@ class _PostgresStateBase:
         open its own — the caller owns it (opened in `main()`, threaded
         through the lifecycle hooks). Raises if none was passed."""
         if self.conn is None:
-            raise ValueError(
-                "a state connection is required — construct "
-                "PostgresState(model, conn=<state_conn>). PostgresState "
-                "does not self-connect."
-            )
+            raise MissingStateConnError()
         return self.conn
 
     def _env_schema(self, base: str) -> str:

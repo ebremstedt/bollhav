@@ -17,7 +17,7 @@ The cron/timezone/lookback knobs live on `batching.time` (the `TimeChunking`); `
 
 Type: `TimeChunking` · Default: `TimeChunking()`
 
-The time-chunking config. Its fields — `chunk`, `window`, `tz`, `lookback` — are documented below and accessed as `batching.time.chunk`, etc.
+The time-chunking config. Its fields — `chunk`, `window`, `no_partial_below`, `tz`, `lookback` (plus `fixed_intervals`, see [Upstream](UPSTREAM.md)) — are documented below and accessed as `batching.time.chunk`, etc.
 
 ## chunk (`batching.time.chunk`)
 
@@ -44,6 +44,24 @@ Timezone used for interval resolution.
 Type: `int` · Default: `None`
 
 Extends each interval's start backwards by N cron-ticks **of `chunk`**. Units are ticks, not calendar days/hours — e.g. with `chunk="*/15 * * * *"`, `lookback=5` is 75 minutes, not 5 days. See [Runtime overrides](DECORATORS.md#lookback).
+
+## no_partial_below (`batching.time.no_partial_below`)
+
+Type: `str | None` · Default: `None` (falls back to `chunk`)
+
+The **completeness grain** the *inferred* trailing edge snaps to. When a run's window is implied — `reload`, or a no-dates backfill — and the contract is open-ended, the edge advances to the latest *complete* unit of this grain instead of the chunk. So `chunk="@yearly"` with `no_partial_below="@daily"` loads through the last complete **day** (the current year as a partial, snapped to a whole day) rather than stopping at the last complete *year*. Can be finer *or* coarser than `chunk` — e.g. `chunk="@hourly", no_partial_below="@daily"` processes hourly but only releases settled days. It's the **end** knob; `lookback` is the **start** knob. Not consulted in `latest` mode — that's `window`'s job.
+
+### Worked example: the trailing edge
+
+```python
+# `no_partial_below` — coarse slices, fresh edge. A yearly chunk, but the
+# inferred trailing edge snaps to the last complete DAY, so the current year
+# loads as a partial ending on a whole-day boundary instead of being skipped
+# until the whole year is over.
+Batch(time=TimeChunking(chunk="@yearly", no_partial_below="@daily"))
+# open contract, today 2026-06-25 → window ends 2026-06-25 (not 2026-01-01)
+# without no_partial_below it would end 2026-01-01 — all of 2026 left out
+```
 
 ## size (`batching.size`)
 

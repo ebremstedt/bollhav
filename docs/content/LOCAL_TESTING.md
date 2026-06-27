@@ -39,15 +39,15 @@ python main.py        # every model, in order, gated by contracts
 
 ## Bake upstreams into the config
 
-Declaring `upstream=[Source("warehouse.orders", type=SourceModel(), contract=UpstreamContract.WINDOW), ...]` with `state=State(...)` makes ordering and gating **data, not orchestration code**. So locally there's nothing to wire: the contract that blocks a model in prod blocks it identically on your laptop. You test the real dependency behavior, not a mock of it — run `python main.py` twice and the second run does nothing (everything `applied`), same as prod.
+Declaring `upstream=[Source("warehouse.orders", type=SourceModel(), contract=UpstreamContract.ENCAPSULATE), ...]` with `state=State(...)` makes ordering and gating **data, not orchestration code**. So locally there's nothing to wire: the contract that blocks a model in prod blocks it identically on your laptop. You test the real dependency behavior, not a mock of it — run `python main.py` twice and the second run does nothing (everything `applied`), same as prod.
 
 ## Backfill with separate processes
 
 Per-interval advisory locks make the same command safe to run many times at once — each process pulls *different* intervals, and the lock guarantees each interval runs exactly once (the loser skips). So to backfill faster, just launch more processes. No coordination code.
 
 ```bash
-export BACKFILL_SINCE='2024-01-01T00:00:00+00:00'
-export BACKFILL_UNTIL='2024-04-01T00:00:00+00:00'
+export RUN_SINCE='2024-01-01T00:00:00+00:00'
+export RUN_UNTIL='2024-04-01T00:00:00+00:00'
 export TAGS='[orders]'
 
 python main.py &      # three workers, same command —

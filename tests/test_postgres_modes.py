@@ -10,8 +10,8 @@ sys.modules["icron"] = MagicMock()
 sys.modules["cron"] = cron_mock
 
 from bollhav.model.database import Database  # noqa: E402
-from bollhav.postgres.data import PostgresData  # noqa: E402
-from bollhav.postgres.schema import _col_ddl, ensure_schema  # noqa: E402
+from bollhav.postgres.data import PostgresData, _col_ddl  # noqa: E402
+from bollhav.postgres.schema import ensure_schema  # noqa: E402
 from bollhav.postgres.modes import (  # noqa: E402
     append,
     recreate_partition,
@@ -99,8 +99,10 @@ class TestColDdl:
         assert "NOT NULL" not in result
 
     def test_primary_key(self) -> None:
+        # PRIMARY KEY is a table-level constraint (see create_table), not inline
+        # on the column — so a composite PK is expressible. Mirrors test_unique.
         result = _col_ddl(_col("my_col", primary_key=True, nullable=False))
-        assert "PRIMARY KEY" in result
+        assert "PRIMARY KEY" not in result
 
     def test_unique(self) -> None:
         result = _col_ddl(_col("my_col", unique=True))

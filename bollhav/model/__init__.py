@@ -8,7 +8,13 @@ from bollhav.model.modelrun import ModelRun
 from bollhav.model.temporality import Temporality
 from bollhav.model.column_sorting import sort_columns
 from bollhav.model.write_modes import WriteMode
-from bollhav.model.source import Source, SourceModel, SourceFile, SourceApi
+from bollhav.model.source import (
+    Source,
+    SourceModel,
+    SourceFile,
+    SourceApi,
+    SourceHardcoded,
+)
 from bollhav.model.target import Target
 from bollhav.model.contract import Contract
 from bollhav.model.batch import Batch, TimeChunking
@@ -54,6 +60,7 @@ __all__ = [
     "SourceModel",
     "SourceFile",
     "SourceApi",
+    "SourceHardcoded",
     "Target",
     "Contract",
     "Batch",

@@ -23,6 +23,7 @@ from bollhav.tui.constants import (
     MODE_ENV,
     MODE_ONLY,
     RUN_MODES,
+    STATE_MODE_NOTE,
 )
 from bollhav.tui.date_select import DateSelect
 from bollhav.tui.discovery import nearest_runner
@@ -173,6 +174,7 @@ class RunTab(Vertical):
             radio = StateRadio(id=f"cfg-{env}")
             radio.border_title = label
             yield radio
+            yield Static(STATE_MODE_NOTE, classes="field-note")
         elif kind == "bool":
             radio = BoolRadio(default=BOOL_DEFAULTS.get(env, False), id=f"cfg-{env}")
             radio.border_title = label
@@ -194,7 +196,9 @@ class RunTab(Vertical):
             widget = self.query_one(f"#cfg-{env}")
             if kind == "mode":
                 mode = (
-                    "latest" if settings.get("LATEST_ENABLED") == "true" else "backfill"
+                    "backfill"
+                    if settings.get("BACKFILL_ENABLED") == "true"
+                    else "latest"
                 )
                 widget.set_value(mode)  # type: ignore[attr-defined]
             elif kind in ("date", "bool", "state"):
@@ -302,7 +306,8 @@ class RunTab(Vertical):
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.STDOUT,
             )
-            assert proc.stdout is not None
+            if proc.stdout is None:
+                return
             async for raw in proc.stdout:
                 log.write(Text(raw.decode(errors="replace").rstrip()))
             rc = await proc.wait()

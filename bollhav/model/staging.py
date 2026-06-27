@@ -5,6 +5,24 @@ from dataclasses import dataclass, field
 from bollhav.model.write_modes import WriteMode
 
 
+# ── errors ──
+
+
+class StagingWriteModeError(ValueError):
+    """A `Staging.write_mode` was set to something other than `APPEND` or
+    `UPSERT_NO_DELETE`. `RECREATE_PARTITION` / `VIEW` are target-side
+    concepts that don't apply to chunks landing in a staging table."""
+
+    def __init__(self, write_mode) -> None:
+        super().__init__(
+            f"Staging.write_mode must be WriteMode.APPEND or "
+            f"WriteMode.UPSERT_NO_DELETE — got "
+            f"{write_mode!r}. RECREATE_PARTITION and VIEW are "
+            f"target-side concepts that don't apply to chunks landing "
+            f"in a staging table."
+        )
+
+
 @dataclass
 class Staging:
     """Neutral, database-agnostic staging config for a Target.
@@ -55,13 +73,7 @@ class Staging:
 
     def __post_init__(self) -> None:
         if self.write_mode not in (WriteMode.APPEND, WriteMode.UPSERT_NO_DELETE):
-            raise ValueError(
-                f"Staging.write_mode must be WriteMode.APPEND or "
-                f"WriteMode.UPSERT_NO_DELETE — got "
-                f"{self.write_mode!r}. RECREATE_PARTITION and VIEW are "
-                f"target-side concepts that don't apply to chunks landing "
-                f"in a staging table."
-            )
+            raise StagingWriteModeError(self.write_mode)
 
 
 __all__ = ["Staging"]

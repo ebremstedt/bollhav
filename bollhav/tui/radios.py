@@ -72,20 +72,28 @@ class BoolRadio(ChoiceRadio):
 
 
 class ModeRadio(ChoiceRadio):
-    """backfill / latest — the window mode (mutually exclusive by nature)."""
+    """latest / backfill — the window source (mutually exclusive by nature).
 
-    _OPTIONS = ["backfill", "latest"]
+    `latest` is the default (a bare run does the latest complete tick); `backfill`
+    with no dates runs the contract range."""
 
-    def __init__(self, default: str = "backfill", id: str | None = None) -> None:
+    _OPTIONS = ["latest", "backfill"]
+
+    def __init__(self, default: str = "latest", id: str | None = None) -> None:
         super().__init__(default, id=id)
 
 
 class StateRadio(ChoiceRadio):
-    """discover / bulldozer — how prefill treats existing state rows (STATE_MODE)."""
+    """bulldozer / discover / torch — how much state a run invalidates (STATE_MODE).
 
-    _OPTIONS = ["discover", "bulldozer"]
+    * `bulldozer` (default) — reset the run window to `pending` and rerun it.
+    * `discover` — keep `applied`, run only what's still outstanding.
+    * `torch` — wipe *all* state; the window scopes what runs now (the rest
+      defers to a later discover run)."""
 
-    def __init__(self, default: str = "discover", id: str | None = None) -> None:
+    _OPTIONS = ["bulldozer", "discover", "torch"]
+
+    def __init__(self, default: str = "bulldozer", id: str | None = None) -> None:
         super().__init__(default, id=id)
 
 

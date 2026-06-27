@@ -27,6 +27,47 @@ if TYPE_CHECKING:
     from bollhav.model.contract import Contract
     from bollhav.model.modelrun import ModelRun
 
+
+# ── errors ──
+
+
+class CronSeedingInvariantError(RuntimeError):
+    """The cron iterator returned a tick `>= now` within its first two steps,
+    violating the seeding invariant that at least two ticks precede `now`.
+    Signals an internal bug in window resolution, not bad config. `cron` is
+    the resolved cron expression.
+
+    Subclasses `RuntimeError` directly (not `ValueError`) so it keeps its
+    original catch semantics."""
+
+    def __init__(self, cron: str) -> None:
+        super().__init__(
+            f"cron seeding invariant violated for {cron!r}: the iterator "
+            f"returned a tick >= now within the first two steps"
+        )
+
+
+class ReloadRequiresContractBeginError(ValueError):
+    """A `reload` window was requested but `contract.begin` isn't set — reload
+    spans `contract.begin` .. (`contract.end` or latest tick), so a begin is
+    required. `name` is the model name."""
+
+    def __init__(self, name: str) -> None:
+        super().__init__(f"reload requires contract.begin to be set on model {name!r}")
+
+
+class BackfillRequiresSinceError(ValueError):
+    """A backfill window was requested with no `since` — backfill needs an
+    explicit start. Set `contract.begin` on the model or pass `--since` at
+    runtime. `name` is the model name."""
+
+    def __init__(self, name: str) -> None:
+        super().__init__(
+            f"backfill requires a since value — set contract.begin on model "
+            f"{name!r} or pass --since at runtime"
+        )
+
+
 _CRON_ALIASES = INTERVAL_EXPRESSION_SHORTCUTS
 
 
@@ -55,10 +96,7 @@ def latest_complete_interval(expression: str, tz: tzinfo = timezone.utc) -> TZIn
     # least 2 ticks have been consumed before the break and both `prev` and
     # `curr` are populated.
     if prev is None or curr is None:
-        raise RuntimeError(
-            f"cron seeding invariant violated for {cron!r}: the iterator "
-            f"returned a tick >= now within the first two steps"
-        )
+        raise CronSeedingInvariantError(cron)
     return TZInterval(prev, curr)
 
 
@@ -70,6 +108,25 @@ def _apply_lookback(expression: str, since: datetime, lookback: int) -> datetime
     tick2 = it.get_next(datetime)
     tick_size = tick2 - tick1
     return since - (tick_size * lookback)
+
+
+def _trailing_edge(contract: "Contract", batching: "Batch", tz: tzinfo) -> datetime:
+    """The *inferred* end of a run window (reload / no-dates backfill):
+
+      * open contract → the **completeness floor**: the latest *complete* unit of
+        `no_partial_below` (defaulting to `chunk`). So a coarse chunk can trail
+        off at a finer boundary — e.g. `@yearly` chunk with
+        `no_partial_below="@daily"` runs through the last complete day.
+      * explicit end  → `min(end, floor)`: a closed (past) end is its own value;
+        a *future* end is clamped to the floor — state windows on the update
+        watermark, so there's no data past the clock to load anyway.
+
+    Pure apart from the clock read in the floor."""
+    floor = latest_complete_interval(
+        batching.time.no_partial_below or batching.time.chunk, tz
+    ).until
+    end = contract.end
+    return floor if end is None else min(end, floor)
 
 
 def resolve_window(
@@ -91,9 +148,16 @@ def resolve_window(
 
         reload   — `contract.begin` .. (`contract.end` or the latest complete tick)
         latest   — the latest complete `window` tick
-        backfill — `since` (or `contract.begin`) .. `until` (required)
+        backfill — `since` (or `contract.begin`) .. `until` (or `contract.end`,
+                   or the latest complete tick)
 
-    Pure apart from the clock read in `latest` / open-ended `reload`."""
+    `until` is optional: a no-dates backfill runs the contract's declared range —
+    the same window `reload` resolves (reload is just a backfill whose bounds
+    come from the contract rather than explicit dates). `since` still needs a
+    source — `RUN_SINCE` or `contract.begin`.
+
+    Pure apart from the clock read in `latest` / open-ended `reload` / a
+    no-`until` backfill."""
     if batching is None:
         # Unbatched: the model runs once over its whole declared range. A
         # temporal model with a closed contract window [begin, end] records a
@@ -109,11 +173,9 @@ def resolve_window(
 
     if reload:
         if contract.begin is None:
-            raise ValueError(
-                f"reload requires contract.begin to be set on model {name!r}"
-            )
+            raise ReloadRequiresContractBeginError(name)
         window_since = contract.begin
-        window_until = contract.end or latest_complete_interval(expr, tz).until
+        window_until = _trailing_edge(contract, batching, tz)
     elif latest:
         window_expr = batching.time.window or expr
         interval = latest_complete_interval(window_expr, tz)
@@ -121,18 +183,14 @@ def resolve_window(
     else:
         window_since = since or contract.begin
         if window_since is None:
-            raise ValueError(
-                f"backfill requires a since value — set contract.begin on model "
-                f"{name!r} or pass --since at runtime"
-            )
-        if until is None:
-            raise ValueError(
-                f"backfill requires an explicit until on model {name!r} — set "
-                f'BACKFILL_UNTIL. Backfill means a specific window; for "to the '
-                f'latest complete tick" use latest mode, for "to contract.end" use '
-                f"reload mode."
-            )
-        window_until = until
+            raise BackfillRequiresSinceError(name)
+        # `until` is optional — when absent, the trailing edge is inferred (the
+        # contract's end, or the latest complete unit of the completeness grain
+        # for an open contract). A no-dates backfill thus runs the declared
+        # range, the same window reload resolves.
+        window_until = (
+            until if until is not None else _trailing_edge(contract, batching, tz)
+        )
 
     if batching.time.lookback:
         window_since = _apply_lookback(
@@ -175,3 +233,26 @@ def compute_intervals(run: "ModelRun") -> tuple[TZInterval, ...] | tuple[None]:
     if model.batching is None:
         return (run.window,)
     return tuple(split_window(run.window, model.batching.time.chunk))
+
+
+def contract_intervals(run: "ModelRun") -> tuple[TZInterval, ...] | tuple[None]:
+    """Every interval the **contract declares** — the full set of `(since,
+    until)` rows that *should* exist, from `contract.begin` to `contract.end`
+    (or the latest complete tick for an open contract), split by the model's
+    chunk. This is what *prefill* materializes, independent of the run's
+    window/mode: state stays complete against the contract, and as the
+    contract's forward edge advances the new ticks appear here. The storage
+    layer inserts only the rows not already present (incremental — prior runs
+    laid down the rest).
+
+    Contrast `compute_intervals`, which returns just *this run's* window. Falls
+    back to that window when there's nothing to declare against — an unbatched
+    model, or a batched one with no `contract.begin`."""
+    model = run.model
+    if model.batching is not None and model.contract.begin is not None:
+        contract_window = resolve_window(
+            model.batching, model.contract, reload=True, name=model.target.full_name
+        )
+        if contract_window is not None:
+            return tuple(split_window(contract_window, model.batching.time.chunk))
+    return compute_intervals(run)

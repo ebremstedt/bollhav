@@ -81,7 +81,7 @@ def _gated(name, contract=None, deactivate_for_dev=False):
     return Source(
         name,
         type=SourceModel(),
-        contract=contract or UpstreamContract.WINDOW,
+        contract=contract or UpstreamContract.ENCAPSULATE,
         deactivate_for_dev=deactivate_for_dev,
     )
 
@@ -156,14 +156,16 @@ class TestRefAddressability:
 class TestContractValidation:
     def test_contract_only_valid_on_source_model(self) -> None:
         with pytest.raises(ValueError, match="only a SourceModel can be gated"):
-            Source("x", type=SourceApi(), contract=UpstreamContract.WINDOW)
+            Source("x", type=SourceApi(), contract=UpstreamContract.ENCAPSULATE)
 
     def test_contract_on_model_is_ok(self) -> None:
         s = Source(
-            "warehouse.orders", type=SourceModel(), contract=UpstreamContract.WINDOW
+            "warehouse.orders",
+            type=SourceModel(),
+            contract=UpstreamContract.ENCAPSULATE,
         )
         assert s.gated is True
-        assert s.contract.value == "window"
+        assert s.contract.value == "encapsulate"
 
 
 class TestDeclaredInputs:
@@ -222,7 +224,7 @@ class TestLineage:
                 Source(
                     "warehouse.orders",
                     type=SourceModel(),
-                    contract=UpstreamContract.WINDOW,
+                    contract=UpstreamContract.ENCAPSULATE,
                 ),
                 Source(
                     "warehouse.customers",
@@ -248,8 +250,10 @@ class TestLineage:
         assert {"name": "raw.landing", "kind": "model"} in lin["sources"]
 
     def test_upstream_specs_use_contract_level(self) -> None:
-        m = _pg_model(upstream=[_gated("warehouse.orders", UpstreamContract.WINDOW)])
-        assert m.upstream_specs == [{"name": "warehouse.orders", "kind": "window"}]
+        m = _pg_model(
+            upstream=[_gated("warehouse.orders", UpstreamContract.ENCAPSULATE)]
+        )
+        assert m.upstream_specs == [{"name": "warehouse.orders", "kind": "encapsulate"}]
 
     def test_lineage_json_roundtrips(self) -> None:
         import json
@@ -261,7 +265,7 @@ class TestLineage:
         tree = self._model().lineage_tree()
         assert "├─ upstream" in tree
         assert "└─ sources" in tree
-        assert "warehouse.orders (window)" in tree
+        assert "warehouse.orders (encapsulate)" in tree
         assert "warehouse.customers (whole)" in tree
         assert "warehouse.app_config (exists)" in tree
         assert "vendor.orders (api)" in tree

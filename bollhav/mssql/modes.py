@@ -9,6 +9,31 @@ from bollhav.mssql.schema import _bracket_quote, _col_type
 logger = logging.getLogger(__name__)
 
 
+# ── errors ──────────────────────────────────────────────────────────
+
+
+class UnhandledMssqlTypeError(ValueError):
+    """`_input_size_for` was given a `MssqlType` it has no input-size mapping
+    for — the type gained a value this function doesn't cover yet. Raised
+    loudly rather than silently falling back to driver autodetect."""
+
+    def __init__(self, t: object) -> None:
+        super().__init__(f"_input_size_for: unhandled MssqlType {t!r}")
+
+
+class MissingSourceModelQueryError(ValueError):
+    """`create_replace_view` found no upstream `Source` with a `SourceModel`
+    type whose `.query` is set. A view is defined by that query, so without
+    one there's nothing to create the view from."""
+
+    def __init__(self, full_name: str) -> None:
+        super().__init__(
+            f"create_replace_view requires a Source with a SourceModel type "
+            f"whose .query is set, in upstream=[...] on "
+            f"{full_name!r}"
+        )
+
+
 def _bulk_insert(
     cursor: pyodbc.Cursor,
     target: str,
@@ -101,7 +126,7 @@ def _input_size_for(col: MssqlColumn):
 
     # If we get here, MssqlType has gained a value this function doesn't
     # cover yet — fail loudly rather than silently fall back to autodetect.
-    raise ValueError(f"_input_size_for: unhandled MssqlType {t!r}")
+    raise UnhandledMssqlTypeError(t)
 
 
 def _set_input_sizes(cursor: pyodbc.Cursor, columns: list[MssqlColumn]) -> None:
@@ -178,7 +203,7 @@ def merge(
 
     Thin wrapper over `_merge_via_temp` that opens a cursor, runs the
     merge against the target table, and commits."""
-    target_table = f"{_bracket_quote(model.target.schema_resolved)}.{_bracket_quote(model.target.name)}"
+    target_table = f"{_bracket_quote(model.target.schema_resolved)}.{_bracket_quote(model.target.name_resolved)}"
     cursor = conn.cursor()
     _merge_via_temp(cursor, target_table, model, df, fast_executemany=fast_executemany)
     cursor.commit()
@@ -192,7 +217,7 @@ def append(
 ) -> None:
     """Bulk insert rows into target without clearing existing data."""
     schema = model.target.schema_resolved
-    table = model.target.name
+    table = model.target.name_resolved
     all_col_names = [c.name for c in model.target.columns]
 
     cursor = conn.cursor()
@@ -221,16 +246,14 @@ def create_replace_view(conn: pyodbc.Connection, model: Model) -> None:
         None,
     )
     if src is None:
-        raise ValueError(
-            f"create_replace_view requires a Source with a SourceModel type "
-            f"whose .query is set, in upstream=[...] on "
-            f"{model.target.full_name!r}"
-        )
+        raise MissingSourceModelQueryError(model.target.full_name)
     schema = model.target.schema_resolved
-    view = model.target.name
+    view = model.target.name_resolved
     # The filter above guarantees this, but it doesn't narrow `src.type`.
-    assert isinstance(src.type, SourceModel) and src.type.query is not None
-    query = cast(LiteralString, src.type.query)
+    source_type = src.type
+    if not isinstance(source_type, SourceModel) or source_type.query is None:
+        raise MissingSourceModelQueryError(model.target.full_name)
+    query = cast(LiteralString, source_type.query)
 
     cursor = conn.cursor()
     cursor.execute(

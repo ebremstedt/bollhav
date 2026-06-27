@@ -11,6 +11,30 @@ from bollhav.model.ordering import topological_sort
 logger = logging.getLogger(__name__)
 
 
+# ── errors ──
+
+
+class EmptyTagsError(ValueError):
+    """`load_models` was called with no tag expression. Tags select which
+    models to run, so a non-empty expression is required (use a catch-all
+    like `"*"` to match everything)"""
+
+    def __init__(self) -> None:
+        super().__init__("tags must be a non-empty expression.")
+
+
+class DuplicateModelError(ValueError):
+    """Two model files declare the same `full_name` (catalog.schema.table).
+    A model's full name must be unique across the scanned folder, since it
+    keys the target, the state rows, and the dependency graph."""
+
+    def __init__(self, full_name: str, file, existing) -> None:
+        super().__init__(
+            f"Duplicate model {full_name!r} found in {file} "
+            f"(already defined in {existing})"
+        )
+
+
 def _model_matches(
     model: Model, potential_tag_groups: list[PotentialTagGroup]
 ) -> tuple[Model, bool] | None:
@@ -81,13 +105,14 @@ def matched_with_reload(
         r:[foo & bar]           match "foo" and "bar", reload=True for all
 
     Interval and chunk size are model config, not tag overrides. To change
-    the interval expression at runtime, use INTERVAL_OVERRIDE.
+    the interval expression at runtime, use INTERVAL_OVERRIDE (flexible models
+    only — it's ignored on fixed-interval models).
 
     Raises:
         ValueError: If tags is not provided or the expression is invalid.
     """
     if not tags:
-        raise ValueError("tags must be a non-empty expression.")
+        raise EmptyTagsError()
 
     potential_tag_groups = parse_expression(tags)
     folder_path = Path(folder)
@@ -103,15 +128,16 @@ def matched_with_reload(
             module = _load_module(file)
             if module is None:
                 continue
+
             for model in _models_from_module(module):
                 full_name = model.target.full_name
+
                 if full_name in seen:
-                    raise ValueError(
-                        f"Duplicate model {full_name!r} found in {file} "
-                        f"(already defined in {seen[full_name]})"
-                    )
+                    raise DuplicateModelError(full_name, file, seen[full_name])
+
                 seen[full_name] = file
                 total_models += 1
+
                 result = _model_matches(model, potential_tag_groups)
                 if result:
                     matched_model, reload = result
@@ -142,9 +168,5 @@ def match_models(
 ) -> list[Model]:
     """Scan a folder for Model instances and return those matching the tag
     expression, topologically sorted. See `matched_with_reload` for the tag
-    syntax; this is the reload-stripped public view.
-
-    Raises:
-        ValueError: If tags is not provided or the expression is invalid.
-    """
+    syntax; this is the reload-stripped public view."""
     return [model for model, _ in matched_with_reload(folder=folder, tags=tags)]

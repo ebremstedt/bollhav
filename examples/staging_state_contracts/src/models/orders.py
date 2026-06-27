@@ -5,7 +5,7 @@ The classic shape: a batched table whose unit of work is a time window.
 rows COPY into a per-interval staging table; on a clean run the lifecycle
 merges staging → target and flips that interval's state row to `applied`.
 
-This is the interval upstream `daily_summary` gates with `UpstreamContract.WINDOW`.
+This is the interval upstream `daily_summary` gates with `UpstreamContract.ENCAPSULATE`.
 """
 
 from datetime import datetime, timezone

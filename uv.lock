@@ -4,7 +4,7 @@ requires-python = ">=3.11.0"
 
 [[package]]
 name = "bollhav"
-version = "3.0.2"
+version = "3.0.7rc4"
 source = { editable = "." }
 dependencies = [
     { name = "polars" },
@@ -35,7 +35,7 @@ requires-dist = [
     { name = "pyright", marker = "extra == 'dev'" },
     { name = "pytest", marker = "extra == 'dev'" },
     { name = "python-icron", specifier = ">=3.0.1" },
-    { name = "roskarl", specifier = ">=3.1.23" },
+    { name = "roskarl", specifier = ">=3.1.31" },
     { name = "ruff", marker = "extra == 'dev'" },
     { name = "textual", marker = "extra == 'tui'", specifier = ">=0.50" },
     { name = "time-machine", marker = "extra == 'dev'" },
@@ -382,14 +382,14 @@ wheels = [
 
 [[package]]
 name = "roskarl"
-version = "3.1.23"
+version = "3.1.31"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "python-icron" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/de/0a/5dd94effa052eafb1dfe347ff51f5559c7991f4aae1b5fc1867617cfda8c/roskarl-3.1.23.tar.gz", hash = "sha256:6a8d227220fc8d3149120791b51431dd5bd262687257886e4de149a0ad575278", size = 10868, upload-time = "2026-03-22T12:29:43.79Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/26/0b/7659a8650265559f6207a5650a9eaee20fd6941f7f18cc1ab2584feb4e59/roskarl-3.1.31.tar.gz", hash = "sha256:66bb50cc2ada56e6646d980aab0564fba41ac8eec1786be7131e6622d63821aa", size = 18292, upload-time = "2026-06-25T13:01:46.68Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/e5/49/ca8ee23b51718e5da5c834425ceb73a7e7ce93fa167ad4ca293b4009a97d/roskarl-3.1.23-py3-none-any.whl", hash = "sha256:d7b50158a22d0c63db264ead0565fa8c5c292182b315cba1323963c9cd434065", size = 8113, upload-time = "2026-03-22T12:29:42.358Z" },
+    { url = "https://files.pythonhosted.org/packages/56/62/7a670472d690fb530dc0c42b2a52f042db52b278cefb511b04119a9bf369/roskarl-3.1.31-py3-none-any.whl", hash = "sha256:3338b99a48fef2ec9a3f50a2082b197d0a16c99e001ed29cd157d9087acf96b1", size = 11690, upload-time = "2026-06-25T13:01:45.689Z" },
 ]
 
 [[package]]

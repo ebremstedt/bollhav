@@ -21,6 +21,45 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+# ── errors ──────────────────────────────────────────────────────────
+
+
+class RecreatePartitionRequiresTzAwareError(ValueError):
+    """A `RECREATE_PARTITION` apply was given naive `since`/`until`. The
+    partition window is matched in UTC, so both bounds must be UTC-aware."""
+
+    def __init__(self) -> None:
+        super().__init__("RECREATE_PARTITION requires since/until to be UTC-aware")
+
+
+class RecreatePartitionRequiresPartitionedByError(ValueError):
+    """A `RECREATE_PARTITION` apply ran on a target with no `partitioned_by`.
+    The DELETE+INSERT keys on the partition column, so it must be set."""
+
+    def __init__(self) -> None:
+        super().__init__("RECREATE_PARTITION requires target.partitioned_by to be set")
+
+
+class RecreatePartitionRequiresWindowError(ValueError):
+    """A `RECREATE_PARTITION` apply resolved no window (since/until). The write
+    targets a specific partition window, so the model must be run windowed."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "RECREATE_PARTITION requires a window (since/until) — "
+            "run the model windowed."
+        )
+
+
+class UnsupportedStagingWriteModeError(NotImplementedError):
+    """The staging write dispatch hit a `write_mode` it doesn't implement.
+    Subclasses `NotImplementedError`: it marks an unimplemented branch (guarded
+    upstream by `Staging.__post_init__`), not bad user config."""
+
+    def __init__(self, wm: object) -> None:
+        super().__init__(f"unsupported staging.write_mode {wm!r}")
+
+
 @dataclass
 class MssqlStaging(Staging):
     """MSSQL-specific extension of `Staging`.
@@ -175,12 +214,10 @@ def write_to_staging(
         case WriteMode.UPSERT_NO_DELETE:
             _merge_into_staging(cursor, model, run_id, df)
         case _ as wm:  # pragma: no cover — guarded by Staging.__post_init__
-            raise NotImplementedError(f"unsupported staging.write_mode {wm!r}")
+            raise UnsupportedStagingWriteModeError(wm)
     cursor.commit()
     logger.debug(
-        "wrote %d rows to staging table (%s)",
-        len(df),
-        _staging_write_mode(model).value,
+        "wrote %d rows to staging table (%s)", len(df), _staging_write_mode(model).value
     )
 
 
@@ -261,10 +298,10 @@ def _apply_recreate_partition(
     INSERT FROM staging. Same transaction, so concurrent readers never
     see a gap (only the new contents of the window)."""
     if since.tzinfo is None or until.tzinfo is None:
-        raise ValueError("RECREATE_PARTITION requires since/until to be UTC-aware")
+        raise RecreatePartitionRequiresTzAwareError()
     partition_col_name = model.target.partitioned_by
     if partition_col_name is None:
-        raise ValueError("RECREATE_PARTITION requires target.partitioned_by to be set")
+        raise RecreatePartitionRequiresPartitionedByError()
 
     mssql_cols = [c for c in model.target.columns if isinstance(c, MssqlColumn)]
     col_list = ", ".join(_bracket_quote(c.name) for c in mssql_cols)
@@ -286,8 +323,8 @@ def apply_atomically_to_target(
     model: "Model",
     *,
     run_id: UUID,
-    since: datetime,
-    until: datetime,
+    since: datetime | None = None,
+    until: datetime | None = None,
 ) -> None:
     """Apply the staged content to the target using whatever operation
     `target.write_mode` describes — all in one transaction.
@@ -326,6 +363,8 @@ def apply_atomically_to_target(
             case WriteMode.UPSERT_NO_DELETE:
                 _apply_upsert(cursor, model, **table_names)
             case WriteMode.RECREATE_PARTITION:
+                if since is None or until is None:
+                    raise RecreatePartitionRequiresWindowError()
                 _apply_recreate_partition(
                     cursor, model, **table_names, since=since, until=until
                 )
@@ -333,13 +372,13 @@ def apply_atomically_to_target(
             cursor.execute(
                 f"DROP TABLE {_bracket_quote(staging_schema)}.{_bracket_quote(staging_table)}"
             )
+            logger.debug("dropped staging table %s.%s", staging_schema, staging_table)
         cursor.commit()
     except Exception:
         cursor.rollback()
         raise
     logger.debug(
-        "moved data from staging to target (%s)",
-        model.target.write_mode.value,
+        "moved data from staging to target (%s)", model.target.write_mode.value
     )
 
 
@@ -351,8 +390,7 @@ def cleanup_orphaned_staging_tables(
 ) -> None:
     if model.target.staging is not None and model.target.staging.keep_after_apply:
         logger.debug(
-            "GC skipped for %s — Staging.keep_after_apply=True",
-            model.target.full_name,
+            "GC skipped for %s — Staging.keep_after_apply=True", model.target.full_name
         )
         return
 

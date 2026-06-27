@@ -4,14 +4,14 @@
 This is the point of the example. Its `upstream` is a list of `Source`s, each
 carrying a contract level. The level says *how much* must be ready; the
 upstream's **shape** (read from the registry) decides what that means, so the
-same `WINDOW` level resolves differently per upstream:
+same `ENCAPSULATE` level resolves differently per upstream:
 
-  * warehouse.orders (an interval model) + WINDOW — satisfied when orders has
+  * warehouse.orders (an interval model) + ENCAPSULATE — satisfied when orders has
                                             an applied state row covering this
                                             summary interval's window.
-  * warehouse.customers (a view) + WINDOW — satisfied when the customers view
+  * warehouse.customers (a view) + ENCAPSULATE — satisfied when the customers view
                                             exists (its existence row applied).
-  * warehouse.app_config (monolithic) + WINDOW — satisfied when app_config is
+  * warehouse.app_config (monolithic) + ENCAPSULATE — satisfied when app_config is
                                             loaded (its existence row applied).
 
 At each interval `@execute_lifecycle` checks every gated upstream. If any is
@@ -74,17 +74,17 @@ daily_summary = Model(
         Source(
             "demo.warehouse.orders",
             type=SourceModel(),
-            contract=UpstreamContract.WINDOW,
+            contract=UpstreamContract.ENCAPSULATE,
         ),
         Source(
             "demo.warehouse.customers",
             type=SourceModel(),
-            contract=UpstreamContract.WINDOW,
+            contract=UpstreamContract.ENCAPSULATE,
         ),
         Source(
             "demo.warehouse.app_config",
             type=SourceModel(),
-            contract=UpstreamContract.WINDOW,
+            contract=UpstreamContract.ENCAPSULATE,
         ),
     ],
     tagging=Tags(tags={"demo"}),

@@ -35,7 +35,10 @@ def _apply(
     window_override: str | None = None,
     lookback_override: int | None = None,
     tz_override=None,
+    state_mode=None,
 ) -> Model:
+    from bollhav.model.state import StateMode
+
     return _apply_to_model(
         model,
         reload=reload,
@@ -47,6 +50,7 @@ def _apply(
         window_override=window_override,
         lookback_override=lookback_override,
         tz_override=tz_override,
+        state_mode=state_mode or StateMode.DISCOVER,
     )
 
 
@@ -83,12 +87,22 @@ class TestSchemaSuffix:
 
 
 class TestPipeOverrides:
-    def test_interval_override(self) -> None:
+    def test_interval_override_applies_to_flexible(self) -> None:
+        # INTERVAL_OVERRIDE re-chunks only a flexible model (it can absorb it).
         m = _apply(
-            _model(chunk="@daily"),
+            _model(chunk="@daily", fixed_intervals=False),
             interval_override="0 * * * *",
         ).model
         assert m.batching.time.chunk == "0 * * * *"
+
+    def test_interval_override_ignored_on_fixed(self) -> None:
+        # A fixed grid can't be re-chunked at runtime without forking state, so
+        # the override is ignored (logged at INFO) — the chunk is left as-is.
+        m = _apply(
+            _model(chunk="@daily"),  # fixed_intervals defaults to True
+            interval_override="0 * * * *",
+        ).model
+        assert m.batching.time.chunk == "@daily"
 
     def test_window_override(self) -> None:
         m = _apply(_model(), latest=True, window_override="@daily").model
@@ -147,23 +161,58 @@ class TestWindowResolution:
 
 
 class TestBatchingCarryThrough:
+    """`_batching_with_overrides` rebuilds `TimeChunking` / `Batch` every run, so
+    any field NOT overridden this run must survive. It uses `replace` (not an
+    enumerating constructor), so a forgotten field can't silently revert to its
+    default — the bug-class that made STATE_MODE a no-op."""
+
     def test_size_carried_through(self) -> None:
         m = Model(
             target=Target(name="events", schema="raw", schema_suffix_appendix=None),
             batching=Batch(
                 time=TimeChunking(chunk="@hourly", tz=UTC),
                 size=5000,
+                retries=7,
             ),
             contract=Contract(begin=datetime(2024, 1, 1, tzinfo=UTC)),
             temporality=Temporality.TEMPORAL,
         )
         out = _apply(m).model
         assert out.batching.size == 5000
+        assert out.batching.retries == 7  # Batch-level fields carry too
 
     def test_pipe_override_sets_interval_expression(self) -> None:
-        m = _model(chunk="@hourly")
+        m = _model(
+            chunk="@hourly", fixed_intervals=False
+        )  # flexible → override applies
         out = _apply(m, interval_override="*/15 * * * *").model
         assert out.batching.time.chunk == "*/15 * * * *"
+
+    def test_timechunking_fields_survive_no_override(self) -> None:
+        # Every TimeChunking field a no-override run doesn't touch is preserved.
+        sthlm = ZoneInfo("Europe/Stockholm")
+        m = _apply(_model(chunk="@daily", window="@weekly", lookback=3, tz=sthlm)).model
+        t = m.batching.time
+        assert (t.chunk, t.window, t.lookback, t.tz) == ("@daily", "@weekly", 3, sthlm)
+
+    def test_lookback_zero_survives_no_override(self) -> None:
+        # 0 is meaningful ("no lookback") and must not be dropped to the default.
+        assert _apply(_model(lookback=0)).model.batching.time.lookback == 0
+
+    def test_fixed_intervals_defaults_true_and_survives(self) -> None:
+        # The attestation defaults True (grid), and a declared False carries
+        # through the rebuild even though _batching_with_overrides never names
+        # it — exactly what the `replace` refactor guarantees.
+        assert _model().batching.time.fixed_intervals is True
+        out = _apply(_model(fixed_intervals=False)).model
+        assert out.batching.time.fixed_intervals is False
+
+    def test_no_partial_below_survives_no_override(self) -> None:
+        # The inferred-edge grain isn't named by _batching_with_overrides, so it
+        # must survive the rebuild via `replace`.
+        assert _model().batching.time.no_partial_below is None
+        out = _apply(_model(chunk="@yearly", no_partial_below="@daily")).model
+        assert out.batching.time.no_partial_below == "@daily"
 
 
 class TestBatchingNone:
@@ -194,10 +243,33 @@ class TestStateAndStagingCarryThrough:
             temporality=Temporality.TEMPORAL,
         )
         out = _apply(m).model
-        assert out.state is s
+        # Rebuilt (to stamp STATE_MODE on), so value-equal rather than identical.
+        assert out.state == s
 
     def test_state_None_stays_None(self) -> None:
         out = _apply(_model()).model
+        assert out.state is None
+
+    def test_state_mode_is_applied(self) -> None:
+        # Regression: STATE_MODE used to be resolved + displayed but never
+        # stamped onto model.state.mode, so bulldozer / torch were silent no-ops.
+        from bollhav.model.state import State, StateMode
+
+        m = Model(
+            target=Target(name="orders", schema="public", schema_suffix_appendix=None),
+            batching=Batch(time=TimeChunking(chunk="@hourly", tz=UTC)),
+            state=State(),  # defaults to DISCOVER
+            temporality=Temporality.TEMPORAL,
+        )
+        out = _apply(m, state_mode=StateMode.BULLDOZER).model
+        assert out.state is not None
+        assert out.state.mode is StateMode.BULLDOZER
+
+    def test_state_mode_ignored_when_no_state(self) -> None:
+        # A stateless model stays stateless regardless of STATE_MODE.
+        from bollhav.model.state import StateMode
+
+        out = _apply(_model(), state_mode=StateMode.BULLDOZER).model
         assert out.state is None
 
     def test_staging_carries_through(self) -> None:
@@ -295,3 +367,77 @@ class TestCurfewPreservedThroughOverrides:
         run = _apply(m)
         assert run.model.curfew is not None
         assert run.model.curfew.windows == [(time(9), time(17))]
+
+
+class TestRunModeWindowMatrix:
+    """The run-mode combinatorics at the resolution layer: STATE_MODE
+    (bulldozer / discover / torch) × window source (latest / explicit backfill /
+    contract range). torch is the constrained one — it forbids an explicit
+    window and always reloads the contract range."""
+
+    def _m(self):
+        from bollhav.model.state import State
+
+        return Model(
+            target=Target(name="t", schema="s", schema_suffix_appendix=None),
+            batching=Batch(time=TimeChunking(chunk="@daily", tz=UTC)),
+            state=State(),
+            temporality=Temporality.TEMPORAL,
+            contract=Contract(begin=_SINCE, end=_UNTIL),
+        )
+
+    @travel(datetime(2024, 1, 15, 12, 0, tzinfo=UTC))
+    def test_latest_resolves_to_the_tick(self) -> None:
+        from bollhav.model.state import StateMode
+
+        for mode in (StateMode.BULLDOZER, StateMode.DISCOVER):
+            run = _apply(
+                self._m(),
+                state_mode=mode,
+                latest=True,
+                backfill_since=None,
+                backfill_until=None,
+            )
+            assert run.window.since == datetime(2024, 1, 14, tzinfo=UTC)
+            assert run.window.until == datetime(2024, 1, 15, tzinfo=UTC)
+
+    def test_explicit_backfill_resolves_to_the_range(self) -> None:
+        from bollhav.model.state import StateMode
+
+        s, u = datetime(2024, 1, 1, tzinfo=UTC), datetime(2024, 1, 3, tzinfo=UTC)
+        for mode in (StateMode.BULLDOZER, StateMode.DISCOVER):
+            run = _apply(self._m(), state_mode=mode, backfill_since=s, backfill_until=u)
+            assert (run.window.since, run.window.until) == (s, u)
+
+    def test_backfill_no_dates_resolves_to_contract_range(self) -> None:
+        from bollhav.model.state import StateMode
+
+        for mode in (StateMode.BULLDOZER, StateMode.DISCOVER):
+            run = _apply(
+                self._m(), state_mode=mode, backfill_since=None, backfill_until=None
+            )
+            assert (run.window.since, run.window.until) == (_SINCE, _UNTIL)
+
+    def test_torch_with_a_window_runs_that_slice(self) -> None:
+        from bollhav.model.state import StateMode
+
+        # torch + an explicit window: the wipe is still total, the window just
+        # scopes what runs *now* — the rest defers to a later discover run.
+        s, u = datetime(2024, 1, 1, tzinfo=UTC), datetime(2024, 1, 3, tzinfo=UTC)
+        run = _apply(
+            self._m(), state_mode=StateMode.TORCH, backfill_since=s, backfill_until=u
+        )
+        assert (run.window.since, run.window.until) == (s, u)
+
+    def test_torch_without_a_window_reloads_the_contract_range(self) -> None:
+        from bollhav.model.state import StateMode
+
+        # bare torch (latest ignored, no dates) → the whole contract range
+        run = _apply(
+            self._m(),
+            state_mode=StateMode.TORCH,
+            latest=True,
+            backfill_since=None,
+            backfill_until=None,
+        )
+        assert (run.window.since, run.window.until) == (_SINCE, _UNTIL)
