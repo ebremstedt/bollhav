@@ -17,7 +17,7 @@ The four models (`src/models/`):
 
 ```python
 upstream=[
-    Source("warehouse.orders",     type=SourceModel(), contract=UpstreamContract.WINDOW),    # applied interval covering the window
+    Source("warehouse.orders",     type=SourceModel(), contract=UpstreamContract.ENCAPSULATE),    # applied interval covering the window
     Source("warehouse.customers",  type=SourceModel(), contract=UpstreamContract.WHOLE),         # the view is loaded
     Source("warehouse.app_config", type=SourceModel(), contract=UpstreamContract.WHOLE),  # the whole table is loaded
 ]

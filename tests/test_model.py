@@ -96,7 +96,7 @@ def test_model_exposes_sub_configs():
 
 def test_batching_defaults_to_none_when_unspecified():
     """No batching kwarg = no chunking. model.intervals returns [None].
-    A whole-table load with no batching is kind=MONOLITHIC."""
+    A whole-table load with no batching is TIMELESS — one oneshot row."""
     m = Model(target=Target(name="orders"), temporality=Temporality.TIMELESS)
     assert m.batching is None
     assert compute_intervals(ModelRun(model=m)) == (None,)
@@ -112,29 +112,34 @@ def test_backfill_without_since_or_bounds_raises():
         resolve_window(Batch(), Contract())
 
 
-def test_backfill_falls_back_to_bounds_for_since_but_requires_until():
-    """`since` falls back to `contract.begin` when no `since` is given — the
-    contract since day one. `until` has no silent fallback in backfill mode;
-    it must be supplied (i.e. `BACKFILL_UNTIL`)."""
-    contract = Contract(begin=datetime(2026, 1, 1, tzinfo=timezone.utc))
-    with pytest.raises(ValueError, match="backfill requires an explicit until"):
-        resolve_window(Batch(), contract)
-
-    # Supply until → window resolves with contract.begin as since.
-    window = resolve_window(
-        Batch(), contract, until=datetime(2026, 1, 3, tzinfo=timezone.utc)
+def test_backfill_bounds_fall_back_to_contract():
+    """`until` is optional: a no-dates backfill runs the contract's declared
+    range — `since` falls back to `contract.begin`, `until` to `contract.end`
+    (the same window reload resolves)."""
+    contract = Contract(
+        begin=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        end=datetime(2026, 1, 3, tzinfo=timezone.utc),
     )
-    intervals = split_window(window, Batch().time.chunk)
-    assert len(intervals) > 0
+    # no since/until → the whole declared range
+    window = resolve_window(Batch(), contract)
+    assert window.since == datetime(2026, 1, 1, tzinfo=timezone.utc)
+    assert window.until == datetime(2026, 1, 3, tzinfo=timezone.utc)
+
+    # explicit until still wins; since still falls back to contract.begin
+    window2 = resolve_window(
+        Batch(), contract, until=datetime(2026, 1, 2, tzinfo=timezone.utc)
+    )
+    intervals = split_window(window2, Batch().time.chunk)
     assert intervals[0].since == datetime(2026, 1, 1, tzinfo=timezone.utc)
-    assert intervals[-1].until == datetime(2026, 1, 3, tzinfo=timezone.utc)
+    assert intervals[-1].until == datetime(2026, 1, 2, tzinfo=timezone.utc)
 
 
 class TestModelKind:
-    """`Model.kind` (a `Temporality` enum: INTERVAL | MONOLITHIC | VIEW) is the
-    single source of truth for a model's unit of work — how many state
-    rows it has and how an upstream contract checks it. It defaults to
-    TEMPORAL and the is_* bools derive from it."""
+    """A model's kind is its `Temporality` (TEMPORAL | TIMELESS) — the single
+    source of truth for a model's unit of work: how many state rows it has and
+    how an upstream contract checks it. It defaults to TEMPORAL; the is_* bools
+    derive from it (is_temporal / is_timeless) and from `view` (is_view /
+    is_table)."""
 
     def test_temporal_model_kind(self):
         m = make_model()  # make_model defaults to kind=TEMPORAL + Batch()
@@ -250,7 +255,7 @@ class TestUpstreamRequiresState:
                     Source(
                         "warehouse.orders",
                         type=SourceModel(),
-                        contract=UpstreamContract.WINDOW,
+                        contract=UpstreamContract.ENCAPSULATE,
                     )
                 ]
             )
@@ -271,7 +276,7 @@ class TestUpstreamRequiresState:
                 Source(
                     "warehouse.customers",
                     type=SourceModel(),
-                    contract=UpstreamContract.WINDOW,
+                    contract=UpstreamContract.ENCAPSULATE,
                 )
             ],
             state=State(),

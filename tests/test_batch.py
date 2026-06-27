@@ -9,6 +9,7 @@ from bollhav.model.window import (
     _resolve_cron,
     _apply_lookback,
     compute_intervals,
+    contract_intervals,
     latest_complete_interval,
     resolve_window,
     split_window,
@@ -275,19 +276,23 @@ class TestIntervalsLookback:
 
 
 class TestIntervalsNoneInputs:
-    """Backfill mode is now strict: an explicit `until` must be set, no silent
-    fallback to `latest_complete_interval()`. The window is resolved at
-    construction (in runtime / the `_model` helper), so an unsatisfiable
-    backfill raises there rather than in `compute_intervals`. These tests pin
-    that behaviour so a future refactor can't bring the implicit fallback back."""
+    """Backfill bounds fall back to the contract: `since` → `contract.begin`,
+    `until` → `contract.end` (or the latest complete tick for an open contract).
+    A no-dates backfill therefore runs the declared range — the same window
+    `reload` resolves. `since` still needs *a* source (explicit or
+    `contract.begin`); with neither it raises."""
 
-    def test_until_none_in_backfill_raises(self) -> None:
-        with pytest.raises(ValueError, match="backfill requires an explicit until"):
-            _model(
-                interval_expression="@hourly",
-                interval_override="0 * * * *",
-                since=datetime(2024, 6, 15, 12, 0, tzinfo=UTC),
-            )
+    @travel(datetime(2024, 6, 15, 14, 35, tzinfo=UTC))
+    def test_until_none_falls_back_to_latest_tick(self) -> None:
+        # No `contract.end` → `until` falls back to the latest complete tick.
+        model = _model(
+            interval_expression="@hourly",
+            interval_override="0 * * * *",
+            since=datetime(2024, 6, 15, 12, 0, tzinfo=UTC),
+        )
+        intervals = list(compute_intervals(model))
+        assert intervals[0].since == datetime(2024, 6, 15, 12, 0, tzinfo=UTC)
+        assert intervals[-1].until == datetime(2024, 6, 15, 14, 0, tzinfo=UTC)
 
     @travel(datetime(2024, 6, 15, 14, 35, tzinfo=UTC))
     def test_until_set_explicitly_in_backfill_is_honored(self) -> None:
@@ -352,3 +357,148 @@ class TestIntervalsNoneInputs:
         assert len(intervals) == 2
         assert intervals[0].since == datetime(2024, 6, 15, 12, 0, tzinfo=UTC)
         assert intervals[0].until == datetime(2024, 6, 15, 13, 0, tzinfo=UTC)
+
+
+class TestContractIntervals:
+    """`contract_intervals` returns the full contract range — what *prefill*
+    materializes — independent of the run's (possibly narrower) window."""
+
+    def test_fills_the_contract_not_the_window(self) -> None:
+        # Contract spans three hours; the run targets only the last one.
+        contract = Contract(
+            begin=datetime(2024, 1, 1, 0, tzinfo=UTC),
+            end=datetime(2024, 1, 1, 3, tzinfo=UTC),
+        )
+        run = _model(
+            interval_expression="@hourly",
+            contract=contract,
+            since=datetime(2024, 1, 1, 2, tzinfo=UTC),
+            until=datetime(2024, 1, 1, 3, tzinfo=UTC),
+        )
+        # The run's window is a single hour...
+        assert len(compute_intervals(run)) == 1
+        # ...but prefill fills every hour the contract declares.
+        ivs = list(contract_intervals(run))
+        assert [(i.since.hour, i.until.hour) for i in ivs] == [(0, 1), (1, 2), (2, 3)]
+
+    def test_falls_back_to_window_without_contract_begin(self) -> None:
+        # No contract.begin → nothing declared to fill against → the run window.
+        run = _model(
+            interval_expression="@hourly",
+            since=datetime(2024, 1, 1, 0, tzinfo=UTC),
+            until=datetime(2024, 1, 1, 2, tzinfo=UTC),
+        )
+        assert list(contract_intervals(run)) == list(compute_intervals(run))
+
+
+# ── trailing edge: no_partial_below × contract.end ──
+
+# 'now' for every case below; the latest-complete boundaries follow from it.
+_NOW = datetime(2026, 6, 25, 12, 0, tzinfo=UTC)
+_BEGIN = datetime(2024, 1, 1, tzinfo=UTC)
+_PAST = datetime(2025, 6, 1, tzinfo=UTC)  # before _NOW
+_FUTURE = datetime(2027, 6, 1, tzinfo=UTC)  # after _NOW
+_LCY = datetime(2026, 1, 1, tzinfo=UTC)  # latest complete @yearly end
+_LCM = datetime(2026, 6, 1, tzinfo=UTC)  # latest complete @monthly end
+_LCD = datetime(2026, 6, 25, tzinfo=UTC)  # latest complete @daily end (00:00)
+
+
+def _edge_batch(chunk="@yearly", no_partial_below=None) -> Batch:
+    return Batch(
+        time=TimeChunking(chunk=chunk, no_partial_below=no_partial_below, tz=UTC)
+    )
+
+
+# (contract.end, no_partial_below) -> expected window.until, with chunk=@yearly.
+_EDGE_CASES = [
+    # open contract → the completeness floor.
+    (None, None, _LCY),
+    (None, "@daily", _LCD),
+    (None, "@monthly", _LCM),
+    # past end → its own value (already before the floor).
+    (_PAST, None, _PAST),
+    (_PAST, "@daily", _PAST),
+    # future end → clamped to the floor (no data past the clock to load).
+    (_FUTURE, None, _LCY),
+    (_FUTURE, "@daily", _LCD),
+    (_FUTURE, "@monthly", _LCM),
+]
+_EDGE_IDS = [
+    "open/chunk",
+    "open/day",
+    "open/month",
+    "past/chunk",
+    "past/day",
+    "future/chunk",
+    "future/day",
+    "future/month",
+]
+
+
+class TestTrailingEdge:
+    """`no_partial_below` (inferred-edge completeness grain) × `contract.end`,
+    over the inferred-window modes (reload + no-dates backfill). chunk=`@yearly`
+    so the default floor (year) differs visibly from a finer grain; a future end
+    is always clamped to the floor. 'now' = 2026-06-25 12:00 UTC."""
+
+    @pytest.mark.parametrize("mode", ["reload", "backfill"])
+    @pytest.mark.parametrize("end,npb,expected", _EDGE_CASES, ids=_EDGE_IDS)
+    def test_edge_matrix(self, end, npb, expected, mode) -> None:
+        with travel(_NOW, tick=False):
+            batch = _edge_batch(no_partial_below=npb)
+            w = resolve_window(
+                batch, Contract(begin=_BEGIN, end=end), reload=(mode == "reload")
+            )
+        assert w.since == _BEGIN
+        assert w.until == expected
+
+    def test_default_edge_is_latest_complete_chunk(self) -> None:
+        # npb unset → exactly the legacy behavior (latest complete chunk).
+        with travel(_NOW, tick=False):
+            w = resolve_window(_edge_batch(), Contract(begin=_BEGIN), reload=True)
+        assert w.until == _LCY
+
+    def test_no_partial_below_coarser_than_chunk(self) -> None:
+        # hourly chunks, but only release whole days: the edge is the last
+        # complete day (00:00), not the latest complete hour (12:00).
+        with travel(_NOW, tick=False):
+            batch = _edge_batch(chunk="@hourly", no_partial_below="@daily")
+            w = resolve_window(batch, Contract(begin=_BEGIN), reload=True)
+        assert w.until == _LCD
+
+    def test_latest_mode_ignores_no_partial_below(self) -> None:
+        # latest mode uses `window` (the bite), not the inferred-edge knobs.
+        with travel(_NOW, tick=False):
+            batch = Batch(
+                time=TimeChunking(
+                    chunk="@yearly",
+                    window="@monthly",
+                    no_partial_below="@daily",
+                    tz=UTC,
+                )
+            )
+            w = resolve_window(batch, Contract(begin=_BEGIN), latest=True)
+        assert (w.since, w.until) == (datetime(2026, 5, 1, tzinfo=UTC), _LCM)
+
+    def test_explicit_until_overrides_the_inferred_edge(self) -> None:
+        # An explicit RUN_UNTIL wins over the contract end and no_partial_below.
+        until = datetime(2025, 3, 1, tzinfo=UTC)
+        with travel(_NOW, tick=False):
+            batch = _edge_batch(no_partial_below="@daily")
+            w = resolve_window(
+                batch, Contract(begin=_BEGIN, end=_FUTURE), since=_BEGIN, until=until
+            )
+        assert w.until == until
+
+    def test_lookback_shifts_start_independently_of_the_edge(self) -> None:
+        # lookback is the start knob; no_partial_below is the end knob — orthogonal.
+        begin = datetime(2026, 6, 20, tzinfo=UTC)
+        with travel(_NOW, tick=False):
+            batch = Batch(
+                time=TimeChunking(
+                    chunk="@daily", no_partial_below="@daily", lookback=2, tz=UTC
+                )
+            )
+            w = resolve_window(batch, Contract(begin=begin), reload=True)
+        assert w.until == _LCD  # end snapped to the last complete day
+        assert w.since == datetime(2026, 6, 18, tzinfo=UTC)  # start pulled back 2 days

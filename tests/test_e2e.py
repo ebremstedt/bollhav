@@ -50,7 +50,12 @@ from bollhav.model import (
     WriteMode,
 )
 from bollhav.model.state import StateMode
-from bollhav.model.window import compute_intervals, resolve_window
+from bollhav.model.window import (
+    compute_intervals,
+    contract_intervals,
+    resolve_window,
+    split_window,
+)
 from bollhav.postgres import (
     PostgresColumn,
     PostgresType,
@@ -205,11 +210,16 @@ def _orders_model(
     upstream: list[Source] | None = None,
     sources: list[Source] | None = None,
     schema_suffix: str = "",
+    fixed_intervals: bool = True,
+    chunk: str = "@daily",
+    tags: set[str] | None = None,
 ) -> ModelRun:
     # `apply_runtime_overrides` normally resolves the window from env vars and
     # returns a ModelRun. E2E tests call the bootstrap directly, so we build
     # the model + resolve the window by hand to the test's fixed window.
-    batching = Batch(time=TimeChunking(chunk="@daily"))
+    from bollhav.model import Tags
+
+    batching = Batch(time=TimeChunking(chunk=chunk, fixed_intervals=fixed_intervals))
     contract = Contract(begin=SINCE, end=bounds_end)
     model = Model(
         target=Target(
@@ -232,6 +242,7 @@ def _orders_model(
         contract=contract,
         # Gated upstreams and ungated sources are one list now.
         upstream=(upstream or []) + (sources or []),
+        tagging=Tags(tags=tags) if tags else Tags(),
     )
     return ModelRun(
         model=model,
@@ -304,14 +315,41 @@ def _bootstrap(models, *, state_mode: StateMode = StateMode.DISCOVER) -> None:
                 state.ensure_library()
                 state.register_model()
                 state.ensure_tables()
+
+                if model.state.mode is StateMode.TORCH:
+                    state.torch_rows()
+
+                batching = model.batching
+                is_flexible = batching is not None and not batching.time.fixed_intervals
+
                 if run.window is None:
                     state.insert_oneshot(run_id=run.run_id)
-                else:
-                    state.insert_intervals(
-                        run_id=run.run_id,
-                        intervals=compute_intervals(run),
+                elif is_flexible:
+                    if model.state.mode is StateMode.BULLDOZER:
+                        state.clear_window(run.window)
+                    if model.contract.begin is not None:
+                        horizon = resolve_window(
+                            batching,
+                            model.contract,
+                            reload=True,
+                            name=model.target.full_name,
+                        )
+                    else:
+                        horizon = run.window
+                    units = tuple(
+                        unit
+                        for gap in state.uncovered_gaps(horizon.since, horizon.until)
+                        for unit in split_window(gap, batching.time.chunk)
                     )
-                run.intervals = state.get_actionable_intervals()
+                    state.prefill(run_id=run.run_id, intervals=units)
+                else:
+                    state.prefill(
+                        run_id=run.run_id,
+                        intervals=contract_intervals(run),
+                    )
+                    if model.state.mode is StateMode.BULLDOZER:
+                        state.reset_window(run_id=run.run_id, window=run.window)
+                run.intervals = state.get_actionable_intervals(window=run.window)
 
 
 def _run_intervals(run: ModelRun, *, error_on_interval: int | None = None):
@@ -1099,7 +1137,7 @@ def _registry_models(schema_name):
             Source(
                 f"{CAT}.{schema_name}.orders",
                 type=SourceModel(),
-                contract=UpstreamContract.WINDOW,
+                contract=UpstreamContract.ENCAPSULATE,
             )
         ],
         sources=[
@@ -1111,7 +1149,7 @@ def _registry_models(schema_name):
 
 
 def test_e2e_registry_get_lineage_matches_model_lineage(schema_name):
-    from bollhav.postgres import registry
+    from bollhav.postgres.state import read as registry
 
     orders, summary = _registry_models(schema_name)
     _bootstrap([orders, summary])
@@ -1131,14 +1169,14 @@ def test_e2e_registry_get_lineage_matches_model_lineage(schema_name):
     ]
     # The in-code view types the same upstream by its contract level instead.
     assert summary.model.lineage()["upstream"] == [
-        {"name": f"{CAT}.{schema_name}.orders", "kind": "window"}
+        {"name": f"{CAT}.{schema_name}.orders", "kind": "encapsulate"}
     ]
     assert {"name": "vendor.api_orders", "kind": "api"} in lineage["sources"]
     assert lineage["inputs_known"] is True
 
 
 def test_e2e_registry_list_and_downstreams_and_graph(schema_name):
-    from bollhav.postgres import registry
+    from bollhav.postgres.state import read as registry
 
     orders, summary = _registry_models(schema_name)
     _bootstrap([orders, summary])
@@ -1167,7 +1205,7 @@ def test_e2e_registry_list_and_downstreams_and_graph(schema_name):
         "from": orders_fqn,
         "to": summary_fqn,
         "relation": "upstream",
-        "contract": "window",
+        "contract": "encapsulate",
         "freshness": None,
     } in graph["edges"]
     assert {
@@ -1179,7 +1217,7 @@ def test_e2e_registry_list_and_downstreams_and_graph(schema_name):
 
 
 def test_e2e_registry_get_upstream_tree_nests(schema_name):
-    from bollhav.postgres import registry
+    from bollhav.postgres.state import read as registry
 
     # orders -> summary -> rollup : a 3-deep chain.
     orders = _orders_model(schema_name, name="orders", state=State(), staging=Staging())
@@ -1192,7 +1230,7 @@ def test_e2e_registry_get_upstream_tree_nests(schema_name):
             Source(
                 f"{CAT}.{schema_name}.orders",
                 type=SourceModel(),
-                contract=UpstreamContract.WINDOW,
+                contract=UpstreamContract.ENCAPSULATE,
             )
         ],
         sources=[Source("raw.landing", type=SourceApi())],
@@ -1206,7 +1244,7 @@ def test_e2e_registry_get_upstream_tree_nests(schema_name):
             Source(
                 f"{CAT}.{schema_name}.summary",
                 type=SourceModel(),
-                contract=UpstreamContract.WINDOW,
+                contract=UpstreamContract.ENCAPSULATE,
             )
         ],
     )
@@ -1224,7 +1262,7 @@ def test_e2e_registry_get_upstream_tree_nests(schema_name):
 
 
 def test_e2e_registry_get_recent_state(schema_name):
-    from bollhav.postgres import registry
+    from bollhav.postgres.state import read as registry
 
     m = _orders_model(schema_name, name="orders", state=State(), staging=Staging())
     _run_intervals(m)  # bootstrap + run all intervals -> applied state rows
@@ -1239,7 +1277,7 @@ def test_e2e_registry_get_recent_state(schema_name):
 
 
 def test_e2e_registry_get_errors(schema_name):
-    from bollhav.postgres import registry
+    from bollhav.postgres.state import read as registry
 
     m = _orders_model(schema_name, name="orders", state=State(), staging=Staging())
     _bootstrap([m])
@@ -1409,7 +1447,8 @@ def test_e2e_dry_state_plans_without_executing(schema_name, capsys, monkeypatch)
 def test_e2e_dry_state_cascade_shows_will_run_after(schema_name, capsys, monkeypatch):
     """DRY_STATE understands the cascade: a downstream gated on an upstream that
     would itself run this pass shows 'pending after <upstream>', not blocked."""
-    from bollhav.model.lifecycle import _DRY_STATE_RUNS, model_lifecycle
+    from bollhav.model.lifecycle import model_lifecycle
+    from bollhav.model.state_dry_plan import _DRY_STATE_RUNS
 
     _DRY_STATE_RUNS.clear()
     monkeypatch.setenv("DRY_STATE_EXTRA", "true")
@@ -1428,7 +1467,7 @@ def test_e2e_dry_state_cascade_shows_will_run_after(schema_name, capsys, monkeyp
             Source(
                 f"{CAT}.{schema_name}.orders",
                 type=SourceModel(),
-                contract=UpstreamContract.WINDOW,
+                contract=UpstreamContract.ENCAPSULATE,
             )
         ],
     )
@@ -1446,6 +1485,65 @@ def test_e2e_dry_state_cascade_shows_will_run_after(schema_name, capsys, monkeyp
     assert "blocked 0" not in out
     assert "applied 0" not in out
     assert "blocked:" not in out  # nothing actually blocked
+
+
+# ── 15b. STATE_MARK_APPLIED ─────────────────────────────────────────────────
+
+
+def test_e2e_mark_applied_stamps_window_only(schema_name, monkeypatch):
+    """STATE_MARK_APPLIED=true stamps exactly the run's window intervals `applied`
+    without running the model, and leaves a pre-existing pending backlog row
+    (outside the window) untouched — proving it scopes to compute_intervals(run),
+    not the actionable set."""
+    from bollhav.model.lifecycle import model_lifecycle
+
+    monkeypatch.setenv("STATE_MARK_APPLIED", "true")
+    ran = {"executed": False}
+
+    @model_lifecycle
+    def run_model(run, data_conn, state_conn=None):
+        ran["executed"] = True  # must not happen under STATE_MARK_APPLIED
+
+    run = _orders_model(schema_name, name="orders_mark", state=State())
+    window_n = len(compute_intervals(run))
+    backlog_since = datetime(2099, 1, 1, tzinfo=timezone.utc)
+    backlog_until = datetime(2099, 1, 2, tzinfo=timezone.utc)
+
+    with psycopg.connect(_dsn(), autocommit=True) as conn:
+        # First pass: creates the state table + stamps the window applied.
+        run_model(run, conn, conn)
+
+        # Seed a pending backlog row OUTSIDE the window — what the actionable set
+        # would pick up but STATE_MARK_APPLIED must not.
+        st = PostgresState(run.model, conn)._state_table()
+        conn.execute(
+            f'INSERT INTO "z_bollhav"."{st}" '
+            "(model_name, run_id, since, until, status) "
+            "VALUES (%s, %s, %s, %s, 'pending')",
+            [run.model.target.full_name, str(run.run_id), backlog_since, backlog_until],
+        )
+
+        # Second pass: re-stamps the window, must NOT touch the backlog.
+        run_model(run, conn, conn)
+
+    rows = _state_rows("z_bollhav", st)
+    applied = [(s, u) for status, s, u in rows if status == "applied"]
+    pending = [(s, u) for status, s, u in rows if status == "pending"]
+
+    assert ran["executed"] is False  # no data ran
+    assert len(applied) == window_n  # the whole window, nothing more
+    assert pending == [(backlog_since, backlog_until)]  # backlog left alone
+
+    # asset DDL was skipped (like DRY_STATE) — no target data table created.
+    with psycopg.connect(_dsn(), autocommit=True) as conn:
+        assert (
+            conn.execute(
+                "SELECT 1 FROM information_schema.tables "
+                "WHERE table_schema=%s AND table_name='orders_mark'",
+                [schema_name],
+            ).fetchone()
+            is None
+        )
 
 
 # ── 12. ephemeral-environment teardown (clear_state / drop_environment) ──
@@ -1651,7 +1749,7 @@ def test_e2e_contract_window_gates_per_matching_window(schema_name, caplog):
     orders day 1 unblocks the downstream's day 1 but not day 2."""
     _enable_debug_logging(caplog)
     orders = _orders_model(schema_name, state=State(), staging=Staging())
-    summary = _downstream_on_orders(schema_name, UpstreamContract.WINDOW)
+    summary = _downstream_on_orders(schema_name, UpstreamContract.ENCAPSULATE)
 
     # Only orders' first daily window is applied.
     intervals = _bootstrap_orders_partial(orders, applied_idx=[0])
@@ -1660,7 +1758,7 @@ def test_e2e_contract_window_gates_per_matching_window(schema_name, caplog):
     g1 = _gate(summary, intervals[1])
     assert g0.satisfied is True  # day 1 lines up → open
     assert g1.satisfied is False  # day 2 not applied → blocked
-    assert g1.blockers == (f"upstream '{CAT}.{schema_name}.orders' (window)",)
+    assert g1.blockers == (f"upstream '{CAT}.{schema_name}.orders' (encapsulate)",)
 
     # Apply the rest → every downstream window opens.
     _bootstrap_orders_partial(orders, applied_idx=[1, 2])
@@ -1755,7 +1853,7 @@ def test_e2e_contract_check_emits_debug_log(schema_name, caplog):
     produces one of each, which is what the assertions pin."""
     _enable_debug_logging(caplog)
     orders = _orders_model(schema_name, state=State(), staging=Staging())
-    summary = _downstream_on_orders(schema_name, UpstreamContract.WINDOW)
+    summary = _downstream_on_orders(schema_name, UpstreamContract.ENCAPSULATE)
     intervals = _bootstrap_orders_partial(orders, applied_idx=[0])
 
     caplog.clear()  # drop the bootstrap/mark-applied logs; keep only the checks
@@ -1768,8 +1866,8 @@ def test_e2e_contract_check_emits_debug_log(schema_name, caplog):
         if r.name == "bollhav.postgres.state.satisfaction"
     ]
     # The day-1 check logged an open gate; the day-2 check logged a block.
-    assert any("SATISFIED upstream" in m and "(window" in m for m in msgs)
-    assert any("BLOCKED upstream" in m and "(window" in m for m in msgs)
+    assert any("SATISFIED upstream" in m and "(encapsulate" in m for m in msgs)
+    assert any("BLOCKED upstream" in m and "(encapsulate" in m for m in msgs)
     # And each check logged a per-window verdict summary.
     assert any("is SATISFIED (all gates open)" in m for m in msgs)
     assert any("is BLOCKED by" in m for m in msgs)
@@ -1882,3 +1980,611 @@ def test_e2e_contract_freshness_requires_contract():
             contract=UpstreamContract.EXISTS,
             freshness=Freshness(within=timedelta(days=1)),
         )
+
+
+# ── flexible vs fixed intervals + lineage contracts ──────────────────
+
+
+def _fixed_intervals_in_library(full_name: str) -> bool:
+    with _conn() as c:
+        row = c.execute(
+            "SELECT fixed_intervals FROM z_bollhav.library WHERE full_name = %s",
+            [full_name],
+        ).fetchone()
+    return row[0]
+
+
+def test_e2e_fixed_intervals_round_trips(schema_name):
+    """register_model stores TimeChunking.fixed_intervals on the library row,
+    and lookup_model reads it back onto the LibraryEntry. A grid model stores
+    True (the default); a coverage model stores False."""
+    grid = _orders_model(schema_name, name="grid", state=State(), staging=Staging())
+    cover = _orders_model(
+        schema_name,
+        name="cover",
+        state=State(),
+        staging=Staging(),
+        fixed_intervals=False,
+    )
+    _bootstrap([grid, cover])
+
+    assert _fixed_intervals_in_library(grid.model.target.full_name) is True
+    assert _fixed_intervals_in_library(cover.model.target.full_name) is False
+
+    # …and through the typed lookup that the gating code actually reads.
+    with _conn() as c:
+        grid_entry = PostgresState.lookup_model(c, grid.model.target.full_name)
+        cover_entry = PostgresState.lookup_model(c, cover.model.target.full_name)
+    assert grid_entry.fixed_intervals is True
+    assert cover_entry.fixed_intervals is False
+
+
+def test_e2e_flexible_upstream_with_encapsulate_downstream_is_satisfied(schema_name):
+    """The headline valid combination: a FLEXIBLE upstream
+    (fixed_intervals=False) feeding a downstream that gates ENCAPSULATE.
+    Coverage works fine against a flexible upstream — once the upstream's
+    windows are applied, the downstream's matching windows are satisfied."""
+    raw = _orders_model(
+        schema_name,
+        name="raw_events",
+        state=State(),
+        staging=Staging(),
+        fixed_intervals=False,
+    )
+    clean = _orders_model(
+        schema_name,
+        name="clean_events",
+        state=State(),
+        staging=Staging(),
+        upstream=[
+            Source(
+                f"{CAT}.{schema_name}.raw_events",
+                type=SourceModel(),
+                contract=UpstreamContract.ENCAPSULATE,
+            )
+        ],
+    )
+    _bootstrap([raw, clean])
+    _run_intervals(raw)  # drive the flexible upstream's windows to `applied`
+
+    with _conn() as c:
+        cs = PostgresState(clean.model, c)
+        for interval in compute_intervals(clean):
+            assert cs.is_upstream_satisfied_live(interval).satisfied is True
+
+
+def test_e2e_exact_on_flexible_upstream_raises(schema_name):
+    """Guard A, end-to-end against the live library: an EXACT contract on a
+    FLEXIBLE upstream is a hard error (it could never match a coalesced range,
+    so the downstream would block forever)."""
+    from bollhav.postgres.state.satisfaction import (
+        ExactContractOnFlexibleUpstreamError,
+    )
+
+    raw = _orders_model(
+        schema_name,
+        name="raw_flex",
+        state=State(),
+        staging=Staging(),
+        fixed_intervals=False,
+    )
+    bad = _orders_model(
+        schema_name,
+        name="bad_exact",
+        state=State(),
+        staging=Staging(),
+        upstream=[
+            Source(
+                f"{CAT}.{schema_name}.raw_flex",
+                type=SourceModel(),
+                contract=UpstreamContract.EXACT,
+            )
+        ],
+    )
+    _bootstrap([raw, bad])
+    _run_intervals(raw)
+
+    with _conn() as c:
+        bs = PostgresState(bad.model, c)
+        interval = next(iter(compute_intervals(bad)))
+        with pytest.raises(ExactContractOnFlexibleUpstreamError):
+            bs.is_upstream_satisfied_live(interval)
+
+
+def test_e2e_flexible_fixed_lineage_plethora(schema_name):
+    """A plethora of interdependent models covering the (shape × contract)
+    matrix end-to-end:
+
+        raw_fixed  (FIXED)
+          ├─ ENCAPSULATE → clean_flex (FLEXIBLE)
+          │                  └─ ENCAPSULATE → report_fixed (FIXED)   ✓ valid
+          └─ EXACT       → audit_exact (FIXED)                       ✓ valid
+        clean_flex (FLEXIBLE)
+          └─ EXACT       → bad_exact (FIXED)                         ✗ Guard A
+
+    Asserts: the library stores each model's fixed_intervals; the valid
+    contracts resolve satisfied; the EXACT-on-flexible edge raises."""
+    from bollhav.postgres.state.satisfaction import (
+        ExactContractOnFlexibleUpstreamError,
+    )
+
+    def ref(name, contract):
+        return Source(
+            f"{CAT}.{schema_name}.{name}", type=SourceModel(), contract=contract
+        )
+
+    raw_fixed = _orders_model(
+        schema_name, name="raw_fixed", state=State(), staging=Staging()
+    )
+    clean_flex = _orders_model(
+        schema_name,
+        name="clean_flex",
+        state=State(),
+        staging=Staging(),
+        fixed_intervals=False,
+        upstream=[ref("raw_fixed", UpstreamContract.ENCAPSULATE)],
+    )
+    report_fixed = _orders_model(
+        schema_name,
+        name="report_fixed",
+        state=State(),
+        staging=Staging(),
+        upstream=[ref("clean_flex", UpstreamContract.ENCAPSULATE)],
+    )
+    audit_exact = _orders_model(
+        schema_name,
+        name="audit_exact",
+        state=State(),
+        staging=Staging(),
+        upstream=[ref("raw_fixed", UpstreamContract.EXACT)],
+    )
+    bad_exact = _orders_model(
+        schema_name,
+        name="bad_exact",
+        state=State(),
+        staging=Staging(),
+        upstream=[ref("clean_flex", UpstreamContract.EXACT)],
+    )
+
+    _bootstrap([raw_fixed, clean_flex, report_fixed, audit_exact, bad_exact])
+    # Drive the two upstreams that get consumed to `applied`.
+    _run_intervals(raw_fixed)
+    _run_intervals(clean_flex)
+
+    # 1) Library records each model's shape.
+    assert _fixed_intervals_in_library(raw_fixed.model.target.full_name) is True
+    assert _fixed_intervals_in_library(clean_flex.model.target.full_name) is False
+    assert _fixed_intervals_in_library(report_fixed.model.target.full_name) is True
+    assert _fixed_intervals_in_library(audit_exact.model.target.full_name) is True
+
+    with _conn() as c:
+        # 2) ENCAPSULATE on a FLEXIBLE upstream — valid, satisfied.
+        rs = PostgresState(report_fixed.model, c)
+        for interval in compute_intervals(report_fixed):
+            assert rs.is_upstream_satisfied_live(interval).satisfied is True
+
+        # 3) EXACT on a FIXED upstream at the same grain — valid, satisfied.
+        aus = PostgresState(audit_exact.model, c)
+        for interval in compute_intervals(audit_exact):
+            assert aus.is_upstream_satisfied_live(interval).satisfied is True
+
+        # 4) EXACT on a FLEXIBLE upstream — Guard A, hard error.
+        bs = PostgresState(bad_exact.model, c)
+        bad_interval = next(iter(compute_intervals(bad_exact)))
+        with pytest.raises(ExactContractOnFlexibleUpstreamError):
+            bs.is_upstream_satisfied_live(bad_interval)
+
+
+def test_e2e_composite_primary_key_ddl_and_upsert(schema_name):
+    """A composite PRIMARY KEY (two `primary_key=True` columns) is emitted as a
+    single table-level constraint — so `create_table` succeeds and an
+    UPSERT_NO_DELETE merge can target the full key (previously impossible: two
+    inline `PRIMARY KEY` clauses are rejected by Postgres)."""
+    cols = [
+        PostgresColumn(
+            name="tenant",
+            data_type=PostgresType.BIGINT,
+            nullable=False,
+            primary_key=True,
+        ),
+        PostgresColumn(
+            name="id", data_type=PostgresType.BIGINT, nullable=False, primary_key=True
+        ),
+        PostgresColumn(name="val", data_type=PostgresType.NUMERIC, nullable=False),
+    ]
+    model = Model(
+        target=Target(
+            name="ckey",
+            schema=schema_name,
+            catalog=CAT,
+            database=Database.POSTGRES,
+            write_mode=WriteMode.UPSERT_NO_DELETE,
+            dsn_env_var="TARGET_DSN",
+            columns=cols,
+        ),
+        temporality=Temporality.TIMELESS,
+    )
+    # merge_key_columns prefers the composite PK.
+    assert [c.name for c in model.target.merge_key_columns] == ["tenant", "id"]
+
+    with psycopg.connect(_dsn(), autocommit=True) as conn:
+        data = PostgresData(model=model, conn=conn)
+        data.create_schema()
+        data.create_table()
+
+        # one PRIMARY KEY constraint, over both columns
+        pk = conn.execute(
+            "SELECT a.attname FROM pg_index i "
+            "JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey) "
+            "WHERE i.indrelid = %s::regclass AND i.indisprimary "
+            "ORDER BY a.attname",
+            [f"{schema_name}.ckey"],
+        ).fetchall()
+        assert [r[0] for r in pk] == ["id", "tenant"]
+
+        # the composite key supports ON CONFLICT — re-cover updates, not duplicates
+        conn.execute(
+            f"INSERT INTO {schema_name}.ckey (tenant, id, val) "
+            "VALUES (1, 1, 10), (1, 2, 20)"
+        )
+        conn.execute(
+            f"INSERT INTO {schema_name}.ckey (tenant, id, val) VALUES (1, 1, 99) "
+            "ON CONFLICT (tenant, id) DO UPDATE SET val = EXCLUDED.val"
+        )
+        rows = conn.execute(
+            f"SELECT tenant, id, val FROM {schema_name}.ckey ORDER BY tenant, id"
+        ).fetchall()
+        assert rows == [(1, 1, 99), (1, 2, 20)]
+
+
+# ── operator state edits (state_admin) ───────────────────────────────
+
+
+def test_e2e_state_admin_reset_interval(schema_name):
+    """reset_interval flips one applied row back to pending so the next run
+    re-runs it; the rest stay applied."""
+    from bollhav.postgres.state.write import reset_interval
+
+    run = _orders_model(schema_name, state=State(), staging=Staging())
+    _run_intervals(run)  # 3 intervals → applied
+    full = run.model.target.full_name
+    st = state_table_name(full)
+    target = list(compute_intervals(run))[0]
+
+    with psycopg.connect(_dsn(), autocommit=True) as conn:
+        n = reset_interval(conn, full, target.since, target.until)
+    assert n == 1
+
+    rows = {(s, u): status for status, s, u in _state_rows(LIBRARY_SCHEMA, st)}
+    assert rows[(target.since, target.until)] == "pending"
+    assert sum(1 for v in rows.values() if v == "applied") == 2
+
+
+def test_e2e_state_admin_reset_model(schema_name):
+    """reset_model flips every row of a model's state table to pending."""
+    from bollhav.postgres.state.write import reset_model
+
+    run = _orders_model(schema_name, state=State(), staging=Staging())
+    _run_intervals(run)
+    full = run.model.target.full_name
+    st = state_table_name(full)
+
+    with psycopg.connect(_dsn(), autocommit=True) as conn:
+        n = reset_model(conn, full)
+    assert n == 3
+    assert all(s == "pending" for s, _, _ in _state_rows(LIBRARY_SCHEMA, st))
+
+
+def test_e2e_state_admin_reset_models_by_list_and_tags(schema_name):
+    """Bulk reset across many tables, by explicit full_name list and by tag
+    expression — both reach the same models."""
+    from bollhav.postgres.state.write import reset_models
+
+    a = _orders_model(
+        schema_name, name="aa", state=State(), staging=Staging(), tags={"reset_demo"}
+    )
+    b = _orders_model(
+        schema_name, name="bb", state=State(), staging=Staging(), tags={"reset_demo"}
+    )
+    _run_intervals(a)
+    _run_intervals(b)
+    fa, fb = a.model.target.full_name, b.model.target.full_name
+
+    # explicit list
+    with psycopg.connect(_dsn(), autocommit=True) as conn:
+        out = reset_models(conn, [fa, fb])
+    assert out == {fa: 3, fb: 3}
+
+    # re-apply, then reset the same two by tag expression
+    _run_intervals(a)
+    _run_intervals(b)
+    with psycopg.connect(_dsn(), autocommit=True) as conn:
+        out2 = reset_models(conn, "[reset_demo]")
+    assert {fa, fb} <= set(out2)
+    assert out2[fa] == 3 and out2[fb] == 3
+
+
+def test_e2e_state_admin_reset_skips_running_rows(schema_name):
+    """A `running` row is owned by a live run — reset never touches it."""
+    from bollhav.postgres.state.write import reset_model
+
+    run = _orders_model(schema_name, state=State(), staging=Staging())
+    _run_intervals(run)
+    full = run.model.target.full_name
+    st = state_table_name(full)
+    keep = list(compute_intervals(run))[0]
+
+    with psycopg.connect(_dsn(), autocommit=True) as conn:
+        conn.execute(
+            f'UPDATE "{LIBRARY_SCHEMA}"."{st}" SET status = %s '
+            "WHERE since = %s AND until = %s",
+            ["running", keep.since, keep.until],
+        )
+        n = reset_model(conn, full)
+
+    rows = {(s, u): status for status, s, u in _state_rows(LIBRARY_SCHEMA, st)}
+    assert rows[(keep.since, keep.until)] == "running"  # untouched
+    assert n == 2  # the other two reset
+
+
+def test_e2e_state_admin_reset_works_for_flexible_models(schema_name):
+    """The same flip-to-pending reset works on a FLEXIBLE model: rows are
+    flipped (not deleted), and a non-applied row reads as uncovered, so the
+    next run re-backfills it."""
+    from bollhav.postgres.state.write import reset_model
+
+    run = _orders_model(
+        schema_name, state=State(), staging=Staging(), fixed_intervals=False
+    )
+    _run_intervals(run)
+    full = run.model.target.full_name
+    st = state_table_name(full)
+
+    with psycopg.connect(_dsn(), autocommit=True) as conn:
+        n = reset_model(conn, full)
+    rows = _state_rows(LIBRARY_SCHEMA, st)
+    assert n == 3
+    assert len(rows) == 3  # rows kept, not deleted
+    assert all(status == "pending" for status, _, _ in rows)
+
+
+def _seed_coalesced(conn, st, full, since, until):
+    """Replace a model's state rows with one coalesced applied row [since, until)
+    — simulating what the flexible coverage engine would produce."""
+    conn.execute(f'DELETE FROM "{LIBRARY_SCHEMA}"."{st}"')
+    conn.execute(
+        f'INSERT INTO "{LIBRARY_SCHEMA}"."{st}" '
+        "(model_name, run_id, since, until, status, applied_at) "
+        "VALUES (%s, gen_random_uuid(), %s, %s, 'applied', now())",
+        [full, since, until],
+    )
+
+
+def test_e2e_uncover_span_splits_coalesced_row(schema_name):
+    """uncover_span subtracts a sub-range from a coalesced applied row, splitting
+    it into the two surrounding covered ranges."""
+    from bollhav.postgres.state.state_table import uncover_span
+
+    run = _orders_model(
+        schema_name, state=State(), staging=Staging(), fixed_intervals=False
+    )
+    _bootstrap([run])
+    full, st = run.model.target.full_name, state_table_name(run.model.target.full_name)
+    mid_s, mid_u = SINCE + timedelta(days=1), SINCE + timedelta(days=2)
+
+    with psycopg.connect(_dsn(), autocommit=True) as conn:
+        _seed_coalesced(conn, st, full, SINCE, UNTIL)
+        removed = uncover_span(conn, LIBRARY_SCHEMA, st, mid_s, mid_u)
+
+    assert removed == 1
+    rows = sorted(_state_rows(LIBRARY_SCHEMA, st), key=lambda r: r[1])
+    assert [(s, u) for _, s, u in rows] == [(SINCE, mid_s), (mid_u, UNTIL)]
+    assert all(status == "applied" for status, _, _ in rows)
+
+
+def test_e2e_uncover_span_deletes_when_span_covers_row(schema_name):
+    """A span covering the whole row leaves no remainder — fully uncovered."""
+    from bollhav.postgres.state.state_table import uncover_span
+
+    run = _orders_model(
+        schema_name, state=State(), staging=Staging(), fixed_intervals=False
+    )
+    _bootstrap([run])
+    full, st = run.model.target.full_name, state_table_name(run.model.target.full_name)
+
+    with psycopg.connect(_dsn(), autocommit=True) as conn:
+        _seed_coalesced(
+            conn, st, full, SINCE + timedelta(days=1), SINCE + timedelta(days=2)
+        )
+        removed = uncover_span(conn, LIBRARY_SCHEMA, st, SINCE, UNTIL)
+
+    assert removed == 1
+    assert _state_rows(LIBRARY_SCHEMA, st) == []
+
+
+def test_e2e_state_admin_reset_interval_flexible_uncovers(schema_name):
+    """reset_interval on a FLEXIBLE model uncovers (range subtraction) rather
+    than flipping the whole coalesced row."""
+    from bollhav.postgres.state.write import reset_interval
+
+    run = _orders_model(
+        schema_name, state=State(), staging=Staging(), fixed_intervals=False
+    )
+    _bootstrap([run])
+    full, st = run.model.target.full_name, state_table_name(run.model.target.full_name)
+    mid_s, mid_u = SINCE + timedelta(days=1), SINCE + timedelta(days=2)
+
+    with psycopg.connect(_dsn(), autocommit=True) as conn:
+        _seed_coalesced(conn, st, full, SINCE, UNTIL)
+        n = reset_interval(conn, full, mid_s, mid_u)
+
+    assert n == 1
+    rows = sorted(_state_rows(LIBRARY_SCHEMA, st), key=lambda r: r[1])
+    assert [(s, u) for _, s, u in rows] == [(SINCE, mid_s), (mid_u, UNTIL)]
+
+
+# ── run modes: window-scoped execution + bulldozer/discover behavior ──
+
+
+def test_e2e_get_actionable_is_window_scoped(schema_name):
+    """A run executes only its window — backlog rows outside it don't leak in.
+    With no window, every non-applied row is returned (the reconcile path)."""
+    from bollhav.model.intervals import TZInterval
+
+    run = _orders_model(schema_name, state=State(), staging=Staging())
+    _bootstrap([run])  # three pending daily rows: day1, day2, day3
+    st = state_table_name(run.model.target.full_name)
+
+    day2 = TZInterval(SINCE + timedelta(days=1), SINCE + timedelta(days=2))
+    with _conn() as c:
+        state = PostgresState(run.model, c)
+        scoped = state.get_actionable_intervals(window=day2)
+        assert [(i.since, i.until) for i in scoped] == [(day2.since, day2.until)]
+        # no window → all three rows
+        assert len(state.get_actionable_intervals()) == 3
+    assert len(_state_rows(LIBRARY_SCHEMA, st)) == 3
+
+
+def test_e2e_bulldozer_reruns_the_applied_window(schema_name):
+    """bulldozer resets the window's already-applied rows to pending — so a
+    re-run of the same window runs them again."""
+    run = _orders_model(schema_name, state=State(), staging=Staging())
+    _run_intervals(run)  # 3 intervals → applied
+
+    run2 = _orders_model(schema_name, state=State(), staging=Staging())
+    _bootstrap([run2], state_mode=StateMode.BULLDOZER)
+    assert len(run2.intervals) == 3  # reset to pending → re-run
+
+
+def test_e2e_discover_skips_the_applied_window(schema_name):
+    """discover leaves applied rows applied — a re-run of the same window does
+    nothing (the idempotent / opt-in catch-up mode)."""
+    run = _orders_model(schema_name, state=State(), staging=Staging())
+    _run_intervals(run)  # 3 intervals → applied
+
+    run2 = _orders_model(schema_name, state=State(), staging=Staging())
+    _bootstrap([run2], state_mode=StateMode.DISCOVER)
+    assert len(run2.intervals) == 0  # all applied → skipped
+
+
+def test_e2e_prefill_fills_the_whole_contract_not_just_the_window(schema_name):
+    """Prefill materializes every interval the *contract* declares, even when
+    the run's window is a single tick. The state table mirrors the contract;
+    window-scoped execution then runs only the tick — the rest sits pending."""
+    from bollhav.model.intervals import TZInterval
+
+    run = _orders_model(schema_name, state=State(), staging=Staging())
+    # A `latest`-style run: window is the last day only, contract still spans all
+    # three (2024-01-01 .. 01-04, @daily).
+    day3 = TZInterval(SINCE + timedelta(days=2), UNTIL)
+    run.window = day3
+    _bootstrap([run])
+    st = state_table_name(run.model.target.full_name)
+
+    rows = _state_rows(LIBRARY_SCHEMA, st)
+    # The full contract is materialized — three rows, all pending.
+    assert [(s, since, until) for s, since, until in rows] == [
+        ("pending", SINCE, SINCE + timedelta(days=1)),
+        ("pending", SINCE + timedelta(days=1), SINCE + timedelta(days=2)),
+        ("pending", SINCE + timedelta(days=2), UNTIL),
+    ]
+    # ...but execution is scoped to the window — only the last day runs.
+    assert [(i.since, i.until) for i in run.intervals] == [(day3.since, day3.until)]
+
+
+def test_e2e_bulldozer_window_spares_the_rest_of_the_contract(schema_name):
+    """Prefill touches the whole contract, but bulldozer's reset is scoped to
+    the run window: redoing one day leaves the other applied days untouched."""
+    from bollhav.model.intervals import TZInterval
+
+    run = _orders_model(schema_name, state=State(), staging=Staging())
+    _run_intervals(run)  # all three days → applied
+
+    run2 = _orders_model(schema_name, state=State(), staging=Staging())
+    day3 = TZInterval(SINCE + timedelta(days=2), UNTIL)
+    run2.window = day3
+    _bootstrap([run2], state_mode=StateMode.BULLDOZER)
+    st = state_table_name(run2.model.target.full_name)
+
+    # Only the windowed day is reset; the rest of the contract stays applied.
+    assert _state_rows(LIBRARY_SCHEMA, st) == [
+        ("applied", SINCE, SINCE + timedelta(days=1)),
+        ("applied", SINCE + timedelta(days=1), SINCE + timedelta(days=2)),
+        ("pending", SINCE + timedelta(days=2), UNTIL),
+    ]
+    assert [(i.since, i.until) for i in run2.intervals] == [(day3.since, day3.until)]
+
+
+# ── flexible (coverage) models: gap-fill + range-subtraction invalidation ──
+
+
+def test_e2e_flexible_fills_gaps_then_is_idempotent(schema_name):
+    """A flexible model's work is the *gaps* in its coverage, not a fixed grid.
+    A fresh run fills the whole contract (one gap, sliced by chunk); a second
+    discover run sees full coverage → no gaps → nothing to do."""
+    run = _orders_model(
+        schema_name, state=State(), staging=Staging(), fixed_intervals=False
+    )
+    _run_intervals(run)  # contract is one gap → 3 daily units → applied
+    st = state_table_name(run.model.target.full_name)
+    assert all(s == "applied" for s, _, _ in _state_rows(LIBRARY_SCHEMA, st))
+
+    run2 = _orders_model(
+        schema_name, state=State(), staging=Staging(), fixed_intervals=False
+    )
+    _bootstrap([run2], state_mode=StateMode.DISCOVER)
+    assert len(run2.intervals) == 0  # fully covered → no gaps
+
+
+def test_e2e_flexible_bulldozer_partial_window_keeps_the_rest_covered(schema_name):
+    """bulldozer on a flexible model is *range-subtraction*: it uncovers only the
+    run window, which re-opens as a gap and re-runs — the surrounding coverage
+    stays applied. (Contrast the fixed grid, which flips whole rows.)"""
+    from bollhav.model.intervals import TZInterval
+
+    run = _orders_model(
+        schema_name, state=State(), staging=Staging(), fixed_intervals=False
+    )
+    _run_intervals(run)  # covers [SINCE, UNTIL)
+    st = state_table_name(run.model.target.full_name)
+
+    run2 = _orders_model(
+        schema_name, state=State(), staging=Staging(), fixed_intervals=False
+    )
+    mid = TZInterval(SINCE + timedelta(days=1), SINCE + timedelta(days=2))
+    run2.window = mid
+    _bootstrap([run2], state_mode=StateMode.BULLDOZER)
+
+    # Only the middle day re-opened; the first and last days stay covered.
+    assert _state_rows(LIBRARY_SCHEMA, st) == [
+        ("applied", SINCE, SINCE + timedelta(days=1)),
+        ("pending", SINCE + timedelta(days=1), SINCE + timedelta(days=2)),
+        ("applied", SINCE + timedelta(days=2), UNTIL),
+    ]
+    assert [(i.since, i.until) for i in run2.intervals] == [(mid.since, mid.until)]
+
+
+def test_e2e_flexible_torch_rechunks_coverage(schema_name):
+    """The fix for the daily→yearly surprise: torch on a flexible model wipes the
+    old-grain coverage, then prefill re-covers the contract at *this run's* chunk
+    — no mixed granularity. Here daily coverage becomes one monthly-grain unit."""
+    run = _orders_model(
+        schema_name, state=State(), staging=Staging(), fixed_intervals=False
+    )
+    _run_intervals(run)  # 3 daily applied rows
+    st = state_table_name(run.model.target.full_name)
+    assert len(_state_rows(LIBRARY_SCHEMA, st)) == 3
+
+    # Re-chunk to monthly under torch: the 3-day contract is one monthly unit.
+    run2 = _orders_model(
+        schema_name,
+        state=State(),
+        staging=Staging(),
+        fixed_intervals=False,
+        chunk="@monthly",
+    )
+    _bootstrap([run2], state_mode=StateMode.TORCH)
+
+    # Old daily rows gone; one pending unit spanning the contract at the new grain.
+    assert _state_rows(LIBRARY_SCHEMA, st) == [("pending", SINCE, UNTIL)]
+    assert [(i.since, i.until) for i in run2.intervals] == [(SINCE, UNTIL)]

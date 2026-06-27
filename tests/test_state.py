@@ -38,6 +38,7 @@ class TestStateMode:
     def test_values(self) -> None:
         assert StateMode.DISCOVER.value == "discover"
         assert StateMode.BULLDOZER.value == "bulldozer"
+        assert StateMode.TORCH.value == "torch"
 
 
 class TestBlockCode:
@@ -422,14 +423,14 @@ class TestReadStatusSummary:
 class TestStateMode_EnvVar:
     """STATE_MODE env var → cfg.state_mode → bootstrap argument."""
 
-    def test_default_is_respect(self) -> None:
+    def test_default_is_bulldozer(self) -> None:
         from bollhav.model.load_models import _resolve_state_mode
 
         with patch(
             "bollhav.model.load_models.env_var",
             lambda name, **kw: None,
         ):
-            assert _resolve_state_mode() is StateMode.DISCOVER
+            assert _resolve_state_mode() is StateMode.BULLDOZER
 
     def test_respect_explicit(self) -> None:
         from bollhav.model.load_models import _resolve_state_mode
@@ -449,6 +450,15 @@ class TestStateMode_EnvVar:
         ):
             assert _resolve_state_mode() is StateMode.BULLDOZER
 
+    def test_torch(self) -> None:
+        from bollhav.model.load_models import _resolve_state_mode
+
+        with patch(
+            "bollhav.model.load_models.env_var",
+            lambda name, **kw: "torch" if name == "STATE_MODE" else None,
+        ):
+            assert _resolve_state_mode() is StateMode.TORCH
+
     def test_unknown_raises(self) -> None:
         from bollhav.model.load_models import _resolve_state_mode
 
@@ -458,6 +468,43 @@ class TestStateMode_EnvVar:
         ):
             with pytest.raises(ValueError, match="STATE_MODE must be one of"):
                 _resolve_state_mode()
+
+
+class TestTorchRows:
+    """`torch_rows` deletes every state row for the model (mock conn)."""
+
+    def _conn(self, *, table_exists: bool, deleted: int = 0):
+        conn = MagicMock()
+        conn.transaction.return_value.__enter__ = MagicMock(return_value=None)
+        conn.transaction.return_value.__exit__ = MagicMock(return_value=None)
+        regclass = MagicMock()
+        regclass.fetchone.return_value = ("public.x",) if table_exists else (None,)
+        delete = MagicMock()
+        delete.rowcount = deleted
+        # first execute = to_regclass probe, second = DELETE
+        conn.execute.side_effect = [regclass, delete]
+        return conn
+
+    def test_deletes_when_table_present(self) -> None:
+        from bollhav.postgres.state import PostgresState
+
+        conn = self._conn(table_exists=True, deleted=14200)
+        PostgresState(_pg_model(), conn).torch_rows()
+        executed = " ".join(str(c.args[0]) for c in conn.execute.call_args_list)
+        assert "to_regclass" in executed
+        assert "DELETE FROM" in executed
+
+    def test_noop_when_table_absent(self) -> None:
+        from bollhav.postgres.state import PostgresState
+
+        conn = MagicMock()
+        probe = MagicMock()
+        probe.fetchone.return_value = (None,)
+        conn.execute.return_value = probe
+        PostgresState(_pg_model(), conn).torch_rows()
+        # only the existence probe ran — no DELETE issued
+        executed = " ".join(str(c.args[0]) for c in conn.execute.call_args_list)
+        assert "DELETE FROM" not in executed
 
     def test_case_insensitive(self) -> None:
         from bollhav.model.load_models import _resolve_state_mode
@@ -575,7 +622,7 @@ class TestAssumeOkUpstream:
         return Source(
             "warehouse.orders",
             type=SourceModel(),
-            contract=UpstreamContract.WINDOW,
+            contract=UpstreamContract.ENCAPSULATE,
             deactivate_for_dev=True,
         )
 

@@ -8,6 +8,7 @@ from uuid import UUID
 
 from psycopg import sql
 
+
 from ._base import _PostgresStateBase
 from ._naming import _name_digest
 from ._ddl import (
@@ -20,16 +21,93 @@ from ._ddl import (
 )
 
 if TYPE_CHECKING:
+    import psycopg
+
     from bollhav.model.intervals import TZInterval
 
 logger = logging.getLogger(__name__)
+
+
+# ── errors ──
+class StateHashCollisionError(ValueError):
+    """The ~1e-12 case where two different models hash to the same state table.
+    The table already holds rows for a different model, so sharing it would
+    corrupt state — rename a model or widen the digest instead."""
+
+    def __init__(self, schema: str, state_table: str, existing, full_name: str) -> None:
+        super().__init__(
+            f"state hash collision: {schema}.{state_table} already holds "
+            f"state for {existing!r}, not {full_name!r}. "
+            f"Rename one model or widen the digest in state_table_name."
+        )
+
+
+class PrefillRequiresStateError(ValueError):
+    """`prefill_intervals` was called on a model with no `state`. There's no
+    state table to prefill, so the model must be state-enabled."""
+
+    def __init__(self, full_name: str) -> None:
+        super().__init__(
+            "prefill_intervals requires a state-enabled model "
+            f"({full_name!r} has no `state`)"
+        )
+
+
+class OneshotRequiresStateError(ValueError):
+    """`insert_oneshot` was called on a model with no `state`. There's no state
+    table to write the oneshot row to, so the model must be state-enabled."""
+
+    def __init__(self, full_name: str) -> None:
+        super().__init__(
+            "insert_oneshot requires a state-enabled model "
+            f"({full_name!r} has no `state`)"
+        )
+
+
+class InvalidPrefillStatusError(ValueError):
+    """A prefill row carried a status other than `pending` or `blocked` — the
+    only two statuses a prefill may set."""
+
+    def __init__(self, status) -> None:
+        super().__init__(
+            f"prefill status must be 'pending' or 'blocked', got {status!r}"
+        )
+
+
+class BlockedRowRequiresReasonError(ValueError):
+    """A prefill row marked `blocked` carried no `blocked_reason`. A blocked row
+    must say why it's blocked, so the reason is required."""
+
+    def __init__(self) -> None:
+        super().__init__("blocked rows require a non-empty blocked_reason")
+
+
+class ClearStateRefusedError(ValueError):
+    """`clear_state` refuses to run on a model with no schema suffix — its state
+    lives in prod (`z_bollhav`), and clearing prod state isn't offered. Set a
+    schema suffix for an ephemeral environment, or delete rows by hand."""
+
+    def __init__(self, full_name: str, library_schema: str) -> None:
+        super().__init__(
+            f"clear_state refuses to run on {full_name!r}: "
+            f"it has no schema suffix, so its state lives in prod "
+            f"({library_schema}). Clearing prod state isn't offered — set "
+            f"SCHEMA_SUFFIX for an ephemeral environment, or delete the rows "
+            f"by hand if you truly must."
+        )
+
 
 # `findall` returns every (name, kind) so the banner lists all the missing
 # upstreams, not just the first. `kind` is optional for older reasons.
 _BLOCK_UPSTREAM_RE = re.compile(r"upstream '([^']+)'(?: \(([^)]+)\))?")
 
 
-class Rows(_PostgresStateBase):
+class StateTable(_PostgresStateBase):
+    """The per-model state table and the interval-status lifecycle over it:
+    create/migrate the table, prefill interval rows, select the actionable
+    ones, transition statuses (running → applied / blocked / error), and
+    torch/clear. One row per interval."""
+
     def ensure_tables(self) -> None:
         """Create the central state schema (`z_bollhav_state`), the model's
         state table, and its indexes if absent. Idempotent. (Errors are NOT
@@ -101,10 +179,8 @@ class Rows(_PostgresStateBase):
             [self.model.target.full_name],
         ).fetchone()
         if row is not None:
-            raise ValueError(
-                f"state hash collision: {schema}.{state_table} already holds "
-                f"state for {row[0]!r}, not {self.model.target.full_name!r}. "
-                f"Rename one model or widen the digest in state_table_name."
+            raise StateHashCollisionError(
+                schema, state_table, row[0], self.model.target.full_name
             )
 
     def _migrate_state_additively(
@@ -116,7 +192,7 @@ class Rows(_PostgresStateBase):
         concurrent old-image writers. Runs inside the caller's transaction.
         Additive only (per the shared-table rule): add the `temporality` and
         `model_name` columns, and relax `since`/`until` to nullable so
-        monolithic / view rows carry a NULL window. Each step checks
+        oneshot / view rows carry a NULL window. Each step checks
         information_schema first, so it's idempotent."""
         conn = self._require_conn()
 
@@ -137,8 +213,8 @@ class Rows(_PostgresStateBase):
                 )
             )
             logger.info(
-                "state: migrated %s.%s — added temporality column (default "
-                "'temporal' so older images keep writing temporal rows)",
+                "state: migrated %s.%s — added temporality column (default 'temporal' "
+                "so older images keep writing temporal rows)",
                 state_schema,
                 state_table,
             )
@@ -174,7 +250,7 @@ class Rows(_PostgresStateBase):
                 )
                 logger.info(
                     "state: migrated %s.%s — relaxed NOT NULL on %s "
-                    "(monolithic / view rows carry a NULL window)",
+                    "(oneshot / view rows carry a NULL window)",
                     state_schema,
                     state_table,
                     col,
@@ -198,10 +274,7 @@ class Rows(_PostgresStateBase):
             prior value (applied_at cleared too)."""
         model = self.model
         if model.state is None:
-            raise ValueError(
-                "prefill_intervals requires a state-enabled model "
-                f"({model.target.full_name!r} has no `state`)"
-            )
+            raise PrefillRequiresStateError(model.target.full_name)
 
         if not intervals:
             return
@@ -214,7 +287,10 @@ class Rows(_PostgresStateBase):
         from bollhav.model.state import StateMode
 
         on_conflict = ""
-        if model.state.mode is StateMode.DISCOVER:
+        # TORCH deletes every row up front (in the lifecycle), so its prefill
+        # hits no conflicts — fall in with DISCOVER's preserve-applied upsert as
+        # a harmless safety net for any stray row.
+        if model.state.mode in (StateMode.DISCOVER, StateMode.TORCH):
             on_conflict = sql.SQL(
                 "ON CONFLICT (since, until) DO UPDATE SET "
                 "status = CASE WHEN {schema}.{table}.status = 'applied' "
@@ -270,6 +346,88 @@ class Rows(_PostgresStateBase):
             blocked,
         )
 
+    def prefill(self, *, run_id: UUID, intervals: tuple) -> None:
+        """Prefill the state table: insert one **pending** row per interval that
+        isn't already present, leaving every existing row exactly as it was
+        (`ON CONFLICT (since, until) DO NOTHING`).
+
+        This is *materialization only* — keep the table complete against the
+        contract — and it is **mode-independent**: a row that's `applied`,
+        `blocked`, or `pending` is never disturbed here. It is also incremental:
+        prior runs have already inserted most of the declared intervals, so a
+        run only adds the new ticks at the contract's advancing edge.
+
+        Invalidation — redoing rows that are already `applied` — is a separate,
+        explicit step: `reset_window` (bulldozer, the run's window) or
+        `torch_rows` (torch, everything). Decoupling the two is what lets a
+        plain `latest` run keep the table honest without re-running history."""
+        model = self.model
+        if model.state is None:
+            raise PrefillRequiresStateError(model.target.full_name)
+        if not intervals:
+            return
+
+        rows = [self._normalize_prefill_row(item) for item in intervals]
+        schema = self._state_schema()
+        table = self._state_table()
+
+        insert = sql.SQL(
+            "INSERT INTO {schema}.{table} "
+            "(model_name, run_id, since, until, status, blocked_reason) "
+            "VALUES (%s, %s, %s, %s, %s, %s) "
+            "ON CONFLICT (since, until) DO NOTHING"
+        ).format(schema=sql.Identifier(schema), table=sql.Identifier(table))
+
+        conn = self._require_conn()
+        with conn.transaction():
+            for interval, status, reason in rows:
+                conn.execute(
+                    insert,
+                    [
+                        model.target.full_name,
+                        str(run_id),
+                        interval.since,
+                        interval.until,
+                        status,
+                        reason,
+                    ],
+                )
+        logger.debug(
+            "state: prefilled %s from contract (%d interval(s) offered; only "
+            "missing rows inserted, existing preserved)",
+            model.target.full_name,
+            len(rows),
+        )
+
+    def reset_window(self, *, run_id: UUID, window: "TZInterval") -> int:
+        """Bulldozer invalidation: flip every row whose `[since, until)` falls
+        inside `window` back to `pending` — clearing the applied/blocked marks —
+        so it re-runs. Rows outside the window are left untouched, and a
+        `running` row is skipped. Returns the number of rows reset.
+
+        Scoped to the run window on purpose: bulldozer redoes exactly what the
+        run named, never the whole table (that's `torch_rows`)."""
+        model = self.model
+        schema = self._state_schema()
+        table = self._state_table()
+        conn = self._require_conn()
+        n = conn.execute(
+            sql.SQL(
+                "UPDATE {schema}.{table} SET status = 'pending', "
+                "applied_at = NULL, blocked_reason = NULL, run_id = %s "
+                "WHERE status <> 'running' AND since >= %s AND until <= %s"
+            ).format(schema=sql.Identifier(schema), table=sql.Identifier(table)),
+            [str(run_id), window.since, window.until],
+        ).rowcount
+        logger.debug(
+            "state: bulldozed %d row(s) in [%s, %s) of %s back to pending",
+            n,
+            window.since,
+            window.until,
+            model.target.full_name,
+        )
+        return n
+
     def insert_oneshot(self, *, run_id: UUID) -> None:
         """Prefill the single NULL-window row for a model with no window to
         track — a timeless model, or a temporal one with no declared range.
@@ -282,10 +440,7 @@ class Rows(_PostgresStateBase):
         isn't re-run), BULLDOZER resets it to pending."""
         model = self.model
         if model.state is None:
-            raise ValueError(
-                "insert_oneshot requires a state-enabled model "
-                f"({model.target.full_name!r} has no `state`)"
-            )
+            raise OneshotRequiresStateError(model.target.full_name)
 
         schema = self._state_schema()
         table = self._state_table()
@@ -293,7 +448,9 @@ class Rows(_PostgresStateBase):
         from bollhav.model.state import StateMode
 
         on_conflict = sql.SQL("")
-        if model.state.mode is StateMode.DISCOVER:
+        # TORCH clears the row first (in the lifecycle), so its prefill hits no
+        # conflict — share DISCOVER's preserve-applied upsert as a safety net.
+        if model.state.mode in (StateMode.DISCOVER, StateMode.TORCH):
             on_conflict = sql.SQL(
                 "ON CONFLICT ((since IS NULL)) WHERE since IS NULL DO UPDATE SET "
                 "status = CASE WHEN {schema}.{table}.status = 'applied' "
@@ -329,17 +486,49 @@ class Rows(_PostgresStateBase):
             model.state.mode.value,
         )
 
+    def torch_rows(self) -> None:
+        """Delete every state row for this model (keeping the state table and
+        the library registration), so the next prefill rediscovers intervals
+        from scratch at the current chunk. The `STATE_MODE=torch` escape hatch:
+        unlike BULLDOZER (reset existing rows to pending — granularity fixed) it
+        clears the rows entirely, so a chunk-granularity change or a stale
+        backlog starts clean. Lighter than `clear_state` (which also drops the
+        table + deregisters). Does NOT touch the model's data.
+
+        Destructive — applied history is lost, so the next run reprocesses
+        every interval (idempotent for MERGE / recreate; APPEND would
+        duplicate)."""
+        schema = self._state_schema()
+        table = self._state_table()
+        conn = self._require_conn()
+        # `ensure_tables` runs before this in the lifecycle, but stay safe if the
+        # table was never bootstrapped — nothing to torch.
+        present = conn.execute(
+            "SELECT to_regclass(%s)", [f"{schema}.{table}"]
+        ).fetchone()
+        if not (present and present[0] is not None):
+            return
+        with conn.transaction():
+            deleted = conn.execute(
+                sql.SQL("DELETE FROM {schema}.{table}").format(
+                    schema=sql.Identifier(schema), table=sql.Identifier(table)
+                )
+            ).rowcount
+        logger.warning(
+            "state: TORCH deleted %d row(s) for %s — re-prefilling from scratch",
+            deleted,
+            self.model.target.full_name,
+        )
+
     @staticmethod
     def _normalize_prefill_row(item) -> tuple:
         """Accept either bare TZInterval (→ pending) or 3-tuple."""
         if isinstance(item, tuple) and len(item) == 3:
             interval, status, reason = item
             if status not in ("pending", "blocked"):
-                raise ValueError(
-                    f"prefill status must be 'pending' or 'blocked', got {status!r}"
-                )
+                raise InvalidPrefillStatusError(status)
             if status == "blocked" and not reason:
-                raise ValueError("blocked rows require a non-empty blocked_reason")
+                raise BlockedRowRequiresReasonError()
             return (interval, status, reason if status == "blocked" else None)
         # Bare TZInterval — backward-compat: treat as pending.
         return (item, "pending", None)
@@ -369,31 +558,43 @@ class Rows(_PostgresStateBase):
         )
         return [TZInterval(since=since, until=until) for since, until in rows]
 
-    def get_actionable_intervals(self) -> tuple:
-        """Return every row whose status is NOT `'applied'` — i.e.
-        pending, blocked, running, or error — ordered oldest first.
+    def get_actionable_intervals(self, window: "TZInterval | None" = None) -> tuple:
+        """Return rows whose status is NOT `'applied'` — i.e. pending, blocked,
+        running, or error — ordered oldest first.
 
-        Used by `@load_models` to populate `model.intervals`. The
-        decorator re-evaluates each row at run time: blocked rows whose
-        upstream now satisfies become processable; pending rows whose
-        upstream regressed get marked blocked. So `blocked` is transient
-        — a snapshot of what's currently waiting, not a terminal state.
+        **Window-scoped.** When `window` is given, only rows that fall fully
+        inside `[window.since, window.until)` are returned — the run executes
+        exactly its window, nothing leaks in from the backlog. When `window` is
+        `None` (a oneshot / view row, or a deliberate reconcile), every
+        non-applied row is returned (the historical "drain everything").
 
-        A monolithic / view model has a single NULL-window row: this yields
-        `(None,)` when it's actionable (so the user's loop runs once with
-        `interval=None`) and `()` when it's already applied (loop skips)."""
+        Used by `@load_models` to populate `model.intervals`. The decorator
+        re-evaluates each row at run time: blocked rows whose upstream now
+        satisfies become processable; pending rows whose upstream regressed get
+        marked blocked. So `blocked` is transient — a snapshot of what's
+        currently waiting, not a terminal state.
+
+        A oneshot / view model has a single NULL-window row: with no
+        `window` this yields `(None,)` when actionable (the user's loop runs
+        once with `interval=None`) and `()` when already applied."""
         from bollhav.model.intervals import TZInterval
 
         schema = self._state_schema()
         table = self._state_table()
+        # Rows fully inside the half-open run window — the honest bound. The
+        # `%s` are bound params; the rest of the string is constant.
+        where = "status <> 'applied'"
+        params: list = []
+        if window is not None:
+            where += " AND since >= %s AND until <= %s"
+            params = [window.since, window.until]
         query = sql.SQL(
             "SELECT since, until FROM {schema}.{table} "
-            "WHERE status <> 'applied' "
-            "ORDER BY since, until"
+            "WHERE " + where + " ORDER BY since, until"
         ).format(schema=sql.Identifier(schema), table=sql.Identifier(table))
 
         conn = self._require_conn()
-        rows = conn.execute(query).fetchall()
+        rows = conn.execute(query, params).fetchall()
         logger.debug(
             "state: read %d actionable intervals for %s",
             len(rows),
@@ -460,7 +661,7 @@ class Rows(_PostgresStateBase):
     @staticmethod
     def _window_match(interval: "TZInterval | None"):
         """SQL predicate + params identifying one state row by its window.
-        `interval` is a TZInterval, or None for a monolithic / view row whose
+        `interval` is a TZInterval, or None for a oneshot / view row whose
         window is NULL — matched on `IS NULL` rather than `=` (which never
         matches NULL)."""
         if interval is None:
@@ -641,13 +842,7 @@ class Rows(_PostgresStateBase):
         (`z_bollhav`) is intentionally not offered — the suffix marks the
         ephemeral environment this is meant for. Do it by hand if you must."""
         if not self.model.target.schema_suffix:
-            raise ValueError(
-                f"clear_state refuses to run on {self.model.target.full_name!r}: "
-                f"it has no schema suffix, so its state lives in prod "
-                f"({LIBRARY_SCHEMA}). Clearing prod state isn't offered — set "
-                f"SCHEMA_SUFFIX for an ephemeral environment, or delete the rows "
-                f"by hand if you truly must."
-            )
+            raise ClearStateRefusedError(self.model.target.full_name, LIBRARY_SCHEMA)
         conn = self._require_conn()
         schema = self._library_schema()
         full_name = self.model.target.full_name
@@ -675,3 +870,189 @@ class Rows(_PostgresStateBase):
                         [full_name],
                     )
         logger.info("state: cleared all state for %s (schema %s)", full_name, schema)
+
+    def uncover(self, since, until) -> int:
+        """Range-subtraction invalidation for a flexible (coverage) model: remove
+        `[since, until)` from this model's applied coverage, splitting an applied
+        row that straddles a boundary. The flexible counterpart of flipping a
+        fixed grid row to `pending`. Returns the number of applied rows removed."""
+        return uncover_span(
+            self._require_conn(),
+            self._state_schema(),
+            self._state_table(),
+            since,
+            until,
+        )
+
+    def uncovered_gaps(self, since, until) -> list:
+        """The uncovered ranges of `[since, until)` for a flexible (coverage)
+        model — the complement of this model's `applied` coverage within that
+        horizon, as maximal gaps. The bootstrap slices each gap by the run's
+        chunk into the units to run, so work is *the holes in coverage*, not a
+        fixed grid. A fully-covered model returns `[]`.
+
+        This is the flexible counterpart of `contract_intervals` (which is the
+        whole grid): here only what isn't `applied` yet becomes work."""
+        from bollhav.model.intervals import TZInterval
+
+        schema = self._state_schema()
+        table = self._state_table()
+        # multirange([since, until)) − range_agg(applied) = the gaps. Mirrors
+        # `uncover_span`'s set math, reversed (horizon minus coverage). `%(s)s` /
+        # `%(u)s` are bound params; the rest is constant.
+        rows = (
+            self._require_conn()
+            .execute(
+                sql.SQL(
+                    "SELECT lower(g), upper(g) FROM unnest("
+                    "tstzmultirange(tstzrange(%(s)s, %(u)s, '[)')) - ("
+                    "SELECT COALESCE("
+                    "range_agg(tstzrange(since, until, '[)')), '{{}}'::tstzmultirange"
+                    ") FROM {schema}.{table} "
+                    "WHERE status = 'applied' AND since IS NOT NULL"
+                    ")) AS g ORDER BY lower(g)"
+                ).format(schema=sql.Identifier(schema), table=sql.Identifier(table)),
+                {"s": since, "u": until},
+            )
+            .fetchall()
+        )
+        # Return gaps in the chunk's own timezone: PG hands timestamps back in the
+        # session tz, and `split_window` walks cron ticks in whatever tz the
+        # boundary carries — so a daily/monthly slice off a session-tz boundary
+        # would land off midnight (a partial first/last unit). Re-frame to the
+        # chunk's tz, the same frame `resolve_window` builds the grid in.
+        tz = self.model.batching.time.tz if self.model.batching else None
+        gaps = [
+            TZInterval(
+                s.astimezone(tz) if tz else s,
+                u.astimezone(tz) if tz else u,
+            )
+            for s, u in rows
+        ]
+        logger.debug(
+            "state: %d coverage gap(s) in [%s, %s) for %s",
+            len(gaps),
+            since,
+            until,
+            self.model.target.full_name,
+        )
+        return gaps
+
+    def clear_window(self, window: "TZInterval") -> int:
+        """Flexible bulldozer invalidation: make `window` a clean gap so the next
+        prefill re-discovers the whole window as work. Two steps:
+
+          1. `uncover` its applied coverage (range-subtraction, straddle-safe —
+             a coalesced island wider than the window is split, not lost).
+          2. delete any leftover non-`applied` rows fully inside it (stale
+             pending/blocked/error from an earlier, possibly differently-chunked
+             run), so they don't linger at the old grain. A `running` row is
+             spared — a live worker owns it.
+
+        The flexible counterpart of `reset_window`. Returns the number of applied
+        rows uncovered."""
+        removed = self.uncover(window.since, window.until)
+        schema = self._state_schema()
+        table = self._state_table()
+        self._require_conn().execute(
+            sql.SQL(
+                "DELETE FROM {schema}.{table} WHERE status <> 'applied' "
+                "AND status <> 'running' AND since >= %s AND until <= %s"
+            ).format(schema=sql.Identifier(schema), table=sql.Identifier(table)),
+            [window.since, window.until],
+        )
+        logger.debug(
+            "state: cleared window [%s, %s) of %s (uncovered %d applied island(s))",
+            window.since,
+            window.until,
+            self.model.target.full_name,
+            removed,
+        )
+        return removed
+
+
+# Overlap predicate shared by uncover's read/delete: an applied, windowed row
+# whose range intersects the target span. `%(s)s` / `%(u)s` are bound params.
+_UNCOVER_OVERLAP = (
+    "status = 'applied' AND since IS NOT NULL "
+    "AND tstzrange(since, until, '[)') && tstzrange(%(s)s, %(u)s, '[)')"
+)
+
+
+def uncover_span(
+    conn: psycopg.Connection, schema: str, table: str, since, until
+) -> int:
+    """Subtract `[since, until)` from a state table's applied coverage (the
+    flexible invalidation primitive — the engine's `uncover(span)`).
+
+    Coverage is the union of the `applied` rows' ranges. Subtracting a span
+    re-materializes that union minus the span: rows fully inside the span
+    vanish, and a row straddling a boundary is **split** so only the overlap is
+    uncovered. PG multirange arithmetic does the set math (`range_agg(...) −
+    span`); `running` rows are never considered. Returns the number of applied
+    rows removed (0 if nothing overlapped).
+
+    Cases (`█` = applied/covered, `·` = uncovered, `^^^` = the span removed)::
+
+        1. span strictly inside one row  →  the row splits in two
+           before:   ████████████████████        [Jan ─────────── Apr)
+           span:           ^^^^^^                      [Feb ─ Mar)
+           after:    █████·······████████        [Jan,Feb)  ·  [Mar,Apr)
+
+        2. span flush to a boundary      →  the row shrinks (one remainder)
+           before:   ████████████████              [Jan ─────── Mar)
+           span:               ^^^^^^                       [Feb ─ Apr)
+           after:    ████████····                  [Jan ─ Feb)
+
+        3. span ⊇ the row                →  the row is deleted (no remainder)
+           before:        ████████                      [Feb ─ Mar)
+           span:        ^^^^^^^^^^^^                  [Jan ───── Apr)
+           after:        ········                   (fully uncovered)
+
+        4. span spans several rows       →  each trimmed/merged via the union
+           before:   ███████   ██████   ███       three coalesced islands
+           span:        ^^^^^^^^^^^^^^                a span across the gap
+           after:    ███····· · ·····██       outer parts kept, middle gone
+
+    A re-materialized remainder row keeps `status='applied'`; the uncovered
+    slice becomes a gap the next run's coverage query re-discovers."""
+    ident = {"schema": sql.Identifier(schema), "table": sql.Identifier(table)}
+    params = {"s": since, "u": until}
+    with conn.transaction():
+        meta = conn.execute(
+            sql.SQL(
+                "SELECT model_name, run_id, temporality "
+                "FROM {schema}.{table} WHERE " + _UNCOVER_OVERLAP + " LIMIT 1"
+            ).format(**ident),
+            params,
+        ).fetchone()
+        if meta is None:
+            return 0
+        model_name, run_id, temporality = meta
+        # remainder = coverage(overlapping rows) − span
+        remainder = conn.execute(
+            sql.SQL(
+                "SELECT lower(r), upper(r) FROM unnest(("
+                "SELECT COALESCE("
+                "range_agg(tstzrange(since, until, '[)')), '{{}}'::tstzmultirange"
+                ") FROM {schema}.{table} WHERE " + _UNCOVER_OVERLAP + ") "
+                "- tstzmultirange(tstzrange(%(s)s, %(u)s, '[)'))) AS r"
+            ).format(**ident),
+            params,
+        ).fetchall()
+        removed = conn.execute(
+            sql.SQL("DELETE FROM {schema}.{table} WHERE " + _UNCOVER_OVERLAP).format(
+                **ident
+            ),
+            params,
+        ).rowcount
+        for s, u in remainder:
+            conn.execute(
+                sql.SQL(
+                    "INSERT INTO {schema}.{table} (model_name, run_id, since, until, "
+                    "status, applied_at, temporality) "
+                    "VALUES (%s, %s, %s, %s, 'applied', now(), %s)"
+                ).format(**ident),
+                [model_name, run_id, s, u, temporality],
+            )
+    return removed

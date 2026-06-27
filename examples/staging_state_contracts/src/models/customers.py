@@ -5,7 +5,7 @@ A view's "asset" is its definition: `@model_lifecycle` runs the
 `upstream`) — there's no data to write, so the execute body does nothing.
 Because it's state-tracked, it
 gets a single existence row that flips to `applied` once the view is in
-place. That row is what a downstream's `WINDOW` contract resolves to for a
+place. That row is what a downstream's `ENCAPSULATE` contract resolves to for a
 view upstream (its existence row applied).
 
 `temporality=Temporality.TIMELESS, view=True` is what marks it a view; `write_mode` is irrelevant for

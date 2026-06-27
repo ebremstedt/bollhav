@@ -237,7 +237,8 @@ class ExploreTab(Vertical):
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.STDOUT,
             )
-            assert proc.stdout is not None
+            if proc.stdout is None:
+                return
             async for raw in proc.stdout:
                 # raw subprocess output → plain Text (no markup parsing, can't crash)
                 log.write(

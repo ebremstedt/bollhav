@@ -1,6 +1,6 @@
 # Changelog
 
-Per-version notes live in [`changelog/`](changelog/) — one Markdown file per release.
+Per-version notes live in [`changelog/`](changelog/) — one Markdown file per release
 
 | Version | Date | Summary |
 |---|---|---|

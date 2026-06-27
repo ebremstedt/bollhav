@@ -18,6 +18,8 @@ roskarl_cron_mock.INTERVAL_EXPRESSION_SHORTCUTS = {
     "@week": "0 0 * * 0",
     "@monthly": "0 0 1 * *",
     "@month": "0 0 1 * *",
+    "@yearly": "0 0 1 1 *",
+    "@annually": "0 0 1 1 *",
 }
 sys.modules["roskarl"] = roskarl_mock
 sys.modules["roskarl.cron"] = roskarl_cron_mock

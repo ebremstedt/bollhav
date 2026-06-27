@@ -116,7 +116,7 @@ def ensure_table(conn: pyodbc.Connection, model: Model) -> None:
 
 def ensure_primary_key(conn: pyodbc.Connection, model: Model) -> None:
     """Add a CLUSTERED PRIMARY KEY named `<table>_pk` if any columns are flagged
-    `primary_key=True` and the table doesn't already have a PK.
+    `primary_key=True` and the table doesn't already have a PK
 
     Idempotent and safe on existing tables — re-running is a no-op once the PK
     is in place. Pairs with `_col_ddl` (which no longer emits inline PRIMARY
@@ -157,7 +157,20 @@ def ensure_indexes(conn: pyodbc.Connection, model: Model) -> None:
     logger.debug("Ensuring %d index(es) on: %s.%s", len(mssql_indexes), schema, table)
 
     cursor = conn.cursor()
+    existing: set[str] = set()
+    if logger.isEnabledFor(logging.DEBUG):
+        existing = {
+            name
+            for (name,) in cursor.execute(
+                "SELECT name FROM sys.indexes "
+                "WHERE object_id = OBJECT_ID(?) AND name IS NOT NULL",
+                f"{schema}.{table}",
+            ).fetchall()
+        }
     for idx in mssql_indexes:
+        if logger.isEnabledFor(logging.DEBUG):
+            state = "present" if idx.name in existing else "creating"
+            logger.debug("  index %s: %s on %s.%s", idx.name, state, schema, table)
         cursor.execute(
             f"IF NOT EXISTS ("
             f"    SELECT 1 FROM sys.indexes"
@@ -166,7 +179,7 @@ def ensure_indexes(conn: pyodbc.Connection, model: Model) -> None:
             idx.name,
             f"{schema}.{table}",
         )
-    cursor.commit()
+        cursor.commit()
 
 
 def ensure_schema_and_table(conn: pyodbc.Connection, model: Model) -> None:

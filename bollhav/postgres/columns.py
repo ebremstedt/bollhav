@@ -3,6 +3,15 @@ from bollhav.model.database import DatabaseColumn
 from enum import Enum
 
 
+# ── errors ──
+class PrimaryKeyNotNullableError(ValueError):
+    """A column was declared both `primary_key=True` and `nullable=True`. A
+    primary key can never be NULL, so the two flags conflict."""
+
+    def __init__(self, name: str) -> None:
+        super().__init__(f"Column {name!r}: primary_key=True cannot be nullable")
+
+
 class PostgresType(Enum):
     BIGINT = "BIGINT"
     BIGSERIAL = "BIGSERIAL"
@@ -95,9 +104,7 @@ class PostgresColumn(DatabaseColumn):
 
     def __post_init__(self) -> None:
         if self.primary_key and self.nullable:
-            raise ValueError(
-                f"Column {self.name!r}: primary_key=True cannot be nullable"
-            )
+            raise PrimaryKeyNotNullableError(self.name)
 
     def __repr__(self) -> str:
         base_parts = [

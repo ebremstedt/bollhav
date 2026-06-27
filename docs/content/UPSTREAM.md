@@ -4,7 +4,7 @@
 
 A model's inputs — **all of them** — live in one list: `upstream: list[Source]`. A `Source` is one input, described by two independent dials:
 
-- **`type`** — *what* it is, and its read config: a [`SourceModel`](#sourcemodel) (relational — a managed model, an external table, or a view), a [`SourceFile`](#sourcefile), or a `SourceApi`.
+- **`type`** — *what* it is, and its read config: a [`SourceModel`](#sourcemodel) (relational — a managed model, an external table, or a view), a [`SourceFile`](#sourcefile), a `SourceApi`, or a [`SourceHardcoded`](#sourcehardcoded) (data written inline, in code).
 - **`contract`** — *whether it gates*. A `Source` carrying a contract is a **managed upstream** the state machine waits for (it must be `applied` before this model runs). No contract ⇒ **ungated** — an external input assumed always present, never blocking.
 
 That's the whole model: gated-vs-ungated is just "does this `Source` have a `contract`," not which list it's in.
@@ -14,7 +14,7 @@ from bollhav.model import UpstreamContract
 
 upstream=[
     # gated managed upstreams (need state — see below):
-    Source("warehouse.orders",    type=SourceModel(), contract=UpstreamContract.WINDOW),
+    Source("warehouse.orders",    type=SourceModel(), contract=UpstreamContract.ENCAPSULATE),
     Source("warehouse.customers", type=SourceModel(), contract=UpstreamContract.WHOLE),
     Source("warehouse.app_config",type=SourceModel(), contract=UpstreamContract.EXISTS),
     # ungated external sources:
@@ -27,16 +27,89 @@ A **contract is only valid on a `SourceModel`** — files and APIs aren't state-
 
 ## Contracts (gating)
 
-A contract is the gating **level** — *how much* of the upstream must be ready before this model runs — chosen from the `UpstreamContract` ladder (weak → strong). The upstream's *shape* (its [temporality](TEMPORALITY.md)) is read from the library at check time, so you only state the level:
+A contract is the gating **level** — *how much* of the upstream must be ready before this model runs — chosen from the `UpstreamContract` ladder. The upstream's *shape* (its [temporality](TEMPORALITY.md)) is read from the library at check time, so you only state the level. Five levels, on three **scopes**:
 
-| `UpstreamContract` | Satisfied when |
-|---|---|
-| `EXISTS` | the upstream is **registered**. No data wait — run-ordering + a lineage edge only. |
-| `WINDOW` | the upstream's window covering this unit's `(since, until)` is `applied`. A daily upstream covers an hourly downstream. *(the usual choice)* |
-| `THROUGH` | every upstream window **up to and including** this unit is `applied` — a gap-free prefix, for cumulative models that sum history `1..N`. |
-| `WHOLE` | the **entire** upstream is loaded — every window `applied` (a temporal upstream), or its one row `applied` (a timeless one). |
+| `UpstreamContract` | Scope | Satisfied when |
+|---|---|---|
+| `EXISTS` | registration | the upstream is **registered**. No data wait — run-ordering + a lineage edge only. |
+| `EXACT` | my window | one `applied` upstream row **equals** my `(since, until)`. Only an exact-grain match — a coarser row that *contains* my window, or a union of finer rows, does **not** count. |
+| `ENCAPSULATE` | my window | the `applied` rows **cover** my `(since, until)` — a single coarser row that contains it, the exact-grain row, or a gap-free **union** of finer rows. A daily upstream covers an hourly downstream; 24 hourly rows cover a daily one. *(the usual choice)* |
+| `THROUGH` | prefix | every upstream window **up to and including** my window is `applied` — a gap-free prefix, for cumulative models that sum history `1..N`. A hole anywhere *before* my window blocks it. |
+| `WHOLE` | whole upstream | the **entire** upstream is loaded — every window `applied` (a temporal upstream), or its one row `applied` (a timeless one). |
 
-**Timeless upstreams.** A [`TIMELESS`](TEMPORALITY.md) upstream (a view or whole-table load) has no window to match, so `WINDOW`/`THROUGH` against it is a hard error — gate it `WHOLE` (loaded) or `EXISTS` (registered). `WINDOW`/`THROUGH` are for temporal upstreams.
+The three window-scoped levels (`EXACT` ⊂ `ENCAPSULATE`, and `EXISTS` below them) consult **only** the upstream rows touching my window — nothing outside `[since, until)` can block me. `THROUGH` and `WHOLE` widen the scope past my window, so a hole elsewhere *does* block. Strength ladder: `WHOLE` ⟹ `THROUGH` ⟹ `ENCAPSULATE` ⟹ `EXISTS`, with `EXACT` ⟹ `ENCAPSULATE` (an exact-grain row also covers the window).
+
+### When to use which
+
+- **`EXISTS`** — you only need *ordering + lineage*, not data: a config/seed table that just has to be registered, or a windowless consumer (view / oneshot) that wants a managed edge to an interval upstream without waiting for it.
+- **`EXACT`** — the upstream is **aggregated at exactly my grain** and that alignment is load-bearing: a daily rollup consuming a daily upstream rollup, where you want *that day's own* aggregate row and a coarser backfill that merged several days must **not** count as ready.
+- **`ENCAPSULATE`** — the default for a **window-local transform**: my window's output is a pure function of my window's input (filter / segment / reshape this slice). Pipelines per-window and tolerates the upstream being at any grain — coarser *or* finer — as long as my window is covered. Use this whenever `WINDOW` was your instinct.
+- **`THROUGH`** — my window's output **depends on history `1..N`**, not just window N: running totals, cumulative balances, snapshots-as-of. Waits for the gap-free prefix; a hole in old history correctly blocks me.
+- **`WHOLE`** — I read **all** of the upstream every run: a full aggregate, an export, a snapshot, or any windowless downstream of an interval upstream.
+
+> `ENCAPSULATE` vs `EXACT`: both look only at my window. `ENCAPSULATE` asks *"is my window's data present, by any combination of rows?"*; `EXACT` asks the stricter *"did the upstream produce a row at exactly my grain?"*. `ENCAPSULATE` vs `THROUGH`: both are gap-free, but `ENCAPSULATE` covers *only* my window while `THROUGH` covers the *whole prefix up to* it — so one old hole blocks `THROUGH` and not `ENCAPSULATE`.
+
+> **Renamed:** the former `WINDOW` level (a single-row "a row contains my window" check) has been **removed** and folded into `ENCAPSULATE`, which subsumes it (a single containing row is a one-element cover) and additionally accepts a finer union. Replace any `UpstreamContract.WINDOW` with `UpstreamContract.ENCAPSULATE`.
+
+**Timeless upstreams.** A [`TIMELESS`](TEMPORALITY.md) upstream (a view or whole-table load) has no window to match, so `EXACT` / `ENCAPSULATE` / `THROUGH` against it is a hard error — gate it `WHOLE` (loaded) or `EXISTS` (registered). The window-scoped levels are for temporal upstreams.
+
+**Fixed vs flexible upstreams.** A *temporal* upstream is one of two shapes, set by [`fixed_intervals`](BATCH.md) on its `TimeChunking` (default `True`):
+
+- **Fixed** (`fixed_intervals=True`) — state is a **grid**: one durable `applied` row per chunk, at a stable grain. Its exact-grain rows persist, so every contract level works against it.
+- **Flexible** (`fixed_intervals=False`) — state is a **coverage set**: `applied` rows are coalesced into maximal covered ranges, so individual exact-grain rows don't survive. The chunk is just how work is sliced, not part of the upstream's identity.
+
+Because a flexible upstream coalesces away its exact-grain rows, **`EXACT` against a flexible upstream is a hard error** — it could never match, so the downstream would block forever. Use `ENCAPSULATE` (coverage) instead. The coverage-based levels are unaffected:
+
+| Upstream is… | `EXISTS` | `EXACT` | `ENCAPSULATE` | `THROUGH` | `WHOLE` |
+|---|:---:|:---:|:---:|:---:|:---:|
+| **Fixed** (default) | ✓ | ✓ | ✓ | ✓ | ✓ |
+| **Flexible** (`fixed_intervals=False`) | ✓ | ✗ error | ✓ | ✓ | ✓ |
+
+`fixed_intervals` is **per-model and does not propagate**: a flexible upstream feeding a fixed downstream is fine — the downstream reads the upstream's *data* (by coverage), not its partitioning, and declaring flexible *means* that data is partition-invariant. So a flexible upstream is in fact the safest to build coverage contracts on; only `EXACT` (which demands a specific grain) is off the table.
+
+!!! note "Mostly live"
+    The `EXACT`-on-flexible rule above is **enforced today** (it raises at gate-check time), and the flexible *execution* engine — coverage gap-filling plus the `uncover`/re-cover invalidation in the table below — is **live too** (see `design/flexible-intervals.md`). Two refinements are still deferred: **coalescing** (today there's one `applied` row per covered unit, merged with `range_agg` at query time — correct coverage, just more rows than the "one row per island" ideal) and the **overlap-aware concurrency lock**, so run a flexible model **single-worker** for now.
+
+### Two axes: identity (`fixed_intervals`) and invalidation (`STATE_MODE`)
+
+`fixed_intervals` and [`STATE_MODE`](STATE.md) are **orthogonal** — one says what a model's state *is*, the other says how much of it a run *throws away* before re-evaluating:
+
+- **Identity — `fixed_intervals`** (per-model, declared in code): **fixed** = a grid keyed by `(since, until)`, where the chunk *is* the state's identity; **flexible** = a coverage set, where the chunk is just how work is sliced.
+- **Invalidation — `STATE_MODE`** (per-run, an env var): how much of the run's window the run resets first. Execution is **window-scoped** — a run does exactly its window, nothing leaks in from the backlog.
+    - **`bulldozer`** (default) — reset the window's rows to `pending` and run exactly them (boundaries kept); leave everything outside the window alone.
+    - **`discover`** — keep every `applied` row, run only the window's outstanding; with **no** window, reconcile *all* outstanding state.
+    - **`torch`** — drop *all* state, then run the window (no window → the whole **contract range**). The wipe is total, so the unrun remainder defers to a later `discover` run — a clean reload / chunk-granularity change.
+
+What each mode *does* depends on the identity axis:
+
+| `STATE_MODE` | **fixed** (grid) | **flexible** (coverage) |
+|---|---|---|
+| `discover` | keep `applied` rows; re-check the rest | leave coverage as-is, fill only the gaps |
+| `bulldozer` | re-`pending` the window's rows (same boundaries) | uncover the run window, then re-cover it |
+| `torch` | delete all rows, re-prefill at the (possibly new) chunk | uncover everything, re-cover from zero |
+
+For a **flexible** model the three modes collapse into one idea — *how much coverage to uncover before computing gaps*: `discover` = nothing, `bulldozer` = the run window, `torch` = all. That's also why **re-chunking** behaves differently per axis: a fixed model's grain is its identity, so [`INTERVAL_OVERRIDE`](BATCH.md) is **ignored** on it (re-chunking would fork the grid into mixed granularity — migrate with `STATE_MODE=torch` instead); a flexible model's chunk isn't identity, so `INTERVAL_OVERRIDE` **applies** to it and re-chunks freely.
+
+(The flexible column is **live**: prefill computes the coverage gaps and slices them by *this run's* chunk; `bulldozer` / `torch` `uncover` coverage by range-subtraction so a re-chunk re-covers cleanly instead of layering a second grain. Still deferred — coalescing covered units into one island row, and the overlap lock for concurrent workers; see the note above.)
+
+### Combinations that don't fit — and the damage
+
+Not every (upstream shape × contract) or (model attestation × write/query) pairing is safe. Some are **caught** for you (a loud error at definition or gate-check); the dangerous ones are **silent** — they corrupt data with no crash. Severity legend: ⛔ caught (safe — you can't ship it) · ⏳ blocks forever (visible, recoverable) · 🔴 silent divergence (disastrous — wrong data, no error).
+
+| Combination | Caught? | What actually happens |
+|---|---|---|
+| `EXACT` on a **flexible** upstream | ⛔ hard error (Guard A) | The flexible upstream coalesces its rows into ranges, so no exact-grain row exists to match — the downstream would sit `blocked` **forever**. Raised at gate-check. |
+| `EXACT` / `ENCAPSULATE` / `THROUGH` on a **timeless** upstream | ⛔ hard error | A timeless upstream has no window to match a window-scoped level against — never satisfiable. Gate it `WHOLE` or `EXISTS`. |
+| `EXACT` on a **fixed** upstream at a **different grain** | ⏳ blocks | EXACT demands a row at *exactly* your `(since,until)`; a daily upstream never produces your hourly grain → permanently `blocked`. Not wrong data, just stalled — use `ENCAPSULATE`. |
+| **Flexible** model + `APPEND` write mode | 🔴 **not caught** | Flexibility re-processes ranges; `APPEND` has no key to overwrite, so every re-cover **duplicates rows**. (Deliberately not enforced — duplicates are detectable and yours to dedupe.) |
+| **Flexible** model + order-dependent `UPSERT` (last-writer-wins) | 🔴 **not caught** | Re-partitioning changes the order rows land; a last-writer-wins MERGE makes the final table **depend on partition order** → silently divergent results. Safe only if ties break deterministically (`incoming._data_modified > existing`) or you use `RECREATE_PARTITION`. |
+| **Flexible** model + non-decomposable query (`GROUP BY`, `ROW_NUMBER … latest-in-window`, cumulative `THROUGH`) | 🔴 **not caught** | Flexibility assumes `[a,c) ≡ [a,b) ∪ [b,c)`. Aggregates and latest-per-key-within-window break that identity, so re-chunking yields **different numbers** — silently wrong. This is the attestation you sign with `fixed_intervals=False`. |
+| **Fixed** model, chunk grain changed (e.g. `INTERVAL_OVERRIDE` hourly→monthly) without `STATE_MODE=torch` | 🔴 **not caught** | Old fine-grained `applied` rows stay; the executor drains every non-applied row unscoped, so the old partitioning leaks into the new run ("ran 14,200 hourly windows under a monthly override"). Re-chunking a fixed model **is** a migration → `STATE_MODE=torch`. |
+
+The pattern: the **caught** rows are the ones the framework can prove wrong from the model definition + the library (a contract level against a known shape). The **silent** rows are exactly the half of the flexibility attestation that *can't* be proven statically — they're the dev's signed promise, which is why `fixed_intervals=False` is opt-in and defaults to `True`.
+
+!!! tip "Does your transform aggregate? Stay fixed."
+    If the model **aggregates** — `GROUP BY`, `SUM`/`COUNT`/`AVG`, `ROW_NUMBER() … latest-per-key within the window`, or any running total / cumulative (`THROUGH`-style) logic — its output is **not** invariant to how the window is partitioned: `[a, c)` ≠ `[a, b) ∪ [b, c)` once you aggregate. **Keep `fixed_intervals=True`** (the default) — one durable row per chunk at a stable grain. Never set `fixed_intervals=False` on an aggregate: that's the 🔴 silent-divergence row above (re-chunking would change the numbers with no error). Aggregated models stay fixed; downstreams may then use any contract level against them, including `EXACT` if they need that exact grain. Reserve `fixed_intervals=False` for **window-local, row-preserving** transforms — a pure `WHERE _data_modified ∈ window` filter / map / reshape with an idempotent write — where partitioning genuinely doesn't change the result.
 
 A `Source` with **no** contract is **ungated** — never waited on (there's no default level).
 
@@ -66,14 +139,14 @@ Source(
 )
 ```
 
-The age is measured against the upstream's `applied_at` — when bollhav *loaded* each row (a producer-side, shared timestamp), **not** the source's own event time. The threshold and scope are **per-consumer**: different downstreams can demand different freshness off the same upstream load. The rows checked are exactly the ones the contract level selects (`WHOLE` → all; `WINDOW` → the matching window; `THROUGH` → the prefix; timeless → the existence row).
+The age is measured against the upstream's `applied_at` — when bollhav *loaded* each row (a producer-side, shared timestamp), **not** the source's own event time. The threshold and scope are **per-consumer**: different downstreams can demand different freshness off the same upstream load. The rows checked are exactly the ones the contract level selects (`WHOLE` → all; `EXACT` → the exact-grain row; `ENCAPSULATE` → the rows covering my window; `THROUGH` → the prefix; timeless → the existence row).
 
 | `FreshnessScope` | Fresh when |
 |---|---|
 | `LATEST` | the **newest** applied row in the selection is within `within` (`max(applied_at)`). "Is it keeping up at the head?" — for append-only / growing tables. |
 | `ALL` | **every** applied row in the selection is — i.e. the **oldest** one (`min(applied_at)`). "Was the whole thing rebuilt recently?" — for full-refresh snapshots / reference tables. |
 
-The scope only differs on a **multi-row** selection (`WHOLE` / `THROUGH` over several windows). For a single-row selection (`WINDOW`, or a timeless upstream) `LATEST` and `ALL` are identical.
+The scope only differs on a **multi-row** selection (`WHOLE` / `THROUGH`, or an `ENCAPSULATE` window satisfied by a union of finer rows). For a single-row selection (`EXACT`, a single-container `ENCAPSULATE`, or a timeless upstream) `LATEST` and `ALL` are identical.
 
 - **`LATEST`** catches a *stalled* pipeline (nothing new landing) but ignores immutable history — right for append-only tables, where `ALL` would be permanently stale (it'd demand re-loading ancient partitions).
 - **`ALL`** catches a *frozen partition* (one window silently stopped refreshing) that `LATEST` misses — right when a stale slice means wrong answers.
@@ -102,7 +175,7 @@ A gated source is a managed model, so its schema moves with the suffix just like
 In a [suffixed](TARGET.md#schema-vs-table-suffix) (dev / PR) run, a gated upstream resolves to *your env's* copy (`warehouse_pr123.orders`) and gates against your env's state. But some upstreams aren't rebuilt per environment — a shared table that lives only in prod. Set `deactivate_for_dev=True` on the `Source` to read it from prod and trust it — **only in a suffixed run**. It's inert without a suffix, so you declare it once and never flip it between dev and prod.
 
 ```python
-Source("warehouse.orders", type=SourceModel(), contract=UpstreamContract.WINDOW, deactivate_for_dev=True)
+Source("warehouse.orders", type=SourceModel(), contract=UpstreamContract.ENCAPSULATE, deactivate_for_dev=True)
 ```
 
 The three cases and how to declare each:
@@ -160,6 +233,46 @@ A `SourceFile` is **not** SQL-addressable (`ref()` on it raises — there's no `
 | `dateformat` | `str` · `None` | `strftime` format for date columns when polars can't autodetect (e.g. `"%d/%m/%Y"`). |
 | `file_ending` | `str` · `None` | File extension hint (e.g. `"csv"`, `"tsv"`). Only needed when `path` doesn't carry one. |
 
+## SourceHardcoded
+
+The `type` of a **hardcoded** input — data written **inline, in code**, not read from a database, file, or API. For small constants kept in the repo: seed / reference / lookup tables, enum mappings, fixtures. The data lives in **exactly one** of two forms:
+
+```python
+from bollhav.model import Source, SourceHardcoded
+
+upstream=[
+    # Python rows — a list of dicts, one per row:
+    Source("ref.countries", type=SourceHardcoded(rows=[
+        {"id": 1, "code": "SE", "name": "Sweden"},
+        {"id": 2, "code": "NO", "name": "Norway"},
+    ])),
+    # …or a self-contained SQL literal (no FROM a real table):
+    Source("ref.flags", type=SourceHardcoded(
+        sql="SELECT * FROM (VALUES (1, true), (2, false)) AS t(id, active)"
+    )),
+]
+```
+
+Like files / APIs it is **never gated** (a `contract` is rejected — hardcoded data is always present, there's nothing to wait on) and **never SQL-addressable** (`ref()` raises — it has no stable table identifier). You read it with `to_dataframe()` and write it like any other DataFrame — there's no read query or external connection to plumb:
+
+```python
+# in your execute body — no read() function needed:
+df = my_source.to_dataframe(data_conn)   # rows: built directly; sql: run on the conn
+write(conn=data_conn, run=run, df_gen=df)
+```
+
+| Field / member | Type · Default | Purpose |
+|---|---|---|
+| `rows` | `Sequence[Mapping] · None` | Inline Python rows (list of dicts). Column names come from the keys. |
+| `sql` | `str · None` | A self-contained SQL literal (`VALUES` / `SELECT`-literal, no real `FROM`) that yields the rows, run on the data connection. |
+| `extra` | `dict · {}` | Free-form config bag. |
+| `content_hash` *(property)* | `str` | A stable, cross-process fingerprint of the inline content — the constant's **version**. Changes iff `rows`/`sql` change, so it can drive re-apply-on-edit (there's no `_data_modified` on a constant). |
+| `to_dataframe(conn=None)` *(method)* | `pl.DataFrame` | Materialize: `rows` builds the frame directly (no connection); `sql` runs on `conn` (a psycopg / pyodbc connection) and reads the result. |
+
+Exactly one of `rows` / `sql` must be set (both, or neither, is a definition-time error). In [lineage](LINEAGE.md) it appears as a real input with `kind="hardcoded"` — distinct from the `unknown-<uuid>` sentinel — so "which tables are code-maintained constants?" is an auditable query.
+
+> **Materialization is explicit today.** You call `to_dataframe()` in your execute body and `write()` the result. A fully-automatic, view-style path (bollhav writes the constant with *no* execute body, re-applying when `content_hash` changes) is a planned follow-up.
+
 ## Ungated sources
 
 An **ungated source** is a `Source` in `upstream` with **no `contract`** — a raw landing table, a third-party API, a dropped file, a hand-made table. Assumed always present, it can never block a unit of work; declaring it just records where data enters the system and (for relational types) enables `ref()` resolution. You never *have* to declare one — you can always hardcode an external table in your SQL. Declaring is the opt-in that buys you [lineage](LINEAGE.md) and `ref()` resolution.
@@ -169,7 +282,7 @@ An **ungated source** is a `Source` in `upstream` with **no `contract`** — a r
 | has a `contract` | yes | no |
 | refers to | a bollhav-managed model | an external, unmanaged input |
 | requires [state](STATE.md) | yes — gated by the state machine | no — never gated |
-| `type` allowed | `SourceModel` only | any (`SourceModel` / `SourceFile` / `SourceApi`) |
+| `type` allowed | `SourceModel` only | any (`SourceModel` / `SourceFile` / `SourceApi` / `SourceHardcoded`) |
 | `ref()` resolution | suffix-aware (moves with env) | literal (fixed location) |
 | purpose | wait-for + lineage | lineage / boundary marker |
 

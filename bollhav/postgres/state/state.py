@@ -7,11 +7,12 @@ from typing import TYPE_CHECKING
 import psycopg
 from psycopg import sql
 
+
 from ._base import _PostgresStateBase
 from ._ddl import LIBRARY_SCHEMA
 from .library import Library
 from .locks import Locks
-from .rows import Rows
+from .state_table import StateTable
 from .satisfaction import Satisfaction
 
 if TYPE_CHECKING:
@@ -20,7 +21,22 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class PostgresState(Library, Rows, Satisfaction, Locks, _PostgresStateBase):
+# ── errors ──
+class DropEnvironmentRefusedError(ValueError):
+    """`drop_environment` refuses to run when no model carries a schema suffix —
+    it would target prod schemas. Set `SCHEMA_SUFFIX` for an ephemeral
+    environment, or drop prod schemas by hand."""
+
+    def __init__(self, library_schema: str) -> None:
+        super().__init__(
+            "drop_environment refuses to run: no model carries a schema suffix, "
+            f"so it would target prod schemas ({library_schema} + unsuffixed "
+            "targets). Set SCHEMA_SUFFIX for an ephemeral environment, or drop "
+            "prod schemas by hand if you must."
+        )
+
+
+class PostgresState(Library, StateTable, Satisfaction, Locks, _PostgresStateBase):
     """Postgres-backed state store for a single model.
 
     Construct with the model and the caller-owned state connection
@@ -29,9 +45,9 @@ class PostgresState(Library, Rows, Satisfaction, Locks, _PostgresStateBase):
     connection unset; every DB method requires it.
 
     Implementation is split by concern across this package: `_base`
-    (connection / naming), `rows` (per-model state rows), `satisfaction`
-    (upstream gating), `locks` (advisory locks), and `library` (the
-    cross-pipeline model library)."""
+    (connection / naming), `state_table` (the per-model state table + interval
+    status lifecycle), `satisfaction` (upstream gating), `locks` (advisory
+    locks), and `library` (the cross-pipeline model library)."""
 
 
 def drop_environment(conn: psycopg.Connection, models: Sequence["Model"]) -> None:
@@ -54,12 +70,7 @@ def drop_environment(conn: psycopg.Connection, models: Sequence["Model"]) -> Non
 
     suffixed = [m for m in models if m.target.schema_suffix]
     if not suffixed:
-        raise ValueError(
-            "drop_environment refuses to run: no model carries a schema suffix, "
-            f"so it would target prod schemas ({LIBRARY_SCHEMA} + unsuffixed "
-            "targets). Set SCHEMA_SUFFIX for an ephemeral environment, or drop "
-            "prod schemas by hand if you must."
-        )
+        raise DropEnvironmentRefusedError(LIBRARY_SCHEMA)
     target_schemas: set[str] = set()
     state_schemas: set[str] = set()
     for m in suffixed:

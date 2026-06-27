@@ -17,6 +17,125 @@ from bollhav.model.curfew import Curfew
 logger = logging.getLogger(__name__)
 
 
+# ── errors ──
+
+
+class TimelessModelWithBatchingError(ValueError):
+    """A `temporality=TIMELESS` model declared `batching` — a timeless model
+    is one whole unit, not windowed, so it can't be batched."""
+
+    def __init__(self, name: str) -> None:
+        super().__init__(
+            f"model {name!r} is temporality=TIMELESS but has batching — a "
+            f"timeless model is one whole unit, not windowed. "
+            f"Drop `batching` (or pick temporality=TEMPORAL)."
+        )
+
+
+class TimelessModelWithContractWindowError(ValueError):
+    """A `temporality=TIMELESS` model declared a `contract` begin/end — a
+    timeless model has no time axis to bound."""
+
+    def __init__(self, name: str) -> None:
+        super().__init__(
+            f"model {name!r} is temporality=TIMELESS but its contract has "
+            f"begin/end — a timeless model has no time axis to bound. "
+            f"Drop the contract window (or pick temporality=TEMPORAL)."
+        )
+
+
+class ViewWithBatchingError(ValueError):
+    """A `view=True` model declared `batching` — a view isn't materialized
+    per-window (it's one CREATE VIEW), so it can't be batched."""
+
+    def __init__(self, name: str) -> None:
+        super().__init__(
+            f"model {name!r} is a view but has batching — a view isn't "
+            f"materialized per-window (it's one CREATE VIEW). Drop "
+            f"`batching`. A temporal view declares the range it covers "
+            f"via its Contract begin/end instead."
+        )
+
+
+class ViewWithStagingError(ValueError):
+    """A `view=True` model declared `staging` — a view has nothing to
+    stage."""
+
+    def __init__(self, name: str) -> None:
+        super().__init__(
+            f"model {name!r} is a view but has staging — a view has "
+            f"nothing to stage. Drop `staging`."
+        )
+
+
+class ViewWithRecreateOrTruncateError(ValueError):
+    """A `view=True` model set `recreate_table` / `truncate_table` — those are
+    materialized-table operations that don't apply to views."""
+
+    def __init__(self, name: str) -> None:
+        super().__init__(
+            f"model {name!r} is a view — recreate_table / "
+            f"truncate_table don't apply to views."
+        )
+
+
+class GatedUpstreamWithoutStateError(ValueError):
+    """A model declared a gated upstream (a `Source` with a contract) but has
+    no `state` — contracts are only checked for state-tracked models, so a
+    gated upstream without state would silently never enforce."""
+
+    def __init__(self, name: str) -> None:
+        super().__init__(
+            f"model {name!r} declares a gated upstream (a Source "
+            f"with a contract) but has no state — contracts are only checked "
+            f"for state-tracked models. Add state=State(...), or drop the "
+            f"contract."
+        )
+
+
+class FrozenModelError(AttributeError):
+    """A frozen `Model` (an immutable definition) was mutated after
+    construction. Per-run state belongs on a `ModelRun`, and pipe/tag
+    overrides build a new `Model` via `runtime.apply_runtime_overrides`.
+    `attr` names the attribute that was being set.
+
+    Subclasses `AttributeError` so existing `except AttributeError` handlers
+    keep catching it unchanged."""
+
+    def __init__(self, attr: str) -> None:
+        super().__init__(
+            f"Model is frozen (an immutable definition); cannot set {attr!r}. "
+            f"Per-run state belongs on a ModelRun, and pipe/tag overrides "
+            f"build a new Model via runtime.apply_runtime_overrides."
+        )
+
+
+class UndeclaredInputError(ValueError):
+    """`ref(name)` was called for a name that isn't a declared input of the
+    model — it must be added to `upstream=[...]` before it can be referenced.
+    `declared` lists the inputs that are declared."""
+
+    def __init__(self, name: str, full_name: str, declared) -> None:
+        super().__init__(
+            f"{name!r} is not a declared input of "
+            f"{full_name!r} — add it to upstream=[...] before "
+            f"referencing it with ref() (declared: {declared or 'none'})"
+        )
+
+
+class NotSqlAddressableError(ValueError):
+    """`ref(name)` was called for an input that isn't SQL-addressable (a file
+    / api / hardcoded source), so it can't go in a `FROM`. `kind` is the
+    input's kind; read it in the read function instead."""
+
+    def __init__(self, name: str, kind: str) -> None:
+        super().__init__(
+            f"input {name!r} is a {kind} — not SQL-addressable, so it "
+            f"can't go in a FROM. Read it in your read function instead; "
+            f"ref() is only for SourceModel inputs."
+        )
+
+
 class Model:
     def __init__(
         self,
@@ -71,11 +190,7 @@ class Model:
 
     def __setattr__(self, name: str, value: object) -> None:
         if getattr(self, "_frozen", False):
-            raise AttributeError(
-                f"Model is frozen (an immutable definition); cannot set {name!r}. "
-                f"Per-run state belongs on a ModelRun, and pipe/tag overrides "
-                f"build a new Model via runtime.apply_runtime_overrides."
-            )
+            raise FrozenModelError(name)
         object.__setattr__(self, name, value)
 
     # ── construction-time validation ──────────────────────────────────
@@ -96,35 +211,16 @@ class Model:
         name = self.target.name
         if self.temporality is Temporality.TIMELESS:
             if self.batching is not None:
-                raise ValueError(
-                    f"model {name!r} is temporality=TIMELESS but has batching — a "
-                    f"timeless model is one whole unit, not windowed. "
-                    f"Drop `batching` (or pick temporality=TEMPORAL)."
-                )
+                raise TimelessModelWithBatchingError(name)
             if self.contract.begin is not None or self.contract.end is not None:
-                raise ValueError(
-                    f"model {name!r} is temporality=TIMELESS but its contract has "
-                    f"begin/end — a timeless model has no time axis to bound. "
-                    f"Drop the contract window (or pick temporality=TEMPORAL)."
-                )
+                raise TimelessModelWithContractWindowError(name)
         if self.view:
             if self.batching is not None:
-                raise ValueError(
-                    f"model {name!r} is a view but has batching — a view isn't "
-                    f"materialized per-window (it's one CREATE VIEW). Drop "
-                    f"`batching`. A temporal view declares the range it covers "
-                    f"via its Contract begin/end instead."
-                )
+                raise ViewWithBatchingError(name)
             if self.target.staging is not None:
-                raise ValueError(
-                    f"model {name!r} is a view but has staging — a view has "
-                    f"nothing to stage. Drop `staging`."
-                )
+                raise ViewWithStagingError(name)
             if self.target.recreate_table or self.target.truncate_table:
-                raise ValueError(
-                    f"model {name!r} is a view — recreate_table / "
-                    f"truncate_table don't apply to views."
-                )
+                raise ViewWithRecreateOrTruncateError(name)
 
     def _validate_upstream_requires_state(self) -> None:
         """Gating contracts are only enforced for state-tracked models (the
@@ -132,12 +228,7 @@ class Model:
         silently never enforce — make that a definition-time error. Ungated
         sources need no state."""
         if self.gated_upstreams and self.state is None:
-            raise ValueError(
-                f"model {self.target.name!r} declares a gated upstream (a Source "
-                f"with a contract) but has no state — contracts are only checked "
-                f"for state-tracked models. Add state=State(...), or drop the "
-                f"contract."
-            )
+            raise GatedUpstreamWithoutStateError(self.target.name)
 
     def pretty(self) -> None:
         cols = self.target.columns
@@ -352,17 +443,9 @@ class Model:
             declared = sorted(
                 source.name for source in self.upstream if source.type is not None
             )
-            raise ValueError(
-                f"{name!r} is not a declared input of "
-                f"{self.target.full_name!r} — add it to upstream=[...] before "
-                f"referencing it with ref() (declared: {declared or 'none'})"
-            )
+            raise UndeclaredInputError(name, self.target.full_name, declared)
         if not src.sql_addressable:
-            raise ValueError(
-                f"input {name!r} is a {src.kind} — not SQL-addressable, so it "
-                f"can't go in a FROM. Read it in your read function instead; "
-                f"ref() is only for SourceModel inputs."
-            )
+            raise NotSqlAddressableError(name, src.kind)
         # Gated upstreams move with the env suffix — unless `deactivate_for_dev` pins
         # them to their canonical (prod) location.
         return self._resolve_relation(

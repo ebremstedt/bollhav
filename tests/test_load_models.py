@@ -60,7 +60,7 @@ def _patches(
 
     ints = {"LOOKBACK_OVERRIDE": lookback_override}
 
-    iso = {"BACKFILL_SINCE": backfill_since, "BACKFILL_UNTIL": backfill_until}
+    iso = {"RUN_SINCE": backfill_since, "RUN_UNTIL": backfill_until}
 
     return [
         patch(
@@ -156,7 +156,9 @@ class TestEnvReading:
     def test_backfill_window_passes_through(self) -> None:
         since = datetime(2024, 1, 1, tzinfo=timezone.utc)
         until = datetime(2024, 1, 2, tzinfo=timezone.utc)
-        apm, _ = _run_decorator(backfill_since=since, backfill_until=until)
+        apm, _ = _run_decorator(
+            backfill_enabled=True, backfill_since=since, backfill_until=until
+        )
         assert apm["backfill_since"] == since
         assert apm["backfill_until"] == until
 
@@ -252,3 +254,35 @@ class TestDecoratorForms:
             main()
 
         assert captured["folder"] == "custom/path"
+
+
+def test_run_since_prefers_new_var_over_legacy_backfill():
+    """RUN_SINCE/UNTIL win when set; the deprecated BACKFILL_* are ignored."""
+    from bollhav.model.load_models import _window_dt
+
+    new = datetime(2025, 5, 5, tzinfo=timezone.utc)
+    legacy = datetime(2024, 1, 1, tzinfo=timezone.utc)
+    parsed = {"RUN_SINCE": new, "BACKFILL_SINCE": legacy}
+    with (
+        patch.dict("os.environ", {"RUN_SINCE": "x", "BACKFILL_SINCE": "y"}),
+        patch(
+            "bollhav.model.load_models.env_var_iso8601_datetime",
+            lambda name: parsed.get(name),
+        ),
+    ):
+        assert _window_dt("RUN_SINCE", "BACKFILL_SINCE", True, None) == new
+
+
+def test_deprecated_backfill_since_alias_when_run_since_unset():
+    """BACKFILL_SINCE still resolves (deprecated alias) when RUN_SINCE is unset."""
+    from bollhav.model.load_models import _window_dt
+
+    legacy = datetime(2024, 1, 1, tzinfo=timezone.utc)
+    with (
+        patch.dict("os.environ", {"BACKFILL_SINCE": "y"}),
+        patch(
+            "bollhav.model.load_models.env_var_iso8601_datetime",
+            lambda name: legacy if name == "BACKFILL_SINCE" else None,
+        ),
+    ):
+        assert _window_dt("RUN_SINCE", "BACKFILL_SINCE", True, None) == legacy

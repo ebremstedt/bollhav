@@ -2,6 +2,29 @@ from dataclasses import dataclass, field
 from bollhav.model.database import DatabaseIndex
 
 
+# ── errors ──────────────────────────────────────────────────────────
+
+
+class EmptyIndexColumnsError(ValueError):
+    """An `Index` was declared with no key columns. An index needs at least
+    one column to order/seek on, so an empty `columns` list is invalid."""
+
+    def __init__(self, name: str) -> None:
+        super().__init__(f"Index {name!r}: columns must be non-empty")
+
+
+class OverlappingIndexColumnsError(ValueError):
+    """An `Index`'s key `columns` and `included` columns overlap. Included
+    columns are stored at the leaf only and must be disjoint from the key,
+    so the same column can't appear in both."""
+
+    def __init__(self, name: str, overlap: list[str]) -> None:
+        super().__init__(
+            f"Index {name!r}: columns and included must be disjoint, "
+            f"got overlap: {overlap}"
+        )
+
+
 @dataclass
 class MssqlIndex(DatabaseIndex):
     """
@@ -23,10 +46,7 @@ class MssqlIndex(DatabaseIndex):
 
     def __post_init__(self) -> None:
         if not self.columns:
-            raise ValueError(f"Index {self.name!r}: columns must be non-empty")
+            raise EmptyIndexColumnsError(self.name)
         overlap = set(self.columns) & set(self.included)
         if overlap:
-            raise ValueError(
-                f"Index {self.name!r}: columns and included must be disjoint, "
-                f"got overlap: {sorted(overlap)}"
-            )
+            raise OverlappingIndexColumnsError(self.name, sorted(overlap))

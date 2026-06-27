@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+from typing import NamedTuple, TYPE_CHECKING
 
 import psycopg
 from psycopg import sql
+
 
 from ._base import _PostgresStateBase
 from ._base import LibraryEntry
@@ -16,21 +17,112 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+# ── errors ──
+class UnregisteredUpstreamError(ValueError):
+    """A gated upstream contract names an upstream that isn't registered in the
+    library — it has never run. The gate demands the upstream exists, so this is
+    a real error (a typo, or the upstream was never deployed/run)."""
+
+    def __init__(self, name: str, level: str, full_name: str) -> None:
+        super().__init__(
+            f"upstream contract {name!r} ({level}) on "
+            f"{full_name!r} is not registered in "
+            f"the library — it has never run. A gated upstream demands "
+            f"the upstream exists; fix the name or run the upstream "
+            f"first. (An ungated source would not block.)"
+        )
+
+
+class TimelessUpstreamContractError(ValueError):
+    """An EXACT / ENCAPSULATE / THROUGH contract gates on a per-window match,
+    but its upstream is TIMELESS and has no window to match. Use WHOLE (loaded)
+    or EXISTS (registered) instead."""
+
+    def __init__(self, name: str, level: str, full_name: str) -> None:
+        super().__init__(
+            f"upstream contract {name!r} ({level}) on "
+            f"{full_name!r} targets a TIMELESS "
+            f"upstream, which has no window to match. Use WHOLE "
+            f"(loaded) or EXISTS (registered) instead."
+        )
+
+
+class ExactContractOnFlexibleUpstreamError(ValueError):
+    """An EXACT contract gates on an applied row whose `(since, until)` equals
+    the window exactly, but the upstream is flexible (`fixed_intervals=False`)
+    — it coalesces its applied rows into maximal covered ranges, so no
+    exact-grain row survives to match. The downstream would block forever. Use
+    ENCAPSULATE (coverage) against a flexible upstream instead."""
+
+    def __init__(self, name: str, full_name: str) -> None:
+        super().__init__(
+            f"upstream contract {name!r} (exact) on {full_name!r} targets a "
+            f"flexible upstream (fixed_intervals=False), which coalesces away "
+            f"its exact-grain rows — EXACT can never match and the model would "
+            f"block forever. Use ENCAPSULATE instead."
+        )
+
+
+class IntervalClassification(NamedTuple):
+    """How one actionable interval would resolve under `DRY_STATE`.
+
+    `status` is `"run"` (every gate already applied), `"after"` (gated only on
+    upstreams that would themselves run earlier this pass), or `"blocked"`
+    (gated on an upstream that would not run). `upstreams` names the gates
+    behind an `"after"` / `"blocked"` verdict — empty for `"run"`."""
+
+    status: str
+    upstreams: list[str]
+
+
+def _windows_cover(windows, interval) -> bool:
+    """Do the would-run `windows` tile `interval` gap-free (a finer **union**)?
+    The Python mirror of the ENCAPSULATE coverage SQL, for the `DRY_STATE`
+    preview: sort the segments overlapping `interval`, sweep left-to-right, and
+    fail on the first hole or if coverage never reaches `interval.until`."""
+    segs = sorted(
+        (w.since, w.until)
+        for w in windows
+        if w is not None and w.until > interval.since and w.since < interval.until
+    )
+    if not segs:
+        return False
+    cursor = interval.since
+    for since, until in segs:
+        if since > cursor:  # a hole before this segment
+            return False
+        if until > cursor:
+            cursor = until
+        if cursor >= interval.until:
+            return True
+    return cursor >= interval.until
+
+
 def _overlay_covers(windows, level: str, interval) -> bool:
     """The `DRY_STATE` cascade rule: True when an upstream's would-run
     `windows` cover this downstream `interval` for the given contract `level`.
     A timeless upstream (or a whole-table `None` window) covers any downstream
-    window; a temporal upstream needs a would-run window that contains the
-    downstream's."""
+    window. EXACT needs a would-run window that *equals* mine; the window-scoped
+    cover levels need a would-run window that *contains* mine (and ENCAPSULATE
+    also accepts a gap-free union of finer would-run windows)."""
     if not windows:
         return False
     if level in ("timeless", "exists", "whole") or interval is None:
         return True
-    for w in windows:
-        if w is None:
-            return True
-        if w.since <= interval.since and w.until >= interval.until:
-            return True
+    if level == "exact":
+        return any(
+            w is not None and w.since == interval.since and w.until == interval.until
+            for w in windows
+        )
+    # A single would-run window that contains mine satisfies any cover level;
+    # ENCAPSULATE additionally accepts a gap-free union of finer would-run rows.
+    if any(
+        w is None or (w.since <= interval.since and w.until >= interval.until)
+        for w in windows
+    ):
+        return True
+    if level in ("encapsulate", "temporal"):
+        return _windows_cover(windows, interval)
     return False
 
 
@@ -44,10 +136,10 @@ class Satisfaction(_PostgresStateBase):
         `UpstreamCheck` verdict carrying one block reason per
         unsatisfied upstream. For each upstream `UpstreamContract`, look it up
         in the library and check satisfaction by the contract's level
-        (interval → window cover; view / monolithic → existence row
+        (interval → window cover; view / oneshot → existence row
         applied). A bare-string upstream has no declared level, so it falls
         back to the upstream's own registered `temporality`. `interval` is the
-        downstream's window, or None for a monolithic / view downstream
+        downstream's window, or None for a oneshot / view downstream
         (whole-table / existence work).
 
         A declared `UpstreamContract` whose upstream is not registered raises — an
@@ -81,7 +173,10 @@ class Satisfaction(_PostgresStateBase):
                 # environments.
                 continue
             name = src.name
-            assert src.contract is not None  # gated ⇒ contract is not None
+            # gated_upstreams only ever holds sources that carry a contract;
+            # this guard documents that invariant and narrows the type.
+            if src.contract is None:
+                continue
             level = src.contract.value
             # Look the upstream up under THIS env's identity + library: a
             # suffixed run resolves against its own env, never prod's.
@@ -93,23 +188,28 @@ class Satisfaction(_PostgresStateBase):
                 # an unregistered upstream is a real error (a typo, or the
                 # upstream was never deployed / run). (An ungated source isn't
                 # checked here at all — it's never iterated.)
-                raise ValueError(
-                    f"upstream contract {name!r} ({level}) on "
-                    f"{self.model.target.full_name!r} is not registered in "
-                    f"the library — it has never run. A gated upstream demands "
-                    f"the upstream exists; fix the name or run the upstream "
-                    f"first. (An ungated source would not block.)"
+                raise UnregisteredUpstreamError(
+                    name, level, self.model.target.full_name
                 )
-            if level in ("window", "through") and match.temporality == "timeless":
-                # WINDOW / THROUGH gate on a per-window match, but a TIMELESS
-                # upstream has no window to match. Make it a definition error,
-                # not a silent never-satisfied: the author must say WHOLE
+            if (
+                level in ("exact", "encapsulate", "through")
+                and match.temporality == "timeless"
+            ):
+                # EXACT / ENCAPSULATE / THROUGH gate on a per-window match, but a
+                # TIMELESS upstream has no window to match. Make it a definition
+                # error, not a silent never-satisfied: the author must say WHOLE
                 # (loaded) or EXISTS (registered) instead.
-                raise ValueError(
-                    f"upstream contract {name!r} ({level}) on "
-                    f"{self.model.target.full_name!r} targets a TIMELESS "
-                    f"upstream, which has no window to match. Use WHOLE "
-                    f"(loaded) or EXISTS (registered) instead."
+                raise TimelessUpstreamContractError(
+                    name, level, self.model.target.full_name
+                )
+            if level == "exact" and match.fixed_intervals is False:
+                # A flexible upstream coalesces its applied rows into maximal
+                # covered ranges, erasing the exact-grain row EXACT needs to
+                # match. The downstream would block forever — make it a loud
+                # definition error. ENCAPSULATE (coverage) is the right level
+                # against a flexible upstream.
+                raise ExactContractOnFlexibleUpstreamError(
+                    name, self.model.target.full_name
                 )
             satisfied = self.is_satisfied(
                 conn, entry=match, interval=interval, level=level
@@ -164,7 +264,7 @@ class Satisfaction(_PostgresStateBase):
 
     def dry_state_classify(
         self, interval: "TZInterval | None", assume_applied: dict | None = None
-    ) -> tuple[str, list[str]]:
+    ) -> IntervalClassification:
         """Classify one actionable interval for `DRY_STATE` into three outcomes,
         accounting for the cascade. `assume_applied` is
         `{upstream_full_name: [windows that would run this pass]}` — an upstream
@@ -189,7 +289,10 @@ class Satisfaction(_PostgresStateBase):
                 # is_upstream_satisfied_live). A prod run gates it normally.
                 continue
             name = src.name
-            assert src.contract is not None  # gated ⇒ contract is not None
+            # gated_upstreams only ever holds sources that carry a contract;
+            # this guard documents that invariant and narrows the type.
+            if src.contract is None:
+                continue
             level = src.contract.value
             lookup = self._suffix_upstream_name(name)
             if assume_applied and _overlay_covers(
@@ -204,10 +307,10 @@ class Satisfaction(_PostgresStateBase):
                 continue  # already applied
             blocked.append(f"{name} ({level})")
         if blocked:
-            return ("blocked", blocked)
+            return IntervalClassification("blocked", blocked)
         if after:
-            return ("after", after)
-        return ("run", [])
+            return IntervalClassification("after", after)
+        return IntervalClassification("run", [])
 
     @staticmethod
     def is_satisfied(
@@ -228,18 +331,22 @@ class Satisfaction(_PostgresStateBase):
         * library-only rows (`state_schema` / `state_table` NULL — older
           images, or models registered without state tracking): presence
           in the library is the proof. Always satisfied.
-        * `level == 'temporal'` / `'window'` / `'through'`:
-          look for an `applied` row whose window matches or fully
-          encapsulates `interval`. A daily-cadence upstream thus covers an
-          hourly downstream without coordination.
+        * `level == 'exact'`: an `applied` row whose window *equals*
+          `interval` (same since/until). Only an exact-grain match counts.
+        * `level == 'encapsulate'` / `'temporal'` (bare): the `applied` rows
+          *cover* `interval` — a single row containing it (fast path), or a
+          gap-free union of finer rows. A daily-cadence upstream covers an
+          hourly downstream; 24 hourly rows cover a daily one.
         * `level == 'timeless'`: the upstream has a single NULL-window
           existence row — satisfied iff that row is `applied` (the view
           exists / the whole table has been loaded). The downstream window
           is irrelevant.
 
-        WINDOW / THROUGH against a TIMELESS upstream is rejected upstream of
-        here (`is_upstream_satisfied_live`), so by the time a contract level
-        reaches this function it is shape-compatible.
+        EXACT / ENCAPSULATE / THROUGH against a TIMELESS upstream is rejected
+        upstream of here (`is_upstream_satisfied_live`), so by the time a
+        contract level reaches this function it is shape-compatible. A
+        windowless downstream (`interval is None`) reads *all* of an interval
+        upstream, so the window-scoped levels degenerate to WHOLE.
 
         If the upstream's state table doesn't exist yet (registered but
         never bootstrapped), returns False."""
@@ -271,17 +378,9 @@ class Satisfaction(_PostgresStateBase):
         # timeless downstream can wait for full load where the single-window
         # interval coverage check can't express it.
         if level == "whole":
-            query = sql.SQL(
-                "SELECT 1 WHERE EXISTS ("
-                "  SELECT 1 FROM {schema}.{table} WHERE status = 'applied'"
-                ") AND NOT EXISTS ("
-                "  SELECT 1 FROM {schema}.{table} WHERE status <> 'applied'"
-                ")"
-            ).format(
-                schema=sql.Identifier(entry.state_schema),
-                table=sql.Identifier(entry.state_table),
+            return Satisfaction._whole_applied(
+                conn, entry.state_schema, entry.state_table
             )
-            return conn.execute(query).fetchone() is not None
 
         if level == "timeless":
             query = sql.SQL(
@@ -317,19 +416,85 @@ class Satisfaction(_PostgresStateBase):
             )
             return conn.execute(query, params * 2).fetchone() is not None
 
-        since = interval.since if interval is not None else None
-        until = interval.until if interval is not None else None
-        query = sql.SQL(
+        # A windowless downstream (interval is None) reading an interval upstream
+        # reads *all* of it — EXACT / ENCAPSULATE have no window to scope to, so
+        # they degenerate to WHOLE (the documented "reads the whole thing" case).
+        if interval is None:
+            return Satisfaction._whole_applied(
+                conn, entry.state_schema, entry.state_table
+            )
+
+        # 'exact' (UpstreamContract.EXACT): one applied row at *exactly* my grain
+        # — same (since, until). A coarser row that merely contains my window does
+        # not count (no per-my-grain row exists), nor does a union of finer rows.
+        if level == "exact":
+            query = sql.SQL(
+                "SELECT 1 FROM {schema}.{table} "
+                "WHERE status = 'applied' AND since = %s AND until = %s "
+                "LIMIT 1"
+            ).format(
+                schema=sql.Identifier(entry.state_schema),
+                table=sql.Identifier(entry.state_table),
+            )
+            return (
+                conn.execute(query, [interval.since, interval.until]).fetchone()
+                is not None
+            )
+
+        # 'encapsulate' (UpstreamContract.ENCAPSULATE; also the bare-temporal
+        # fallback): my window's data is present — the applied rows COVER
+        # [since, until). Fast path: one applied row already contains it (the
+        # common same-or-coarser-grain case, a cheap indexed lookup). Else: do the
+        # applied rows overlapping my window tile it gap-free (a union of finer
+        # rows — 24 hourly rows covering my day)? Nothing outside my window is
+        # consulted, so a hole elsewhere in the upstream never blocks me.
+        fast = sql.SQL(
             "SELECT 1 FROM {schema}.{table} "
-            "WHERE status = 'applied' "
-            "  AND since <= %s AND until >= %s "
+            "WHERE status = 'applied' AND since <= %s AND until >= %s "
             "LIMIT 1"
         ).format(
             schema=sql.Identifier(entry.state_schema),
             table=sql.Identifier(entry.state_table),
         )
-        row = conn.execute(query, [since, until]).fetchone()
-        return row is not None
+        if conn.execute(fast, [interval.since, interval.until]).fetchone() is not None:
+            return True
+
+        cover = sql.SQL(
+            "WITH ov AS ("
+            "  SELECT since, until FROM {schema}.{table} "
+            "  WHERE status = 'applied' AND until > %s AND since < %s"
+            "), chain AS ("
+            "  SELECT since, max(until) OVER ("
+            "    ORDER BY since, until ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING"
+            "  ) AS prev_max FROM ov"
+            ") "
+            "SELECT (SELECT min(since) FROM ov) <= %s "  # covers the left edge
+            "   AND (SELECT max(until) FROM ov) >= %s "  # covers the right edge
+            "   AND NOT EXISTS ("  # no internal hole
+            "     SELECT 1 FROM chain WHERE prev_max IS NOT NULL AND since > prev_max"
+            "   )"
+        ).format(
+            schema=sql.Identifier(entry.state_schema),
+            table=sql.Identifier(entry.state_table),
+        )
+        row = conn.execute(
+            cover, [interval.since, interval.until, interval.since, interval.until]
+        ).fetchone()
+        return bool(row and row[0])
+
+    @staticmethod
+    def _whole_applied(conn: psycopg.Connection, schema: str, table: str) -> bool:
+        """WHOLE: at least one `applied` row and no outstanding (non-applied)
+        one — the whole upstream is loaded. Shared by the WHOLE level and by the
+        window-scoped levels when the downstream is windowless (reads all)."""
+        query = sql.SQL(
+            "SELECT 1 WHERE EXISTS ("
+            "  SELECT 1 FROM {schema}.{table} WHERE status = 'applied'"
+            ") AND NOT EXISTS ("
+            "  SELECT 1 FROM {schema}.{table} WHERE status <> 'applied'"
+            ")"
+        ).format(schema=sql.Identifier(schema), table=sql.Identifier(table))
+        return conn.execute(query).fetchone() is not None
 
     @staticmethod
     def is_fresh(
@@ -366,8 +531,12 @@ class Satisfaction(_PostgresStateBase):
             bound, params = sql.SQL(""), []
         elif level == "through":
             bound, params = sql.SQL(" AND until <= %s"), [interval.until]
-        else:  # window contract, or a bare temporal upstream → per-window cover
-            bound = sql.SQL(" AND since <= %s AND until >= %s")
+        elif level == "exact":
+            bound = sql.SQL(" AND since = %s AND until = %s")
+            params = [interval.since, interval.until]
+        else:  # encapsulate, or a bare temporal upstream → the rows covering my
+            # window (every row overlapping it — the single container or the union)
+            bound = sql.SQL(" AND until > %s AND since < %s")
             params = [interval.since, interval.until]
 
         agg = (

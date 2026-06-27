@@ -2,10 +2,24 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+
 from ._base import _PostgresStateBase
 
 if TYPE_CHECKING:
     from bollhav.model.intervals import TZInterval
+
+
+# ── errors ──
+class StateActivationRequiredError(ValueError):
+    """A state-only operation (e.g. `acquire_model_lock`) was called on a model
+    with no `state=State(...)`. The lifecycle only invokes these on stateful
+    models, so reaching here is a wiring bug in the caller."""
+
+    def __init__(self, full_name: str) -> None:
+        super().__init__(
+            f"acquire_model_lock requires a state-activated model, but "
+            f"{full_name!r} has model.state is None"
+        )
 
 
 class Locks(_PostgresStateBase):
@@ -13,7 +27,7 @@ class Locks(_PostgresStateBase):
         """Hash key for an interval-scoped lock: identifies the specific
         `(model, since, until)` triple. Used by `@execute_lifecycle` so two
         workers can race on the same model but different intervals
-        without conflict. A monolithic / view row has a NULL window, so its
+        without conflict. A oneshot / view row has a NULL window, so its
         key collapses to a single per-model `…|oneshot` slot."""
         if interval is None:
             return f"{self.model.target.full_name}|oneshot"
@@ -67,10 +81,10 @@ class Locks(_PostgresStateBase):
         lock was taken. Raises `ModelLockedError` if another run already
         holds the lock. Only call on a state-activated model — the
         lifecycle hook guards the call on `model.stateful`."""
-        assert self.model.state is not None, (
-            "acquire_model_lock requires a state-activated model (model.state is None)"
-        )
-        if self.model.state.allow_concurrent_runs:
+        state = self.model.state
+        if state is None:
+            raise StateActivationRequiredError(self.model.target.full_name)
+        if state.allow_concurrent_runs:
             return False
         if not self.try_acquire_lock():
             from bollhav.model.state import ModelLockedError

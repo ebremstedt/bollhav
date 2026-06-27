@@ -1,6 +1,6 @@
 [project]
 name = "bollhav"
-version = "3.0.2"
+version = "3.0.8"
 authors = [
   { name="Erik Bremstedt", email="erik@bremstedtanalytics.se" },
 ]
@@ -12,7 +12,7 @@ dependencies = [
   "python-icron>=3.0.1",
   "polars>=0.20.0",
   "psycopg[binary]>=3.3.3",
-  "roskarl>=3.1.23"
+  "roskarl>=3.1.31"
 ]
 
 [project.optional-dependencies]

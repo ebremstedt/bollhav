@@ -1,3 +1,4 @@
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Callable
@@ -8,11 +9,99 @@ from bollhav.model.write_modes import WriteMode
 from bollhav.model.column_sorting import sort_columns
 
 
+# ── errors ──
+
+
+class RecreateAndTruncateError(ValueError):
+    """A `Target` set both `recreate_table` and `truncate_table` — recreate
+    already leaves the table empty, so truncate is redundant and the two
+    together are contradictory."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "recreate_table and truncate_table cannot both be True — "
+            "recreate already leaves the table empty"
+        )
+
+
+class ColumnsWithoutDatabaseError(ValueError):
+    """A `Target` declared `columns` without a `database` — columns describe a
+    database-backed table's schema, so the `database` must be set too."""
+
+    def __init__(self) -> None:
+        super().__init__("database must be set when columns is provided")
+
+
+class DatabaseWithoutColumnsError(ValueError):
+    """A `Target` set `database` without any `columns` — a database-backed
+    table needs its column schema, so `columns` must be set too."""
+
+    def __init__(self) -> None:
+        super().__init__("columns must be set when database is provided")
+
+
+class MissingCatalogError(ValueError):
+    """A database-backed `Target` left `catalog` unset. A model's identity is
+    `catalog.schema.table`, so the catalog is required to keep names unique
+    across databases in the shared library."""
+
+    def __init__(self, name: str) -> None:
+        super().__init__(
+            f"catalog must be set on model {name!r} — a database-backed "
+            f"model's identity is catalog.schema.table, so the catalog is "
+            f"required to keep names unique across databases in the shared "
+            f"library (referencing by anything less risks collisions)."
+        )
+
+
+class MultiplePartitionColumnsError(ValueError):
+    """A `Target` marked more than one column `partition_on=True`. A table
+    has a single partition key, so at most one column may carry it. `names`
+    lists the offending columns."""
+
+    def __init__(self, names: str) -> None:
+        super().__init__(f"At most one column can have partition_on=True, got: {names}")
+
+
+class UpsertWithoutKeyError(ValueError):
+    """A `Target` uses `WriteMode.UPSERT_NO_DELETE` but no column is marked
+    `primary_key=True` or `unique=True` — the upsert needs a merge key to
+    join on."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "WriteMode.UPSERT_NO_DELETE requires at least one column with "
+            "primary_key=True or unique=True"
+        )
+
+
+class RecreatePartitionWithoutColumnError(ValueError):
+    """A `Target` uses `WriteMode.RECREATE_PARTITION` but no column is marked
+    `partition_on=True` — the write targets a specific partition, so it needs
+    a partition column."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "WriteMode.RECREATE_PARTITION requires one column with partition_on=True"
+        )
+
+
+class UnknownIndexColumnError(ValueError):
+    """An index on a `Target` references column(s) that aren't declared on the
+    table. `index_name` names the index; `unknown` lists the missing
+    column(s)."""
+
+    def __init__(self, index_name: str, unknown: list) -> None:
+        super().__init__(
+            f"Index {index_name!r} references unknown column(s): {unknown}"
+        )
+
+
 def resolve_schema_name(name: str, suffix: str, appendix: str | None) -> str:
     """Apply a rotating `suffix` (and optional date `appendix`) to a schema
     name — `warehouse` → `warehouse_pr123_2425_` — or return it unchanged when
     no suffix is set. Pure: callers pass the base name, never a resolved one,
-    so it's idempotent. (Note the trailing `_`, kept for back-compat.)"""
+    so it's idempotent. (Note the trailing `_`, kept for back-compat)"""
     if not suffix:
         return name
     s = f"{name}_{suffix}"
@@ -32,8 +121,8 @@ class Target:
     catalog: str | None = None
     database: Database | None = None
 
-    columns: list[DatabaseColumn] = field(default_factory=list)
-    indexes: list[DatabaseIndex] = field(default_factory=list)
+    columns: Sequence[DatabaseColumn] = field(default_factory=list)
+    indexes: Sequence[DatabaseIndex] = field(default_factory=list)
     column_sorting: Callable | None = sort_columns
     unique_columns: list = field(init=False, default_factory=list)
     primary_key_columns: list = field(init=False, default_factory=list)
@@ -118,28 +207,18 @@ class Target:
 
     def __post_init__(self) -> None:
         if self.recreate_table and self.truncate_table:
-            raise ValueError(
-                "recreate_table and truncate_table cannot both be True — "
-                "recreate already leaves the table empty"
-            )
+            raise RecreateAndTruncateError()
         if self.database is not None and len(self.columns) == 0:
-            raise ValueError("columns must be set when database is provided")
+            raise DatabaseWithoutColumnsError()
         if len(self.columns) > 0 and self.database is None:
-            raise ValueError("database must be set when columns is provided")
+            raise ColumnsWithoutDatabaseError()
         if self.database is not None and not self.catalog:
-            raise ValueError(
-                f"catalog must be set on model {self.name!r} — a database-backed "
-                f"model's identity is catalog.schema.table, so the catalog is "
-                f"required to keep names unique across databases in the shared "
-                f"library (referencing by anything less risks collisions)."
-            )
+            raise MissingCatalogError(self.name)
 
         partition_cols = [c for c in self.columns if getattr(c, "partition_on", False)]
         if len(partition_cols) > 1:
             names = ", ".join(repr(c.name) for c in partition_cols)
-            raise ValueError(
-                f"At most one column can have partition_on=True, got: {names}"
-            )
+            raise MultiplePartitionColumnsError(names)
 
         self.sensitive = (
             any(getattr(c, "sensitive", False) for c in self.columns)
@@ -160,17 +239,12 @@ class Target:
         self.partitioned_by_index = self.partitioned_by is not None
 
         if self.write_mode == WriteMode.UPSERT_NO_DELETE and not self.merge_key_columns:
-            raise ValueError(
-                "WriteMode.UPSERT_NO_DELETE requires at least one column with "
-                "primary_key=True or unique=True"
-            )
+            raise UpsertWithoutKeyError()
         if (
             self.write_mode == WriteMode.RECREATE_PARTITION
             and self.partitioned_by is None
         ):
-            raise ValueError(
-                "WriteMode.RECREATE_PARTITION requires one column with partition_on=True"
-            )
+            raise RecreatePartitionWithoutColumnError()
 
         if self.columns and self.column_sorting:
             col_names = [c.name for c in self.columns]
@@ -186,6 +260,4 @@ class Target:
                 )
                 unknown = [c for c in referenced if c not in col_names]
                 if unknown:
-                    raise ValueError(
-                        f"Index {idx.name!r} references unknown column(s): {unknown}"
-                    )
+                    raise UnknownIndexColumnError(idx.name, unknown)

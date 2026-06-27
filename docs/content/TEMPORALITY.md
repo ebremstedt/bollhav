@@ -38,7 +38,7 @@ Model(temporality=Temporality.TEMPORAL, view=True,                 # a temporal 
       contract=Contract(begin=..., end=...), ...)    #   its Contract is the range it covers
 ```
 
-A view **can't be batched** — it's one `CREATE VIEW`, not materialized per-window. Its temporality is otherwise free: `TEMPORAL`, where its [`Contract`](CONTRACT.md) `begin`/`end` declares the range it covers (recorded as a single state row a downstream can gate `WINDOW` against), or `TIMELESS` (existence only).
+A view **can't be batched** — it's one `CREATE VIEW`, not materialized per-window. Its temporality is otherwise free: `TEMPORAL`, where its [`Contract`](CONTRACT.md) `begin`/`end` declares the range it covers (recorded as a single state row a downstream can gate `ENCAPSULATE` against), or `TIMELESS` (existence only).
 
 ## Validation
 
@@ -83,10 +83,10 @@ flowchart TD
 
 | Combo | Declare | State | Gate it with | Use when |
 |---|---|---|---|---|
-| **Temporal batched table** | `temporality=TEMPORAL, batching=Batch(...)` | one row **per window** | `WINDOW` / `THROUGH` / `WHOLE` / `EXISTS` | The default for incremental fact/event tables — daily/hourly loads, backfills, anything processed and resumed per time window. |
-| **Temporal one-shot table** | `temporality=TEMPORAL, contract=Contract(begin,end)` (no batching) | one row spanning **[begin,end]** | `WINDOW` (window ⊆ range) / `WHOLE` / `EXISTS` | A time-bounded table loaded in a single pass — small enough not to chunk, or the source only does a whole-range read — but downstreams still ask "is my window covered." |
-| **Timeless table** | `temporality=TIMELESS` | one **whole-table** row | `WHOLE` / `EXISTS` (not `WINDOW`) | Dimensions, reference / lookup tables, config — no time axis, reloaded wholesale. The only question is "is it loaded." |
-| **Temporal view** | `temporality=TEMPORAL, view=True, contract=Contract(begin,end)` | one row spanning **[begin,end]** (no data) | `WINDOW` (window ⊆ range) / `WHOLE` / `EXISTS` | A SQL view over time-ranged data where consumers care "is this view current through my window." Declare the range; enforce it by gating the view's own source `WINDOW`. |
+| **Temporal batched table** | `temporality=TEMPORAL, batching=Batch(...)` | one row **per window** | `ENCAPSULATE` / `THROUGH` / `WHOLE` / `EXISTS` | The default for incremental fact/event tables — daily/hourly loads, backfills, anything processed and resumed per time window. |
+| **Temporal one-shot table** | `temporality=TEMPORAL, contract=Contract(begin,end)` (no batching) | one row spanning **[begin,end]** | `ENCAPSULATE` (window ⊆ range) / `WHOLE` / `EXISTS` | A time-bounded table loaded in a single pass — small enough not to chunk, or the source only does a whole-range read — but downstreams still ask "is my window covered." |
+| **Timeless table** | `temporality=TIMELESS` | one **whole-table** row | `WHOLE` / `EXISTS` (not `ENCAPSULATE`) | Dimensions, reference / lookup tables, config — no time axis, reloaded wholesale. The only question is "is it loaded." |
+| **Temporal view** | `temporality=TEMPORAL, view=True, contract=Contract(begin,end)` | one row spanning **[begin,end]** (no data) | `ENCAPSULATE` (window ⊆ range) / `WHOLE` / `EXISTS` | A SQL view over time-ranged data where consumers care "is this view current through my window." Declare the range; enforce it by gating the view's own source `ENCAPSULATE`. |
 | **Timeless view** | `temporality=TIMELESS, view=True` | one **existence** row (no data) | `WHOLE` / `EXISTS` | A plain view — renames, joins, projections, lookups — where the only question is "does it exist." |
 
 The two rejected corners each follow from one rule: **timeless can't batch** (batching chops a *time window*, and there's no time axis), and **a view can't batch** (batching is per-window *materialization*, and a view materializes nothing — its only way to carry time is the one-shot `[begin, end]` row).

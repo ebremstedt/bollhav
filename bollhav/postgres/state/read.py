@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING
 
 from psycopg import sql
 
-from bollhav.postgres.state import ERRORS_TABLE, LIBRARY_SCHEMA, LIBRARY_TABLE
+from ._ddl import ERRORS_TABLE, LIBRARY_SCHEMA, LIBRARY_TABLE
 
 if TYPE_CHECKING:
     import psycopg
