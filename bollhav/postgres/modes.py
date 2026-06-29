@@ -33,16 +33,15 @@ class RecreatePartitionRequiresPartitionColumnError(ValueError):
         )
 
 
-class CreateReplaceViewRequiresSourceModelError(ValueError):
-    """`create_replace_view` found no upstream Source carrying a `SourceModel`
-    with a `.query`. A view is defined by that query, so without it there's
-    nothing to create."""
+class CreateReplaceViewRequiresQueryError(ValueError):
+    """`create_replace_view` was called for a model with no `query`. A view is
+    defined by its `query` (the view body); without it there's nothing to
+    create — and `is_view` is False, so the lifecycle shouldn't reach here."""
 
     def __init__(self, full_name: str) -> None:
         super().__init__(
-            f"create_replace_view requires a Source with a SourceModel type "
-            f"whose .query is set, in upstream=[...] on "
-            f"{full_name!r}"
+            f"create_replace_view requires Model.query (the view body) to be "
+            f"set on {full_name!r}"
         )
 
 
@@ -170,19 +169,8 @@ def create_replace_view(
     conn: psycopg.Connection,
     model: Model,
 ) -> None:
-    from bollhav.model.source import SourceModel
-
-    src = next(
-        (
-            s
-            for s in model.upstream
-            if isinstance(s.type, SourceModel) and s.type.query is not None
-        ),
-        None,
-    )
-    source = src.type if src is not None else None
-    if not isinstance(source, SourceModel) or source.query is None:
-        raise CreateReplaceViewRequiresSourceModelError(model.target.full_name)
+    if model.query is None:
+        raise CreateReplaceViewRequiresQueryError(model.target.full_name)
 
     with conn.transaction():
         ensure_schema(conn, model.target.schema_resolved)
@@ -190,6 +178,6 @@ def create_replace_view(
             sql.SQL("CREATE OR REPLACE VIEW {schema}.{view} AS {query}").format(
                 schema=sql.Identifier(model.target.schema_resolved),
                 view=sql.Identifier(model.target.name_resolved),
-                query=sql.SQL(cast(LiteralString, source.query)),
+                query=sql.SQL(cast(LiteralString, model.query)),
             )
         )

@@ -59,7 +59,7 @@ def _model(
 ) -> Model:
     cols = columns or [_col("id"), _col("val")]
     return Model(
-        upstream=[Source("src", type=SourceModel(query=source_query))],
+        upstream=[Source("src", type=SourceModel(read_query=source_query))],
         target=Target(
             name="test_table",
             schema="test_schema",

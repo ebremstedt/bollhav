@@ -4,6 +4,7 @@ import pytest
 
 from bollhav.model.batch import Batch
 from bollhav.model.contract import Contract
+from bollhav.model.materialization import Materialization
 from bollhav.model.model import Model
 from bollhav.model.temporality import Temporality
 from bollhav.model.target import Target
@@ -160,7 +161,10 @@ class TestModelKind:
 
     def test_view_model_kind(self):
         m = Model(
-            target=Target(name="customers"), temporality=Temporality.TIMELESS, view=True
+            target=Target(name="customers"),
+            temporality=Temporality.TIMELESS,
+            materialization=Materialization.VIEW,
+            query="SELECT 1",
         )
         assert m.temporality is Temporality.TIMELESS
         assert m.temporality.value == "timeless"
@@ -207,7 +211,8 @@ class TestModelKind:
         with pytest.raises(ValueError, match="view but has batching"):
             Model(
                 target=Target(name="customers"),
-                view=True,
+                materialization=Materialization.VIEW,
+                query="SELECT 1",
                 batching=Batch(),
             )
 
@@ -221,7 +226,8 @@ class TestModelKind:
         m = Model(
             target=Target(name="customers"),
             temporality=Temporality.TEMPORAL,
-            view=True,
+            materialization=Materialization.VIEW,
+            query="SELECT 1",
             contract=Contract(
                 begin=datetime(2024, 1, 1, tzinfo=timezone.utc),
                 end=datetime(2024, 2, 1, tzinfo=timezone.utc),
@@ -234,7 +240,10 @@ class TestModelKind:
     def test_timeless_view_is_allowed(self):
         # A view may also be TIMELESS — existence only, no range.
         m = Model(
-            target=Target(name="customers"), temporality=Temporality.TIMELESS, view=True
+            target=Target(name="customers"),
+            temporality=Temporality.TIMELESS,
+            materialization=Materialization.VIEW,
+            query="SELECT 1",
         )
         assert m.is_view is True
         assert m.is_timeless is True

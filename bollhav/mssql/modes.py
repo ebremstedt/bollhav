@@ -21,16 +21,15 @@ class UnhandledMssqlTypeError(ValueError):
         super().__init__(f"_input_size_for: unhandled MssqlType {t!r}")
 
 
-class MissingSourceModelQueryError(ValueError):
-    """`create_replace_view` found no upstream `Source` with a `SourceModel`
-    type whose `.query` is set. A view is defined by that query, so without
-    one there's nothing to create the view from."""
+class CreateReplaceViewRequiresQueryError(ValueError):
+    """`create_replace_view` was called for a model with no `query`. A view is
+    defined by its `query` (the view body); without it there's nothing to
+    create — and `is_view` is False, so the lifecycle shouldn't reach here."""
 
     def __init__(self, full_name: str) -> None:
         super().__init__(
-            f"create_replace_view requires a Source with a SourceModel type "
-            f"whose .query is set, in upstream=[...] on "
-            f"{full_name!r}"
+            f"create_replace_view requires Model.query (the view body) to be "
+            f"set on {full_name!r}"
         )
 
 
@@ -235,25 +234,11 @@ def append(
 
 def create_replace_view(conn: pyodbc.Connection, model: Model) -> None:
     """Create or alter a view using the query defined on its SourceModel."""
-    from bollhav.model.source import SourceModel
-
-    src = next(
-        (
-            s
-            for s in model.upstream
-            if isinstance(s.type, SourceModel) and s.type.query is not None
-        ),
-        None,
-    )
-    if src is None:
-        raise MissingSourceModelQueryError(model.target.full_name)
+    if model.query is None:
+        raise CreateReplaceViewRequiresQueryError(model.target.full_name)
     schema = model.target.schema_resolved
     view = model.target.name_resolved
-    # The filter above guarantees this, but it doesn't narrow `src.type`.
-    source_type = src.type
-    if not isinstance(source_type, SourceModel) or source_type.query is None:
-        raise MissingSourceModelQueryError(model.target.full_name)
-    query = cast(LiteralString, source_type.query)
+    query = cast(LiteralString, model.query)
 
     cursor = conn.cursor()
     cursor.execute(

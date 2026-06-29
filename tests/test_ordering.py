@@ -25,8 +25,9 @@ def make_model(
     # bare names as the model's full set of inputs, so both resolve to it.
     model.upstream_names = upstream
     model.declared_inputs = upstream
-    # Views are a separate flag now (`model.view`), independent of the time
-    # axis. Set both `kind` and `is_view` so the mock matches the real Model.
+    # Views are a separate choice now (`model.materialization`), independent of
+    # the time axis. Set both `kind` and `is_view` so the mock matches the real
+    # Model.
     model.temporality = temporality
     model.is_view = view
     return model

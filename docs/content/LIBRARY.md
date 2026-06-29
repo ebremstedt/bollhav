@@ -64,8 +64,9 @@ Model(target=Target(...), state=State(), batching=Batch(...))
 # View intended as upstream — opt in via library=True
 Model(
     target=Target(name="v_x", ...),
-    temporality=Temporality.TIMELESS, view=True,
-    upstream=[Source("v_x", type=SourceModel(query="SELECT ..."))],
+    temporality=Temporality.TIMELESS,
+    materialization=Materialization.VIEW,
+    query="SELECT ...",
     library=True,
 )
 

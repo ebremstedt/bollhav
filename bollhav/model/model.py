@@ -8,6 +8,7 @@ from uuid import uuid4
 from bollhav.model.target import Target
 from bollhav.model.contract import Contract
 from bollhav.model.batch import Batch
+from bollhav.model.materialization import Materialization
 from bollhav.model.temporality import Temporality
 from bollhav.model.state import State
 from bollhav.model.tags import Tags
@@ -45,8 +46,9 @@ class TimelessModelWithContractWindowError(ValueError):
 
 
 class ViewWithBatchingError(ValueError):
-    """A `view=True` model declared `batching` — a view isn't materialized
-    per-window (it's one CREATE VIEW), so it can't be batched."""
+    """A VIEW model (`materialization=Materialization.VIEW`) declared `batching` —
+    a view isn't materialized per-window (it's one CREATE VIEW), so it can't be
+    batched."""
 
     def __init__(self, name: str) -> None:
         super().__init__(
@@ -58,8 +60,8 @@ class ViewWithBatchingError(ValueError):
 
 
 class ViewWithStagingError(ValueError):
-    """A `view=True` model declared `staging` — a view has nothing to
-    stage."""
+    """A VIEW model (`materialization=Materialization.VIEW`) declared `staging` —
+    a view has nothing to stage."""
 
     def __init__(self, name: str) -> None:
         super().__init__(
@@ -69,13 +71,27 @@ class ViewWithStagingError(ValueError):
 
 
 class ViewWithRecreateOrTruncateError(ValueError):
-    """A `view=True` model set `recreate_table` / `truncate_table` — those are
-    materialized-table operations that don't apply to views."""
+    """A VIEW model (`materialization=Materialization.VIEW`) set `recreate_table`
+    / `truncate_table` — those are materialized-table operations that don't apply
+    to views."""
 
     def __init__(self, name: str) -> None:
         super().__init__(
             f"model {name!r} is a view — recreate_table / "
             f"truncate_table don't apply to views."
+        )
+
+
+class ViewWithoutQueryError(ValueError):
+    """A VIEW model (`materialization=Materialization.VIEW`) declared no `query` —
+    a view is created from its SELECT body, so `query=...` is required. (A `query`
+    alone does not make a model a view; `materialization` is the explicit
+    choice.)"""
+
+    def __init__(self, name: str) -> None:
+        super().__init__(
+            f"model {name!r} is a view (materialization=VIEW) but has no query — "
+            f'a view is defined by its SELECT body. Set query="SELECT ...".'
         )
 
 
@@ -144,7 +160,8 @@ class Model:
         batching: Batch | None = None,
         *,
         temporality: Temporality = Temporality.TEMPORAL,
-        view: bool = False,
+        materialization: Materialization = Materialization.TABLE,
+        query: str | None = None,
         tagging: Tags | None = None,
         tags: set[str] | None = None,
         state: State | None = None,
@@ -159,7 +176,12 @@ class Model:
         self.contract = contract or Contract()
         self.batching = batching
         self.temporality = temporality
-        self.view = view
+        # `materialization` is the explicit output shape (TABLE vs VIEW); `query`
+        # is the model's defining SELECT. The body lives on the model (what it
+        # produces), not on an upstream source. A VIEW requires a `query`
+        # (validated below) — a query alone does NOT make a model a view.
+        self.materialization = materialization
+        self.query = query
         self.state = state
         self.curfew = curfew
         self.enabled = enabled
@@ -203,10 +225,11 @@ class Model:
             chunks, or the whole `[begin, end]` range in one run).
           * TIMELESS must not have batching, and carries no time window
             (`contract.begin` / `contract.end` must be unset).
-          * a view (`view=True`) isn't materialized per-window, so it can't be
-            batched — its kind may be TEMPORAL (its `Contract` `begin`/`end`
-            declares the range it covers, recorded as one state row) or TIMELESS
-            (existence only). It also has no staging or recreate/truncate.
+          * a view (`materialization=VIEW`) isn't materialized per-window, so it
+            can't be batched — its kind may be TEMPORAL (its `Contract`
+            `begin`/`end` declares the range it covers, recorded as one state
+            row) or TIMELESS (existence only). It must declare its body via
+            `query`, and has no staging or recreate/truncate.
         """
         name = self.target.name
         if self.temporality is Temporality.TIMELESS:
@@ -214,7 +237,9 @@ class Model:
                 raise TimelessModelWithBatchingError(name)
             if self.contract.begin is not None or self.contract.end is not None:
                 raise TimelessModelWithContractWindowError(name)
-        if self.view:
+        if self.is_view:
+            if self.query is None:
+                raise ViewWithoutQueryError(name)
             if self.batching is not None:
                 raise ViewWithBatchingError(name)
             if self.target.staging is not None:
@@ -319,11 +344,18 @@ class Model:
         """Typed ungated sources as `[{"name", "kind"}]` for the library's
         `sources` column and lineage. `kind` is the source type label
         (`model` / `file` / `api`). The UNKNOWN sentinel is excluded."""
-        return [
-            {"name": source.name, "kind": source.kind}
-            for source in self.upstream
-            if not source.gated and source.type is not None
-        ]
+        specs: list[dict] = []
+        for source in self.upstream:
+            if source.gated or source.type is None:
+                continue
+            spec = {"name": source.name, "kind": source.kind}
+            # `read_query` is declarative read config (bollhav never runs it);
+            # surface it in the catalog so an upstream shows how it's read.
+            read_query = getattr(source.type, "read_query", None)
+            if read_query is not None:
+                spec["read_query"] = read_query
+            specs.append(spec)
+        return specs
 
     @property
     def declared_inputs(self) -> list[str]:
@@ -509,16 +541,18 @@ class Model:
 
     @property
     def is_table(self) -> bool:
-        """True when this model produces a materialized TABLE (not a view).
-        For asset-side decisions that only care about table-vs-view."""
-        return not self.view
+        """True when this model produces a materialized TABLE
+        (`materialization=Materialization.TABLE`). For asset-side decisions
+        that only care about table-vs-view."""
+        return self.materialization is Materialization.TABLE
 
     @property
     def is_view(self) -> bool:
-        """True when this model produces a VIEW (`view=True`). Its state is a
-        single existence row; an upstream is satisfied when that row says the
-        view exists."""
-        return self.view
+        """True when this model produces a VIEW
+        (`materialization=Materialization.VIEW`). Its body is the model's
+        `query`; its state is a single existence row, satisfied when that row
+        says the view exists."""
+        return self.materialization is Materialization.VIEW
 
     # ── time axis ─────────────────────────────────────────────────────
 

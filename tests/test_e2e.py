@@ -39,6 +39,7 @@ from bollhav.model import (
     TimeChunking,
     UpstreamContract,
     Temporality,
+    Materialization,
     Model,
     ModelRun,
     Source,
@@ -535,14 +536,6 @@ def test_e2e_view_as_upstream_does_not_block_downstream(schema_name):
 
     view = ModelRun(
         model=Model(
-            upstream=[
-                Source(
-                    "v_high_value",
-                    type=SourceModel(
-                        query=f"SELECT * FROM {schema_name}.orders WHERE total >= 0"
-                    ),
-                )
-            ],
             target=Target(
                 name="v_high_value",
                 schema=schema_name,
@@ -550,7 +543,8 @@ def test_e2e_view_as_upstream_does_not_block_downstream(schema_name):
                 dsn_env_var="TARGET_DSN",
             ),
             temporality=Temporality.TIMELESS,
-            view=True,
+            materialization=Materialization.VIEW,
+            query=f"SELECT * FROM {schema_name}.orders WHERE total >= 0",
         )
     )
 

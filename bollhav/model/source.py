@@ -82,13 +82,19 @@ if TYPE_CHECKING:
 
 @dataclass
 class SourceModel:
-    """Relational input — a managed model, an external table, or a view.
-    Carries the config to read it. Set `query` to define a view."""
+    """Relational input — a managed model or an external table. Carries the
+    config for reading it.
+
+    `read_query` is an optional custom SELECT for reading this upstream. It is
+    **declarative config only — bollhav never executes it**; your read code in
+    `execute` picks it up (`source.read_query`) instead of hardcoding the SQL.
+    (A *view's* defining body lives on the model as `Model.query`, not here —
+    this object models an input you read, not an output you produce.)"""
 
     schema: str | None = None
     catalog: str | None = None
     dsn_env_var: str | None = None
-    query: str | None = None
+    read_query: str | None = None
     partitioned_by: str | None = None
     infer_schema_length: int | None = None
     """Passed to polars as infer_schema_length — the max rows to scan for

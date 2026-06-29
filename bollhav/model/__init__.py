@@ -6,6 +6,7 @@ from bollhav.model.matching import match_models
 from bollhav.model.model import Model
 from bollhav.model.modelrun import ModelRun
 from bollhav.model.temporality import Temporality
+from bollhav.model.materialization import Materialization
 from bollhav.model.column_sorting import sort_columns
 from bollhav.model.write_modes import WriteMode
 from bollhav.model.source import (
@@ -48,6 +49,7 @@ __all__ = [
     "Model",
     "ModelRun",
     "Temporality",
+    "Materialization",
     "sort_columns",
     "Staging",
     "State",
