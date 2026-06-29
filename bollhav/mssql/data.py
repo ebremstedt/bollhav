@@ -45,9 +45,9 @@ class MssqlData:
         ensure_schema(self.conn, self.model.target.schema_resolved)
 
     def create_or_replace_view(self) -> None:
-        """`CREATE OR ALTER VIEW` from the model's source query — the
-        target-side asset for a VIEW model. Called instead of the table
-        DDL when `model.is_view`."""
+        """`CREATE OR ALTER VIEW` from the model's defining `query` (the view
+        body) — the target-side asset for a VIEW model. Called instead of the
+        table DDL when `model.is_view`."""
         from bollhav.mssql.modes import create_replace_view
 
         create_replace_view(conn=self.conn, model=self.model)

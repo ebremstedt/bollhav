@@ -200,14 +200,14 @@ upstream=[
 ]
 ```
 
-`SourceModel` is the only **SQL-addressable** type — `model.ref("raw.orders")` resolves it into a `FROM`. It's also the only type that can be **gated**: attach a `contract` to make it a managed upstream. A [view](TEMPORALITY.md) model's (`view=True`) definition *is* a `SourceModel` with a `query` set, in its `upstream` list — that's what `CREATE OR REPLACE VIEW` runs.
+`SourceModel` is the only **SQL-addressable** type — `model.ref("raw.orders")` resolves it into a `FROM`. It's also the only type that can be **gated**: attach a `contract` to make it a managed upstream. (A [view](TEMPORALITY.md) model's body lives on the model as `Model.query`, not on an upstream — `SourceModel` is purely an input you read.)
 
 | Field | Type · Default | Purpose |
 |---|---|---|
 | `schema` | `str` · `None` | Source schema. |
 | `catalog` | `str` · `None` | Source catalog / database (3-part `catalog.schema.table` names). |
 | `dsn_env_var` | `str` · `None` | DSN env var for the source connection. |
-| `query` | `str` · `None` | Optional query override. On a [view](TEMPORALITY.md) model's (`view=True`) source it *is* the view definition; otherwise the loader may use this SQL instead of `SELECT * FROM <schema>.<name>`. |
+| `read_query` | `str` · `None` | Optional custom `SELECT` for reading this upstream — **declarative config only; bollhav never executes it.** Your read code in `execute` picks it up (`source.read_query`) instead of hardcoding the SQL. (A view's body is `Model.query`, not here.) |
 | `partitioned_by` | `str` · `None` | Partition column on the source, when relevant to the read. |
 | `infer_schema_length` | `int` · `None` | Passed to polars as `infer_schema_length` — max rows scanned to infer column types. `None` scans every row (slow on large sources). |
 | `extra` | `dict` · `{}` | Free-form config bag for read functions that need extra knobs. |
