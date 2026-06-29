@@ -24,6 +24,7 @@ sys.modules.setdefault("pyodbc", MagicMock())
 
 from bollhav.model.batch import Batch
 from bollhav.model.database import Database
+from bollhav.model.materialization import Materialization
 from bollhav.model.temporality import Temporality
 from bollhav.model.intervals import TZInterval
 from bollhav.model.staging import Staging
@@ -58,6 +59,7 @@ def _model(
         ]
     # A TIMELESS model (incl. a view) has no batching; a TEMPORAL one is batched.
     batching = None if temporality is Temporality.TIMELESS else Batch()
+    materialization = Materialization.VIEW if view else Materialization.TABLE
     return Model(
         target=Target(
             name="events",
@@ -74,7 +76,8 @@ def _model(
         state=state,
         batching=batching,
         temporality=temporality,
-        view=view,
+        materialization=materialization,
+        query="SELECT 1" if view else None,
     )
 
 

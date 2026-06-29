@@ -116,13 +116,17 @@ If all columns are part of the unique key (no non-key columns), the `WHEN MATCHE
 
 ## Views
 
-A view is `view=True` on the model, not a write mode. Runs `CREATE OR ALTER VIEW`. Requires a `Source` in `upstream` whose `SourceModel.query` is set (the view's definition). No dataframe is consumed.
+A view is `materialization=Materialization.VIEW` on the model, not a write mode. Runs `CREATE OR ALTER VIEW` from the model's `query` (its SELECT body, required for a view). No dataframe is consumed.
 
 ```python
-from bollhav.model import Temporality, Source, SourceModel
+from bollhav.model import Materialization, Temporality, Model, Target
 
-target = Target(..., )
-upstream = [Source("raw_table", type=SourceModel(query="SELECT id, name FROM dbo.raw_table"))]
+model = Model(
+    target=Target(...),
+    temporality=Temporality.TIMELESS,
+    materialization=Materialization.VIEW,
+    query="SELECT id, name FROM dbo.raw_table",
+)
 write(conn=conn, model=model)   # no df_gen
 ```
 

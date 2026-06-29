@@ -145,7 +145,7 @@ flowchart LR
 
 ## Views
 
-A view is **not** a write mode — it's `view=True` on the model (timeless, or temporal with a `Contract` range it covers). It writes no data; the lifecycle runs `CREATE OR REPLACE VIEW` from the defining `SourceModel(query=…)` in `upstream`.
+A view is **not** a write mode — it's `materialization=Materialization.VIEW` on the model (timeless, or temporal with a `Contract` range it covers). It writes no data; the lifecycle runs `CREATE OR REPLACE VIEW` from the model's defining `query` (its SELECT body).
 
 ```mermaid
 flowchart LR
@@ -174,7 +174,7 @@ flowchart LR
 | `RECREATE_PARTITION` | ✅ | ✅ | ✅ | Deletes matches first |
 | `MERGE` | ✅ | ✅ | ✅ | Requires Postgres 15+ |
 
-A **view** is not a write mode — see [Views](#views); set `view=True` instead.
+A **view** is not a write mode — see [Views](#views); set `materialization=Materialization.VIEW` instead.
 
 ### Pre-load flags (on `Target`)
 

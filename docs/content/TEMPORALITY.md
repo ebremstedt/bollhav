@@ -28,13 +28,15 @@ The one case where `state` becomes **required** is gating: a `Source` that carri
 
 ## View vs table
 
-Materialization is a **separate** flag from the time axis. By default a model produces a materialized table; `view=True` makes it a SQL view (`CREATE OR REPLACE VIEW` from its defining `SourceModel(query=…)`).
+Materialization is a **separate** choice from the time axis — the `materialization` enum (`Materialization.TABLE` by default, or `Materialization.VIEW`). A `VIEW` is created with `CREATE OR REPLACE VIEW` from the model's defining `query` (its SELECT body, which lives on the model). Note: the `query` is the *definition*; `materialization` is how it's realized — a `query` alone does **not** make a model a view.
 
 ```python
 Model(temporality=Temporality.TEMPORAL, batching=Batch(...), ...)  # a windowed table
 Model(temporality=Temporality.TIMELESS, ...)                       # a whole-table load
-Model(temporality=Temporality.TIMELESS, view=True, ...)            # a timeless view
-Model(temporality=Temporality.TEMPORAL, view=True,                 # a temporal view —
+Model(temporality=Temporality.TIMELESS,                            # a timeless view
+      materialization=Materialization.VIEW, query="SELECT ...")
+Model(temporality=Temporality.TEMPORAL,                            # a temporal view —
+      materialization=Materialization.VIEW, query="SELECT ...",
       contract=Contract(begin=..., end=...), ...)    #   its Contract is the range it covers
 ```
 
@@ -46,7 +48,8 @@ The temporality and its companions must agree, caught at construction:
 
 - `Temporality.TIMELESS` **with** `batching` raises — a timeless model isn't windowed.
 - `Temporality.TIMELESS` **with** a `Contract` `begin`/`end` raises — no time to bound.
-- `view=True` **with** `batching` raises — a view isn't materialized per-window.
+- `materialization=Materialization.VIEW` **with** `batching` raises — a view isn't materialized per-window.
+- `materialization=Materialization.VIEW` **without** a `query` raises — a view is created from its SELECT body.
 
 ## Units per run
 
@@ -86,8 +89,8 @@ flowchart TD
 | **Temporal batched table** | `temporality=TEMPORAL, batching=Batch(...)` | one row **per window** | `ENCAPSULATE` / `THROUGH` / `WHOLE` / `EXISTS` | The default for incremental fact/event tables — daily/hourly loads, backfills, anything processed and resumed per time window. |
 | **Temporal one-shot table** | `temporality=TEMPORAL, contract=Contract(begin,end)` (no batching) | one row spanning **[begin,end]** | `ENCAPSULATE` (window ⊆ range) / `WHOLE` / `EXISTS` | A time-bounded table loaded in a single pass — small enough not to chunk, or the source only does a whole-range read — but downstreams still ask "is my window covered." |
 | **Timeless table** | `temporality=TIMELESS` | one **whole-table** row | `WHOLE` / `EXISTS` (not `ENCAPSULATE`) | Dimensions, reference / lookup tables, config — no time axis, reloaded wholesale. The only question is "is it loaded." |
-| **Temporal view** | `temporality=TEMPORAL, view=True, contract=Contract(begin,end)` | one row spanning **[begin,end]** (no data) | `ENCAPSULATE` (window ⊆ range) / `WHOLE` / `EXISTS` | A SQL view over time-ranged data where consumers care "is this view current through my window." Declare the range; enforce it by gating the view's own source `ENCAPSULATE`. |
-| **Timeless view** | `temporality=TIMELESS, view=True` | one **existence** row (no data) | `WHOLE` / `EXISTS` | A plain view — renames, joins, projections, lookups — where the only question is "does it exist." |
+| **Temporal view** | `temporality=TEMPORAL, materialization=VIEW, query=..., contract=Contract(begin,end)` | one row spanning **[begin,end]** (no data) | `ENCAPSULATE` (window ⊆ range) / `WHOLE` / `EXISTS` | A SQL view over time-ranged data where consumers care "is this view current through my window." Declare the range; enforce it by gating the view's own source `ENCAPSULATE`. |
+| **Timeless view** | `temporality=TIMELESS, materialization=VIEW, query=...` | one **existence** row (no data) | `WHOLE` / `EXISTS` | A plain view — renames, joins, projections, lookups — where the only question is "does it exist." |
 
 The two rejected corners each follow from one rule: **timeless can't batch** (batching chops a *time window*, and there's no time axis), and **a view can't batch** (batching is per-window *materialization*, and a view materializes nothing — its only way to carry time is the one-shot `[begin, end]` row).
 
