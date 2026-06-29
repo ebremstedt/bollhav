@@ -2,6 +2,7 @@ from datetime import datetime, timezone
 from unittest.mock import MagicMock
 import pytest
 from bollhav.model.temporality import Temporality
+from bollhav.model.materialization import Materialization
 from bollhav.model.model import Model
 from bollhav.model.target import Target
 from bollhav.model.contract import Contract
@@ -46,16 +47,19 @@ def make_model(**overrides) -> Model:
 #
 # The old `ModelType.VIEW <-> WriteMode.VIEW` coupling tests were removed:
 # `WriteMode.VIEW` no longer exists, and `ModelType` is gone entirely. A view
-# is now identified solely by `Model(temporality=Temporality.TIMELESS, view=True)`; the Target no longer
-# carries a model_type, so there is no write-mode/model-type pairing to
-# validate.
+# is now identified by `Model(materialization=Materialization.VIEW, query=...)`;
+# the Target no longer carries a model_type, so there is no write-mode/model-type
+# pairing to validate.
 
 
 def test_view_kind_has_no_write_mode_coupling():
     # A VIEW with the default (APPEND) write mode on its target is accepted —
     # the write mode is simply irrelevant for a view, so no error is raised.
     m = make_model(
-        target=Target(name="test_table"), temporality=Temporality.TIMELESS, view=True
+        target=Target(name="test_table"),
+        temporality=Temporality.TIMELESS,
+        materialization=Materialization.VIEW,
+        query="SELECT 1",
     )
     assert m.is_view is True
 

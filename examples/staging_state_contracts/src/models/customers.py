@@ -1,19 +1,20 @@
 """customers — a VIEW, with state.
 
 A view's "asset" is its definition: `@model_lifecycle` runs the
-`CREATE OR REPLACE VIEW` (from the defining `SourceModel.query` in its
-`upstream`) — there's no data to write, so the execute body does nothing.
-Because it's state-tracked, it
-gets a single existence row that flips to `applied` once the view is in
-place. That row is what a downstream's `ENCAPSULATE` contract resolves to for a
-view upstream (its existence row applied).
+`CREATE OR REPLACE VIEW` from the model's defining `query` (its SELECT body) —
+there's no data to write, so the execute body does nothing. Because it's
+state-tracked, it gets a single existence row that flips to `applied` once the
+view is in place. That row is what a downstream's `ENCAPSULATE` contract
+resolves to for a view upstream (its existence row applied).
 
-`temporality=Temporality.TIMELESS, view=True` is what marks it a view; `write_mode` is irrelevant for
-views (it's a data-write strategy) and is left at its default.
+`materialization=Materialization.VIEW` is what marks it a view (with its `query`
+as the body); `write_mode` is irrelevant for views (it's a data-write strategy)
+and is left at its default.
 """
 
 from bollhav.model import (
     Database,
+    Materialization,
     Temporality,
     Model,
     Source,
@@ -27,7 +28,8 @@ from bollhav.postgres import PostgresColumn, PostgresType
 
 customers = Model(
     temporality=Temporality.TIMELESS,
-    view=True,
+    materialization=Materialization.VIEW,
+    query="SELECT DISTINCT customer_id FROM warehouse.orders",
     target=Target(
         name="customers",
         schema="warehouse",
@@ -40,14 +42,9 @@ customers = Model(
             ),
         ],
     ),
-    # The view reads the orders table, so the pipeline creates orders first.
-    # A view's definition is a SourceModel with a query, in the inputs list.
-    upstream=[
-        Source(
-            "demo.warehouse.orders",
-            type=SourceModel(query="SELECT DISTINCT customer_id FROM warehouse.orders"),
-        )
-    ],
+    # The view reads the orders table, so the pipeline creates orders first —
+    # declared as a plain upstream dependency (the view body lives on `query`).
+    upstream=[Source("demo.warehouse.orders", type=SourceModel())],
     state=State(),  # so it registers (kind=view) with an existence row
     tagging=Tags(tags={"demo"}),
 )

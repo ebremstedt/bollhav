@@ -147,9 +147,7 @@ class TestRefAddressability:
             m.ref("vendor.orders")
 
     def test_view_kind_is_addressable(self) -> None:
-        m = _pg_model(
-            upstream=[Source("raw.v_orders", type=SourceModel(query="SELECT 1"))]
-        )
+        m = _pg_model(upstream=[Source("raw.v_orders", type=SourceModel())])
         assert m.ref("raw.v_orders") == '"raw"."v_orders"'
 
 

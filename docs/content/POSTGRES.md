@@ -48,4 +48,4 @@ Loads data into a temp table via `COPY`, then runs `INSERT ... ON CONFLICT (...)
 
 ## Views
 
-A view is `view=True` on the model, not a write mode. Runs `CREATE OR REPLACE VIEW`. Requires a `Source` in `upstream` whose `SourceModel.query` is set (the view's definition). No dataframe needed.
+A view is `materialization=Materialization.VIEW` on the model, not a write mode. Runs `CREATE OR REPLACE VIEW` from the model's `query` (its SELECT body, required for a view). No dataframe needed.
