@@ -279,6 +279,23 @@ class Library(_PostgresStateBase):
                 if batching is not None
                 else None
             ),
+            "ownership": (
+                {
+                    "owner": (
+                        {"name": model.ownership.owner.name, "email": model.ownership.owner.email}
+                        if model.ownership.owner is not None
+                        else None
+                    ),
+                    "creator": model.ownership.creator,
+                    "team": (
+                        {"name": model.ownership.team.name, "email": model.ownership.team.email}
+                        if model.ownership.team is not None
+                        else None
+                    ),
+                }
+                if model.ownership is not None
+                else None
+            ),
         }
 
     def register_model(self) -> None:

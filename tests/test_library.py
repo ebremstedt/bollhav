@@ -199,6 +199,54 @@ class TestRegister:
         assert params[1] == []
 
 
+class TestBuildMetadataOwnership:
+    """``_build_metadata`` serialises the ownership field to a JSON-safe dict."""
+
+    def _metadata(self, **ownership_kwargs):
+        from bollhav.postgres.state import PostgresState
+        from bollhav.model.owner import Contact, Ownership
+
+        m = _model()
+        m.ownership = Ownership(**ownership_kwargs) if ownership_kwargs else None
+        return PostgresState._build_metadata(m)
+
+    def test_ownership_absent_emits_null(self):
+        m = _model()
+        m.ownership = None
+        from bollhav.postgres.state import PostgresState
+
+        meta = PostgresState._build_metadata(m)
+        assert meta["ownership"] is None
+
+    def test_full_ownership_serialises(self):
+        from bollhav.postgres.state import PostgresState
+        from bollhav.model.owner import Contact, Ownership
+
+        m = _model()
+        m.ownership = Ownership(
+            owner=Contact(name="Axel", email="axel@example.com"),
+            creator="axel",
+            team=Contact(name="platform", email="platform@example.com"),
+        )
+        meta = PostgresState._build_metadata(m)
+        assert meta["ownership"] == {
+            "owner": {"name": "Axel", "email": "axel@example.com"},
+            "creator": "axel",
+            "team": {"name": "platform", "email": "platform@example.com"},
+        }
+
+    def test_partial_ownership_owner_none(self):
+        from bollhav.postgres.state import PostgresState
+        from bollhav.model.owner import Contact, Ownership
+
+        m = _model()
+        m.ownership = Ownership(creator="bot", team=Contact(name="analytics"))
+        meta = PostgresState._build_metadata(m)
+        assert meta["ownership"]["owner"] is None
+        assert meta["ownership"]["creator"] == "bot"
+        assert meta["ownership"]["team"] == {"name": "analytics", "email": None}
+
+
 class TestLookup:
     def test_returns_none_when_not_registered(self) -> None:
         from bollhav.postgres.state import PostgresState
