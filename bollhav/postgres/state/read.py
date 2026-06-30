@@ -456,8 +456,9 @@ def get_gaps_grouped(
             )
             continue
         # The horizon: contract begin → contract end, else the state's forward
-        # edge (max until), else now() when nothing's materialized.
-        b, e = conn.execute(
+        # edge (max until), else now() when nothing's materialized. The SELECT
+        # always returns one row; the guard is just for the type checker.
+        horizon = conn.execute(
             sql.SQL(
                 "SELECT %(b)s::timestamptz, COALESCE("
                 "%(e)s::timestamptz, "
@@ -465,6 +466,9 @@ def get_gaps_grouped(
             ).format(tbl=tbl),
             {"b": begin, "e": end},
         ).fetchone()
+        if horizon is None:
+            continue
+        b, e = horizon
         # multirange([b, e)) − range_agg(applied) = the maximal uncovered spans.
         gap_rows = conn.execute(
             sql.SQL(
