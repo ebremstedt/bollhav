@@ -112,12 +112,25 @@
         data-tip="Mean backfill coverage across the {view.gapScored} model{view.gapScored ===
         1
           ? ''
-          : 's'} that have a percentage — a rough project completeness score."
+          : 's'} that have a percentage — a rough backfill completeness score."
       >
-        project score
+        backfill score
         <b style="color:{GAP_COLORS.covered}">{view.gapScore}%</b>
       </span>
     {/if}
+  {:else if view.tab === "models"}
+    <span class="item" data-tip="Temporal — the model's work references time (windowed)."
+      ><span class="mbdg temp">⏱</span>temporal</span
+    >
+    <span class="item" data-tip="Timeless — a whole-table model with no time axis."
+      ><span class="mbdg temp timeless">∞</span>timeless</span
+    >
+    <span class="item" data-tip="Materialization: a stored table."
+      ><span class="mbdg mat">T</span>table</span
+    >
+    <span class="item" data-tip="Materialization: a SQL view."
+      ><span class="mbdg mat view">V</span>view</span
+    >
   {:else}
     {#each RUN_STATUSES as [k, label]}
       <span class="item">
@@ -205,6 +218,30 @@
     border: 1px solid var(--control-border);
     border-radius: 4px;
     padding: 0 4px;
+  }
+  /* model temporality / materialization badges — same icons + colours as the
+     Models tab's left-menu list */
+  .mbdg {
+    display: inline-block;
+    font-size: 9px;
+    width: 15px;
+    text-align: center;
+    border-radius: 3px;
+    padding: 1px 0;
+    color: #fff;
+    background: #43a047;
+  }
+  .mbdg.temp {
+    background: #2f80ed;
+  }
+  .mbdg.temp.timeless {
+    background: #1e3a8a;
+  }
+  .mbdg.mat {
+    background: #1b5e20;
+  }
+  .mbdg.mat.view {
+    background: #66bb6a;
   }
   .score b {
     font-size: 13px;

@@ -11,6 +11,7 @@
   import RunsView from "./components/RunsView.svelte";
   import GridView from "./components/GridView.svelte";
   import GapsView from "./components/GapsView.svelte";
+  import ModelsView from "./components/ModelsView.svelte";
 
   let dark = $state(true);
 
@@ -25,6 +26,8 @@
     <GridView />
   {:else if view.tab === "gaps"}
     <GapsView />
+  {:else if view.tab === "models"}
+    <ModelsView />
   {:else}
     <LineageBar />
     <div class="body">
