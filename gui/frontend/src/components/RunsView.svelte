@@ -29,9 +29,8 @@
   // can collapse them all.
   let openSet = $state(new Set());
 
-  // the shared search (driven by the global top bar): model-name substring and
-  // the tag-expression matches (set of full names, or null = inactive).
-  let nameQuery = $derived(view.query);
+  // the shared tag-expression matches (set of full names, or null = inactive).
+  // The model-name filter is lineage-only, so the runs tab isn't narrowed by it.
   let tagMatchSet = $derived(view.tagMatches ? new Set(view.tagMatches) : null);
 
   function toggleRow(i, isOpen) {
@@ -105,20 +104,18 @@
           status: r.status,
           blocked_reason: r.blocked_reason,
         });
-    // filter by model name (substring) and/or tag-expression match, then cap
+    // filter by tag-expression match (model-name filter is lineage-only), then cap
     let filtered = out;
-    const nq = nameQuery.trim().toLowerCase();
-    if (nq) filtered = filtered.filter((o) => o.full_name.toLowerCase().includes(nq));
     if (tagMatchSet) filtered = filtered.filter((o) => tagMatchSet.has(o.full_name));
     filtered = filtered.filter((o) => passesTime(o.when, o.since, o.until));
     filtered.sort((a, b) => (b.when || "").localeCompare(a.when || ""));
     return filtered.slice(0, limit);
   });
 
-  // is any filter (name / tag / time) narrowing the view right now?
+  // is any filter (tag / time) narrowing the view right now? (the model-name
+  // filter is lineage-only)
   let hasFilter = $derived(
-    !!nameQuery.trim() ||
-      !!tagMatchSet ||
+    !!tagMatchSet ||
       (view.loadedMode === "exact"
         ? !!view.loadedExact
         : !!(view.loadedFrom || view.loadedTo)) ||
