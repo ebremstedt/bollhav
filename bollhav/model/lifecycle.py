@@ -315,7 +315,9 @@ def model_lifecycle(func: Callable) -> Callable:
                         model.target.full_name,
                     )
 
-            PROGRESS.begin_model_for(model, total=len(run.intervals))
+            PROGRESS.begin_model_for(
+                model, total=len(run.intervals), intervals=run.intervals
+            )
             if dry_state:
                 _print_state_plan(run, state_handler, _dry_state_extra())
                 return None
