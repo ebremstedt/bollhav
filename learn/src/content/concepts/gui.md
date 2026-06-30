@@ -1,6 +1,6 @@
 ---
-title: "GUI"
-body: "Visualize the lineage graph."
+title: "GUI 🕸️"
+body: "See the whole pipeline as a live graph"
 ---
 
-A small web app (under `gui/`) that draws the cross-pipeline model graph from the central `z_bollhav` library with live state and errors. A FastAPI backend reads Postgres via `bollhav.postgres.registry`; a Svelte Flow frontend renders managed models vs sources, status lights, and upstream contracts + freshness on the arrows. A 🎄 toggle switches lappland (bare) and stockholm (full detail).
+A small web app (under `gui/`) that draws the cross-pipeline model graph from the central `z_bollhav` library, with live state and errors. A FastAPI backend reads Postgres; a Svelte Flow frontend renders managed models versus sources, status lights, and each arrow's upstream contract and freshness. A 🎄 toggle switches between lappland (bare) and stockholm (full detail).

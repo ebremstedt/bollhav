@@ -1,6 +1,6 @@
 ---
-title: "Virtual environments"
-body: "One env per pipeline."
+title: "Virtual environments 🏖️"
+body: "Use a schema suffix so dev runs don't overwrite production"
 ---
 
-Pin `bollhav` plus your connectors (`psycopg` for Postgres, `pyodbc` for MSSQL) and `polars`, captured in `requirements.txt` so local, CI, and the prod image match. A venv is enough for pure-Python Postgres; MSSQL needs the system ODBC Driver 18 (not pip-installable), so reach for Docker there. Keep the state/target DB separate — a throwaway Docker Postgres.
+Setting `SCHEMA_SUFFIX` gives a run its own isolated environment: every schema it touches — the target tables, state, library, errors, and staging — gets the suffix appended, turning `z_bollhav` into something like `z_bollhav_pr123`. A development or CI run then writes into that sandbox instead of overwriting the production models. Without a suffix, a dev run would point straight at the prod schemas — exactly what you don't want. The suffix can also carry a timestamp appendix, so the whole environment is ephemeral and easy to tear down once you're done.

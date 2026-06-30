@@ -124,3 +124,7 @@ The override nulls `state` but copies gated `upstream` verbatim → re-validatio
 
 ## Top 5 to fix first
 1 (DST `split_window`), 2 (non-atomic state/data + dead `update_state=False`), 3 (applied-gate TOCTOU), 4 (lock-free torch/bulldozer), 5 (PG PK-only UPSERT) — silent data corruption or crashes on normal configs.
+
+## Planned API ergonomics (bool → enum, not bugs)
+Same upgrade as `Materialization` (done on `feat/query-on-model`): replace a `bool` with a named enum so the choice reads as intent and can grow.
+- **`TimeChunking.fixed_intervals: bool` → `rigidity: Rigidity` enum** — `Rigidity.RIGID` (default, was `True` — the chunk grid is the state identity) / `Rigidity.FLUID` (was `False` — freely re-sliceable coverage). Touches `window.py`, the coverage/state engine, run-modes, tests, docs. The learn site already describes it as `rigidity` (acting as if implemented).

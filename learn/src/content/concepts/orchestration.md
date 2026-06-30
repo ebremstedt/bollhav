@@ -1,6 +1,6 @@
 ---
-title: "Orchestration"
-body: "An external conductor owns the DAG."
+title: "Orchestration 🐙"
+body: "Centralized model ordering"
 ---
 
-The stateless alternative: Airflow / Dagster / cron owns the graph — it encodes raw → clean → marts, retries, and schedules, while bollhav just runs the model you point it at (selected by `TAGS`). It's the only option where state isn't supported (e.g. MSSQL). The two compose — a thin trigger on the outside, contracts doing the real ordering inside; put Airflow in front and it degrades to a timer, not a dependency engine.
+The stateless alternative: Airflow, Dagster, or cron owns the graph — it encodes raw → clean → marts, plus retries and schedules — while bollhav just runs whichever model you point it at (chosen by `TAGS`). It's the only setup where state isn't supported (for example on MSSQL). The two can also compose: a thin trigger on the outside with contracts doing the real ordering inside. Put Airflow in front of stateful models and it becomes a timer, not a dependency engine.

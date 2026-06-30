@@ -1,6 +1,6 @@
 ---
-title: "Contract"
-body: "A model's own time window."
+title: "Contract 📜"
+body: "What a model is expected to produce"
 ---
 
-`Contract(begin=, end=)` is the historical scope a model's runs may target; bollhav walks that range in reload / backfill. Ignored in latest mode (which reads from `now()`). Distinct from an `UpstreamContract` — that's a downstream's gating policy on an input.
+A `Contract` declares what a model is expected to produce — the span of data it should cover, from `begin` to `end`. With a **loose upper bound** (no fixed `end`), it keeps filling as more days elapse, always extending to the latest complete window — rather than stopping at a set date.
