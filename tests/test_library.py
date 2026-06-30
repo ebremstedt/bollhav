@@ -204,7 +204,7 @@ class TestBuildMetadataOwnership:
 
     def _metadata(self, **ownership_kwargs):
         from bollhav.postgres.state import PostgresState
-        from bollhav.model.owner import Contact, Ownership
+        from bollhav.model.owner import Ownership
 
         m = _model()
         m.ownership = Ownership(**ownership_kwargs) if ownership_kwargs else None
