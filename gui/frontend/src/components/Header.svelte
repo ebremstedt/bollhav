@@ -12,20 +12,13 @@
   // top-level view tabs
   const TABS = [
     ["lineage", "Lineage"],
+    ["models", "Models"],
     ["runs", "Runs"],
     ["grid", "Grid"],
+    ["gaps", "Gaps"],
   ];
 
   let { dark = $bindable() } = $props();
-
-  let modelNames = $derived(
-    view.full
-      ? view.full.nodes
-          .filter((n) => n.type === "model")
-          .map((n) => n.name)
-          .sort()
-      : [],
-  );
 
   let allTags = $derived(
     view.full
@@ -42,7 +35,9 @@
           class="seg-btn"
           class:active={view.tab === val}
           onclick={() => setTab(val)}
-          >{label}{#if val === "grid"}<sup class="beta">(beta)</sup>{/if}</button
+          >{label}{#if val === "grid" || val === "gaps"}<sup class="beta"
+              >(beta)</sup
+            >{/if}</button
         >
       {/each}
     </span>
@@ -66,21 +61,20 @@
   </div>
 
   <div class="right">
-    <input
-      class="search"
-      list="model-list"
-      placeholder="find a model by name…"
-      value={view.query}
-      oninput={(e) => {
-        view.query = e.currentTarget.value;
-        applyFilter();
-      }}
-    />
-    <datalist id="model-list">
-      {#each modelNames as m}
-        <option value={m}></option>
-      {/each}
-    </datalist>
+    <!-- the model-name filter lives on the top bar for the lineage + models
+         tabs (it narrows the lineage graph and the models list); the runs /
+         grid / gaps tabs are not filtered by it. -->
+    {#if view.tab === "lineage" || view.tab === "models"}
+      <input
+        class="search"
+        placeholder="filter models by name…"
+        value={view.query}
+        oninput={(e) => {
+          view.query = e.currentTarget.value;
+          if (view.tab === "lineage") applyFilter();
+        }}
+      />
+    {/if}
     <input
       class="search tagsearch"
       list="tag-list"
