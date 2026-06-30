@@ -273,6 +273,23 @@ def test_label_unbatched_model_has_empty_mode():
     assert _name_and_mode(m, [None]) == ("dim_thing", "")
 
 
+def test_avg_batch_marker_uses_at_sign_not_a_acute():
+    """The average-batch-time marker renders as '@', never 'á'."""
+
+    @progress_bar
+    def execute(model):
+        pass
+
+    execute.set_total(2)
+    model = make_mock_model("orders")
+    execute(model=model)
+    execute(model=model)
+
+    output = finish_captured(execute)
+    assert " @ " in output, f"expected '@' avg marker in: {output!r}"
+    assert "á" not in output, f"stale 'á' marker present in: {output!r}"
+
+
 def test_begin_model_for_threads_span_into_finished_line():
     """End-to-end through the renderer: begin_model_for given a single
     sub-chunk slice prints '(1h)', never '(daily)'."""

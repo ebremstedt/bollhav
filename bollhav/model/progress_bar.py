@@ -335,7 +335,7 @@ class Progress:
 
     def _avg_batch_str(self) -> str:
         avg = self._avg_batch_seconds()
-        return f" á {_format_duration(avg)}" if avg is not None else ""
+        return f" @ {_format_duration(avg)}" if avg is not None else ""
 
     def _eta_str(self) -> str:
         avg = self._avg_batch_seconds()
@@ -376,15 +376,15 @@ def progress_bar(func: Callable) -> Callable:
         ✓ 3 models done  5.2s
 
     PROGRESS_BAR=model  (default)
-        ✓ customers       110ms 3/3 á  36ms
-        ✓ orders          1.2s  9/9 á 130ms
-        ✓ products        4.5s 25/25 á 180ms
+        ✓ customers       110ms 3/3 @  36ms
+        ✓ orders          1.2s  9/9 @ 130ms
+        ✓ products        4.5s 25/25 @ 180ms
 
     PROGRESS_BAR=execute
-        ⠋ customers  █████████░░░░░░░░░░░ 45% 3/9 á 130ms ~1.2s left
-        ✓ customers       1.2s  9/9 á 130ms
-        ⠋ orders     ██░░░░░░░░░░░░░░░░░░ 12% 3/25 á 180ms ~4.0s left
-        ✓ orders          4.5s 25/25 á 180ms
+        ⠋ customers  █████████░░░░░░░░░░░ 45% 3/9 @ 130ms ~1.2s left
+        ✓ customers       1.2s  9/9 @ 130ms
+        ⠋ orders     ██░░░░░░░░░░░░░░░░░░ 12% 3/25 @ 180ms ~4.0s left
+        ✓ orders          4.5s 25/25 @ 180ms
         ...
 
     Legacy single-execute path. New lifecycle-based pipelines get progress
