@@ -47,13 +47,13 @@
       .finally(() => (loading = false));
   });
 
-  // name + tag filter, then the models needing backfill first (worst gap first);
-  // `showAll` then appends the fully-covered / loaded / no-contract models.
+  // tag filter (the model-name filter is lineage-only), then the models needing
+  // backfill first (worst gap first); `showAll` then appends the fully-covered /
+  // loaded / no-contract models.
   let rows = $derived.by(() => {
-    const nq = view.query.trim().toLowerCase();
-    const visible = groups
-      .filter((g) => !nq || g.full_name.toLowerCase().includes(nq))
-      .filter((g) => !tagMatchSet || tagMatchSet.has(g.full_name));
+    const visible = groups.filter(
+      (g) => !tagMatchSet || tagMatchSet.has(g.full_name),
+    );
     const primary = visible.filter(needsBackfill);
     primary.sort(
       (a, b) => b.gap_seconds - a.gap_seconds || a.full_name.localeCompare(b.full_name),
@@ -67,7 +67,7 @@
 
   let gapCount = $derived(groups.filter(needsBackfill).length);
 
-  let hasFilter = $derived(!!view.query.trim() || !!tagMatchSet);
+  let hasFilter = $derived(!!tagMatchSet);
 
   function shortName(full) {
     return (full || "").split(".").slice(-2).join(".");
@@ -84,6 +84,9 @@
     if (m) return `${m}m`;
     return `${Math.round(sec)}s`;
   }
+
+  // ISO date part for the bar's start / end labels, e.g. "2026-05-01"
+  const dateOf = (s) => (s ? s.slice(0, 10) : "");
 
   // a gap's position within the contract window, as left% / width% of the bar
   function span(g, begin, end) {
@@ -137,6 +140,7 @@
         <tbody>
           {#each rows as g (g.full_name)}
             {@const open = selected === g.full_name}
+            {@const tags = (g.tags || []).filter((t) => !t.includes("."))}
             <tr
               class="row"
               class:open
@@ -144,6 +148,7 @@
               onclick={() => (selected = open ? null : g.full_name)}
             >
               <td class="model" title={g.full_name}
+                ><span class="caret">{open ? "▾" : "▸"}</span
                 >{#each nameSegments(shortName(g.full_name), view.tagHighlights[g.full_name] || []) as s}<span
                     class:hit={s.hit}>{s.text}</span
                   >{/each}{#if g.timeless}<span
@@ -154,74 +159,88 @@
               >
               <td class="track">
                 {#if g.has_contract}
-                  <div class="bar-wrap" title="{ts(g.begin)} → {ts(g.end)}">
+                  <div class="bar-wrap">
                     {#each g.gaps as gp}
                       <div
                         class="hole"
                         style="{span(gp, g.begin, g.end)};background:{GAP}"
                       ></div>
                     {/each}
+                    <span class="edge edge-l">{dateOf(g.begin)}</span>
+                    <span class="edge edge-r">{dateOf(g.end)}</span>
                   </div>
                 {:else if g.timeless && g.applied !== null}
-                  <div
-                    class="bar-wrap"
-                    title="whole-table model — {g.applied
-                      ? 'loaded'
-                      : 'not loaded yet'}"
-                  >
+                  <div class="bar-wrap" title="timeless — no time bounds">
                     {#if !g.applied}
                       <div class="hole" style="left:0;width:100%;background:{GAP}"></div>
                     {/if}
+                    <span class="edge edge-l">∞</span>
+                    <span class="edge edge-r">∞</span>
                   </div>
                 {:else}
                   <span class="nobounds">no declared contract bounds</span>
                 {/if}
               </td>
-              <td class="stat pct">
-                {#if g.has_contract || (g.timeless && g.applied !== null)}{g.pct_covered ??
-                    "—"}%{/if}
-              </td>
-              <td class="stat gapdur">
-                {#if g.has_contract && g.gaps.length}
-                  <b>{humDur(g.gap_seconds)}</b> · {g.gaps.length} gap{g.gaps
-                    .length === 1
-                    ? ""
-                    : "s"}
-                {:else if g.has_contract}
-                  <span class="ok">fully backfilled</span>
-                {:else if g.timeless && g.applied === true}
-                  <span class="ok">whole table loaded</span>
-                {:else if g.timeless && g.applied === false}
-                  whole table — not loaded
-                {/if}
-              </td>
             </tr>
-            {#if open && g.has_contract && g.gaps.length}
+            {#if open}
               <tr class="detail-row">
                 <td></td>
-                <td colspan="3">
-                  <div class="gaplist">
-                    <div class="window">
-                      contract window <span class="mono">{ts(g.begin)}</span> →
-                      <span class="mono">{ts(g.end)}</span>
-                    </div>
-                    {#each g.gaps as gp}
-                      <div class="gapline">
-                        <span class="dot" style="background:{GAP}"></span>
-                        <span class="mono">{ts(gp.since)}</span>
-                        <span class="arrow">→</span>
-                        <span class="mono">{ts(gp.until)}</span>
-                        <span class="dur">{humDur(gp.seconds)}</span>
-                        <button
-                          class="copy"
-                          title="copy as RUN_SINCE / RUN_UNTIL for a backfill run"
-                          onclick={(ev) => {
-                            ev.stopPropagation();
-                            copyRange(gp, ev);
-                          }}>copy</button
+                <td>
+                  <div class="detail">
+                    <div class="summary">
+                      {#if g.has_contract}
+                        <span class="big">{g.pct_covered ?? "—"}%</span> backfilled
+                        {#if g.gaps.length}
+                          · <b>{humDur(g.gap_seconds)}</b> missing in {g.gaps.length}
+                          gap{g.gaps.length === 1 ? "" : "s"}
+                        {:else}
+                          · <span class="ok">fully backfilled</span>
+                        {/if}
+                        <span class="muted"
+                          >· contract {dateOf(g.begin)} → {dateOf(g.end)}</span
                         >
+                      {:else if g.timeless && g.applied !== null}
+                        <span class="big">{g.pct_covered ?? "—"}%</span> ·
+                        {#if g.applied}<span class="ok">whole table loaded</span
+                          >{:else}whole table — not loaded yet{/if}
+                      {:else}
+                        <span class="muted">no declared contract bounds</span>
+                      {/if}
+                    </div>
+                    {#if Object.keys(g.status_counts || {}).length}
+                      <div class="statuses">
+                        {#each Object.entries(g.status_counts) as [s, n]}
+                          <span class="st">{s}&nbsp;{n}</span>
+                        {/each}
                       </div>
-                    {/each}
+                    {/if}
+                    {#if tags.length}
+                      <div class="tags">
+                        <span class="tags-label">tags</span>
+                        {#each tags as t}<span class="tag">{t}</span>{/each}
+                      </div>
+                    {/if}
+                    {#if g.has_contract && g.gaps.length}
+                      <div class="gaplist">
+                        {#each g.gaps as gp}
+                          <div class="gapline">
+                            <span class="dot" style="background:{GAP}"></span>
+                            <span class="mono">{ts(gp.since)}</span>
+                            <span class="arrow">→</span>
+                            <span class="mono">{ts(gp.until)}</span>
+                            <span class="dur">{humDur(gp.seconds)}</span>
+                            <button
+                              class="copy"
+                              title="copy as RUN_SINCE / RUN_UNTIL for a backfill run"
+                              onclick={(ev) => {
+                                ev.stopPropagation();
+                                copyRange(gp, ev);
+                              }}>copy</button
+                            >
+                          </div>
+                        {/each}
+                      </div>
+                    {/if}
                   </div>
                 </td>
               </tr>
@@ -323,16 +342,45 @@
   .track {
     width: 100%;
   }
+  .caret {
+    display: inline-block;
+    width: 12px;
+    color: var(--muted);
+    font-size: 9px;
+  }
   .bar-wrap {
     position: relative;
-    height: 16px;
+    width: 100%;
+    height: 18px;
     border-radius: 4px;
     /* fresh emerald with a subtle top-down sheen (matches COVERED) */
     background: linear-gradient(180deg, #4ed47a 0%, #2da44e 100%);
     border: 1px solid rgba(0, 0, 0, 0.18);
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18);
     overflow: hidden;
-    min-width: 180px;
+    min-width: 160px;
+  }
+  /* contract start / end (and the timeless label) overlaid on the bar ends,
+     painted over the holes (they come later in the DOM) */
+  .edge {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    display: flex;
+    align-items: center;
+    padding: 0 6px;
+    font-size: 10px;
+    color: #fff;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.55);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+    pointer-events: none;
+  }
+  .edge-l {
+    left: 0;
+  }
+  .edge-r {
+    right: 0;
   }
   .hole {
     position: absolute;
@@ -345,36 +393,68 @@
     color: var(--muted);
     font-style: italic;
   }
-  .stat {
-    white-space: nowrap;
-    text-align: right;
-    font-size: 11px;
-    color: var(--muted);
+  .detail-row td {
+    padding-top: 0;
+    padding-bottom: 12px;
   }
-  .pct {
-    width: 48px;
+  .detail {
+    padding: 2px 0 0;
+  }
+  .summary {
+    font-size: 12px;
+    margin-bottom: 7px;
+  }
+  .summary .big {
+    font-size: 14px;
+    font-weight: 700;
     font-variant-numeric: tabular-nums;
   }
-  .gapdur {
-    width: 150px;
-  }
-  .gapdur .ok {
+  .ok {
     color: var(--muted);
     font-style: italic;
   }
-  .detail-row td {
-    padding-top: 0;
-    padding-bottom: 10px;
+  .muted {
+    color: var(--muted);
+  }
+  .statuses {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 7px;
+  }
+  .st {
+    font-size: 10px;
+    color: var(--muted);
+    border: 1px solid var(--control-border);
+    border-radius: 4px;
+    padding: 1px 6px;
+    text-transform: capitalize;
+  }
+  .tags {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 5px;
+    margin-bottom: 7px;
+  }
+  .tags-label {
+    font-size: 10px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin-right: 2px;
+  }
+  .tag {
+    font-size: 10px;
+    color: #16a34a;
+    background: rgba(22, 163, 74, 0.12);
+    border-radius: 4px;
+    padding: 1px 6px;
   }
   .gaplist {
     border-left: 2px solid var(--border);
     padding: 4px 0 4px 12px;
-    margin: 2px 0 6px;
-  }
-  .window {
-    font-size: 11px;
-    color: var(--muted);
-    margin-bottom: 6px;
+    margin: 2px 0 0;
   }
   .gapline {
     display: flex;

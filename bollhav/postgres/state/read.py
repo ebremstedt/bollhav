@@ -382,6 +382,7 @@ def get_gaps_grouped(
     for full_name, temporality, st_schema, st_table, metadata in models:
         contract = (metadata or {}).get("contract") or {}
         begin, end = contract.get("begin"), contract.get("end")
+        tags = (metadata or {}).get("tags", []) or []
         has_table = bool(
             st_schema and st_table and _table_exists(conn, st_schema, st_table)
         )
@@ -427,6 +428,7 @@ def get_gaps_grouped(
                     "pct_covered": None
                     if applied is None
                     else (100.0 if applied else 0.0),
+                    "tags": tags,
                     "status_counts": status_counts,
                 }
             )
@@ -448,6 +450,7 @@ def get_gaps_grouped(
                     "gap_seconds": 0,
                     "covered_seconds": 0,
                     "pct_covered": None,
+                    "tags": tags,
                     "status_counts": status_counts,
                 }
             )
@@ -502,6 +505,7 @@ def get_gaps_grouped(
                     if contract_seconds
                     else None
                 ),
+                "tags": tags,
                 "status_counts": status_counts,
             }
         )

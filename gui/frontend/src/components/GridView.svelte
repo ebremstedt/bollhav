@@ -43,9 +43,7 @@
   // filter by model name + tag match, and each model's cells by the time
   // filter; drop models left with no visible cells.
   let rows = $derived.by(() => {
-    const nq = view.query.trim().toLowerCase();
     const out = groups
-      .filter((g) => !nq || g.full_name.toLowerCase().includes(nq))
       .filter((g) => !tagMatchSet || tagMatchSet.has(g.full_name))
       .map((g) => {
         // backend gives newest-first; "oldest" puts newest on the right
@@ -65,10 +63,10 @@
     return out;
   });
 
-  // is any filter (name / tag / time) narrowing the view right now?
+  // is any filter (tag / time) narrowing the view right now? (the model-name
+  // filter is lineage-only)
   let hasFilter = $derived(
-    !!view.query.trim() ||
-      !!tagMatchSet ||
+    !!tagMatchSet ||
       (view.loadedMode === "exact"
         ? !!view.loadedExact
         : !!(view.loadedFrom || view.loadedTo)) ||
