@@ -1,6 +1,6 @@
 ---
-title: "Lineage"
-body: "Where a model's data comes from."
+title: "Lineage 🧬"
+body: "Understand all relationships between models in your pipelines"
 ---
 
-Each model declares its inputs, so you can inspect one model's lineage in code (no database) or read the whole cross-pipeline graph from the library — managed upstreams as internal edges, sources as boundary nodes.
+Because every model declares its own inputs, you can trace one model's lineage straight from the code — no database needed — or read the whole cross-pipeline graph out of the library, with managed upstreams as internal edges and sources as the boundary nodes where data enters.

@@ -1,6 +1,6 @@
 ---
-title: "Sources"
-body: "External, unmanaged inputs."
+title: "Sources 📥"
+body: "Where data enters from outside the framework"
 ---
 
-Boundary nodes where data enters the system: `SourceModel` (a raw table), `SourceFile`, `SourceApi`, and `SourceHardcoded` (inline rows/SQL). Ungated — unlike upstreams they're not state-tracked.
+Sources are the edges of the system, where data comes in from somewhere bollhav doesn't manage: `SourceModel` (a raw table), `SourceFile`, `SourceApi`, and `SourceHardcoded` (inline rows or SQL). Unlike managed upstreams, they aren't state-tracked — so nothing gates on them.

@@ -1,6 +1,6 @@
 ---
-title: "Tags"
-body: "Selecting which models run."
+title: "Tags 🏷️"
+body: "Selecting which models run using tag expressions"
 ---
 
-`TAGS` is a tag expression: `[a & b]` is AND, `[a][b]` is OR groups, `not:` excludes, `r:` reloads. A model's literal name is a tag, so `[FactCase]` selects exactly that one.
+`TAGS` is a small expression language for picking models. `[a & b]` means both, separate groups `[a][b]` mean either, `not:` excludes, and `r:` marks a model for reload. Every model's own name counts as a tag, so `[FactCase]` selects exactly that one model.

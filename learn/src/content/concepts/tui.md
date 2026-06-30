@@ -1,6 +1,6 @@
 ---
-title: "TUI"
-body: "Run models from the terminal."
+title: "TUI 🖥️"
+body: "Drive runs from a terminal screen"
 ---
 
-A terminal UI (`pip install "bollhav[tui]"`, then run `bollhav` in a folder of models). Set the run environment in a form — backfill window, suffixes, state mode, overrides — and fire a dry run, a dry-state run, or the real run, without remembering env-var names.
+A terminal screen for running models: install with `pip install "bollhav[tui]"`, then run `bollhav` inside a folder of models. You set up the run on a form — backfill window, schema suffixes, state mode, overrides — and launch a dry run, a dry-state run, or the real thing, without having to remember any environment-variable names.

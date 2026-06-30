@@ -1,6 +1,6 @@
 ---
-title: "Freshness"
-body: "How old an upstream may be."
+title: "Freshness ❄️"
+body: "Set limits on how stale your upstream data can be"
 ---
 
-A freshness bound (`Freshness` / `FreshnessScope`) on an upstream contract: even when the data is present, a downstream is stale if the upstream is older than the bound. Shown as a ❄ on the dependency arrow.
+A freshness bound sits on an upstream contract and caps how old the input may be. Even when the data is all present, the downstream counts as stale if the upstream is older than the bound. It shows up as a ❄ on the dependency arrow.

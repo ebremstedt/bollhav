@@ -1,6 +1,6 @@
 ---
-title: "State marking"
-body: "Adopting out-of-band loads."
+title: "State marking ✅"
+body: "Explicitly let state know you have made your own backfilling"
 ---
 
-`STATE_MARK_APPLIED` stamps the run's window intervals applied without executing the model — for when you loaded the tables outside of a state run and want state to reflect that.
+`STATE_MARK_APPLIED` marks the run's intervals as applied without actually executing the model. Use it when you loaded the tables some other way — outside a normal state run — and just want state to catch up and reflect that the work is already done.
