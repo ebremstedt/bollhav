@@ -23,7 +23,7 @@ schema in that database (prod + any dev/PR envs).
 
 ---
 
-Everything below is reference — you don't need it to run the app.
+Everything below is reference — you don't need it to run the app
 
 | URL | what |
 |---|---|
