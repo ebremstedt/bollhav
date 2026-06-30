@@ -252,6 +252,76 @@ SPEC = [
     ),
 ]
 
+# More temporal CLEAN facts — each reads one unmanaged `model` source with no
+# managed upstreams. They exist mainly to give the Gaps tab a rich spread of
+# DIFFERENT backfill shapes (see PROFILES below).
+_EXTRA_TEMPORAL = [
+    "InventoryStockLevelSnapshotFact",
+    "PaymentTransactionSettlementFact",
+    "WebSessionClickstreamEventFact",
+    "SupportTicketResolutionEventFact",
+    "AdImpressionDeliveryEventFact",
+    "LogisticsRouteTelemetryFact",
+    "PricingExperimentAssignmentFact",
+    "DeviceTelemetryHeartbeatFact",
+]
+SPEC += [
+    (clean(t), Temporality.TEMPORAL, [], [(cha(t), "model")]) for t in _EXTRA_TEMPORAL
+]
+
+
+# Per-temporal-model backfill shape for the demo: how far back the contract
+# begins (`days`) and which day-indices are already `applied` (a list of
+# half-open [start, end) index ranges; index 0 = the contract's first day,
+# index days-1 = the most recent day). Everything not applied is a gap, so this
+# table is really "draw me these gaps". The Gaps tab then shows a spread of
+# shapes: tiny recent tails, huge leading backlogs, swiss-cheese holes,
+# fully-covered, and never-run.
+DEFAULT_PROFILE = {"days": 60, "applied": [(0, 54)]}
+PROFILES = {
+    # existing models — the special `*_latest` newest cell is layered on top
+    clean("CustomerInteractionEngagementEventFact"): {"days": 45, "applied": [(0, 44)]},
+    clean("SubscriptionBillingLifecycleCycleFact"): {"days": 90, "applied": [(80, 90)]},
+    clean("OrderFulfilmentShipmentMovementFact"): {
+        "days": 40,
+        "applied": [(0, 10), (16, 24), (30, 40)],
+    },
+    consume("DailyConsolidatedRevenueAggregateFact"): {
+        "days": 60,
+        "applied": [(0, 59)],
+    },
+    consume("RollingThirtyDayEngagementTrendView"): {"days": 30, "applied": [(0, 29)]},
+    consume("WeeklyChannelAttributionRollupFact"): {"days": 70, "applied": [(20, 55)]},
+    # extra models — pure gap-shape variety
+    clean("InventoryStockLevelSnapshotFact"): {"days": 120, "applied": [(0, 120)]},
+    clean("PaymentTransactionSettlementFact"): {"days": 50, "applied": []},
+    clean("WebSessionClickstreamEventFact"): {"days": 75, "applied": [(50, 75)]},
+    clean("SupportTicketResolutionEventFact"): {
+        "days": 35,
+        "applied": [(0, 12), (20, 35)],
+    },
+    clean("AdImpressionDeliveryEventFact"): {
+        "days": 100,
+        "applied": [(0, 30), (70, 100)],
+    },
+    clean("LogisticsRouteTelemetryFact"): {
+        "days": 28,
+        "applied": [(0, 7), (10, 14), (18, 21), (24, 28)],
+    },
+    clean("PricingExperimentAssignmentFact"): {"days": 14, "applied": [(0, 7)]},
+    clean("DeviceTelemetryHeartbeatFact"): {"days": 120, "applied": [(0, 90)]},
+}
+
+
+def _temporal_window(full_name):
+    """The `(begin, days, profile)` for a temporal model — `begin` is aligned to
+    midnight so daily intervals tile the contract exactly. Shared by `_build`
+    (the `Contract` bound) and `_seed_runs` (the rows) so they always agree."""
+    prof = PROFILES.get(full_name, DEFAULT_PROFILE)
+    today0 = NOW.replace(hour=0, minute=0, second=0, microsecond=0)
+    return today0 - timedelta(days=prof["days"]), prof["days"], prof
+
+
 # Historic (already-resolved) errors — logged, but the interval later
 # succeeded, so they DON'T light the red dot. DailyConsolidatedRevenueAggregateFact
 # gets a separate *unresolved* error in _seed_runs to demo the dot.
@@ -388,7 +458,7 @@ def _build(full_name, kind, upstream_specs, source_specs):
         upstream=upstream,
         description=description,
         contract=(
-            Contract(begin=NOW - timedelta(days=60))
+            Contract(begin=_temporal_window(full_name)[0])
             if kind is Temporality.TEMPORAL
             else None
         ),
@@ -403,63 +473,79 @@ def _seed_runs(
     running_latest=False,
     stale_latest=False,
     blocked_latest=False,
+    loaded=True,
 ):
-    """Give the model a little run history via the real state API: 6 daily
-    intervals, the rest applied. By default the newest is left pending; with
-    `error_latest` the newest interval is recorded as a failure (state row
-    -> 'error'), so it shows as an unresolved error (the red dot). A later
-    successful rerun would flip it back to applied and clear that. With
-    `running_latest` the newest interval is left in 'running' (a run in
-    flight), which lights the blue dot. With `stale_latest` the newest interval
-    is left `blocked` with a freshness-stale reason, which lights the yellow dot.
+    """Materialize a temporal model's whole contract window as daily state rows
+    (one per day, like prefill does), `mark_applied` the days named in its
+    PROFILE, and leave the rest `pending` — so the Gaps tab shows exactly the
+    profile's holes as backfill gaps. The newest day can instead be flipped to a
+    special status to light the lineage badges: `error_latest` records a failure
+    (red dot), `running_latest` leaves it 'running' (blue dot), `stale_latest` /
+    `blocked_latest` leave it 'blocked' (a freshness-stale reason → yellow dot,
+    a completeness reason → orange dot).
 
-    Oneshot/view models get one applied whole-table row."""
+    Oneshot/view (timeless) models get one applied whole-table row."""
     st = PostgresState(model=model, conn=conn)
     st.ensure_tables()
     rid = uuid.uuid4()  # bollhav 3.0: run_id lives on ModelRun, mint one per run
-    if model.temporality is Temporality.TEMPORAL:
-        base = (NOW - timedelta(days=6)).replace(
-            hour=0, minute=0, second=0, microsecond=0
-        )
-        ivs = [
-            TZInterval(base + timedelta(days=i), base + timedelta(days=i + 1))
-            for i in range(6)
-        ]
+    if model.temporality is not Temporality.TEMPORAL:
+        # a timeless model is one whole-table row — either loaded (applied) or
+        # not yet (left pending), never partial
+        st.insert_oneshot(run_id=rid)
+        if loaded:
+            st.mark_applied(run_id=rid, interval=None)
+        return
+
+    begin, days, prof = _temporal_window(model.target.full_name)
+    ivs = [
+        TZInterval(begin + timedelta(days=i), begin + timedelta(days=i + 1))
+        for i in range(days)
+    ]
+    applied = set()
+    for a, b in prof["applied"]:
+        applied.update(range(a, b))
+
+    # the newest day carries any special status, so it's never auto-applied
+    special = error_latest or running_latest or stale_latest or blocked_latest
+    last = days - 1
+    if special:
+        applied.discard(last)
+
+    # prefill the whole contract as pending, then apply the profile's days
+    if ivs:
         st.insert_intervals(run_id=rid, intervals=tuple(ivs))
-        for iv in ivs[:-1]:
-            st.mark_applied(run_id=rid, interval=iv)
+    for i in sorted(applied):
+        st.mark_applied(run_id=rid, interval=ivs[i])
+
+    if special:
+        iv = ivs[last]
         if error_latest:
             st.record_failure(
                 run_id=rid,
-                interval=ivs[-1],
+                interval=iv,
                 error_type="AssertionError",
                 error_message="case count below sanity threshold",
                 traceback_text="Traceback ...\nAssertionError: below threshold",
                 update_state=True,
             )
         elif running_latest:
-            st.mark_running(run_id=rid, interval=ivs[-1])
+            st.mark_running(run_id=rid, interval=iv)
         elif stale_latest:
-            # newest interval blocked because an upstream is present but too old
-            # (freshness gate) — the descriptor carries the `stale` tag the
-            # blue 'stale' badge keys on.
+            # blocked because an upstream is present but too old (freshness gate)
+            # — the descriptor carries the `stale` tag the yellow badge keys on.
             reason = (
                 "STATE_002: upstream "
                 f"'{clean('CustomerInteractionEngagementEventFact')}' (through, stale)"
             )
-            st.insert_intervals(run_id=rid, intervals=((ivs[-1], "blocked", reason),))
+            st.insert_intervals(run_id=rid, intervals=((iv, "blocked", reason),))
         elif blocked_latest:
-            # newest interval blocked on completeness — an upstream simply hasn't
-            # produced the data yet (no `stale` tag → orange 'blocked' badge).
+            # blocked on completeness — an upstream simply hasn't produced the
+            # data yet (no `stale` tag → orange 'blocked' badge).
             reason = (
                 "STATE_002: upstream "
                 f"'{clean('CustomerInteractionEngagementEventFact')}' (window)"
             )
-            st.insert_intervals(run_id=rid, intervals=((ivs[-1], "blocked", reason),))
-        # else: newest stays pending
-    else:
-        st.insert_oneshot(run_id=rid)
-        st.mark_applied(run_id=rid, interval=None)
+            st.insert_intervals(run_id=rid, intervals=((iv, "blocked", reason),))
 
 
 def _seed_errors(conn):
@@ -509,6 +595,9 @@ def main() -> None:
                 ),
                 stale_latest=(name == consume("RollingThirtyDayEngagementTrendView")),
                 blocked_latest=(name == consume("WeeklyChannelAttributionRollupFact")),
+                # leave one timeless model un-loaded so the Gaps tab shows the
+                # gray "not loaded" whole-table state (the rest load green)
+                loaded=(name != clean("QuarterlySalesTargetReferenceTable")),
             )
         _seed_errors(conn)
         conn.commit()
