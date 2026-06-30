@@ -95,6 +95,34 @@ def test_model_exposes_sub_configs():
     assert isinstance(m.tags, set)
 
 
+def test_model_ownership_defaults_to_none():
+    assert make_model().ownership is None
+
+
+def test_model_stores_ownership():
+    from bollhav.model.owner import Contact, Ownership
+
+    o = Ownership(
+        owner=Contact(name="Axel", email="axel@example.com"),
+        creator="axel",
+        team=Contact(name="platform"),
+    )
+    m = make_model(ownership=o)
+    assert m.ownership is o
+    assert m.ownership.owner.name == "Axel"
+    assert m.ownership.team.name == "platform"
+
+
+def test_model_equality_ignores_ownership():
+    """Ownership is descriptive metadata — two models differing only in
+    ownership should still compare equal."""
+    from bollhav.model.owner import Contact, Ownership
+
+    base = make_model()
+    with_owner = make_model(ownership=Ownership(owner=Contact(name="Axel")))
+    assert base == with_owner
+
+
 def test_batching_defaults_to_none_when_unspecified():
     """No batching kwarg = no chunking. model.intervals returns [None].
     A whole-table load with no batching is TIMELESS — one oneshot row."""
