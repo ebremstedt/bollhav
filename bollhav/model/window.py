@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING
 
 from icron import croniter
 from bollhav.model.intervals import TZInterval
+from bollhav.model.temporality import Temporality
 from roskarl.cron import INTERVAL_EXPRESSION_SHORTCUTS
 
 if TYPE_CHECKING:
@@ -129,10 +130,17 @@ def _trailing_edge(contract: "Contract", batching: "Batch", tz: tzinfo) -> datet
     return floor if end is None else min(end, floor)
 
 
+# An unbatched model has no chunk, so an open temporal contract has no grain to
+# floor its trailing edge on. Default to whole completed days — coarse enough
+# that a daily-reloaded dim's span advances at most once per run.
+_UNBATCHED_TRAILING_GRAIN = "@daily"
+
+
 def resolve_window(
     batching: "Batch | None",
     contract: "Contract",
     *,
+    temporality: Temporality = Temporality.TEMPORAL,
     latest: bool = False,
     reload: bool = False,
     since: datetime | None = None,
@@ -143,8 +151,14 @@ def resolve_window(
     `batching` + `contract` and the run instruction. The result already
     accounts for `lookback`, so the caller only has to `split_window` it.
 
-    Returns `None` when there is no `batching` — the model runs once,
-    unfiltered. Three mutually-exclusive modes, in precedence order:
+    With no `batching` the model runs once, unfiltered, recorded as a single
+    state row. A TEMPORAL model with a `contract.begin` spans `[begin, end]`
+    (an open end falls back to the latest complete day — an unbatched model has
+    no chunk to floor on); that spanning row is what a downstream gates WINDOW
+    against and what `uncovered_gaps` counts as coverage. A TIMELESS or
+    range-less model has no window → `None` → a NULL-window one-shot row.
+
+    For a batched model, three mutually-exclusive modes, in precedence order:
 
         reload   — `contract.begin` .. (`contract.end` or the latest complete tick)
         latest   — the latest complete `window` tick
@@ -157,16 +171,27 @@ def resolve_window(
     source — `RUN_SINCE` or `contract.begin`.
 
     Pure apart from the clock read in `latest` / open-ended `reload` / a
-    no-`until` backfill."""
+    no-`until` backfill / an open temporal unbatched contract."""
     if batching is None:
-        # Unbatched: the model runs once over its whole declared range. A
-        # temporal model with a closed contract window [begin, end] records a
-        # single state row spanning it, so a downstream can gate WINDOW on it
-        # (its window must fall inside the range). A timeless / range-less model
-        # has no window → None → a NULL-window one-shot row.
-        if contract.begin is not None and contract.end is not None:
+        # Unbatched: the model runs once over its whole declared range, recorded
+        # as a single state row spanning it so a downstream can gate WINDOW (its
+        # window must fall inside the span) and `uncovered_gaps` sees coverage.
+        # Only a TEMPORAL model with a `begin` has a range to span; a TIMELESS /
+        # range-less model has no window → None → a NULL-window one-shot row.
+        if temporality is not Temporality.TEMPORAL or contract.begin is None:
+            return None
+        # Closed contract → [begin, end]. Open contract (no end) → [begin, the
+        # latest complete day]: with no chunk to floor on, the trailing edge
+        # uses a default daily completeness grain. Without this an open-contract
+        # temporal oneshot fell through to None and registered a NULL-window
+        # row, which `uncovered_gaps` (WHERE since IS NOT NULL) ignores — so the
+        # whole contract reported as one uncovered gap.
+        if contract.end is not None:
             return TZInterval(contract.begin, contract.end)
-        return None
+        edge = latest_complete_interval(
+            _UNBATCHED_TRAILING_GRAIN, contract.begin.tzinfo or timezone.utc
+        ).until
+        return TZInterval(contract.begin, edge)
 
     expr = batching.time.chunk
     tz = batching.time.tz
