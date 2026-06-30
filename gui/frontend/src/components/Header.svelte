@@ -14,6 +14,7 @@
     ["lineage", "Lineage"],
     ["runs", "Runs"],
     ["grid", "Grid"],
+    ["gaps", "Gaps"],
   ];
 
   let { dark = $bindable() } = $props();
@@ -42,7 +43,7 @@
           class="seg-btn"
           class:active={view.tab === val}
           onclick={() => setTab(val)}
-          >{label}{#if val === "grid"}<sup class="beta">(beta)</sup>{/if}</button
+          >{label}{#if val === "grid" || val === "gaps"}<sup class="beta">(beta)</sup>{/if}</button
         >
       {/each}
     </span>
