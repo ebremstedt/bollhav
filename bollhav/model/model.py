@@ -349,8 +349,6 @@ class Model:
             if source.gated or source.type is None:
                 continue
             spec = {"name": source.name, "kind": source.kind}
-            # `read_query` is declarative read config (bollhav never runs it);
-            # surface it in the catalog so an upstream shows how it's read.
             read_query = getattr(source.type, "read_query", None)
             if read_query is not None:
                 spec["read_query"] = read_query

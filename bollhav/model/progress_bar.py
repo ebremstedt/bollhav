@@ -4,11 +4,15 @@ import os
 import threading
 from contextlib import contextmanager
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta
 from enum import Enum
 from functools import wraps
 from typing import Callable, Iterator
 import sys
 import time
+
+from icron import croniter
+from roskarl.cron import INTERVAL_EXPRESSION_SHORTCUTS
 
 _SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
 _SPINNER_INTERVAL = 0.1
@@ -48,13 +52,50 @@ def name_width_for(models) -> int:
     return max((len(_model_display_label(m)) for m in models), default=0)
 
 
-def _name_and_mode(model) -> tuple[str, str]:
+def _resolve_cron(expr: str) -> str:
+    return INTERVAL_EXPRESSION_SHORTCUTS.get(expr, expr)
+
+
+def _is_whole_chunk(interval, chunk: str) -> bool:
+    """True when `interval` spans exactly one `chunk` tick — its `until` is the
+    next chunk boundary after its `since`. Every interval of a grid-aligned run
+    is a whole chunk; a backfill window narrower than / misaligned to the chunk
+    leaves a partial slice that isn't."""
+    nxt = croniter(_resolve_cron(chunk), interval.since).get_next(datetime)
+    return nxt == interval.until
+
+
+def _format_span(delta: timedelta) -> str:
+    """Compact span label for a partial slice: 1 hr → '1h', 90 min → '1h30m'."""
+    secs = int(delta.total_seconds())
+    days, rem = divmod(secs, 86400)
+    hours, rem = divmod(rem, 3600)
+    mins, secs = divmod(rem, 60)
+    parts = []
+    if days:
+        parts.append(f"{days}d")
+    if hours:
+        parts.append(f"{hours}h")
+    if mins:
+        parts.append(f"{mins}m")
+    if secs and not parts:
+        parts.append(f"{secs}s")
+    return "".join(parts) or "0s"
+
+
+def _name_and_mode(model, intervals=None) -> tuple[str, str]:
     """Return `(full_name, mode_label)`. `mode_label` is empty when the
     object isn't a bollhav Model (or has no batching configured).
 
+    `mode_label` is normally the chunk grain, but when `intervals` (this run's
+    resolved intervals) shows a single sub-chunk slice — a backfill window
+    narrower than / misaligned to the chunk grid — it's that slice's real span
+    instead, so the row doesn't falsely claim a whole `daily` etc. ran.
+
     Examples of mode_label:
         "hourly"          (@hourly alias — @ stripped)
-        "*/15 * * * *"    (a raw cron)"""
+        "*/15 * * * *"    (a raw cron)
+        "1h"              (one sub-chunk slice — its actual span)"""
     if not (model and hasattr(model, "target") and hasattr(model.target, "full_name")):
         return ("", "")
     name = model.target.full_name
@@ -62,7 +103,12 @@ def _name_and_mode(model) -> tuple[str, str]:
     if getattr(model, "batching", None) is None:
         return (name, "")
 
-    return (name, model.batching.time.chunk.lstrip("@"))
+    chunk = model.batching.time.chunk
+    if intervals is not None and len(intervals) == 1:
+        only = intervals[0]
+        if only is not None and not _is_whole_chunk(only, chunk):
+            return (name, _format_span(only.until - only.since))
+    return (name, chunk.lstrip("@"))
 
 
 @dataclass
@@ -164,8 +210,8 @@ class Progress:
         yield
         self.tick(time.time() - start)
 
-    def begin_model_for(self, model, total: int | None = None) -> None:
-        name, mode = _name_and_mode(model)
+    def begin_model_for(self, model, total: int | None = None, intervals=None) -> None:
+        name, mode = _name_and_mode(model, intervals)
         self.begin_model(name, mode, total)
 
     def begin_model(self, name: str, mode: str, total: int | None = None) -> None:
@@ -289,7 +335,7 @@ class Progress:
 
     def _avg_batch_str(self) -> str:
         avg = self._avg_batch_seconds()
-        return f" á {_format_duration(avg)}" if avg is not None else ""
+        return f" @ {_format_duration(avg)}" if avg is not None else ""
 
     def _eta_str(self) -> str:
         avg = self._avg_batch_seconds()
@@ -330,15 +376,15 @@ def progress_bar(func: Callable) -> Callable:
         ✓ 3 models done  5.2s
 
     PROGRESS_BAR=model  (default)
-        ✓ customers       110ms 3/3 á  36ms
-        ✓ orders          1.2s  9/9 á 130ms
-        ✓ products        4.5s 25/25 á 180ms
+        ✓ customers       110ms 3/3 @  36ms
+        ✓ orders          1.2s  9/9 @ 130ms
+        ✓ products        4.5s 25/25 @ 180ms
 
     PROGRESS_BAR=execute
-        ⠋ customers  █████████░░░░░░░░░░░ 45% 3/9 á 130ms ~1.2s left
-        ✓ customers       1.2s  9/9 á 130ms
-        ⠋ orders     ██░░░░░░░░░░░░░░░░░░ 12% 3/25 á 180ms ~4.0s left
-        ✓ orders          4.5s 25/25 á 180ms
+        ⠋ customers  █████████░░░░░░░░░░░ 45% 3/9 @ 130ms ~1.2s left
+        ✓ customers       1.2s  9/9 @ 130ms
+        ⠋ orders     ██░░░░░░░░░░░░░░░░░░ 12% 3/25 @ 180ms ~4.0s left
+        ✓ orders          4.5s 25/25 @ 180ms
         ...
 
     Legacy single-execute path. New lifecycle-based pipelines get progress
