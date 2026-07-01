@@ -18,7 +18,7 @@ from bollhav.model.source import (
 )
 from bollhav.model.target import Target
 from bollhav.model.contract import Contract
-from bollhav.model.batch import Batch, TimeChunking
+from bollhav.model.batch import Batch, TimeChunking, ChunkFix, ChunkFlex
 from bollhav.model.curfew import Curfew
 from bollhav.model.staging import Staging
 from bollhav.model.lifecycle import execute_lifecycle, model_lifecycle
@@ -68,6 +68,8 @@ __all__ = [
     "Contract",
     "Batch",
     "TimeChunking",
+    "ChunkFix",
+    "ChunkFlex",
     "Curfew",
     "Tags",
     "Contact",

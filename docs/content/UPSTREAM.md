@@ -53,28 +53,28 @@ The three window-scoped levels (`EXACT` ⊂ `ENCAPSULATE`, and `EXISTS` below th
 
 **Timeless upstreams.** A [`TIMELESS`](TEMPORALITY.md) upstream (a view or whole-table load) has no window to match, so `EXACT` / `ENCAPSULATE` / `THROUGH` against it is a hard error — gate it `WHOLE` (loaded) or `EXISTS` (registered). The window-scoped levels are for temporal upstreams.
 
-**Fixed vs flexible upstreams.** A *temporal* upstream is one of two shapes, set by [`fixed_intervals`](BATCH.md) on its `TimeChunking` (default `True`):
+**Fixed vs flexible upstreams.** A *temporal* upstream is one of two shapes, set by [`flexibility`](BATCH.md) on its `TimeChunking` (default `ChunkFix`):
 
-- **Fixed** (`fixed_intervals=True`) — state is a **grid**: one durable `applied` row per chunk, at a stable grain. Its exact-grain rows persist, so every contract level works against it.
-- **Flexible** (`fixed_intervals=False`) — state is a **coverage set**: `applied` rows are coalesced into maximal covered ranges, so individual exact-grain rows don't survive. The chunk is just how work is sliced, not part of the upstream's identity.
+- **Fixed** (`ChunkFix`, the default) — state is a **grid**: one durable `applied` row per chunk, at a stable grain. Its exact-grain rows persist, so every contract level works against it.
+- **Flexible** (`ChunkFlex`) — state is a **coverage set**: `applied` rows are coalesced into maximal covered ranges, so individual exact-grain rows don't survive. The chunk is just how work is sliced, not part of the upstream's identity.
 
 Because a flexible upstream coalesces away its exact-grain rows, **`EXACT` against a flexible upstream is a hard error** — it could never match, so the downstream would block forever. Use `ENCAPSULATE` (coverage) instead. The coverage-based levels are unaffected:
 
 | Upstream is… | `EXISTS` | `EXACT` | `ENCAPSULATE` | `THROUGH` | `WHOLE` |
 |---|:---:|:---:|:---:|:---:|:---:|
-| **Fixed** (default) | ✓ | ✓ | ✓ | ✓ | ✓ |
-| **Flexible** (`fixed_intervals=False`) | ✓ | ✗ error | ✓ | ✓ | ✓ |
+| **Fixed** (`ChunkFix`, default) | ✓ | ✓ | ✓ | ✓ | ✓ |
+| **Flexible** (`ChunkFlex`) | ✓ | ✗ error | ✓ | ✓ | ✓ |
 
-`fixed_intervals` is **per-model and does not propagate**: a flexible upstream feeding a fixed downstream is fine — the downstream reads the upstream's *data* (by coverage), not its partitioning, and declaring flexible *means* that data is partition-invariant. So a flexible upstream is in fact the safest to build coverage contracts on; only `EXACT` (which demands a specific grain) is off the table.
+The flexibility is **per-model and does not propagate**: a flexible upstream feeding a fixed downstream is fine — the downstream reads the upstream's *data* (by coverage), not its partitioning, and declaring flexible *means* that data is partition-invariant. So a flexible upstream is in fact the safest to build coverage contracts on; only `EXACT` (which demands a specific grain) is off the table.
 
 !!! note "Mostly live"
     The `EXACT`-on-flexible rule above is **enforced today** (it raises at gate-check time), and the flexible *execution* engine — coverage gap-filling plus the `uncover`/re-cover invalidation in the table below — is **live too** (see `design/flexible-intervals.md`). Two refinements are still deferred: **coalescing** (today there's one `applied` row per covered unit, merged with `range_agg` at query time — correct coverage, just more rows than the "one row per island" ideal) and the **overlap-aware concurrency lock**, so run a flexible model **single-worker** for now.
 
-### Two axes: identity (`fixed_intervals`) and invalidation (`STATE_MODE`)
+### Two axes: identity (`flexibility`) and invalidation (`STATE_MODE`)
 
-`fixed_intervals` and [`STATE_MODE`](STATE.md) are **orthogonal** — one says what a model's state *is*, the other says how much of it a run *throws away* before re-evaluating:
+`flexibility` and [`STATE_MODE`](STATE.md) are **orthogonal** — one says what a model's state *is*, the other says how much of it a run *throws away* before re-evaluating:
 
-- **Identity — `fixed_intervals`** (per-model, declared in code): **fixed** = a grid keyed by `(since, until)`, where the chunk *is* the state's identity; **flexible** = a coverage set, where the chunk is just how work is sliced.
+- **Identity — `flexibility`** (per-model, declared in code): **`ChunkFix`** = a grid keyed by `(since, until)`, where the chunk *is* the state's identity; **`ChunkFlex`** = a coverage set, where the chunk is just how work is sliced.
 - **Invalidation — `STATE_MODE`** (per-run, an env var): how much of the run's window the run resets first. Execution is **window-scoped** — a run does exactly its window, nothing leaks in from the backlog.
     - **`bulldozer`** (default) — reset the window's rows to `pending` and run exactly them (boundaries kept); leave everything outside the window alone.
     - **`discover`** — keep every `applied` row, run only the window's outstanding; with **no** window, reconcile *all* outstanding state.
@@ -103,13 +103,13 @@ Not every (upstream shape × contract) or (model attestation × write/query) pai
 | `EXACT` on a **fixed** upstream at a **different grain** | ⏳ blocks | EXACT demands a row at *exactly* your `(since,until)`; a daily upstream never produces your hourly grain → permanently `blocked`. Not wrong data, just stalled — use `ENCAPSULATE`. |
 | **Flexible** model + `APPEND` write mode | 🔴 **not caught** | Flexibility re-processes ranges; `APPEND` has no key to overwrite, so every re-cover **duplicates rows**. (Deliberately not enforced — duplicates are detectable and yours to dedupe.) |
 | **Flexible** model + order-dependent `UPSERT` (last-writer-wins) | 🔴 **not caught** | Re-partitioning changes the order rows land; a last-writer-wins MERGE makes the final table **depend on partition order** → silently divergent results. Safe only if ties break deterministically (`incoming._data_modified > existing`) or you use `RECREATE_PARTITION`. |
-| **Flexible** model + non-decomposable query (`GROUP BY`, `ROW_NUMBER … latest-in-window`, cumulative `THROUGH`) | 🔴 **not caught** | Flexibility assumes `[a,c) ≡ [a,b) ∪ [b,c)`. Aggregates and latest-per-key-within-window break that identity, so re-chunking yields **different numbers** — silently wrong. This is the attestation you sign with `fixed_intervals=False`. |
+| **Flexible** model + non-decomposable query (`GROUP BY`, `ROW_NUMBER … latest-in-window`, cumulative `THROUGH`) | 🔴 **not caught** | Flexibility assumes `[a,c) ≡ [a,b) ∪ [b,c)`. Aggregates and latest-per-key-within-window break that identity, so re-chunking yields **different numbers** — silently wrong. This is the attestation you sign with `ChunkFlex`. |
 | **Fixed** model, chunk grain changed (e.g. `INTERVAL_OVERRIDE` hourly→monthly) without `STATE_MODE=torch` | 🔴 **not caught** | Old fine-grained `applied` rows stay; the executor drains every non-applied row unscoped, so the old partitioning leaks into the new run ("ran 14,200 hourly windows under a monthly override"). Re-chunking a fixed model **is** a migration → `STATE_MODE=torch`. |
 
-The pattern: the **caught** rows are the ones the framework can prove wrong from the model definition + the library (a contract level against a known shape). The **silent** rows are exactly the half of the flexibility attestation that *can't* be proven statically — they're the dev's signed promise, which is why `fixed_intervals=False` is opt-in and defaults to `True`.
+The pattern: the **caught** rows are the ones the framework can prove wrong from the model definition + the library (a contract level against a known shape). The **silent** rows are exactly the half of the flexibility attestation that *can't* be proven statically — they're the dev's signed promise, which is why `ChunkFlex` is opt-in and `ChunkFix` is the default.
 
 !!! tip "Does your transform aggregate? Stay fixed."
-    If the model **aggregates** — `GROUP BY`, `SUM`/`COUNT`/`AVG`, `ROW_NUMBER() … latest-per-key within the window`, or any running total / cumulative (`THROUGH`-style) logic — its output is **not** invariant to how the window is partitioned: `[a, c)` ≠ `[a, b) ∪ [b, c)` once you aggregate. **Keep `fixed_intervals=True`** (the default) — one durable row per chunk at a stable grain. Never set `fixed_intervals=False` on an aggregate: that's the 🔴 silent-divergence row above (re-chunking would change the numbers with no error). Aggregated models stay fixed; downstreams may then use any contract level against them, including `EXACT` if they need that exact grain. Reserve `fixed_intervals=False` for **window-local, row-preserving** transforms — a pure `WHERE _data_modified ∈ window` filter / map / reshape with an idempotent write — where partitioning genuinely doesn't change the result.
+    If the model **aggregates** — `GROUP BY`, `SUM`/`COUNT`/`AVG`, `ROW_NUMBER() … latest-per-key within the window`, or any running total / cumulative (`THROUGH`-style) logic — its output is **not** invariant to how the window is partitioned: `[a, c)` ≠ `[a, b) ∪ [b, c)` once you aggregate. **Keep it `ChunkFix`** (the default) — one durable row per chunk at a stable grain. Never make an aggregate `ChunkFlex`: that's the 🔴 silent-divergence row above (re-chunking would change the numbers with no error). Aggregated models stay fixed; downstreams may then use any contract level against them, including `EXACT` if they need that exact grain. Reserve `ChunkFlex` for **window-local, row-preserving** transforms — a pure `WHERE _data_modified ∈ window` filter / map / reshape with an idempotent write — where partitioning genuinely doesn't change the result.
 
 A `Source` with **no** contract is **ungated** — never waited on (there's no default level).
 

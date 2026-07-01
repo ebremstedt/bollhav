@@ -15,7 +15,8 @@ calculation lives here so the model stays free of window logic.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone, tzinfo
+from datetime import datetime, timedelta, timezone, tzinfo
+from collections.abc import Iterable
 from typing import TYPE_CHECKING
 
 from icron import croniter
@@ -101,6 +102,20 @@ def latest_complete_interval(expression: str, tz: tzinfo = timezone.utc) -> TZIn
     return TZInterval(prev, curr)
 
 
+def window_holds_a_grid_cell(window: TZInterval, chunk_expr: str) -> bool:
+    """Whether at least one whole `chunk` grid cell `[tick, next_tick)` fits fully
+    inside `window`. A fixed grid runs whole cells only, so a window that holds
+    none — narrower than the chunk, or misaligned — has nothing valid to run.
+
+    `icron.croniter` only walks forward (`get_next` is strictly greater), so probe
+    1µs before `since` to get the first tick *at or after* it, then the tick after
+    that: the cell `[first, second)` sits fully inside iff `second <= until`."""
+    cron = _resolve_cron(chunk_expr)
+    first = croniter(cron, window.since - timedelta(microseconds=1)).get_next(datetime)
+    second = croniter(cron, first).get_next(datetime)
+    return second <= window.until
+
+
 def _apply_lookback(expression: str, since: datetime, lookback: int) -> datetime:
     """Shift `since` back by `lookback` cron ticks (for reprocessing recent
     history to absorb late-arriving data). `expression` must be resolved."""
@@ -114,18 +129,17 @@ def _apply_lookback(expression: str, since: datetime, lookback: int) -> datetime
 def _trailing_edge(contract: "Contract", batching: "Batch", tz: tzinfo) -> datetime:
     """The *inferred* end of a run window (reload / no-dates backfill):
 
-      * open contract → the **completeness floor**: the latest *complete* unit of
-        `no_partial_below` (defaulting to `chunk`). So a coarse chunk can trail
-        off at a finer boundary — e.g. `@yearly` chunk with
-        `no_partial_below="@daily"` runs through the last complete day.
+      * open contract → floor to the latest *complete* unit of the model's
+        `floor_chunk`. So a flexible model whose `floor_chunk` is finer than its
+        chunk trails off mid-chunk on a partial — e.g. `@monthly` chunk with
+        `floor_chunk="@daily"` runs through the last complete day, the current
+        month as a partial.
       * explicit end  → `min(end, floor)`: a closed (past) end is its own value;
         a *future* end is clamped to the floor — state windows on the update
         watermark, so there's no data past the clock to load anyway.
 
     Pure apart from the clock read in the floor."""
-    floor = latest_complete_interval(
-        batching.time.no_partial_below or batching.time.chunk, tz
-    ).until
+    floor = latest_complete_interval(batching.time.floor_chunk, tz).until
     end = contract.end
     return floor if end is None else min(end, floor)
 
@@ -182,7 +196,7 @@ def resolve_window(
             return None
         # Closed contract → [begin, end]. Open contract (no end) → [begin, the
         # latest complete day]: with no chunk to floor on, the trailing edge
-        # uses a default daily completeness grain. Without this an open-contract
+        # floors on a default daily grain. Without this an open-contract
         # temporal oneshot fell through to None and registered a NULL-window
         # row, which `uncovered_gaps` (WHERE since IS NOT NULL) ignores — so the
         # whole contract reported as one uncovered gap.
@@ -202,7 +216,7 @@ def resolve_window(
         window_since = contract.begin
         window_until = _trailing_edge(contract, batching, tz)
     elif latest:
-        window_expr = batching.time.window or expr
+        window_expr = batching.time.latest_window or expr
         interval = latest_complete_interval(window_expr, tz)
         window_since, window_until = interval.since, interval.until
     else:
@@ -210,7 +224,7 @@ def resolve_window(
         if window_since is None:
             raise BackfillRequiresSinceError(name)
         # `until` is optional — when absent, the trailing edge is inferred (the
-        # contract's end, or the latest complete unit of the completeness grain
+        # contract's end, or the latest complete unit of the `floor_chunk`
         # for an open contract). A no-dates backfill thus runs the declared
         # range, the same window reload resolves.
         window_until = (
@@ -241,6 +255,43 @@ def split_window(window: TZInterval, expression: str) -> list[TZInterval]:
     if current < window.until:
         intervals.append(TZInterval(current, window.until))
     return intervals
+
+
+def split_at_times(
+    interval: TZInterval, points: Iterable[datetime]
+) -> list[TZInterval]:
+    """Split `interval` at each point in `points` that falls *strictly inside* it,
+    returning the pieces left-to-right. A point on `since`/`until`, or outside the
+    interval, is ignored — so no empty piece is produced; with no interior point
+    the interval comes back unchanged, as a one-element list.
+
+        cut [since, until) at interior points a and b → three pieces:
+
+            since     a            b           until
+            |---------|------------|-----------|
+            [since, a)   [a, b)      [b, until)
+              piece 1     piece 2       piece 3
+
+    Each piece is a `TZInterval`; together they tile the original exactly (no gap,
+    no overlap). A piece can be **any width** — the cut points are arbitrary —
+    unlike a `chunk`, which is a uniform cron-grid cell (every chunk the same
+    cadence). So splitting a whole-month unit at a mid-month edge yields two
+    *unequal* pieces (see the diagram: the three pieces have different widths).
+
+    Used to force extra boundaries — a run window's edges — into a set of
+    chunk-sliced units so none straddles them: `get_actionable_intervals` only
+    returns units fully inside the window, so a chunk coarser than the window
+    would otherwise overshoot the edge and never become actionable."""
+    cuts = sorted(p for p in set(points) if interval.since < p < interval.until)
+    if not cuts:
+        return [interval]
+    pieces: list[TZInterval] = []
+    start = interval.since
+    for p in cuts:
+        pieces.append(TZInterval(start, p))
+        start = p
+    pieces.append(TZInterval(start, interval.until))
+    return pieces
 
 
 def compute_intervals(run: "ModelRun") -> tuple[TZInterval, ...] | tuple[None]:

@@ -168,7 +168,7 @@ def load_models(
         RUN_UNTIL                     ISO 8601 datetime (optional; ?? contract.end
                                       ?? latest complete tick). (alias: BACKFILL_UNTIL)
         INTERVAL_OVERRIDE  cron / @alias — re-chunks at runtime. Applies ONLY
-                                      to flexible models (fixed_intervals=False);
+                                      to flexible models (ChunkFlex);
                                       ignored (logged at INFO) on fixed models,
                                       since re-chunking a fixed grid forks its
                                       state — use STATE_MODE=torch for that.

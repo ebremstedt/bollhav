@@ -357,7 +357,7 @@ def get_gaps_grouped(
     latest `until` materialized in state (an open contract's forward edge), then
     `now()` when nothing's been materialized yet. Each model returns:
 
-        {full_name, has_contract, begin, end,
+        {full_name, has_contract, is_view, begin, end,
          gaps: [{since, until, seconds}],
          contract_seconds, gap_seconds, covered_seconds, pct_covered,
          status_counts: {applied, pending, blocked, running, error, …}}
@@ -365,13 +365,18 @@ def get_gaps_grouped(
     `has_contract` is False — with empty `gaps` — for a model with no contract
     `begin` (an open-start contract, so gaps-vs-contract is undefined), no state
     table, or a timeless temporality. Such models are still listed so the GUI can
-    show them as "no declared bounds". Ordered by name."""
+    show them as "no declared bounds".
+
+    A view (`is_view`) is one CREATE VIEW, not materialized per window, so it
+    can't have a per-window gap: its coverage is all-or-nothing across
+    `[begin, end]` (`pct_covered` 0 or 100, empty `gaps`), keyed on its existence
+    row — a view is never "needs backfill". Ordered by name."""
     if not _table_exists(conn, schema, LIBRARY_TABLE):
         return []
     models = conn.execute(
         sql.SQL(
-            "SELECT full_name, temporality, state_schema, state_table, metadata "
-            "FROM {schema}.{table} ORDER BY full_name"
+            "SELECT full_name, temporality, model_type, state_schema, state_table, "
+            "metadata FROM {schema}.{table} ORDER BY full_name"
         ).format(
             schema=sql.Identifier(schema),
             table=sql.Identifier(LIBRARY_TABLE),
@@ -379,7 +384,8 @@ def get_gaps_grouped(
     ).fetchall()
 
     out: list[dict] = []
-    for full_name, temporality, st_schema, st_table, metadata in models:
+    for full_name, temporality, model_type, st_schema, st_table, metadata in models:
+        is_view = model_type == "VIEW"
         contract = (metadata or {}).get("contract") or {}
         begin, end = contract.get("begin"), contract.get("end")
         tags = (metadata or {}).get("tags", []) or []
@@ -418,6 +424,7 @@ def get_gaps_grouped(
                     "full_name": full_name,
                     "has_contract": False,
                     "timeless": True,
+                    "is_view": is_view,
                     "applied": applied,
                     "begin": None,
                     "end": None,
@@ -442,6 +449,7 @@ def get_gaps_grouped(
                     "full_name": full_name,
                     "has_contract": False,
                     "timeless": False,
+                    "is_view": is_view,
                     "applied": None,
                     "begin": begin,
                     "end": end,
@@ -469,6 +477,32 @@ def get_gaps_grouped(
         if horizon is None:
             continue
         b, e = horizon
+        # A view is one CREATE VIEW — it reflects its whole declared range or
+        # nothing, never materialized per window, so it can't have a per-window
+        # gap that "needs backfill". Its coverage is all-or-nothing across
+        # [b, e], keyed on whether its existence row is applied.
+        if is_view:
+            applied = status_counts.get("applied", 0) > 0
+            contract_seconds = (e - b).total_seconds() if e > b else 0
+            out.append(
+                {
+                    "full_name": full_name,
+                    "has_contract": True,
+                    "timeless": False,
+                    "is_view": True,
+                    "applied": applied,
+                    "begin": _iso(b),
+                    "end": _iso(e),
+                    "gaps": [],
+                    "contract_seconds": contract_seconds,
+                    "gap_seconds": 0.0 if applied else contract_seconds,
+                    "covered_seconds": contract_seconds if applied else 0.0,
+                    "pct_covered": 100.0 if applied else 0.0,
+                    "tags": tags,
+                    "status_counts": status_counts,
+                }
+            )
+            continue
         # multirange([b, e)) − range_agg(applied) = the maximal uncovered spans.
         gap_rows = conn.execute(
             sql.SQL(
@@ -497,6 +531,7 @@ def get_gaps_grouped(
                 "full_name": full_name,
                 "has_contract": True,
                 "timeless": False,
+                "is_view": False,
                 "applied": None,
                 "begin": _iso(b),
                 "end": _iso(e),

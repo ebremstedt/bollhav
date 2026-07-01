@@ -1,18 +1,52 @@
 from __future__ import annotations
 
-import logging
 from dataclasses import replace
 from datetime import datetime, tzinfo
 
 from bollhav.model.batch import Batch
-from bollhav.model.window import resolve_window
+from bollhav.model.window import resolve_window, window_holds_a_grid_cell
 from bollhav.model.matching import matched_with_reload
 from bollhav.model.model import Model
 from bollhav.model.modelrun import ModelRun
 from bollhav.model.state import StateMode
 from bollhav.model.target import Target
 
-logger = logging.getLogger(__name__)
+
+# ── errors ──
+
+
+class FixedModelIntervalOverrideError(ValueError):
+    """`INTERVAL_OVERRIDE` was set for a fixed-grid (`ChunkFix`) model. A fixed
+    model's chunk *is* its state identity, so re-chunking at runtime would fork
+    its state into mixed granularity — it is not allowed. Change the model's
+    declared chunk and run `STATE_MODE=torch`, or make it flexible (`ChunkFlex`)
+    if arbitrary re-chunking is intended."""
+
+    def __init__(self, full_name: str, override: str, chunk: str) -> None:
+        super().__init__(
+            f"INTERVAL_OVERRIDE={override!r} cannot be applied to {full_name!r}: "
+            f"it is a fixed grid (ChunkFix, chunk={chunk!r}) whose chunk is its "
+            f"state identity — re-chunking would fork state. Change its declared "
+            f"chunk and run STATE_MODE=torch, or make it flexible (ChunkFlex)."
+        )
+
+
+class FixedModelWindowTooNarrowError(ValueError):
+    """A fixed-grid model's run window holds no whole `[tick, next_tick)` grid
+    cell — narrower than the chunk, or misaligned. A fixed grid runs whole cells
+    only (a cell may aggregate over its interval), so a partial window would
+    silently run nothing, or a wrong partial result. Widen the window to a chunk
+    boundary, or make the model flexible (`ChunkFlex`)."""
+
+    def __init__(
+        self, full_name: str, chunk: str, since: object, until: object
+    ) -> None:
+        super().__init__(
+            f"run window [{since}, {until}) for {full_name!r} holds no whole "
+            f"{chunk!r} grid cell (narrower than the chunk, or misaligned). A "
+            f"fixed grid runs whole cells only — widen the window to a chunk "
+            f"boundary, or make it flexible (ChunkFlex)."
+        )
 
 
 def apply_runtime_overrides(
@@ -40,7 +74,7 @@ def apply_runtime_overrides(
         * `target.suffix` set to `table_suffix`.
         * `batching.time.chunk` overridden by
           `interval_override` (pipe) when set.
-        * `batching.time.window` overridden by
+        * `batching.time.latest_window` overridden by
           `window_override` when set.
         * `batching.time.lookback` overridden by `lookback_override` when
           set.
@@ -129,6 +163,21 @@ def _apply_to_model(
             until=backfill_until,
             name=model.target.full_name,
         )
+    # A fixed grid runs whole cells only; a run window that can't hold one
+    # (narrower than the chunk, or misaligned) would silently run nothing — or a
+    # wrong partial of a cell that may aggregate over its interval — so refuse it.
+    if (
+        window is not None
+        and batching is not None
+        and not batching.time.is_flexible
+        and not window_holds_a_grid_cell(window, batching.time.chunk)
+    ):
+        raise FixedModelWindowTooNarrowError(
+            model.target.full_name,
+            batching.time.chunk,
+            window.since,
+            window.until,
+        )
     # STATE_DISABLED forces no-state semantics — null `state` + `target.staging`
     # at construction so the lifecycle hooks pass through and write() goes
     # direct. Otherwise carry the model's state, with the run's STATE_MODE
@@ -206,23 +255,16 @@ def _batching_with_overrides(
     if batching is None:
         return None
     # INTERVAL_OVERRIDE re-chunks at runtime, but only a flexible model
-    # (fixed_intervals=False) can absorb that — re-chunking a FIXED grid would
-    # fork its state into mixed granularity. So the override is ignored on fixed
-    # models (change a fixed model's chunk via STATE_MODE=torch instead).
+    # (ChunkFlex) can absorb that — re-chunking a FIXED grid would fork its state
+    # into mixed granularity. A fixed model cannot be re-chunked at runtime;
+    # asking to is a hard error (change its chunk via STATE_MODE=torch instead).
     chunk = batching.time.chunk
     if interval_override:
-        if batching.time.fixed_intervals:
-            logger.info(
-                "INTERVAL_OVERRIDE=%r ignored for %s: it has fixed intervals "
-                "(fixed_intervals=True), so re-chunking at runtime would fork its "
-                "state — keeping chunk=%r. Change a fixed model's chunk with "
-                "STATE_MODE=torch instead.",
-                interval_override,
-                full_name or "this model",
-                batching.time.chunk,
+        if not batching.time.is_flexible:
+            raise FixedModelIntervalOverrideError(
+                full_name or "this model", interval_override, batching.time.chunk
             )
-        else:
-            chunk = interval_override
+        chunk = interval_override
     # `replace` carries through every field NOT overridden here — so any new
     # `TimeChunking` / `Batch` field survives the rebuild automatically, instead
     # of silently reverting to its default (an explicit constructor was an
@@ -234,7 +276,7 @@ def _batching_with_overrides(
         time=replace(
             batching.time,
             chunk=chunk,
-            window=window_override or batching.time.window,
+            latest_window=window_override or batching.time.latest_window,
             lookback=lookback_override
             if lookback_override is not None
             else batching.time.lookback,

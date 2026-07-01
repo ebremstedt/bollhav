@@ -885,21 +885,29 @@ class StateTable(_PostgresStateBase):
         )
 
     def uncovered_gaps(self, since, until) -> list:
-        """The uncovered ranges of `[since, until)` for a flexible (coverage)
-        model — the complement of this model's `applied` coverage within that
-        horizon, as maximal gaps. The bootstrap slices each gap by the run's
-        chunk into the units to run, so work is *the holes in coverage*, not a
-        fixed grid. A fully-covered model returns `[]`.
+        """The ranges of `[since, until)` that have **no existing state row** —
+        what the flexible bootstrap must newly materialize. The complement of
+        *every* row with a `since` (any status), not just `applied`:
 
-        This is the flexible counterpart of `contract_intervals` (which is the
-        whole grid): here only what isn't `applied` yet becomes work."""
+          * `applied` rows are coverage (done);
+          * `pending` / `running` / `blocked` / `error` rows are already tracked,
+            and `get_actionable_intervals` drains them.
+
+        So a "gap" is a region the state doesn't track *at all* — re-filling
+        anything else would lay a second, overlapping row (mixed-grain clutter:
+        e.g. a monthly re-run over an existing daily-`pending` span). A fully
+        tracked horizon returns `[]`. The bootstrap slices each gap by the run's
+        chunk into the units to run — the flexible counterpart of
+        `contract_intervals` (the whole grid)."""
         from bollhav.model.intervals import TZInterval
 
         schema = self._state_schema()
         table = self._state_table()
-        # multirange([since, until)) − range_agg(applied) = the gaps. Mirrors
-        # `uncover_span`'s set math, reversed (horizon minus coverage). `%(s)s` /
-        # `%(u)s` are bound params; the rest is constant.
+        # multirange([since, until)) − range_agg(all rows) = the untracked gaps.
+        # Mirrors `uncover_span`'s set math, reversed (horizon minus what already
+        # has a row). Subtracting *every* status (not just `applied`) is what stops
+        # a re-run from overlaying a second row on an already-scheduled span.
+        # `%(s)s` / `%(u)s` are bound params; the rest is constant.
         rows = (
             self._require_conn()
             .execute(
@@ -909,7 +917,7 @@ class StateTable(_PostgresStateBase):
                     "SELECT COALESCE("
                     "range_agg(tstzrange(since, until, '[)')), '{{}}'::tstzmultirange"
                     ") FROM {schema}.{table} "
-                    "WHERE status = 'applied' AND since IS NOT NULL"
+                    "WHERE since IS NOT NULL"
                     ")) AS g ORDER BY lower(g)"
                 ).format(schema=sql.Identifier(schema), table=sql.Identifier(table)),
                 {"s": since, "u": until},
@@ -930,7 +938,7 @@ class StateTable(_PostgresStateBase):
             for s, u in rows
         ]
         logger.debug(
-            "state: %d coverage gap(s) in [%s, %s) for %s",
+            "state: %d unfilled gap(s) in [%s, %s) for %s",
             len(gaps),
             since,
             until,

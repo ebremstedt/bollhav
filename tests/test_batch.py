@@ -4,7 +4,7 @@ from zoneinfo import ZoneInfo
 import pytest
 from time_machine import travel
 
-from bollhav.model.batch import Batch, TimeChunking
+from bollhav.model.batch import Batch, TimeChunking, ChunkFix, ChunkFlex
 from bollhav.model.window import (
     _resolve_cron,
     _apply_lookback,
@@ -12,6 +12,7 @@ from bollhav.model.window import (
     contract_intervals,
     latest_complete_interval,
     resolve_window,
+    split_at_times,
     split_window,
 )
 from bollhav.model.contract import Contract
@@ -391,7 +392,7 @@ class TestContractIntervals:
         assert list(contract_intervals(run)) == list(compute_intervals(run))
 
 
-# ── trailing edge: no_partial_below × contract.end ──
+# ── trailing edge: floor_chunk × contract.end ──
 
 # 'now' for every case below; the latest-complete boundaries follow from it.
 _NOW = datetime(2026, 6, 25, 12, 0, tzinfo=UTC)
@@ -403,13 +404,15 @@ _LCM = datetime(2026, 6, 1, tzinfo=UTC)  # latest complete @monthly end
 _LCD = datetime(2026, 6, 25, tzinfo=UTC)  # latest complete @daily end (00:00)
 
 
-def _edge_batch(chunk="@yearly", no_partial_below=None) -> Batch:
-    return Batch(
-        time=TimeChunking(chunk=chunk, no_partial_below=no_partial_below, tz=UTC)
+def _edge_batch(chunk="@yearly", floor_chunk=None) -> Batch:
+    # floor_chunk is flexible-only now; a bare edge model (no floor) is fixed.
+    flexibility = (
+        ChunkFlex(floor_chunk=floor_chunk) if floor_chunk is not None else ChunkFix()
     )
+    return Batch(time=TimeChunking(chunk=chunk, flexibility=flexibility, tz=UTC))
 
 
-# (contract.end, no_partial_below) -> expected window.until, with chunk=@yearly.
+# (contract.end, floor_chunk) -> expected window.until, with chunk=@yearly.
 _EDGE_CASES = [
     # open contract → the completeness floor.
     (None, None, _LCY),
@@ -436,7 +439,7 @@ _EDGE_IDS = [
 
 
 class TestTrailingEdge:
-    """`no_partial_below` (inferred-edge completeness grain) × `contract.end`,
+    """`floor_chunk` (inferred-edge completeness grain) × `contract.end`,
     over the inferred-window modes (reload + no-dates backfill). chunk=`@yearly`
     so the default floor (year) differs visibly from a finer grain; a future end
     is always clamped to the floor. 'now' = 2026-06-25 12:00 UTC."""
@@ -445,7 +448,7 @@ class TestTrailingEdge:
     @pytest.mark.parametrize("end,npb,expected", _EDGE_CASES, ids=_EDGE_IDS)
     def test_edge_matrix(self, end, npb, expected, mode) -> None:
         with travel(_NOW, tick=False):
-            batch = _edge_batch(no_partial_below=npb)
+            batch = _edge_batch(floor_chunk=npb)
             w = resolve_window(
                 batch, Contract(begin=_BEGIN, end=end), reload=(mode == "reload")
             )
@@ -458,22 +461,22 @@ class TestTrailingEdge:
             w = resolve_window(_edge_batch(), Contract(begin=_BEGIN), reload=True)
         assert w.until == _LCY
 
-    def test_no_partial_below_coarser_than_chunk(self) -> None:
+    def test_floor_chunk_coarser_than_chunk(self) -> None:
         # hourly chunks, but only release whole days: the edge is the last
         # complete day (00:00), not the latest complete hour (12:00).
         with travel(_NOW, tick=False):
-            batch = _edge_batch(chunk="@hourly", no_partial_below="@daily")
+            batch = _edge_batch(chunk="@hourly", floor_chunk="@daily")
             w = resolve_window(batch, Contract(begin=_BEGIN), reload=True)
         assert w.until == _LCD
 
-    def test_latest_mode_ignores_no_partial_below(self) -> None:
+    def test_latest_mode_ignores_floor_chunk(self) -> None:
         # latest mode uses `window` (the bite), not the inferred-edge knobs.
         with travel(_NOW, tick=False):
             batch = Batch(
                 time=TimeChunking(
                     chunk="@yearly",
-                    window="@monthly",
-                    no_partial_below="@daily",
+                    latest_window="@monthly",
+                    flexibility=ChunkFlex(floor_chunk="@daily"),
                     tz=UTC,
                 )
             )
@@ -481,27 +484,205 @@ class TestTrailingEdge:
         assert (w.since, w.until) == (datetime(2026, 5, 1, tzinfo=UTC), _LCM)
 
     def test_explicit_until_overrides_the_inferred_edge(self) -> None:
-        # An explicit RUN_UNTIL wins over the contract end and no_partial_below.
+        # An explicit RUN_UNTIL wins over the contract end and floor_chunk.
         until = datetime(2025, 3, 1, tzinfo=UTC)
         with travel(_NOW, tick=False):
-            batch = _edge_batch(no_partial_below="@daily")
+            batch = _edge_batch(floor_chunk="@daily")
             w = resolve_window(
                 batch, Contract(begin=_BEGIN, end=_FUTURE), since=_BEGIN, until=until
             )
         assert w.until == until
 
     def test_lookback_shifts_start_independently_of_the_edge(self) -> None:
-        # lookback is the start knob; no_partial_below is the end knob — orthogonal.
+        # lookback is the start knob; floor_chunk is the end knob — orthogonal.
         begin = datetime(2026, 6, 20, tzinfo=UTC)
         with travel(_NOW, tick=False):
             batch = Batch(
                 time=TimeChunking(
-                    chunk="@daily", no_partial_below="@daily", lookback=2, tz=UTC
+                    chunk="@daily",
+                    flexibility=ChunkFlex(floor_chunk="@daily"),
+                    lookback=2,
+                    tz=UTC,
                 )
             )
             w = resolve_window(batch, Contract(begin=begin), reload=True)
         assert w.until == _LCD  # end snapped to the last complete day
         assert w.since == datetime(2026, 6, 18, tzinfo=UTC)  # start pulled back 2 days
+
+    def test_flexible_monthly_backfill_cuts_last_month_at_current_day(self) -> None:
+        # A FLEXIBLE model chunked by month, backfilled with "now" halfway through
+        # a month: the trailing edge floors on the latest complete DAY
+        # (floor_chunk="@daily"), so the last month is a *partial*
+        # [month-start, that day) — cut mid-month, not extended to the month end.
+        now = datetime(2026, 6, 15, 12, tzinfo=UTC)  # halfway through June
+        begin = datetime(2026, 3, 1, tzinfo=UTC)
+        batch = Batch(
+            time=TimeChunking(
+                chunk="@monthly",
+                flexibility=ChunkFlex(floor_chunk="@daily"),
+                tz=UTC,
+            )
+        )
+        with travel(now, tick=False):
+            # no-dates backfill: since given, until inferred → the trailing edge.
+            w = resolve_window(batch, Contract(begin=begin), since=begin)
+            intervals = split_window(w, batch.time.chunk)
+        # edge cut at the latest complete day, not the June month boundary.
+        assert w.until == datetime(2026, 6, 15, tzinfo=UTC)
+        # whole months up to June, then a partial June 1 → June 15.
+        assert intervals[-2] == TZInterval(
+            datetime(2026, 5, 1, tzinfo=UTC), datetime(2026, 6, 1, tzinfo=UTC)
+        )
+        assert intervals[-1] == TZInterval(
+            datetime(2026, 6, 1, tzinfo=UTC), datetime(2026, 6, 15, tzinfo=UTC)
+        )
+
+
+class TestFlexibleBackfillSplits:
+    """A flexible model has two independent knobs: `chunk` slices the span, and
+    `floor_chunk` floors the *inferred* trailing edge. Backfill a multi-year
+    range with no explicit `until`, chunked `@yearly`, and the whole years split
+    cleanly while the final partial year snaps to `floor_chunk`'s latest
+    complete unit. 'now' = _NOW (2026-06-25 12:00 UTC)."""
+
+    _BEGIN = datetime(2021, 1, 1, tzinfo=UTC)
+    _WHOLE_YEARS = [
+        TZInterval(datetime(y, 1, 1, tzinfo=UTC), datetime(y + 1, 1, 1, tzinfo=UTC))
+        for y in (2021, 2022, 2023, 2024, 2025)
+    ]
+
+    @pytest.mark.parametrize(
+        "floor_chunk, tail",
+        [
+            (None, None),  # floor falls back to the chunk (year) → no partial tail
+            ("@yearly", None),  # explicit year floor → same as above
+            ("@monthly", TZInterval(_LCY, _LCM)),  # partial year → last complete month
+            ("@daily", TZInterval(_LCY, _LCD)),  # partial year → last complete day
+        ],
+        ids=["floor=chunk", "floor=year", "floor=month", "floor=day"],
+    )
+    def test_yearly_backfill_tail_snaps_to_floor_chunk(self, floor_chunk, tail) -> None:
+        batch = Batch(
+            time=TimeChunking(
+                chunk="@yearly",
+                flexibility=ChunkFlex(floor_chunk=floor_chunk),
+                tz=UTC,
+            )
+        )
+        with travel(_NOW, tick=False):
+            # no-dates backfill: since given, until inferred → the trailing edge
+            w = resolve_window(batch, Contract(begin=self._BEGIN), since=self._BEGIN)
+            intervals = split_window(w, batch.time.chunk)
+        assert intervals == self._WHOLE_YEARS + ([tail] if tail else [])
+
+    # Full cross-product: chunk × floor_chunk. The edge floors on `floor_chunk or
+    # chunk` (so it depends only on the floor grain, never the slicing chunk); the
+    # last interval is whole when the edge lands on a chunk boundary, partial
+    # otherwise. 'now' = 2026-06-25 12:00 → _LCY/_LCM/_LCD.
+    _MATRIX = [
+        # (chunk, floor_chunk, edge, last-interval `since`)
+        ("@yearly", None, _LCY, datetime(2025, 1, 1, tzinfo=UTC)),  # whole year
+        ("@yearly", "@monthly", _LCM, datetime(2026, 1, 1, tzinfo=UTC)),  # partial
+        ("@yearly", "@daily", _LCD, datetime(2026, 1, 1, tzinfo=UTC)),  # partial
+        ("@monthly", None, _LCM, datetime(2026, 5, 1, tzinfo=UTC)),  # whole month
+        ("@monthly", "@daily", _LCD, datetime(2026, 6, 1, tzinfo=UTC)),  # partial
+        (
+            "@monthly",
+            "@yearly",
+            _LCY,
+            datetime(2025, 12, 1, tzinfo=UTC),
+        ),  # coarser floor
+        ("@daily", None, _LCD, datetime(2026, 6, 24, tzinfo=UTC)),  # whole day
+        (
+            "@daily",
+            "@monthly",
+            _LCM,
+            datetime(2026, 5, 31, tzinfo=UTC),
+        ),  # coarser floor
+        (
+            "@daily",
+            "@yearly",
+            _LCY,
+            datetime(2025, 12, 31, tzinfo=UTC),
+        ),  # coarser floor
+    ]
+
+    @pytest.mark.parametrize(
+        "chunk, floor_chunk, edge, last_since",
+        _MATRIX,
+        ids=[
+            f"{c.strip('@')}-floor-{(f or 'none').strip('@')}" for c, f, *_ in _MATRIX
+        ],
+    )
+    def test_edge_and_tail_across_chunk_x_floor(
+        self, chunk, floor_chunk, edge, last_since
+    ) -> None:
+        batch = Batch(
+            time=TimeChunking(
+                chunk=chunk,
+                flexibility=ChunkFlex(floor_chunk=floor_chunk),
+                tz=UTC,
+            )
+        )
+        with travel(_NOW, tick=False):
+            w = resolve_window(batch, Contract(begin=self._BEGIN), since=self._BEGIN)
+            intervals = split_window(w, batch.time.chunk)
+        assert w.until == edge  # edge floors on `floor_chunk or chunk`
+        assert intervals[-1] == TZInterval(last_since, edge)  # whole or partial tail
+
+    def test_fine_chunk_coarse_floor_releases_only_settled_units(self) -> None:
+        # The floor can be COARSER than the chunk: chunk daily but only release
+        # whole months (floor_chunk="@monthly"). The edge stops at the last
+        # complete month — daily slices up to it, never a partial day beyond.
+        batch = Batch(
+            time=TimeChunking(
+                chunk="@daily",
+                flexibility=ChunkFlex(floor_chunk="@monthly"),
+                tz=UTC,
+            )
+        )
+        begin = datetime(2026, 5, 28, tzinfo=UTC)
+        with travel(_NOW, tick=False):
+            w = resolve_window(batch, Contract(begin=begin), since=begin)
+            intervals = split_window(w, batch.time.chunk)
+        assert w.until == _LCM  # last complete MONTH, not the last complete day
+        days = [datetime(2026, 5, d, tzinfo=UTC) for d in (28, 29, 30, 31)] + [_LCM]
+        assert intervals == [TZInterval(a, b) for a, b in zip(days, days[1:])]
+
+
+class TestSplitAtTimes:
+    """`split_at_times` — force extra boundaries (a run window's edges) into an interval
+    so no piece straddles them."""
+
+    _IV = TZInterval(
+        datetime(2026, 1, 1, tzinfo=UTC), datetime(2026, 1, 11, tzinfo=UTC)
+    )
+
+    def test_interior_points_split_left_to_right(self) -> None:
+        d3 = datetime(2026, 1, 4, tzinfo=UTC)
+        d7 = datetime(2026, 1, 8, tzinfo=UTC)
+        assert split_at_times(
+            self._IV, [d7, d3]
+        ) == [  # unordered input, ordered output
+            TZInterval(self._IV.since, d3),
+            TZInterval(d3, d7),
+            TZInterval(d7, self._IV.until),
+        ]
+
+    def test_boundary_and_outside_points_are_ignored(self) -> None:
+        before = datetime(2025, 12, 1, tzinfo=UTC)
+        after = datetime(2026, 2, 1, tzinfo=UTC)
+        # points on the bounds or outside are no-ops → interval unchanged
+        assert split_at_times(
+            self._IV, [self._IV.since, self._IV.until, before, after]
+        ) == [self._IV]
+
+    def test_duplicate_points_collapse(self) -> None:
+        mid = datetime(2026, 1, 6, tzinfo=UTC)
+        assert split_at_times(self._IV, [mid, mid]) == [
+            TZInterval(self._IV.since, mid),
+            TZInterval(mid, self._IV.until),
+        ]
 
 
 class TestUnbatchedWindow:

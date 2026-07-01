@@ -55,6 +55,7 @@ from bollhav.model.window import (
     compute_intervals,
     contract_intervals,
     resolve_window,
+    split_at_times,
     split_window,
 )
 from bollhav.postgres import (
@@ -218,9 +219,10 @@ def _orders_model(
     # `apply_runtime_overrides` normally resolves the window from env vars and
     # returns a ModelRun. E2E tests call the bootstrap directly, so we build
     # the model + resolve the window by hand to the test's fixed window.
-    from bollhav.model import Tags
+    from bollhav.model import Tags, ChunkFix, ChunkFlex
 
-    batching = Batch(time=TimeChunking(chunk=chunk, fixed_intervals=fixed_intervals))
+    flexibility = ChunkFix() if fixed_intervals else ChunkFlex()
+    batching = Batch(time=TimeChunking(chunk=chunk, flexibility=flexibility))
     contract = Contract(begin=SINCE, end=bounds_end)
     model = Model(
         target=Target(
@@ -321,7 +323,7 @@ def _bootstrap(models, *, state_mode: StateMode = StateMode.DISCOVER) -> None:
                     state.torch_rows()
 
                 batching = model.batching
-                is_flexible = batching is not None and not batching.time.fixed_intervals
+                is_flexible = batching is not None and batching.time.is_flexible
 
                 if run.window is None:
                     state.insert_oneshot(run_id=run.run_id)
@@ -337,10 +339,12 @@ def _bootstrap(models, *, state_mode: StateMode = StateMode.DISCOVER) -> None:
                         )
                     else:
                         horizon = run.window
+                    edges = (run.window.since, run.window.until)
                     units = tuple(
-                        unit
+                        piece
                         for gap in state.uncovered_gaps(horizon.since, horizon.until)
                         for unit in split_window(gap, batching.time.chunk)
+                        for piece in split_at_times(unit, edges)
                     )
                     state.prefill(run_id=run.run_id, intervals=units)
                 else:
@@ -2582,3 +2586,59 @@ def test_e2e_flexible_torch_rechunks_coverage(schema_name):
     # Old daily rows gone; one pending unit spanning the contract at the new grain.
     assert _state_rows(LIBRARY_SCHEMA, st) == [("pending", SINCE, UNTIL)]
     assert [(i.since, i.until) for i in run2.intervals] == [(SINCE, UNTIL)]
+
+
+def test_e2e_flexible_window_narrower_than_chunk_runs_a_clamped_unit(schema_name):
+    """A run window narrower than the chunk must still produce one actionable unit
+    *clamped to the window*. The prefill splits the chunk-sized unit at the window
+    edges, so it doesn't overshoot `window.until` and get filtered out by
+    `get_actionable_intervals` (which returns only units fully inside the window).
+    Regression: a @monthly chunk over a one-day window used to yield 0 actionable —
+    the run did nothing."""
+    from bollhav.model.intervals import TZInterval
+
+    run = _orders_model(
+        schema_name,
+        state=State(),
+        staging=Staging(),
+        fixed_intervals=False,
+        chunk="@monthly",  # coarser than the whole (3-day) contract → one unit
+    )
+    day1 = TZInterval(SINCE, SINCE + timedelta(days=1))
+    run.window = day1  # ask for just the first day
+    _bootstrap([run], state_mode=StateMode.DISCOVER)
+
+    # The window is actionable as itself; the remainder stays pending (not run now).
+    assert [(i.since, i.until) for i in run.intervals] == [(day1.since, day1.until)]
+    st = state_table_name(run.model.target.full_name)
+    assert _state_rows(LIBRARY_SCHEMA, st) == [
+        ("pending", SINCE, SINCE + timedelta(days=1)),
+        ("pending", SINCE + timedelta(days=1), UNTIL),
+    ]
+
+
+def test_e2e_flexible_prefill_does_not_overlay_existing_pending(schema_name):
+    """`uncovered_gaps` subtracts *all* live rows, not just `applied` — so a re-run
+    over a span that already has `pending` rows (even at a different grain) doesn't
+    lay a second, overlapping row on top. Regression for the mixed-grain clutter a
+    monthly re-run left over an existing daily-pending span."""
+    run1 = _orders_model(
+        schema_name, state=State(), staging=Staging(), fixed_intervals=False
+    )  # @daily
+    _bootstrap([run1], state_mode=StateMode.DISCOVER)  # 3 daily pending, not run
+    st = state_table_name(run1.model.target.full_name)
+    daily = _state_rows(LIBRARY_SCHEMA, st)
+    assert len(daily) == 3 and all(s == "pending" for s, _, _ in daily)
+
+    # Re-run at monthly grain over the same, already-pending range.
+    run2 = _orders_model(
+        schema_name,
+        state=State(),
+        staging=Staging(),
+        fixed_intervals=False,
+        chunk="@monthly",
+    )
+    _bootstrap([run2], state_mode=StateMode.DISCOVER)
+
+    # No overlapping monthly row added — the existing pending span is respected.
+    assert _state_rows(LIBRARY_SCHEMA, st) == daily

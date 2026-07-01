@@ -271,10 +271,10 @@ class Library(_PostgresStateBase):
             "batching": (
                 {
                     "chunk": batching.time.chunk,
-                    "window": batching.time.window,
+                    "window": batching.time.latest_window,
                     "lookback": batching.time.lookback,
                     "size": batching.size,
-                    "fixed_intervals": batching.time.fixed_intervals,
+                    "fixed_intervals": not batching.time.is_flexible,
                 }
                 if batching is not None
                 else None
@@ -325,7 +325,9 @@ class Library(_PostgresStateBase):
         # vs a coverage set). It lives on `TimeChunking`; a model with no
         # batching (oneshot / view) is trivially a fixed single unit.
         fixed_intervals = (
-            model.batching.time.fixed_intervals if model.batching is not None else True
+            (not model.batching.time.is_flexible)
+            if model.batching is not None
+            else True
         )
         upsert = sql.SQL(
             "INSERT INTO {schema}.{table} "
