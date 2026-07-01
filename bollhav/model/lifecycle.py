@@ -14,6 +14,7 @@ from bollhav.model.window import (
     compute_intervals,
     contract_intervals,
     resolve_window,
+    split_at_times,
     split_window,
 )
 from bollhav.model.write_modes import WriteMode
@@ -279,12 +280,19 @@ def model_lifecycle(func: Callable) -> Callable:
                     # begin set → a reload window; else the run window, which is
                     # non-None in this branch (past the `run.window is None` arm).
                     assert horizon is not None
+                    # Force the run-window edges as split points so no unit
+                    # straddles the window boundary: `get_actionable_intervals`
+                    # only returns units fully inside the window, so a chunk
+                    # coarser than the window would otherwise overshoot and never
+                    # become actionable (the run would do nothing).
+                    edges = (run.window.since, run.window.until)
                     units = tuple(
-                        unit
+                        piece
                         for gap in state_handler.uncovered_gaps(
                             horizon.since, horizon.until
                         )
                         for unit in split_window(gap, batching.time.chunk)
+                        for piece in split_at_times(unit, edges)
                     )
                     state_handler.prefill(run_id=run.run_id, intervals=units)
                 else:

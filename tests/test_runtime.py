@@ -1,16 +1,21 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
+import pytest
 from time_machine import travel
 
-from bollhav.model.runtime import _apply_to_model
+from bollhav.model.runtime import (
+    _apply_to_model,
+    FixedModelIntervalOverrideError,
+    FixedModelWindowTooNarrowError,
+)
 from bollhav.model.batch import Batch, TimeChunking, ChunkFlex
 from bollhav.model.contract import Contract
 from bollhav.model.intervals import TZInterval
 from bollhav.model.temporality import Temporality
 from bollhav.model.model import Model
 from bollhav.model.target import Target
-from bollhav.model.window import latest_complete_interval
+from bollhav.model.window import latest_complete_interval, compute_intervals
 
 
 CET = ZoneInfo("Europe/Stockholm")
@@ -95,14 +100,37 @@ class TestPipeOverrides:
         ).model
         assert m.batching.time.chunk == "0 * * * *"
 
-    def test_interval_override_ignored_on_fixed(self) -> None:
-        # A fixed grid can't be re-chunked at runtime without forking state, so
-        # the override is ignored (logged at INFO) — the chunk is left as-is.
-        m = _apply(
-            _model(chunk="@daily"),  # flexibility defaults to ChunkFix (grid)
-            interval_override="0 * * * *",
-        ).model
-        assert m.batching.time.chunk == "@daily"
+    def test_interval_override_raises_on_fixed(self) -> None:
+        # A fixed grid's chunk IS its identity — re-chunking would fork state, so
+        # INTERVAL_OVERRIDE on a fixed model is a hard error, not a silent ignore.
+        with pytest.raises(FixedModelIntervalOverrideError):
+            _apply(
+                _model(chunk="@daily"),  # flexibility defaults to ChunkFix (grid)
+                interval_override="0 * * * *",
+            )
+
+    def test_fixed_window_narrower_than_chunk_raises(self) -> None:
+        # A fixed @daily model asked for a sub-day window has no whole grid cell
+        # to run — refuse it rather than silently do nothing.
+        with pytest.raises(FixedModelWindowTooNarrowError):
+            _apply(
+                _model(chunk="@daily", tz=UTC),
+                backfill_since=datetime(2024, 6, 1, tzinfo=UTC),
+                backfill_until=datetime(2024, 6, 1, 6, tzinfo=UTC),  # 6h < one day
+            )
+
+    def test_fixed_run_cadence_is_only_its_chunk(self) -> None:
+        # A fixed model emits whole chunk cells and nothing else — same cadence in,
+        # same out. A @daily model over 3 days → exactly three one-day cells, never
+        # a coarser or finer grain.
+        run = _apply(
+            _model(chunk="@daily", tz=UTC),
+            backfill_since=datetime(2024, 6, 1, tzinfo=UTC),
+            backfill_until=datetime(2024, 6, 4, tzinfo=UTC),
+        )
+        intervals = list(compute_intervals(run))
+        assert len(intervals) == 3
+        assert all((iv.until - iv.since) == timedelta(days=1) for iv in intervals)
 
     def test_window_override(self) -> None:
         m = _apply(_model(), latest=True, window_override="@daily").model
@@ -214,15 +242,15 @@ class TestBatchingCarryThrough:
         out = _apply(_model(flexibility=ChunkFlex())).model
         assert out.batching.time.is_flexible is True
 
-    def test_no_partial_below_survives_no_override(self) -> None:
+    def test_floor_chunk_survives_no_override(self) -> None:
         # The inferred-edge grain (on ChunkFlex) isn't named by
         # _batching_with_overrides, so it must survive the rebuild via `replace`.
-        assert _model().batching.time.completeness_grain == "@hourly"  # default chunk
+        assert _model().batching.time.floor_chunk == "@hourly"  # default chunk
         out = _apply(
-            _model(chunk="@yearly", flexibility=ChunkFlex(no_partial_below="@daily"))
+            _model(chunk="@yearly", flexibility=ChunkFlex(floor_chunk="@daily"))
         ).model
-        assert out.batching.time.flexibility == ChunkFlex(no_partial_below="@daily")
-        assert out.batching.time.completeness_grain == "@daily"
+        assert out.batching.time.flexibility == ChunkFlex(floor_chunk="@daily")
+        assert out.batching.time.floor_chunk == "@daily"
 
 
 class TestBatchingNone:
