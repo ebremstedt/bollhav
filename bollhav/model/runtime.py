@@ -110,7 +110,11 @@ def _apply_to_model(
         and backfill_until is None
     ):
         window = resolve_window(
-            batching, model.contract, reload=True, name=model.target.full_name
+            batching,
+            model.contract,
+            temporality=model.temporality,
+            reload=True,
+            name=model.target.full_name,
         )
     else:
         # `reload` (from matching) and the pipe args together pick the window
@@ -118,6 +122,7 @@ def _apply_to_model(
         window = resolve_window(
             batching,
             model.contract,
+            temporality=model.temporality,
             reload=reload,
             latest=latest,
             since=backfill_since,

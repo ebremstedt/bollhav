@@ -128,3 +128,11 @@ def grid(limit: int = 40, env: str | None = None):
     recent `limit` run rows."""
     with _conn() as c:
         return read.get_runs_grouped(c, limit=limit, schema=_schema(env))
+
+
+@app.get("/gaps")
+def gaps(env: str | None = None):
+    """Per-model backfill gaps — the spans of each model's contract window that
+    aren't yet `applied` in its state table (what still needs backfilling)."""
+    with _conn() as c:
+        return read.get_gaps_grouped(c, schema=_schema(env))
