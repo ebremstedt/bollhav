@@ -59,7 +59,10 @@ class TestPeople:
 
     def test_partial_fields_valid(self):
         assert People(creator="axel").creator == "axel"
-        assert People(maintainers=(Contact(name="analytics"),)).maintainers[0].name == "analytics"
+        assert (
+            People(maintainers=(Contact(name="analytics"),)).maintainers[0].name
+            == "analytics"
+        )
 
     def test_rejects_empty_creator(self):
         with pytest.raises(OwnerError, match="creator"):
