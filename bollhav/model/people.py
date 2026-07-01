@@ -36,9 +36,7 @@ class People:
 
     def __post_init__(self) -> None:
         if self.creator is not None and not self.creator.strip():
-            raise OwnerError(
-                "People.creator must be a non-empty string when set"
-            )
+            raise OwnerError("People.creator must be a non-empty string when set")
         self.owners = self._validate_contacts("owners", self.owners)
         self.maintainers = self._validate_contacts("maintainers", self.maintainers)
 
