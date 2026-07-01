@@ -199,6 +199,54 @@ class TestRegister:
         assert params[1] == []
 
 
+class TestBuildMetadataPeople:
+    """``_build_metadata`` serialises the people field to a JSON-safe dict."""
+
+    def _metadata(self, **people_kwargs):
+        from bollhav.postgres.state import PostgresState
+        from bollhav.model.people import People
+
+        m = _model()
+        m.people = People(**people_kwargs) if people_kwargs else None
+        return PostgresState._build_metadata(m)
+
+    def test_people_absent_emits_null(self):
+        m = _model()
+        m.people = None
+        from bollhav.postgres.state import PostgresState
+
+        meta = PostgresState._build_metadata(m)
+        assert meta["people"] is None
+
+    def test_full_people_serialises(self):
+        from bollhav.postgres.state import PostgresState
+        from bollhav.model.people import Contact, People
+
+        m = _model()
+        m.people = People(
+            owners=(Contact(name="Axel", email="axel@example.com"),),
+            creator="axel",
+            maintainers=(Contact(name="platform", email="platform@example.com"),),
+        )
+        meta = PostgresState._build_metadata(m)
+        assert meta["people"] == {
+            "owners": [{"name": "Axel", "email": "axel@example.com"}],
+            "creator": "axel",
+            "maintainers": [{"name": "platform", "email": "platform@example.com"}],
+        }
+
+    def test_partial_people_owner_none(self):
+        from bollhav.postgres.state import PostgresState
+        from bollhav.model.people import Contact, People
+
+        m = _model()
+        m.people = People(creator="bot", maintainers=(Contact(name="analytics"),))
+        meta = PostgresState._build_metadata(m)
+        assert meta["people"]["owners"] is None
+        assert meta["people"]["creator"] == "bot"
+        assert meta["people"]["maintainers"] == [{"name": "analytics", "email": None}]
+
+
 class TestLookup:
     def test_returns_none_when_not_registered(self) -> None:
         from bollhav.postgres.state import PostgresState

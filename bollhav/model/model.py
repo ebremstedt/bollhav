@@ -14,6 +14,7 @@ from bollhav.model.state import State
 from bollhav.model.tags import Tags
 from bollhav.model.source import Source
 from bollhav.model.curfew import Curfew
+from bollhav.model.people import People
 
 logger = logging.getLogger(__name__)
 
@@ -170,6 +171,7 @@ class Model:
         debug: bool = False,
         description: str | None = None,
         upstream: list[Source] | None = None,
+        people: People | None = None,
         **kwargs,
     ):
         self.target = target
@@ -198,6 +200,7 @@ class Model:
                 self.target.name, self.target.schema, self.target.catalog
             )
         )
+        self.people = people
         self.extra = kwargs
         self._validate_kind_consistency()
         self._validate_upstream_requires_state()
@@ -588,8 +591,11 @@ class Model:
             # The auto-injected UNKNOWN sentinel carries a per-instance uuid
             # (so each is a distinct lineage node), which would make two
             # otherwise-identical models unequal — drop it before comparing.
+            # `people` is descriptive metadata (not pipeline identity) so it
+            # is excluded from equality too.
             d = dict(m.__dict__)
             d["upstream"] = [source for source in m.upstream if source.type is not None]
+            d.pop("people", None)
             return d
 
         return _norm(self) == _norm(other)

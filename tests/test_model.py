@@ -95,6 +95,34 @@ def test_model_exposes_sub_configs():
     assert isinstance(m.tags, set)
 
 
+def test_model_people_defaults_to_none():
+    assert make_model().people is None
+
+
+def test_model_stores_people():
+    from bollhav.model.people import Contact, People
+
+    o = People(
+        owners=(Contact(name="Axel", email="axel@example.com"),),
+        creator="axel",
+        maintainers=(Contact(name="platform"),),
+    )
+    m = make_model(people=o)
+    assert m.people is o
+    assert m.people.owners[0].name == "Axel"
+    assert m.people.maintainers[0].name == "platform"
+
+
+def test_model_equality_ignores_people():
+    """People is descriptive metadata — two models differing only in
+    people should still compare equal."""
+    from bollhav.model.people import Contact, People
+
+    base = make_model()
+    with_owner = make_model(people=People(owners=(Contact(name="Axel"),)))
+    assert base == with_owner
+
+
 def test_batching_defaults_to_none_when_unspecified():
     """No batching kwarg = no chunking. model.intervals returns [None].
     A whole-table load with no batching is TIMELESS — one oneshot row."""

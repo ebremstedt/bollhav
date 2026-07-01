@@ -29,6 +29,7 @@ from bollhav.model.state import (
     StateMode,
 )
 from bollhav.model.tags import Tags
+from bollhav.model.people import Contact, People
 from bollhav.model.upstream import (
     Freshness,
     FreshnessScope,
@@ -69,6 +70,8 @@ __all__ = [
     "TimeChunking",
     "Curfew",
     "Tags",
+    "Contact",
+    "People",
     "UpstreamContract",
     "Freshness",
     "FreshnessScope",
