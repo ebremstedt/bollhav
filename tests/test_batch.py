@@ -502,3 +502,61 @@ class TestTrailingEdge:
             w = resolve_window(batch, Contract(begin=begin), reload=True)
         assert w.until == _LCD  # end snapped to the last complete day
         assert w.since == datetime(2026, 6, 18, tzinfo=UTC)  # start pulled back 2 days
+
+
+class TestUnbatchedWindow:
+    """`resolve_window` with `batching=None` — the single-row span an unbatched
+    model records. The whole point: an open temporal contract must still resolve
+    to a real `[begin, edge]` window so it registers a non-NULL state row.
+    `uncovered_gaps` only counts `since IS NOT NULL` rows, so an unbatched
+    temporal oneshot that fell through to `None` (a NULL-window row) reported its
+    entire contract as an uncovered gap. 'now' = 2026-06-25 12:00 UTC."""
+
+    def test_temporal_closed_contract_spans_begin_to_end(self) -> None:
+        # Both bounds set → the literal [begin, end] span (no clock read).
+        w = resolve_window(
+            None, Contract(begin=_BEGIN, end=_PAST), temporality=Temporality.TEMPORAL
+        )
+        assert w == TZInterval(_BEGIN, _PAST)
+
+    def test_temporal_open_contract_closes_at_latest_complete_day(self) -> None:
+        # The fix: open end (no contract.end) → [begin, latest complete day],
+        # not None. An unbatched model has no chunk, so the edge defaults to
+        # whole days.
+        with travel(_NOW, tick=False):
+            w = resolve_window(
+                None, Contract(begin=_BEGIN), temporality=Temporality.TEMPORAL
+            )
+        assert w == TZInterval(_BEGIN, _LCD)
+
+    def test_open_contract_edge_uses_the_begin_timezone(self) -> None:
+        # The daily floor is taken in the contract's own tz, so the day boundary
+        # is local midnight (CET), not UTC midnight.
+        begin = datetime(2024, 1, 1, tzinfo=CET)
+        with travel(_NOW, tick=False):
+            w = resolve_window(
+                None, Contract(begin=begin), temporality=Temporality.TEMPORAL
+            )
+        assert w.since == begin
+        assert w.until == datetime(2026, 6, 25, tzinfo=CET)  # last complete CET day
+
+    def test_temporal_open_contract_is_the_default_temporality(self) -> None:
+        # temporality defaults to TEMPORAL, so omitting it resolves a span too.
+        with travel(_NOW, tick=False):
+            w = resolve_window(None, Contract(begin=_BEGIN))
+        assert w == TZInterval(_BEGIN, _LCD)
+
+    def test_timeless_open_contract_is_a_null_window_oneshot(self) -> None:
+        # A TIMELESS model never spans, even with a begin — it gets None (→ the
+        # NULL-window one-shot row). This is the gate the temporality arg adds.
+        w = resolve_window(
+            None, Contract(begin=_BEGIN), temporality=Temporality.TIMELESS
+        )
+        assert w is None
+
+    def test_temporal_rangeless_contract_is_a_null_window_oneshot(self) -> None:
+        # No begin → nothing to span → None (NULL-window one-shot row), regardless
+        # of temporality.
+        assert (
+            resolve_window(None, Contract(), temporality=Temporality.TEMPORAL) is None
+        )

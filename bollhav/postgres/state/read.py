@@ -343,6 +343,179 @@ def get_recent_runs(
     return runs[:limit]
 
 
+def get_gaps_grouped(
+    conn: "psycopg.Connection",
+    schema: str = LIBRARY_SCHEMA,
+) -> list[dict]:
+    """Per stateful model, the **backfill gaps** between its contract and its
+    state table — the `[since, until)` spans of the contract window that aren't
+    yet `applied`. The set-math mirrors `StateTable.uncovered_gaps`
+    (`multirange([begin, horizon)) − range_agg(applied)`), but read straight from
+    the library so the GUI needs no model objects.
+
+    The horizon is the contract `begin` → contract `end`, falling back to the
+    latest `until` materialized in state (an open contract's forward edge), then
+    `now()` when nothing's been materialized yet. Each model returns:
+
+        {full_name, has_contract, begin, end,
+         gaps: [{since, until, seconds}],
+         contract_seconds, gap_seconds, covered_seconds, pct_covered,
+         status_counts: {applied, pending, blocked, running, error, …}}
+
+    `has_contract` is False — with empty `gaps` — for a model with no contract
+    `begin` (an open-start contract, so gaps-vs-contract is undefined), no state
+    table, or a timeless temporality. Such models are still listed so the GUI can
+    show them as "no declared bounds". Ordered by name."""
+    if not _table_exists(conn, schema, LIBRARY_TABLE):
+        return []
+    models = conn.execute(
+        sql.SQL(
+            "SELECT full_name, temporality, state_schema, state_table, metadata "
+            "FROM {schema}.{table} ORDER BY full_name"
+        ).format(
+            schema=sql.Identifier(schema),
+            table=sql.Identifier(LIBRARY_TABLE),
+        )
+    ).fetchall()
+
+    out: list[dict] = []
+    for full_name, temporality, st_schema, st_table, metadata in models:
+        contract = (metadata or {}).get("contract") or {}
+        begin, end = contract.get("begin"), contract.get("end")
+        tags = (metadata or {}).get("tags", []) or []
+        has_table = bool(
+            st_schema and st_table and _table_exists(conn, st_schema, st_table)
+        )
+        tbl = (
+            sql.SQL("{schema}.{table}").format(
+                schema=sql.Identifier(st_schema), table=sql.Identifier(st_table)
+            )
+            if has_table
+            else None
+        )
+        status_counts = (
+            {
+                s: n
+                for s, n in conn.execute(
+                    sql.SQL(
+                        "SELECT status, count(*) FROM {tbl} GROUP BY status"
+                    ).format(tbl=tbl)
+                ).fetchall()
+            }
+            if has_table
+            else {}
+        )
+
+        # Timeless (oneshot / whole-table) model: no time axis, so backfill is
+        # all-or-nothing — its single whole-table row is either `applied`
+        # (`applied=True`, the GUI paints it fully "loaded") or not yet
+        # (`applied=False`, fully "not loaded"). Never a partial gap. Flagged
+        # `timeless` so the GUI can colour it distinctly from a temporal bar.
+        if temporality != "temporal":
+            applied = status_counts.get("applied", 0) > 0 if has_table else None
+            out.append(
+                {
+                    "full_name": full_name,
+                    "has_contract": False,
+                    "timeless": True,
+                    "applied": applied,
+                    "begin": None,
+                    "end": None,
+                    "gaps": [],
+                    "contract_seconds": 0,
+                    "gap_seconds": 0,
+                    "covered_seconds": 0,
+                    "pct_covered": None
+                    if applied is None
+                    else (100.0 if applied else 0.0),
+                    "tags": tags,
+                    "status_counts": status_counts,
+                }
+            )
+            continue
+
+        # Temporal model with no declared lower bound (open start) or no state
+        # table — gaps-vs-contract is undefined; list it as "no declared bounds".
+        if not begin or not has_table:
+            out.append(
+                {
+                    "full_name": full_name,
+                    "has_contract": False,
+                    "timeless": False,
+                    "applied": None,
+                    "begin": begin,
+                    "end": end,
+                    "gaps": [],
+                    "contract_seconds": 0,
+                    "gap_seconds": 0,
+                    "covered_seconds": 0,
+                    "pct_covered": None,
+                    "tags": tags,
+                    "status_counts": status_counts,
+                }
+            )
+            continue
+        # The horizon: contract begin → contract end, else the state's forward
+        # edge (max until), else now() when nothing's materialized. The SELECT
+        # always returns one row; the guard is just for the type checker.
+        horizon = conn.execute(
+            sql.SQL(
+                "SELECT %(b)s::timestamptz, COALESCE("
+                "%(e)s::timestamptz, "
+                "(SELECT max(until) FROM {tbl} WHERE until IS NOT NULL), now())"
+            ).format(tbl=tbl),
+            {"b": begin, "e": end},
+        ).fetchone()
+        if horizon is None:
+            continue
+        b, e = horizon
+        # multirange([b, e)) − range_agg(applied) = the maximal uncovered spans.
+        gap_rows = conn.execute(
+            sql.SQL(
+                "SELECT lower(g), upper(g) FROM unnest("
+                "tstzmultirange(tstzrange(%(b)s::timestamptz, %(e)s::timestamptz, '[)')) - ("
+                "SELECT COALESCE("
+                "range_agg(tstzrange(since, until, '[)')), '{{}}'::tstzmultirange"
+                ") FROM {tbl} WHERE status = 'applied' AND since IS NOT NULL"
+                ")) AS g WHERE upper(g) > lower(g) ORDER BY lower(g)"
+            ).format(tbl=tbl),
+            {"b": b, "e": e},
+        ).fetchall()
+        gaps = [
+            {
+                "since": _iso(gs),
+                "until": _iso(gu),
+                "seconds": (gu - gs).total_seconds(),
+            }
+            for gs, gu in gap_rows
+        ]
+        contract_seconds = (e - b).total_seconds() if e > b else 0
+        gap_seconds = sum(g["seconds"] for g in gaps)
+        covered_seconds = max(contract_seconds - gap_seconds, 0)
+        out.append(
+            {
+                "full_name": full_name,
+                "has_contract": True,
+                "timeless": False,
+                "applied": None,
+                "begin": _iso(b),
+                "end": _iso(e),
+                "gaps": gaps,
+                "contract_seconds": contract_seconds,
+                "gap_seconds": gap_seconds,
+                "covered_seconds": covered_seconds,
+                "pct_covered": (
+                    round(covered_seconds / contract_seconds * 100, 1)
+                    if contract_seconds
+                    else None
+                ),
+                "tags": tags,
+                "status_counts": status_counts,
+            }
+        )
+    return out
+
+
 def get_runs_grouped(
     conn: "psycopg.Connection",
     limit: int = 40,

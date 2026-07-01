@@ -1,5 +1,10 @@
 <script>
-  import { LEGEND_KINDS, LEGEND_SOURCES, STATUS_COLOR } from "../lib/constants.js";
+  import {
+    LEGEND_KINDS,
+    LEGEND_SOURCES,
+    STATUS_COLOR,
+    GAP_COLORS,
+  } from "../lib/constants.js";
   import { view } from "../lib/view.svelte.js";
 
   let showHelp = $state(false);
@@ -81,6 +86,51 @@
   >
     <span class="sw dot stale"></span>stale
   </span>
+  {:else if view.tab === "gaps"}
+    <span
+      class="item"
+      data-tip="A temporal interval that has been applied, or a timeless model that has loaded its whole table."
+    >
+      <span class="sw" style="background:{GAP_COLORS.covered}"></span>applied / loaded
+    </span>
+    <span
+      class="item"
+      data-tip="Part of the contract window with no applied row yet — what still needs backfilling. A timeless model not yet loaded shows fully grey."
+    >
+      <span class="sw" style="background:{GAP_COLORS.gap}"></span>gap (needs backfill)
+    </span>
+    <span
+      class="item"
+      data-tip="A whole-table model with no time axis: all-or-nothing (loaded or not), never a partial gap. Marked with a `timeless` badge and coloured with the same green / grey."
+    >
+      <span class="tl-badge">timeless</span>whole-table model
+    </span>
+    {#if view.gapScore != null}
+      <span class="sep"></span>
+      <span
+        class="item score"
+        data-tip="Mean backfill coverage across the {view.gapScored} model{view.gapScored ===
+        1
+          ? ''
+          : 's'} that have a percentage — a rough backfill completeness score."
+      >
+        backfill score
+        <b style="color:{GAP_COLORS.covered}">{view.gapScore}%</b>
+      </span>
+    {/if}
+  {:else if view.tab === "models"}
+    <span class="item" data-tip="Temporal — the model's work references time (windowed)."
+      ><span class="mbdg temp">⏱</span>temporal</span
+    >
+    <span class="item" data-tip="Timeless — a whole-table model with no time axis."
+      ><span class="mbdg temp timeless">∞</span>timeless</span
+    >
+    <span class="item" data-tip="Materialization: a stored table."
+      ><span class="mbdg mat">T</span>table</span
+    >
+    <span class="item" data-tip="Materialization: a SQL view."
+      ><span class="mbdg mat view">V</span>view</span
+    >
   {:else}
     {#each RUN_STATUSES as [k, label]}
       <span class="item">
@@ -159,6 +209,43 @@
     align-items: center;
     gap: 5px;
     cursor: help;
+  }
+  .tl-badge {
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--legend-fg);
+    border: 1px solid var(--control-border);
+    border-radius: 4px;
+    padding: 0 4px;
+  }
+  /* model temporality / materialization badges — same icons + colours as the
+     Models tab's left-menu list */
+  .mbdg {
+    display: inline-block;
+    font-size: 9px;
+    width: 15px;
+    text-align: center;
+    border-radius: 3px;
+    padding: 1px 0;
+    color: #fff;
+    background: #43a047;
+  }
+  .mbdg.temp {
+    background: #2f80ed;
+  }
+  .mbdg.temp.timeless {
+    background: #1e3a8a;
+  }
+  .mbdg.mat {
+    background: #1b5e20;
+  }
+  .mbdg.mat.view {
+    background: #66bb6a;
+  }
+  .score b {
+    font-size: 13px;
+    font-variant-numeric: tabular-nums;
   }
   /* custom hover tooltip (native title is too flaky/slow) */
   [data-tip] {

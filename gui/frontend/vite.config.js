@@ -27,6 +27,7 @@ export default defineConfig({
       "/errors": API,
       "/runs": API,
       "/grid": API,
+      "/gaps": API,
     },
   },
 });
