@@ -1,6 +1,6 @@
 import pytest
 
-from bollhav.model.owner import Contact, OwnerError, Ownership
+from bollhav.model.people import Contact, OwnerError, People
 
 
 # ── Contact ───────────────────────────────────────────────────────────
@@ -37,18 +37,18 @@ class TestContact:
             Contact(name="Axel", email="notanemail")
 
 
-# ── Ownership ─────────────────────────────────────────────────────────
+# ── People ────────────────────────────────────────────────────────────
 
 
-class TestOwnership:
+class TestPeople:
     def test_all_fields_none_is_valid(self):
-        o = Ownership()
+        o = People()
         assert o.owners is None
         assert o.creator is None
         assert o.maintainers is None
 
     def test_stores_all_fields(self):
-        o = Ownership(
+        o = People(
             owners=(Contact(name="Axel", email="axel@example.com"),),
             creator="axel",
             maintainers=(Contact(name="platform"),),
@@ -58,33 +58,33 @@ class TestOwnership:
         assert o.maintainers[0].name == "platform"
 
     def test_partial_fields_valid(self):
-        assert Ownership(creator="axel").creator == "axel"
-        assert Ownership(maintainers=(Contact(name="analytics"),)).maintainers[0].name == "analytics"
+        assert People(creator="axel").creator == "axel"
+        assert People(maintainers=(Contact(name="analytics"),)).maintainers[0].name == "analytics"
 
     def test_rejects_empty_creator(self):
         with pytest.raises(OwnerError, match="creator"):
-            Ownership(creator="")
+            People(creator="")
 
     def test_rejects_whitespace_creator(self):
         with pytest.raises(OwnerError, match="creator"):
-            Ownership(creator="   ")
+            People(creator="   ")
 
     def test_accepts_multiple_owners(self):
-        o = Ownership(owners=(Contact(name="Axel"), Contact(name="Sam")))
+        o = People(owners=(Contact(name="Axel"), Contact(name="Sam")))
         assert [c.name for c in o.owners] == ["Axel", "Sam"]
 
     def test_rejects_empty_owners_tuple(self):
         with pytest.raises(OwnerError, match="owners"):
-            Ownership(owners=())
+            People(owners=())
 
     def test_rejects_empty_maintainers_tuple(self):
         with pytest.raises(OwnerError, match="maintainers"):
-            Ownership(maintainers=())
+            People(maintainers=())
 
     def test_rejects_non_contact_in_owners(self):
         with pytest.raises(OwnerError, match="owners"):
-            Ownership(owners=("Axel",))
+            People(owners=("Axel",))
 
     def test_rejects_non_contact_in_maintainers(self):
         with pytest.raises(OwnerError, match="maintainers"):
-            Ownership(maintainers=("platform",))
+            People(maintainers=("platform",))

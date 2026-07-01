@@ -279,21 +279,21 @@ class Library(_PostgresStateBase):
                 if batching is not None
                 else None
             ),
-            "ownership": (
+            "people": (
                 {
                     "owners": (
-                        [{"name": c.name, "email": c.email} for c in model.ownership.owners]
-                        if model.ownership.owners is not None
+                        [{"name": c.name, "email": c.email} for c in model.people.owners]
+                        if model.people.owners is not None
                         else None
                     ),
-                    "creator": model.ownership.creator,
+                    "creator": model.people.creator,
                     "maintainers": (
-                        [{"name": c.name, "email": c.email} for c in model.ownership.maintainers]
-                        if model.ownership.maintainers is not None
+                        [{"name": c.name, "email": c.email} for c in model.people.maintainers]
+                        if model.people.maintainers is not None
                         else None
                     ),
                 }
-                if model.ownership is not None
+                if model.people is not None
                 else None
             ),
         }

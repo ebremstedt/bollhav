@@ -29,7 +29,7 @@ from bollhav.model.state import (
     StateMode,
 )
 from bollhav.model.tags import Tags
-from bollhav.model.owner import Contact, Ownership
+from bollhav.model.people import Contact, People
 from bollhav.model.upstream import (
     Freshness,
     FreshnessScope,
@@ -71,7 +71,7 @@ __all__ = [
     "Curfew",
     "Tags",
     "Contact",
-    "Ownership",
+    "People",
     "UpstreamContract",
     "Freshness",
     "FreshnessScope",
