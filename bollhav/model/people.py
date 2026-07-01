@@ -3,14 +3,13 @@ from dataclasses import dataclass
 
 
 class OwnerError(ValueError):
-    """Raised when a ``Contact`` or ``Ownership`` is constructed with
+    """Raised when a ``Contact`` or ``People`` is constructed with
     invalid values (empty strings, malformed email, etc.)."""
 
 
 @dataclass
 class Contact:
-    """A named entity with an optional contact email — used to represent
-    either an individual owner or a maintainer."""
+    """Contact information"""
 
     name: str
     email: str | None = None
@@ -28,8 +27,8 @@ class Contact:
 
 
 @dataclass
-class Ownership:
-    """Ownership and accountability metadata for a model."""
+class People:
+    """Involved people and accountability metadata for a model"""
 
     owners: tuple[Contact, ...] | None = None
     creator: str | None = None
@@ -38,7 +37,7 @@ class Ownership:
     def __post_init__(self) -> None:
         if self.creator is not None and not self.creator.strip():
             raise OwnerError(
-                "Ownership.creator must be a non-empty string when set"
+                "People.creator must be a non-empty string when set"
             )
         self.owners = self._validate_contacts("owners", self.owners)
         self.maintainers = self._validate_contacts("maintainers", self.maintainers)
@@ -52,12 +51,12 @@ class Ownership:
         contacts = tuple(value)
         if not contacts:
             raise OwnerError(
-                f"Ownership.{field_name} must contain at least one Contact when set"
+                f"People.{field_name} must contain at least one Contact when set"
             )
         for c in contacts:
             if not isinstance(c, Contact):
                 raise OwnerError(
-                    f"Ownership.{field_name} must contain only Contact instances "
+                    f"People.{field_name} must contain only Contact instances "
                     f"(got {c!r})"
                 )
         return contacts

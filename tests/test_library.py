@@ -199,52 +199,52 @@ class TestRegister:
         assert params[1] == []
 
 
-class TestBuildMetadataOwnership:
-    """``_build_metadata`` serialises the ownership field to a JSON-safe dict."""
+class TestBuildMetadataPeople:
+    """``_build_metadata`` serialises the people field to a JSON-safe dict."""
 
-    def _metadata(self, **ownership_kwargs):
+    def _metadata(self, **people_kwargs):
         from bollhav.postgres.state import PostgresState
-        from bollhav.model.owner import Ownership
+        from bollhav.model.people import People
 
         m = _model()
-        m.ownership = Ownership(**ownership_kwargs) if ownership_kwargs else None
+        m.people = People(**people_kwargs) if people_kwargs else None
         return PostgresState._build_metadata(m)
 
-    def test_ownership_absent_emits_null(self):
+    def test_people_absent_emits_null(self):
         m = _model()
-        m.ownership = None
+        m.people = None
         from bollhav.postgres.state import PostgresState
 
         meta = PostgresState._build_metadata(m)
-        assert meta["ownership"] is None
+        assert meta["people"] is None
 
-    def test_full_ownership_serialises(self):
+    def test_full_people_serialises(self):
         from bollhav.postgres.state import PostgresState
-        from bollhav.model.owner import Contact, Ownership
+        from bollhav.model.people import Contact, People
 
         m = _model()
-        m.ownership = Ownership(
+        m.people = People(
             owners=(Contact(name="Axel", email="axel@example.com"),),
             creator="axel",
             maintainers=(Contact(name="platform", email="platform@example.com"),),
         )
         meta = PostgresState._build_metadata(m)
-        assert meta["ownership"] == {
+        assert meta["people"] == {
             "owners": [{"name": "Axel", "email": "axel@example.com"}],
             "creator": "axel",
             "maintainers": [{"name": "platform", "email": "platform@example.com"}],
         }
 
-    def test_partial_ownership_owner_none(self):
+    def test_partial_people_owner_none(self):
         from bollhav.postgres.state import PostgresState
-        from bollhav.model.owner import Contact, Ownership
+        from bollhav.model.people import Contact, People
 
         m = _model()
-        m.ownership = Ownership(creator="bot", maintainers=(Contact(name="analytics"),))
+        m.people = People(creator="bot", maintainers=(Contact(name="analytics"),))
         meta = PostgresState._build_metadata(m)
-        assert meta["ownership"]["owners"] is None
-        assert meta["ownership"]["creator"] == "bot"
-        assert meta["ownership"]["maintainers"] == [{"name": "analytics", "email": None}]
+        assert meta["people"]["owners"] is None
+        assert meta["people"]["creator"] == "bot"
+        assert meta["people"]["maintainers"] == [{"name": "analytics", "email": None}]
 
 
 class TestLookup:
