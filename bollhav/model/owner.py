@@ -10,9 +10,7 @@ class OwnerError(ValueError):
 @dataclass
 class Contact:
     """A named entity with an optional contact email — used to represent
-    either an individual owner or a maintainer. When ``email`` is set it
-    must contain ``@``; fuller RFC 5322 parsing is intentionally out of
-    scope."""
+    either an individual owner or a maintainer."""
 
     name: str
     email: str | None = None
@@ -31,12 +29,7 @@ class Contact:
 
 @dataclass
 class Ownership:
-    """Ownership and accountability metadata for a model.
-
-    All fields are optional — set whichever are relevant. ``owners`` and
-    ``maintainers`` are each one or more ``Contact`` instances, stored as a
-    tuple. ``creator`` is a free-form string identifying who created the
-    model (username, service account, etc.)."""
+    """Ownership and accountability metadata for a model."""
 
     owners: tuple[Contact, ...] | None = None
     creator: str | None = None
