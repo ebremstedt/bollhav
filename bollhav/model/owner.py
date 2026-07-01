@@ -33,7 +33,7 @@ class Contact:
 class Ownership:
     """Ownership and accountability metadata for a model.
 
-    All fields are optional — set whichever are relevant. ``owner`` and
+    All fields are optional — set whichever are relevant. ``owners`` and
     ``maintainers`` are each one or more ``Contact`` instances, stored as a
     tuple. ``creator`` is a free-form string identifying who created the
     model (username, service account, etc.)."""
@@ -47,7 +47,7 @@ class Ownership:
             raise OwnerError(
                 "Ownership.creator must be a non-empty string when set"
             )
-        self.owner = self._validate_contacts("owner", self.owner)
+        self.owners = self._validate_contacts("owners", self.owners)
         self.maintainers = self._validate_contacts("maintainers", self.maintainers)
 
     @staticmethod
