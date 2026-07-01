@@ -40,7 +40,7 @@ def apply_runtime_overrides(
         * `target.suffix` set to `table_suffix`.
         * `batching.time.chunk` overridden by
           `interval_override` (pipe) when set.
-        * `batching.time.window` overridden by
+        * `batching.time.latest_window` overridden by
           `window_override` when set.
         * `batching.time.lookback` overridden by `lookback_override` when
           set.
@@ -205,15 +205,15 @@ def _batching_with_overrides(
     if batching is None:
         return None
     # INTERVAL_OVERRIDE re-chunks at runtime, but only a flexible model
-    # (fixed_intervals=False) can absorb that — re-chunking a FIXED grid would
-    # fork its state into mixed granularity. So the override is ignored on fixed
-    # models (change a fixed model's chunk via STATE_MODE=torch instead).
+    # (ChunkFlex) can absorb that — re-chunking a FIXED grid would fork its
+    # state into mixed granularity. So the override is ignored on fixed models
+    # (change a fixed model's chunk via STATE_MODE=torch instead).
     chunk = batching.time.chunk
     if interval_override:
-        if batching.time.fixed_intervals:
+        if not batching.time.is_flexible:
             logger.info(
-                "INTERVAL_OVERRIDE=%r ignored for %s: it has fixed intervals "
-                "(fixed_intervals=True), so re-chunking at runtime would fork its "
+                "INTERVAL_OVERRIDE=%r ignored for %s: it has a fixed grid "
+                "(ChunkFix), so re-chunking at runtime would fork its "
                 "state — keeping chunk=%r. Change a fixed model's chunk with "
                 "STATE_MODE=torch instead.",
                 interval_override,
@@ -233,7 +233,7 @@ def _batching_with_overrides(
         time=replace(
             batching.time,
             chunk=chunk,
-            window=window_override or batching.time.window,
+            latest_window=window_override or batching.time.latest_window,
             lookback=lookback_override
             if lookback_override is not None
             else batching.time.lookback,

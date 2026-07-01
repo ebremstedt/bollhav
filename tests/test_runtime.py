@@ -4,7 +4,7 @@ from zoneinfo import ZoneInfo
 from time_machine import travel
 
 from bollhav.model.runtime import _apply_to_model
-from bollhav.model.batch import Batch, TimeChunking
+from bollhav.model.batch import Batch, TimeChunking, ChunkFlex
 from bollhav.model.contract import Contract
 from bollhav.model.intervals import TZInterval
 from bollhav.model.temporality import Temporality
@@ -90,7 +90,7 @@ class TestPipeOverrides:
     def test_interval_override_applies_to_flexible(self) -> None:
         # INTERVAL_OVERRIDE re-chunks only a flexible model (it can absorb it).
         m = _apply(
-            _model(chunk="@daily", fixed_intervals=False),
+            _model(chunk="@daily", flexibility=ChunkFlex()),
             interval_override="0 * * * *",
         ).model
         assert m.batching.time.chunk == "0 * * * *"
@@ -99,14 +99,14 @@ class TestPipeOverrides:
         # A fixed grid can't be re-chunked at runtime without forking state, so
         # the override is ignored (logged at INFO) — the chunk is left as-is.
         m = _apply(
-            _model(chunk="@daily"),  # fixed_intervals defaults to True
+            _model(chunk="@daily"),  # flexibility defaults to ChunkFix (grid)
             interval_override="0 * * * *",
         ).model
         assert m.batching.time.chunk == "@daily"
 
     def test_window_override(self) -> None:
         m = _apply(_model(), latest=True, window_override="@daily").model
-        assert m.batching.time.window == "@daily"
+        assert m.batching.time.latest_window == "@daily"
 
     def test_lookback_override(self) -> None:
         m = _apply(_model(lookback=2), lookback_override=5).model
@@ -183,7 +183,7 @@ class TestBatchingCarryThrough:
 
     def test_pipe_override_sets_interval_expression(self) -> None:
         m = _model(
-            chunk="@hourly", fixed_intervals=False
+            chunk="@hourly", flexibility=ChunkFlex()
         )  # flexible → override applies
         out = _apply(m, interval_override="*/15 * * * *").model
         assert out.batching.time.chunk == "*/15 * * * *"
@@ -191,28 +191,38 @@ class TestBatchingCarryThrough:
     def test_timechunking_fields_survive_no_override(self) -> None:
         # Every TimeChunking field a no-override run doesn't touch is preserved.
         sthlm = ZoneInfo("Europe/Stockholm")
-        m = _apply(_model(chunk="@daily", window="@weekly", lookback=3, tz=sthlm)).model
+        m = _apply(
+            _model(chunk="@daily", latest_window="@weekly", lookback=3, tz=sthlm)
+        ).model
         t = m.batching.time
-        assert (t.chunk, t.window, t.lookback, t.tz) == ("@daily", "@weekly", 3, sthlm)
+        assert (t.chunk, t.latest_window, t.lookback, t.tz) == (
+            "@daily",
+            "@weekly",
+            3,
+            sthlm,
+        )
 
     def test_lookback_zero_survives_no_override(self) -> None:
         # 0 is meaningful ("no lookback") and must not be dropped to the default.
         assert _apply(_model(lookback=0)).model.batching.time.lookback == 0
 
-    def test_fixed_intervals_defaults_true_and_survives(self) -> None:
-        # The attestation defaults True (grid), and a declared False carries
-        # through the rebuild even though _batching_with_overrides never names
-        # it — exactly what the `replace` refactor guarantees.
-        assert _model().batching.time.fixed_intervals is True
-        out = _apply(_model(fixed_intervals=False)).model
-        assert out.batching.time.fixed_intervals is False
+    def test_flexibility_defaults_fixed_and_survives(self) -> None:
+        # The attestation defaults to ChunkFix (grid), and a declared ChunkFlex
+        # carries through the rebuild even though _batching_with_overrides never
+        # names it — exactly what the `replace` refactor guarantees.
+        assert _model().batching.time.is_flexible is False
+        out = _apply(_model(flexibility=ChunkFlex())).model
+        assert out.batching.time.is_flexible is True
 
     def test_no_partial_below_survives_no_override(self) -> None:
-        # The inferred-edge grain isn't named by _batching_with_overrides, so it
-        # must survive the rebuild via `replace`.
-        assert _model().batching.time.no_partial_below is None
-        out = _apply(_model(chunk="@yearly", no_partial_below="@daily")).model
-        assert out.batching.time.no_partial_below == "@daily"
+        # The inferred-edge grain (on ChunkFlex) isn't named by
+        # _batching_with_overrides, so it must survive the rebuild via `replace`.
+        assert _model().batching.time.completeness_grain == "@hourly"  # default chunk
+        out = _apply(
+            _model(chunk="@yearly", flexibility=ChunkFlex(no_partial_below="@daily"))
+        ).model
+        assert out.batching.time.flexibility == ChunkFlex(no_partial_below="@daily")
+        assert out.batching.time.completeness_grain == "@daily"
 
 
 class TestBatchingNone:

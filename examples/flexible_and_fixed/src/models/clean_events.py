@@ -1,6 +1,6 @@
 """clean_events — a FLEXIBLE interval table.
 
-`fixed_intervals=False` is the attestation: this model's output for a time
+`ChunkFlex` is the attestation: this model's output for a time
 range is **invariant to how that range is partitioned**. That's true here —
 it's a pure window-local clean (filter + reshape of `raw_events` rows in the
 window), with no aggregation. Two requirements come with the attestation:
@@ -8,7 +8,7 @@ window), with no aggregation. Two requirements come with the attestation:
   1. window-decomposable query — yes (per-row filter/map), and
   2. an **idempotent write** — so re-covering a range can't duplicate. Hence
      `WriteMode.UPSERT_NO_DELETE`, keyed on `id`. (`APPEND` would duplicate on
-     re-cover — never pair it with `fixed_intervals=False`.)
+     re-cover — never pair it with `ChunkFlex`.)
 
 It gates `raw_events` with `ENCAPSULATE` (coverage), which works against any
 fixed-or-flexible upstream. Being flexible itself, *its* exact-grain rows are
@@ -20,6 +20,7 @@ from datetime import datetime, timezone
 
 from bollhav.model import (
     Batch,
+    ChunkFlex,
     Contract,
     Database,
     Model,
@@ -67,7 +68,7 @@ clean_events = Model(
     temporality=Temporality.TEMPORAL,
     state=State(),
     # The attestation: state is a coverage set, not a grid. Re-chunk freely.
-    batching=Batch(time=TimeChunking(chunk="@daily", fixed_intervals=False)),
+    batching=Batch(time=TimeChunking(chunk="@daily", flexibility=ChunkFlex())),
     contract=Contract(
         begin=datetime(2024, 1, 1, tzinfo=timezone.utc),
         end=datetime(2024, 1, 4, tzinfo=timezone.utc),
