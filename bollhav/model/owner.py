@@ -38,7 +38,7 @@ class Ownership:
     tuple. ``creator`` is a free-form string identifying who created the
     model (username, service account, etc.)."""
 
-    owner: tuple[Contact, ...] | None = None
+    owners: tuple[Contact, ...] | None = None
     creator: str | None = None
     maintainers: tuple[Contact, ...] | None = None
 
