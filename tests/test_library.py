@@ -224,15 +224,15 @@ class TestBuildMetadataOwnership:
 
         m = _model()
         m.ownership = Ownership(
-            owner=Contact(name="Axel", email="axel@example.com"),
+            owners=(Contact(name="Axel", email="axel@example.com"),),
             creator="axel",
-            team=Contact(name="platform", email="platform@example.com"),
+            maintainers=(Contact(name="platform", email="platform@example.com"),),
         )
         meta = PostgresState._build_metadata(m)
         assert meta["ownership"] == {
-            "owner": {"name": "Axel", "email": "axel@example.com"},
+            "owners": [{"name": "Axel", "email": "axel@example.com"}],
             "creator": "axel",
-            "team": {"name": "platform", "email": "platform@example.com"},
+            "maintainers": [{"name": "platform", "email": "platform@example.com"}],
         }
 
     def test_partial_ownership_owner_none(self):
@@ -240,11 +240,11 @@ class TestBuildMetadataOwnership:
         from bollhav.model.owner import Contact, Ownership
 
         m = _model()
-        m.ownership = Ownership(creator="bot", team=Contact(name="analytics"))
+        m.ownership = Ownership(creator="bot", maintainers=(Contact(name="analytics"),))
         meta = PostgresState._build_metadata(m)
-        assert meta["ownership"]["owner"] is None
+        assert meta["ownership"]["owners"] is None
         assert meta["ownership"]["creator"] == "bot"
-        assert meta["ownership"]["team"] == {"name": "analytics", "email": None}
+        assert meta["ownership"]["maintainers"] == [{"name": "analytics", "email": None}]
 
 
 class TestLookup:

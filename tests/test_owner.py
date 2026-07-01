@@ -43,23 +43,23 @@ class TestContact:
 class TestOwnership:
     def test_all_fields_none_is_valid(self):
         o = Ownership()
-        assert o.owner is None
+        assert o.owners is None
         assert o.creator is None
-        assert o.team is None
+        assert o.maintainers is None
 
     def test_stores_all_fields(self):
         o = Ownership(
-            owner=Contact(name="Axel", email="axel@example.com"),
+            owners=(Contact(name="Axel", email="axel@example.com"),),
             creator="axel",
-            team=Contact(name="platform"),
+            maintainers=(Contact(name="platform"),),
         )
-        assert o.owner.name == "Axel"
+        assert o.owners[0].name == "Axel"
         assert o.creator == "axel"
-        assert o.team.name == "platform"
+        assert o.maintainers[0].name == "platform"
 
     def test_partial_fields_valid(self):
         assert Ownership(creator="axel").creator == "axel"
-        assert Ownership(team=Contact(name="analytics")).team.name == "analytics"
+        assert Ownership(maintainers=(Contact(name="analytics"),)).maintainers[0].name == "analytics"
 
     def test_rejects_empty_creator(self):
         with pytest.raises(OwnerError, match="creator"):
@@ -68,3 +68,23 @@ class TestOwnership:
     def test_rejects_whitespace_creator(self):
         with pytest.raises(OwnerError, match="creator"):
             Ownership(creator="   ")
+
+    def test_accepts_multiple_owners(self):
+        o = Ownership(owners=(Contact(name="Axel"), Contact(name="Sam")))
+        assert [c.name for c in o.owners] == ["Axel", "Sam"]
+
+    def test_rejects_empty_owners_tuple(self):
+        with pytest.raises(OwnerError, match="owners"):
+            Ownership(owners=())
+
+    def test_rejects_empty_maintainers_tuple(self):
+        with pytest.raises(OwnerError, match="maintainers"):
+            Ownership(maintainers=())
+
+    def test_rejects_non_contact_in_owners(self):
+        with pytest.raises(OwnerError, match="owners"):
+            Ownership(owners=("Axel",))
+
+    def test_rejects_non_contact_in_maintainers(self):
+        with pytest.raises(OwnerError, match="maintainers"):
+            Ownership(maintainers=("platform",))

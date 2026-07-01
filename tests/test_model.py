@@ -103,14 +103,14 @@ def test_model_stores_ownership():
     from bollhav.model.owner import Contact, Ownership
 
     o = Ownership(
-        owner=Contact(name="Axel", email="axel@example.com"),
+        owners=(Contact(name="Axel", email="axel@example.com"),),
         creator="axel",
-        team=Contact(name="platform"),
+        maintainers=(Contact(name="platform"),),
     )
     m = make_model(ownership=o)
     assert m.ownership is o
-    assert m.ownership.owner.name == "Axel"
-    assert m.ownership.team.name == "platform"
+    assert m.ownership.owners[0].name == "Axel"
+    assert m.ownership.maintainers[0].name == "platform"
 
 
 def test_model_equality_ignores_ownership():
@@ -119,7 +119,7 @@ def test_model_equality_ignores_ownership():
     from bollhav.model.owner import Contact, Ownership
 
     base = make_model()
-    with_owner = make_model(ownership=Ownership(owner=Contact(name="Axel")))
+    with_owner = make_model(ownership=Ownership(owners=(Contact(name="Axel"),)))
     assert base == with_owner
 
 

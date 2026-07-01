@@ -281,15 +281,15 @@ class Library(_PostgresStateBase):
             ),
             "ownership": (
                 {
-                    "owner": (
-                        {"name": model.ownership.owner.name, "email": model.ownership.owner.email}
-                        if model.ownership.owner is not None
+                    "owners": (
+                        [{"name": c.name, "email": c.email} for c in model.ownership.owners]
+                        if model.ownership.owners is not None
                         else None
                     ),
                     "creator": model.ownership.creator,
-                    "team": (
-                        {"name": model.ownership.team.name, "email": model.ownership.team.email}
-                        if model.ownership.team is not None
+                    "maintainers": (
+                        [{"name": c.name, "email": c.email} for c in model.ownership.maintainers]
+                        if model.ownership.maintainers is not None
                         else None
                     ),
                 }
