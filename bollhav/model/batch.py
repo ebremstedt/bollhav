@@ -39,9 +39,9 @@ class ChunkFix:
 
 @dataclass(frozen=True)
 class ChunkFlex:
-    """ChunkFlex promises the model's output doesn't depend on how time is sliced 
-    into chunks — so the chunk is just a convenience, not the state's identity. 
-    That lets bollhav keep state as a set of covered ranges, do its work by filling 
+    """ChunkFlex promises the model's output doesn't depend on how time is sliced
+    into chunks — so the chunk is just a convenience, not the state's identity.
+    That lets bollhav keep state as a set of covered ranges, do its work by filling
     the gaps, and re-chunk freely between runs."""
 
     floor_chunk: IntervalExpression | IntervalExpressionExtended | None = None

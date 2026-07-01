@@ -257,7 +257,9 @@ def split_window(window: TZInterval, expression: str) -> list[TZInterval]:
     return intervals
 
 
-def split_at_times(interval: TZInterval, points: Iterable[datetime]) -> list[TZInterval]:
+def split_at_times(
+    interval: TZInterval, points: Iterable[datetime]
+) -> list[TZInterval]:
     """Split `interval` at each point in `points` that falls *strictly inside* it,
     returning the pieces left-to-right. A point on `since`/`until`, or outside the
     interval, is ignored — so no empty piece is produced; with no interior point

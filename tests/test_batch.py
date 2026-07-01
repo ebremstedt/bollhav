@@ -407,9 +407,7 @@ _LCD = datetime(2026, 6, 25, tzinfo=UTC)  # latest complete @daily end (00:00)
 def _edge_batch(chunk="@yearly", floor_chunk=None) -> Batch:
     # floor_chunk is flexible-only now; a bare edge model (no floor) is fixed.
     flexibility = (
-        ChunkFlex(floor_chunk=floor_chunk)
-        if floor_chunk is not None
-        else ChunkFix()
+        ChunkFlex(floor_chunk=floor_chunk) if floor_chunk is not None else ChunkFix()
     )
     return Batch(time=TimeChunking(chunk=chunk, flexibility=flexibility, tz=UTC))
 
@@ -563,9 +561,7 @@ class TestFlexibleBackfillSplits:
         ],
         ids=["floor=chunk", "floor=year", "floor=month", "floor=day"],
     )
-    def test_yearly_backfill_tail_snaps_to_floor_chunk(
-        self, floor_chunk, tail
-    ) -> None:
+    def test_yearly_backfill_tail_snaps_to_floor_chunk(self, floor_chunk, tail) -> None:
         batch = Batch(
             time=TimeChunking(
                 chunk="@yearly",
@@ -590,16 +586,33 @@ class TestFlexibleBackfillSplits:
         ("@yearly", "@daily", _LCD, datetime(2026, 1, 1, tzinfo=UTC)),  # partial
         ("@monthly", None, _LCM, datetime(2026, 5, 1, tzinfo=UTC)),  # whole month
         ("@monthly", "@daily", _LCD, datetime(2026, 6, 1, tzinfo=UTC)),  # partial
-        ("@monthly", "@yearly", _LCY, datetime(2025, 12, 1, tzinfo=UTC)),  # coarser floor
+        (
+            "@monthly",
+            "@yearly",
+            _LCY,
+            datetime(2025, 12, 1, tzinfo=UTC),
+        ),  # coarser floor
         ("@daily", None, _LCD, datetime(2026, 6, 24, tzinfo=UTC)),  # whole day
-        ("@daily", "@monthly", _LCM, datetime(2026, 5, 31, tzinfo=UTC)),  # coarser floor
-        ("@daily", "@yearly", _LCY, datetime(2025, 12, 31, tzinfo=UTC)),  # coarser floor
+        (
+            "@daily",
+            "@monthly",
+            _LCM,
+            datetime(2026, 5, 31, tzinfo=UTC),
+        ),  # coarser floor
+        (
+            "@daily",
+            "@yearly",
+            _LCY,
+            datetime(2025, 12, 31, tzinfo=UTC),
+        ),  # coarser floor
     ]
 
     @pytest.mark.parametrize(
         "chunk, floor_chunk, edge, last_since",
         _MATRIX,
-        ids=[f"{c.strip('@')}-floor-{(f or 'none').strip('@')}" for c, f, *_ in _MATRIX],
+        ids=[
+            f"{c.strip('@')}-floor-{(f or 'none').strip('@')}" for c, f, *_ in _MATRIX
+        ],
     )
     def test_edge_and_tail_across_chunk_x_floor(
         self, chunk, floor_chunk, edge, last_since
@@ -641,12 +654,16 @@ class TestSplitAtTimes:
     """`split_at_times` — force extra boundaries (a run window's edges) into an interval
     so no piece straddles them."""
 
-    _IV = TZInterval(datetime(2026, 1, 1, tzinfo=UTC), datetime(2026, 1, 11, tzinfo=UTC))
+    _IV = TZInterval(
+        datetime(2026, 1, 1, tzinfo=UTC), datetime(2026, 1, 11, tzinfo=UTC)
+    )
 
     def test_interior_points_split_left_to_right(self) -> None:
         d3 = datetime(2026, 1, 4, tzinfo=UTC)
         d7 = datetime(2026, 1, 8, tzinfo=UTC)
-        assert split_at_times(self._IV, [d7, d3]) == [  # unordered input, ordered output
+        assert split_at_times(
+            self._IV, [d7, d3]
+        ) == [  # unordered input, ordered output
             TZInterval(self._IV.since, d3),
             TZInterval(d3, d7),
             TZInterval(d7, self._IV.until),
@@ -656,9 +673,9 @@ class TestSplitAtTimes:
         before = datetime(2025, 12, 1, tzinfo=UTC)
         after = datetime(2026, 2, 1, tzinfo=UTC)
         # points on the bounds or outside are no-ops → interval unchanged
-        assert split_at_times(self._IV, [self._IV.since, self._IV.until, before, after]) == [
-            self._IV
-        ]
+        assert split_at_times(
+            self._IV, [self._IV.since, self._IV.until, before, after]
+        ) == [self._IV]
 
     def test_duplicate_points_collapse(self) -> None:
         mid = datetime(2026, 1, 6, tzinfo=UTC)

@@ -38,7 +38,9 @@ class FixedModelWindowTooNarrowError(ValueError):
     silently run nothing, or a wrong partial result. Widen the window to a chunk
     boundary, or make the model flexible (`ChunkFlex`)."""
 
-    def __init__(self, full_name: str, chunk: str, since: object, until: object) -> None:
+    def __init__(
+        self, full_name: str, chunk: str, since: object, until: object
+    ) -> None:
         super().__init__(
             f"run window [{since}, {until}) for {full_name!r} holds no whole "
             f"{chunk!r} grid cell (narrower than the chunk, or misaligned). A "
