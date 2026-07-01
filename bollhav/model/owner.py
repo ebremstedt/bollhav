@@ -1,5 +1,4 @@
 from __future__ import annotations
-
 from dataclasses import dataclass
 
 
@@ -11,8 +10,9 @@ class OwnerError(ValueError):
 @dataclass
 class Contact:
     """A named entity with an optional contact email — used to represent
-    either an individual owner or a team. When ``email`` is set it must
-    contain ``@``; fuller RFC 5322 parsing is intentionally out of scope."""
+    either an individual owner or a maintainer. When ``email`` is set it
+    must contain ``@``; fuller RFC 5322 parsing is intentionally out of
+    scope."""
 
     name: str
     email: str | None = None
@@ -34,16 +34,37 @@ class Ownership:
     """Ownership and accountability metadata for a model.
 
     All fields are optional — set whichever are relevant. ``owner`` and
-    ``team`` are both represented as ``Contact`` instances. ``creator`` is a
-    free-form string identifying who created the model (username, service
-    account, etc.)."""
+    ``maintainers`` are each one or more ``Contact`` instances, stored as a
+    tuple. ``creator`` is a free-form string identifying who created the
+    model (username, service account, etc.)."""
 
-    owner: Contact | None = None
+    owner: tuple[Contact, ...] | None = None
     creator: str | None = None
-    team: Contact | None = None
+    maintainers: tuple[Contact, ...] | None = None
 
     def __post_init__(self) -> None:
         if self.creator is not None and not self.creator.strip():
             raise OwnerError(
                 "Ownership.creator must be a non-empty string when set"
             )
+        self.owner = self._validate_contacts("owner", self.owner)
+        self.maintainers = self._validate_contacts("maintainers", self.maintainers)
+
+    @staticmethod
+    def _validate_contacts(
+        field_name: str, value: tuple[Contact, ...] | None
+    ) -> tuple[Contact, ...] | None:
+        if value is None:
+            return None
+        contacts = tuple(value)
+        if not contacts:
+            raise OwnerError(
+                f"Ownership.{field_name} must contain at least one Contact when set"
+            )
+        for c in contacts:
+            if not isinstance(c, Contact):
+                raise OwnerError(
+                    f"Ownership.{field_name} must contain only Contact instances "
+                    f"(got {c!r})"
+                )
+        return contacts
