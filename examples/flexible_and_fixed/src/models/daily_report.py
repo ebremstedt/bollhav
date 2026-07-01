@@ -6,7 +6,7 @@ The headline valid combination: it gates `clean_events` (FLEXIBLE) with
 this used `EXACT` on `clean_events`, it would be a hard error — a flexible
 upstream has no durable exact-grain row to match.)
 
-It aggregates, so it must stay FIXED itself (`fixed_intervals=True`, the
+It aggregates, so it must stay FIXED itself (`ChunkFix`, the
 default): an aggregate is not partition-invariant.
 """
 

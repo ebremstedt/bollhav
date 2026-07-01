@@ -4,7 +4,7 @@ from zoneinfo import ZoneInfo
 import pytest
 from time_machine import travel
 
-from bollhav.model.batch import Batch, TimeChunking
+from bollhav.model.batch import Batch, TimeChunking, ChunkFix, ChunkFlex
 from bollhav.model.window import (
     _resolve_cron,
     _apply_lookback,
@@ -404,9 +404,13 @@ _LCD = datetime(2026, 6, 25, tzinfo=UTC)  # latest complete @daily end (00:00)
 
 
 def _edge_batch(chunk="@yearly", no_partial_below=None) -> Batch:
-    return Batch(
-        time=TimeChunking(chunk=chunk, no_partial_below=no_partial_below, tz=UTC)
+    # no_partial_below is flexible-only now; a bare edge model (no floor) is fixed.
+    flexibility = (
+        ChunkFlex(no_partial_below=no_partial_below)
+        if no_partial_below is not None
+        else ChunkFix()
     )
+    return Batch(time=TimeChunking(chunk=chunk, flexibility=flexibility, tz=UTC))
 
 
 # (contract.end, no_partial_below) -> expected window.until, with chunk=@yearly.
@@ -472,8 +476,8 @@ class TestTrailingEdge:
             batch = Batch(
                 time=TimeChunking(
                     chunk="@yearly",
-                    window="@monthly",
-                    no_partial_below="@daily",
+                    latest_window="@monthly",
+                    flexibility=ChunkFlex(no_partial_below="@daily"),
                     tz=UTC,
                 )
             )
@@ -496,12 +500,43 @@ class TestTrailingEdge:
         with travel(_NOW, tick=False):
             batch = Batch(
                 time=TimeChunking(
-                    chunk="@daily", no_partial_below="@daily", lookback=2, tz=UTC
+                    chunk="@daily",
+                    flexibility=ChunkFlex(no_partial_below="@daily"),
+                    lookback=2,
+                    tz=UTC,
                 )
             )
             w = resolve_window(batch, Contract(begin=begin), reload=True)
         assert w.until == _LCD  # end snapped to the last complete day
         assert w.since == datetime(2026, 6, 18, tzinfo=UTC)  # start pulled back 2 days
+
+    def test_flexible_monthly_backfill_cuts_last_month_at_current_day(self) -> None:
+        # A FLEXIBLE model chunked by month, backfilled with "now" halfway through
+        # a month: the trailing edge floors on the latest complete DAY
+        # (no_partial_below="@daily"), so the last month is a *partial*
+        # [month-start, that day) — cut mid-month, not extended to the month end.
+        now = datetime(2026, 6, 15, 12, tzinfo=UTC)  # halfway through June
+        begin = datetime(2026, 3, 1, tzinfo=UTC)
+        batch = Batch(
+            time=TimeChunking(
+                chunk="@monthly",
+                flexibility=ChunkFlex(no_partial_below="@daily"),
+                tz=UTC,
+            )
+        )
+        with travel(now, tick=False):
+            # no-dates backfill: since given, until inferred → the trailing edge.
+            w = resolve_window(batch, Contract(begin=begin), since=begin)
+            intervals = split_window(w, batch.time.chunk)
+        # edge cut at the latest complete day, not the June month boundary.
+        assert w.until == datetime(2026, 6, 15, tzinfo=UTC)
+        # whole months up to June, then a partial June 1 → June 15.
+        assert intervals[-2] == TZInterval(
+            datetime(2026, 5, 1, tzinfo=UTC), datetime(2026, 6, 1, tzinfo=UTC)
+        )
+        assert intervals[-1] == TZInterval(
+            datetime(2026, 6, 1, tzinfo=UTC), datetime(2026, 6, 15, tzinfo=UTC)
+        )
 
 
 class TestUnbatchedWindow:

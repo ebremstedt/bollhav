@@ -252,7 +252,7 @@ def model_lifecycle(func: Callable) -> Callable:
 
                 if run.window is None:
                     state_handler.insert_oneshot(run_id=run.run_id)
-                elif batching is not None and not batching.time.fixed_intervals:
+                elif batching is not None and batching.time.is_flexible:
                     # Flexible (coverage) model: state is the set of covered
                     # ranges, the chunk is just how work is sliced. Invalidation
                     # is range-subtraction and work is the *gaps* in coverage, not

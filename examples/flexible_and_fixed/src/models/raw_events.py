@@ -1,6 +1,6 @@
 """raw_events — a FIXED interval table (the default).
 
-`fixed_intervals=True` (implicit): state is a grid, one durable `applied` row
+`ChunkFix` (implicit): state is a grid, one durable `applied` row
 per `@daily` chunk at a stable grain. Its exact-grain rows persist, so a
 downstream may gate it with ANY contract level — including `EXACT` (see
 `audit`) and `ENCAPSULATE` (see `clean_events`).

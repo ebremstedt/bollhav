@@ -218,9 +218,10 @@ def _orders_model(
     # `apply_runtime_overrides` normally resolves the window from env vars and
     # returns a ModelRun. E2E tests call the bootstrap directly, so we build
     # the model + resolve the window by hand to the test's fixed window.
-    from bollhav.model import Tags
+    from bollhav.model import Tags, ChunkFix, ChunkFlex
 
-    batching = Batch(time=TimeChunking(chunk=chunk, fixed_intervals=fixed_intervals))
+    flexibility = ChunkFix() if fixed_intervals else ChunkFlex()
+    batching = Batch(time=TimeChunking(chunk=chunk, flexibility=flexibility))
     contract = Contract(begin=SINCE, end=bounds_end)
     model = Model(
         target=Target(
@@ -321,7 +322,7 @@ def _bootstrap(models, *, state_mode: StateMode = StateMode.DISCOVER) -> None:
                     state.torch_rows()
 
                 batching = model.batching
-                is_flexible = batching is not None and not batching.time.fixed_intervals
+                is_flexible = batching is not None and batching.time.is_flexible
 
                 if run.window is None:
                     state.insert_oneshot(run_id=run.run_id)

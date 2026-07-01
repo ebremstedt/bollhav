@@ -115,17 +115,16 @@ def _trailing_edge(contract: "Contract", batching: "Batch", tz: tzinfo) -> datet
     """The *inferred* end of a run window (reload / no-dates backfill):
 
       * open contract → the **completeness floor**: the latest *complete* unit of
-        `no_partial_below` (defaulting to `chunk`). So a coarse chunk can trail
-        off at a finer boundary — e.g. `@yearly` chunk with
-        `no_partial_below="@daily"` runs through the last complete day.
+        the flexibility's completeness grain (`ChunkFlex.no_partial_below`,
+        else `chunk`). So a flexible model with a coarse chunk can trail off at a
+        finer boundary — e.g. `@monthly` chunk with `no_partial_below="@daily"`
+        runs through the last complete day.
       * explicit end  → `min(end, floor)`: a closed (past) end is its own value;
         a *future* end is clamped to the floor — state windows on the update
         watermark, so there's no data past the clock to load anyway.
 
     Pure apart from the clock read in the floor."""
-    floor = latest_complete_interval(
-        batching.time.no_partial_below or batching.time.chunk, tz
-    ).until
+    floor = latest_complete_interval(batching.time.completeness_grain, tz).until
     end = contract.end
     return floor if end is None else min(end, floor)
 
@@ -202,7 +201,7 @@ def resolve_window(
         window_since = contract.begin
         window_until = _trailing_edge(contract, batching, tz)
     elif latest:
-        window_expr = batching.time.window or expr
+        window_expr = batching.time.latest_window or expr
         interval = latest_complete_interval(window_expr, tz)
         window_since, window_until = interval.since, interval.until
     else:
