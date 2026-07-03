@@ -4,7 +4,7 @@
 
 <p align="center">
   <strong>Bollhav</strong><br>
-  a Python framework that standardizes pipeline code
+  A Python framework that standardizes pipeline code
 </p>
 
 <p align="center">
