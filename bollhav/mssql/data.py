@@ -44,13 +44,13 @@ class MssqlData:
     def create_schema(self) -> None:
         ensure_schema(self.conn, self.model.target.schema_resolved)
 
-    def create_or_replace_view(self) -> None:
-        """`CREATE OR ALTER VIEW` from the model's defining `query` (the view
-        body) — the target-side asset for a VIEW model. Called instead of the
-        table DDL when `model.is_view`."""
+    def create_or_replace_view(self, body: str | None) -> None:
+        """`CREATE OR ALTER VIEW` from `body` (the model's resolved view body) —
+        the target-side asset for a VIEW model. Called instead of the table DDL
+        when `model.is_view`."""
         from bollhav.mssql.modes import create_replace_view
 
-        create_replace_view(conn=self.conn, model=self.model)
+        create_replace_view(conn=self.conn, model=self.model, body=body)
 
     def recreate_table(self) -> None:
         target = self.model.target

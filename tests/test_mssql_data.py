@@ -77,7 +77,7 @@ def _model(
         batching=batching,
         temporality=temporality,
         materialization=materialization,
-        query="SELECT 1" if view else None,
+        query_builder="SELECT 1" if view else None,
     )
 
 

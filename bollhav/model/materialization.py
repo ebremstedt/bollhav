@@ -3,7 +3,7 @@ from enum import Enum
 
 class Materialization(Enum):
     """How a model is realized as a database object — the materialization
-    choice, kept separate from the model's *definition* (`Model.query`). A
+    choice, kept separate from the model's *definition* (`Model.query_builder`). A
     `query` is what the model computes; `materialization` is how that result is
     persisted. Defaults to `TABLE` on a `Model`.
 

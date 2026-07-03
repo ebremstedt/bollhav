@@ -88,7 +88,7 @@ class SourceModel:
     `read_query` is an optional custom SELECT for reading this upstream. It is
     **declarative config only — bollhav never executes it**; your read code in
     `execute` picks it up (`source.read_query`) instead of hardcoding the SQL.
-    (A *view's* defining body lives on the model as `Model.query`, not here —
+    (A *view's* defining body lives on the model as `Model.query_builder`, not here —
     this object models an input you read, not an output you produce.)"""
 
     schema: str | None = None

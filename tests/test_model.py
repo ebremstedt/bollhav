@@ -192,7 +192,7 @@ class TestModelKind:
             target=Target(name="customers"),
             temporality=Temporality.TIMELESS,
             materialization=Materialization.VIEW,
-            query="SELECT 1",
+            query_builder="SELECT 1",
         )
         assert m.temporality is Temporality.TIMELESS
         assert m.temporality.value == "timeless"
@@ -240,7 +240,7 @@ class TestModelKind:
             Model(
                 target=Target(name="customers"),
                 materialization=Materialization.VIEW,
-                query="SELECT 1",
+                query_builder="SELECT 1",
                 batching=Batch(),
             )
 
@@ -255,7 +255,7 @@ class TestModelKind:
             target=Target(name="customers"),
             temporality=Temporality.TEMPORAL,
             materialization=Materialization.VIEW,
-            query="SELECT 1",
+            query_builder="SELECT 1",
             contract=Contract(
                 begin=datetime(2024, 1, 1, tzinfo=timezone.utc),
                 end=datetime(2024, 2, 1, tzinfo=timezone.utc),
@@ -271,7 +271,7 @@ class TestModelKind:
             target=Target(name="customers"),
             temporality=Temporality.TIMELESS,
             materialization=Materialization.VIEW,
-            query="SELECT 1",
+            query_builder="SELECT 1",
         )
         assert m.is_view is True
         assert m.is_timeless is True

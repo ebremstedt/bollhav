@@ -196,7 +196,7 @@ def _apply_to_model(
         batching=batching,
         temporality=model.temporality,
         materialization=model.materialization,
-        query=model.query,
+        query_builder=model.query_builder,
         state=state,
         curfew=model.curfew,
         enabled=model.enabled,

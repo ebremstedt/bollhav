@@ -22,13 +22,13 @@ class UnhandledMssqlTypeError(ValueError):
 
 
 class CreateReplaceViewRequiresQueryError(ValueError):
-    """`create_replace_view` was called for a model with no `query`. A view is
-    defined by its `query` (the view body); without it there's nothing to
+    """`create_replace_view` was called for a model with no `query_builder`. A view is
+    defined by its `query_builder` (the view body); without it there's nothing to
     create — and `is_view` is False, so the lifecycle shouldn't reach here."""
 
     def __init__(self, full_name: str) -> None:
         super().__init__(
-            f"create_replace_view requires Model.query (the view body) to be "
+            f"create_replace_view requires Model.query_builder (the view body) to be "
             f"set on {full_name!r}"
         )
 
@@ -232,13 +232,21 @@ def append(
     cursor.commit()
 
 
-def create_replace_view(conn: pyodbc.Connection, model: Model) -> None:
-    """Create or alter a view using the query defined on its SourceModel."""
-    if model.query is None:
+def create_replace_view(
+    conn: pyodbc.Connection, model: Model, body: str | None
+) -> None:
+    """Create or alter a view from `body` (the model's resolved view body)."""
+    if body is None:
         raise CreateReplaceViewRequiresQueryError(model.target.full_name)
+    if not isinstance(body, str):
+        raise TypeError(
+            f"model {model.target.full_name!r} is an MSSQL view but its "
+            f"query_builder returned a {type(body).__name__}, not a str — "
+            f"psycopg Composables are Postgres-only; return a SQL string."
+        )
     schema = model.target.schema_resolved
     view = model.target.name_resolved
-    query = cast(LiteralString, model.query)
+    query = cast(LiteralString, body)
 
     cursor = conn.cursor()
     cursor.execute(
