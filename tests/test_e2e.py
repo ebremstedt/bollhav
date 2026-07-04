@@ -298,7 +298,7 @@ def _bootstrap(models, *, state_mode: StateMode = StateMode.DISCOVER) -> None:
             data = PostgresData(model=model, conn=conn)
             data.create_schema()
             if model.is_view:
-                data.create_or_replace_view()
+                data.create_or_replace_view(run.resolve_query())
             else:
                 if model.target.recreate_table:
                     data.recreate_table()
@@ -385,7 +385,9 @@ def _run_intervals(run: ModelRun, *, error_on_interval: int | None = None):
             raise RuntimeError("simulated mid-stream crash")
         with psycopg.connect(_dsn()) as conn:
             if model.is_view:
-                create_replace_view(conn=conn, model=model)
+                create_replace_view(
+                    conn=conn, model=model, body=ModelRun(model=model).resolve_query()
+                )
             else:
                 df_gen = _gen_rows(since, until)
                 if model.target.stage:
@@ -548,7 +550,7 @@ def test_e2e_view_as_upstream_does_not_block_downstream(schema_name):
             ),
             temporality=Temporality.TIMELESS,
             materialization=Materialization.VIEW,
-            query=f"SELECT * FROM {schema_name}.orders WHERE total >= 0",
+            query_builder=f"SELECT * FROM {schema_name}.orders WHERE total >= 0",
         )
     )
 

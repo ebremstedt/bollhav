@@ -47,7 +47,7 @@ def make_model(**overrides) -> Model:
 #
 # The old `ModelType.VIEW <-> WriteMode.VIEW` coupling tests were removed:
 # `WriteMode.VIEW` no longer exists, and `ModelType` is gone entirely. A view
-# is now identified by `Model(materialization=Materialization.VIEW, query=...)`;
+# is now identified by `Model(materialization=Materialization.VIEW, query_builder=...)`;
 # the Target no longer carries a model_type, so there is no write-mode/model-type
 # pairing to validate.
 
@@ -59,7 +59,7 @@ def test_view_kind_has_no_write_mode_coupling():
         target=Target(name="test_table"),
         temporality=Temporality.TIMELESS,
         materialization=Materialization.VIEW,
-        query="SELECT 1",
+        query_builder="SELECT 1",
     )
     assert m.is_view is True
 

@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
 from bollhav.model.intervals import TZInterval
 
 if TYPE_CHECKING:
+    from psycopg import sql
+
     from bollhav.model.model import Model
 
 
@@ -43,6 +46,20 @@ class ModelRun:
     is_reload: bool = False
     is_latest: bool = False
     is_backfill: bool = False
+
+    def resolve_query(
+        self, since: datetime | None = None, until: datetime | None = None
+    ) -> "str | sql.Composable | None":
+        """The model's defining SELECT as runnable SQL. A string `query_builder`
+        passes through; a callable is invoked as `query_builder(self, since,
+        until)` so it can use `self.model.ref(...)` and the window. Returns
+        whatever the builder yields — a `str`, a psycopg `sql.Composable`, … — or
+        `None` if unset. `since`/`until` are `None` for a windowless build (a
+        view / timeless model)."""
+        qb = self.model.query_builder
+        if qb is None:
+            return None
+        return qb(self, since, until) if callable(qb) else qb
 
 
 __all__ = ["ModelRun"]

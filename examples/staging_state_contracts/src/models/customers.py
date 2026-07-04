@@ -29,7 +29,7 @@ from bollhav.postgres import PostgresColumn, PostgresType
 customers = Model(
     temporality=Temporality.TIMELESS,
     materialization=Materialization.VIEW,
-    query="SELECT DISTINCT customer_id FROM warehouse.orders",
+    query_builder="SELECT DISTINCT customer_id FROM warehouse.orders",
     target=Target(
         name="customers",
         schema="warehouse",

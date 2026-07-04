@@ -34,13 +34,13 @@ class RecreatePartitionRequiresPartitionColumnError(ValueError):
 
 
 class CreateReplaceViewRequiresQueryError(ValueError):
-    """`create_replace_view` was called for a model with no `query`. A view is
-    defined by its `query` (the view body); without it there's nothing to
+    """`create_replace_view` was called for a model with no `query_builder`. A view is
+    defined by its `query_builder` (the view body); without it there's nothing to
     create — and `is_view` is False, so the lifecycle shouldn't reach here."""
 
     def __init__(self, full_name: str) -> None:
         super().__init__(
-            f"create_replace_view requires Model.query (the view body) to be "
+            f"create_replace_view requires Model.query_builder (the view body) to be "
             f"set on {full_name!r}"
         )
 
@@ -168,9 +168,16 @@ def upsert_no_delete(conn: psycopg.Connection, model: Model, df: pl.DataFrame) -
 def create_replace_view(
     conn: psycopg.Connection,
     model: Model,
+    body: "str | sql.Composable | None",
 ) -> None:
-    if model.query is None:
+    if body is None:
         raise CreateReplaceViewRequiresQueryError(model.target.full_name)
+    # A string body is trusted SQL text → wrap in sql.SQL. A psycopg Composable
+    # (from a query_builder that wants psycopg to handle quoting) is composed
+    # directly.
+    view_body = (
+        body if isinstance(body, sql.Composable) else sql.SQL(cast(LiteralString, body))
+    )
 
     with conn.transaction():
         ensure_schema(conn, model.target.schema_resolved)
@@ -178,6 +185,6 @@ def create_replace_view(
             sql.SQL("CREATE OR REPLACE VIEW {schema}.{view} AS {query}").format(
                 schema=sql.Identifier(model.target.schema_resolved),
                 view=sql.Identifier(model.target.name_resolved),
-                query=sql.SQL(cast(LiteralString, model.query)),
+                query=view_body,
             )
         )

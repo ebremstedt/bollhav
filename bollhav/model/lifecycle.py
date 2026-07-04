@@ -213,7 +213,7 @@ def model_lifecycle(func: Callable) -> Callable:
             if data_handler is not None:
                 data_handler.create_schema()
                 if model.is_view:
-                    data_handler.create_or_replace_view()
+                    data_handler.create_or_replace_view(run.resolve_query())
                 else:
                     if model.target.recreate_table:
                         data_handler.recreate_table()

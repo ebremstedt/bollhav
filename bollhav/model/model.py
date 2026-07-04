@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Callable
 from datetime import datetime, timezone
+from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 from bollhav.model.target import Target
@@ -15,6 +17,11 @@ from bollhav.model.tags import Tags
 from bollhav.model.source import Source
 from bollhav.model.curfew import Curfew
 from bollhav.model.people import People
+
+if TYPE_CHECKING:
+    from psycopg import sql
+
+    from bollhav.model.modelrun import ModelRun
 
 logger = logging.getLogger(__name__)
 
@@ -84,15 +91,16 @@ class ViewWithRecreateOrTruncateError(ValueError):
 
 
 class ViewWithoutQueryError(ValueError):
-    """A VIEW model (`materialization=Materialization.VIEW`) declared no `query` —
-    a view is created from its SELECT body, so `query=...` is required. (A `query`
-    alone does not make a model a view; `materialization` is the explicit
-    choice.)"""
+    """A VIEW model (`materialization=Materialization.VIEW`) declared no
+    `query_builder` — a view is created from its SELECT body, so `query_builder`
+    is required. (A `query_builder` alone does not make a model a view;
+    `materialization` is the explicit choice.)"""
 
     def __init__(self, name: str) -> None:
         super().__init__(
-            f"model {name!r} is a view (materialization=VIEW) but has no query — "
-            f'a view is defined by its SELECT body. Set query="SELECT ...".'
+            f"model {name!r} is a view (materialization=VIEW) but has no "
+            f"query_builder — a view is defined by its SELECT body. Set "
+            f'query_builder="SELECT ..." (or a callable that builds it).'
         )
 
 
@@ -162,7 +170,27 @@ class Model:
         *,
         temporality: Temporality = Temporality.TEMPORAL,
         materialization: Materialization = Materialization.TABLE,
-        query: str | None = None,
+        # The view body. A plain `str` is a fixed SELECT; a **callable** is the
+        # escape hatch for when the exact query has to be built at run time,
+        # because it varies with things not known at import:
+        #   - the run's window (a callable receives `since`/`until` and can
+        #     filter/parameterize the SELECT to the interval being built);
+        #   - filters or other per-run inputs the builder closes over;
+        #   - the virtual environment's schema suffix — `run.model.ref(...)`
+        #     resolves upstream tables to their *suffixed* names, so the same
+        #     model reads from `warehouse_pr12.orders` in a PR env and
+        #     `warehouse.orders` in prod. A literal string can't move with it.
+        # Signature: `(model_run, since, until) -> str | sql.Composable`. Return
+        # a psycopg `sql.Composable` (Postgres only) to have psycopg quote any
+        # interpolated values; a `str` is composed as trusted SQL text.
+        query_builder: (
+            str
+            | Callable[
+                [ModelRun, datetime | None, datetime | None],
+                str | sql.Composable | Any,
+            ]
+            | None
+        ) = None,
         tagging: Tags | None = None,
         tags: set[str] | None = None,
         state: State | None = None,
@@ -178,20 +206,14 @@ class Model:
         self.contract = contract or Contract()
         self.batching = batching
         self.temporality = temporality
-        # `materialization` is the explicit output shape (TABLE vs VIEW); `query`
-        # is the model's defining SELECT. The body lives on the model (what it
-        # produces), not on an upstream source. A VIEW requires a `query`
-        # (validated below) — a query alone does NOT make a model a view.
         self.materialization = materialization
-        self.query = query
+        self.query_builder = query_builder
         self.state = state
         self.curfew = curfew
         self.enabled = enabled
         self.debug = debug
         self.description = description
         self.upstream: list[Source] = upstream or [_unknown_source()]
-        # keep the tagging config so registration can add the schema-suffix
-        # tags (env-specific) per `suffix_add_to_tags`; default when unset.
         self.tagging: Tags = tagging or Tags()
         self.tags: set[str] = (
             tags
@@ -241,7 +263,7 @@ class Model:
             if self.contract.begin is not None or self.contract.end is not None:
                 raise TimelessModelWithContractWindowError(name)
         if self.is_view:
-            if self.query is None:
+            if self.query_builder is None:
                 raise ViewWithoutQueryError(name)
             if self.batching is not None:
                 raise ViewWithBatchingError(name)
