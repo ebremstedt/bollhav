@@ -21,7 +21,6 @@ sys.modules.setdefault("pyodbc", MagicMock())  # bollhav.mssql imports it native
 
 from psycopg import sql  # noqa: E402
 
-from bollhav.model.batch import Batch  # noqa: E402
 from bollhav.model.database import Database  # noqa: E402
 from bollhav.model.materialization import Materialization  # noqa: E402
 from bollhav.model.model import Model, ViewWithoutQueryError  # noqa: E402
@@ -133,9 +132,9 @@ class TestCallableQueryBuilder:
                 contract=UpstreamContract.ENCAPSULATE,
             )
         ]
-        qb = lambda run, since, until: (
-            f"SELECT * FROM {run.model.ref('warehouse.orders')}"
-        )  # noqa: E731
+
+        def qb(run, since, until):
+            return f"SELECT * FROM {run.model.ref('warehouse.orders')}"
 
         prod = _view(query_builder=qb, suffix="", upstream=upstream)
         assert (
