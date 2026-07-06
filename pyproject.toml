@@ -20,7 +20,7 @@ dev = ["pytest", "ruff", "time-machine", "pyright"]
 tui = ["textual>=0.50"]
 # The MSSQL backend needs pyodbc (a C-extension). It's optional — Postgres
 # users never install it, tests mock it, and pyright is told the import may be
-# absent (see the `# pyright: ignore` on each `import pyodbc`).
+# absent (see the `# pyright: ignore` on each `import pyodbc`)
 mssql = ["pyodbc>=5"]
 
 [project.scripts]
