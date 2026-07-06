@@ -1,5 +1,12 @@
-name: seahorse-app
+name: bollhav
 region: ams
+domains:
+  - domain: bollhav.dev
+    type: PRIMARY
+    zone: bollhav.dev
+  - domain: www.bollhav.dev
+    type: ALIAS
+    zone: bollhav.dev
 alerts:
   - rule: DEPLOYMENT_FAILED
   - rule: DOMAIN_FAILED

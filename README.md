@@ -8,9 +8,9 @@
 </p>
 
 <p align="center">
-  <a href="TODO-docs-url">Docs</a> ·
-  <a href="TODO-learn-url">Learn</a> ·
-  <a href="TODO-lab-url">Lab</a>
+  <a href="https://bollhav.dev">Docs</a> ·
+  <a href="https://learn.bollhav.dev">Learn</a> ·
+  <a href="https://lab.bollhav.dev">Lab</a>
 </p>
 
 The idea is a clean separation: a **Model** is a pure data object that declares

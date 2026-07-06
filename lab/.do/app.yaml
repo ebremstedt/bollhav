@@ -1,5 +1,9 @@
 name: bollhav-lab
 region: ams
+domains:
+  - domain: lab.bollhav.dev
+    type: PRIMARY
+    zone: bollhav.dev
 alerts:
   - rule: DEPLOYMENT_FAILED
   - rule: DOMAIN_FAILED

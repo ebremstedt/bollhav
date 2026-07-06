@@ -1,5 +1,9 @@
 name: bollhav-learn
 region: ams
+domains:
+  - domain: learn.bollhav.dev
+    type: PRIMARY
+    zone: bollhav.dev
 alerts:
   - rule: DEPLOYMENT_FAILED
   - rule: DOMAIN_FAILED
