@@ -44,7 +44,7 @@ type=SourceModel(), contract=UpstreamContract.EXACT)` to a model would raise
 fixed-vs-flexible matrix.
 
 > **Status:** the flexible *execution* engine (coverage gap-filling + range
-> coalescing) is still being built — see `design/flexible-intervals.md`. Today
+> coalescing) is still being built. Today
 > `clean_events` registers as flexible and the **contract rules above are
 > enforced**, but its own execution still runs the fixed grid path. So this
 > example exercises the *registration + lineage* half of flexibility, which is

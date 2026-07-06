@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="bollhav_logo_large.png" alt="bollhav" width="300">
+  <img src="docs/content/bollhav_logo_large.png" alt="bollhav" width="300">
 </p>
 
 <p align="center">

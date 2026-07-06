@@ -68,7 +68,7 @@ Because a flexible upstream coalesces away its exact-grain rows, **`EXACT` again
 The flexibility is **per-model and does not propagate**: a flexible upstream feeding a fixed downstream is fine — the downstream reads the upstream's *data* (by coverage), not its partitioning, and declaring flexible *means* that data is partition-invariant. So a flexible upstream is in fact the safest to build coverage contracts on; only `EXACT` (which demands a specific grain) is off the table.
 
 !!! note "Mostly live"
-    The `EXACT`-on-flexible rule above is **enforced today** (it raises at gate-check time), and the flexible *execution* engine — coverage gap-filling plus the `uncover`/re-cover invalidation in the table below — is **live too** (see `design/flexible-intervals.md`). Two refinements are still deferred: **coalescing** (today there's one `applied` row per covered unit, merged with `range_agg` at query time — correct coverage, just more rows than the "one row per island" ideal) and the **overlap-aware concurrency lock**, so run a flexible model **single-worker** for now.
+    The `EXACT`-on-flexible rule above is **enforced today** (it raises at gate-check time), and the flexible *execution* engine — coverage gap-filling plus the `uncover`/re-cover invalidation in the table below — is **live too**. Two refinements are still deferred: **coalescing** (today there's one `applied` row per covered unit, merged with `range_agg` at query time — correct coverage, just more rows than the "one row per island" ideal) and the **overlap-aware concurrency lock**, so run a flexible model **single-worker** for now.
 
 ### Two axes: identity (`flexibility`) and invalidation (`STATE_MODE`)
 
