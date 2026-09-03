@@ -19,7 +19,7 @@ def _col_type(col: MssqlColumn) -> str:
             return f"{t}({col.precision}, {col.scale})"
         if col.precision is not None:
             return f"{t}({col.precision})"
-    elif t in ("NVARCHAR", "VARCHAR", "CHAR"):
+    elif t in ("NVARCHAR", "VARCHAR", "CHAR", "VARBINARY"):
         length = col.length if col.length is not None else "MAX"
         return f"{t}({length})"
     elif t == "DATETIME2" and col.scale is not None:

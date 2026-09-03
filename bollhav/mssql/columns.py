@@ -32,6 +32,7 @@ class MssqlType(Enum):
     TIME = "TIME"
     TINYINT = "TINYINT"
     UNIQUEIDENTIFIER = "UNIQUEIDENTIFIER"
+    VARBINARY = "VARBINARY"
     VARBINARY_MAX = "VARBINARY(MAX)"
     VARCHAR = "VARCHAR"
 
@@ -49,7 +50,8 @@ class MssqlColumn(DatabaseColumn):
         unique:      Marks column as part of the composite UNIQUE constraint.
         precision:   Total digits (DECIMAL/NUMERIC).
         scale:       Digits right of the decimal (DECIMAL/NUMERIC/DATETIME2).
-        length:      Max character length. None means MAX for NVARCHAR/VARCHAR.
+        length:      Max character/byte length. None means MAX for
+                     NVARCHAR/VARCHAR/VARBINARY.
     """
 
     data_type: MssqlType = MssqlType.NVARCHAR

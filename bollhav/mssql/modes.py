@@ -119,6 +119,10 @@ def _input_size_for(col: MssqlColumn):
     if t == MssqlType.UNIQUEIDENTIFIER:
         return (pyodbc.SQL_GUID, 36, 0)
 
+    # Variable-length binary (parameterized length, or MAX when length=None)
+    if t == MssqlType.VARBINARY:
+        return (pyodbc.SQL_VARBINARY, col.length or 0, 0)
+
     # Variable-length binary (MAX)
     if t == MssqlType.VARBINARY_MAX:
         return (pyodbc.SQL_VARBINARY, 0, 0)
