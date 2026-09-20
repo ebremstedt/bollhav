@@ -22,6 +22,9 @@ tui = ["textual>=0.50"]
 # users never install it, tests mock it, and pyright is told the import may be
 # absent (see the `# pyright: ignore` on each `import pyodbc`)
 mssql = ["pyodbc>=5"]
+# The Iceberg backend needs pyiceberg (+ pyarrow). Optional like mssql — the
+# catalog implementation (sql/rest/...) and its driver are the app's choice.
+iceberg = ["pyiceberg[pyarrow]>=0.9"]
 
 [project.scripts]
 bollhav = "bollhav._tui_entry:main"

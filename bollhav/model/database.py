@@ -6,6 +6,7 @@ class Database(Enum):
     POSTGRES = "POSTGRES"
     PARQUET = "PARQUET"
     MSSQL = "MSSQL"
+    ICEBERG = "ICEBERG"
 
 
 @dataclass
