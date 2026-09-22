@@ -41,13 +41,15 @@ class DatabaseWithoutColumnsError(ValueError):
 
 
 class MissingCatalogError(ValueError):
-    """A database-backed `Target` left `catalog` unset. A model's identity is
-    `catalog.schema.table`, so the catalog is required to keep names unique
-    across databases in the shared library."""
+    """A Postgres / MSSQL `Target` left `catalog` unset. There the catalog is
+    the database name and part of the model's identity,
+    `catalog.schema.table`, so it is required to keep names unique across
+    databases in the shared library. An Iceberg identifier is only
+    `namespace.table`, so an Iceberg target may leave it out."""
 
     def __init__(self, name: str) -> None:
         super().__init__(
-            f"catalog must be set on model {name!r} — a database-backed "
+            f"catalog must be set on model {name!r} — a Postgres / MSSQL "
             f"model's identity is catalog.schema.table, so the catalog is "
             f"required to keep names unique across databases in the shared "
             f"library (referencing by anything less risks collisions)."
@@ -212,7 +214,9 @@ class Target:
             raise DatabaseWithoutColumnsError()
         if len(self.columns) > 0 and self.database is None:
             raise ColumnsWithoutDatabaseError()
-        if self.database is not None and not self.catalog:
+        # Postgres / MSSQL identify a table as database.schema.table, so the
+        # catalog is required there. Iceberg addresses namespace.table only.
+        if self.database in (Database.POSTGRES, Database.MSSQL) and not self.catalog:
             raise MissingCatalogError(self.name)
 
         partition_cols = [c for c in self.columns if getattr(c, "partition_on", False)]

@@ -208,6 +208,10 @@ def model_lifecycle(func: Callable) -> Callable:
                 from bollhav.mssql.data import MssqlData
 
                 data_handler = MssqlData(model=model, conn=data_conn)
+            elif model.target.database is Database.ICEBERG:
+                from bollhav.iceberg.data import IcebergData
+
+                data_handler = IcebergData(model=model, conn=data_conn)
 
         try:
             if data_handler is not None:
