@@ -77,8 +77,6 @@ def create_model(*, table: str, hospital: str) -> Model:
                 latest_window="@daily",
                 flexibility=ChunkFlex(floor_chunk="@daily"),
             ),
-            # Small on purpose: every chunk is one Iceberg commit, so a 50-row
-            # interval lands as two snapshots and `peek.py` shows it.
             size=25,
         ),
         temporality=Temporality.TEMPORAL,

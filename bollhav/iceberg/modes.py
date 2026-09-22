@@ -26,8 +26,7 @@ class UpsertRequiresMergeKeysError(ValueError):
 
     def __init__(self, full_name: str) -> None:
         super().__init__(
-            f"upsert on {full_name!r} requires primary key / unique columns "
-            f"to join on"
+            f"upsert on {full_name!r} requires primary key / unique columns to join on"
         )
 
 
