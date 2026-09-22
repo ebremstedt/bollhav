@@ -13,8 +13,10 @@ from bollhav.iceberg.modes import (
     upsert,
 )
 from bollhav.iceberg.write_modes import (
+    MissingDataFrameError,
     RecreatePartitionRequiresWindowError,
     UnhandledWriteModeError,
+    write,
     write_dataframes,
 )
 
@@ -24,6 +26,7 @@ __all__ = [
     "IcebergStagingNotSupportedError",
     "IcebergType",
     "IcebergViewsNotSupportedError",
+    "MissingDataFrameError",
     "NotIcebergColumnsError",
     "OverwriteRequiresPartitionColumnError",
     "RecreatePartitionRequiresWindowError",
@@ -34,5 +37,6 @@ __all__ = [
     "iceberg_schema",
     "overwrite",
     "upsert",
+    "write",
     "write_dataframes",
 ]
