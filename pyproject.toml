@@ -47,6 +47,13 @@ include = ["bollhav*"]
 include = ["bollhav"]
 pythonVersion = "3.11"
 
+# The rule set is pinned to what ruff enabled by default up to 0.15 (pyflakes +
+# the pycodestyle errors). CI installs the latest ruff, and 0.16 widened its
+# defaults (isort, pyupgrade, ruff-specific, …), which would fail every PR on
+# untouched code. Widen this deliberately, not by upgrade.
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F"]
+
 [tool.ruff.lint.per-file-ignores]
 # These mock the optional pyodbc C-extension into sys.modules BEFORE importing
 # the modules that import it, so the imports legitimately follow statements.
