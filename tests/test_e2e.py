@@ -2304,6 +2304,51 @@ def test_e2e_state_admin_reset_models_by_list_and_tags(schema_name):
     assert out2[fa] == 3 and out2[fb] == 3
 
 
+def test_e2e_state_admin_reset_range(schema_name):
+    """reset_range flips every row inside the range to pending; a row outside
+    it stays applied."""
+    from bollhav.postgres.state.write import reset_range
+
+    run = _orders_model(schema_name, state=State(), staging=Staging())
+    _run_intervals(run)  # 3 intervals → applied
+    full = run.model.target.full_name
+    st = state_table_name(full)
+    ivs = list(compute_intervals(run))
+
+    with psycopg.connect(_dsn(), autocommit=True) as conn:
+        n = reset_range(conn, full, ivs[0].since, ivs[1].until)
+    assert n == 2
+
+    rows = {(s, u): status for status, s, u in _state_rows(LIBRARY_SCHEMA, st)}
+    assert rows[(ivs[0].since, ivs[0].until)] == "pending"
+    assert rows[(ivs[1].since, ivs[1].until)] == "pending"
+    assert rows[(ivs[2].since, ivs[2].until)] == "applied"
+
+
+def test_e2e_state_admin_reset_intervals(schema_name):
+    """reset_intervals resets several named windows at once, leaving the rest."""
+    from bollhav.postgres.state.write import reset_intervals
+
+    run = _orders_model(schema_name, state=State(), staging=Staging())
+    _run_intervals(run)
+    full = run.model.target.full_name
+    st = state_table_name(full)
+    ivs = list(compute_intervals(run))
+
+    with psycopg.connect(_dsn(), autocommit=True) as conn:
+        n = reset_intervals(
+            conn,
+            full,
+            [(ivs[0].since, ivs[0].until), (ivs[2].since, ivs[2].until)],
+        )
+    assert n == 2
+
+    rows = {(s, u): status for status, s, u in _state_rows(LIBRARY_SCHEMA, st)}
+    assert rows[(ivs[0].since, ivs[0].until)] == "pending"
+    assert rows[(ivs[1].since, ivs[1].until)] == "applied"
+    assert rows[(ivs[2].since, ivs[2].until)] == "pending"
+
+
 def test_e2e_state_admin_reset_skips_running_rows(schema_name):
     """A `running` row is owned by a live run — reset never touches it."""
     from bollhav.postgres.state.write import reset_model

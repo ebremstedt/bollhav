@@ -1,7 +1,10 @@
 import os
+from datetime import datetime
+
 import psycopg
 from fastapi import FastAPI, HTTPException
-from bollhav.postgres.state import read
+from pydantic import BaseModel
+from bollhav.postgres.state import read, write
 from bollhav.postgres.state import LIBRARY_SCHEMA
 
 DSN = os.environ.get(
@@ -11,15 +14,23 @@ DSN = os.environ.get(
 app = FastAPI(title="LINEAGE")
 
 
+# The one write path (POST /state/{name}/reset) can be switched off for a
+# deployment with LINEAGE_READ_ONLY=1; /config tells the GUI so it hides the
+# controls.
+def _writable() -> bool:
+    return os.environ.get("LINEAGE_READ_ONLY", "").lower() not in ("1", "true", "yes")
+
+
 @app.get("/config")
 def config():
-    """Runtime UI config from env vars. `default_model` / `default_tags`
-    pre-narrow the lineage graph on load so slow clients never lay out the
-    whole DAG (set one or the other on the backend deployment)."""
+    """Runtime UI config from env vars. The frontend narrows the lineage graph
+    to one random model on load so slow clients never lay out the whole DAG;
+    `default_tags` lets a deployment pin a tag filter instead. `writable` says
+    whether state resets are allowed."""
     return {
-        "title": os.environ.get("LINEAGE_TITLE") or "Model GUI",
-        "default_model": os.environ.get("LINEAGE_DEFAULT_MODEL") or None,
+        "title": os.environ.get("LINEAGE_TITLE") or "model explorer",
         "default_tags": os.environ.get("LINEAGE_DEFAULT_TAGS") or None,
+        "writable": _writable(),
     }
 
 
@@ -69,6 +80,74 @@ def tree(full_name: str):
 def state(full_name: str, limit: int = 50, env: str | None = None):
     with _conn() as c:
         return read.get_recent_state(c, full_name, limit=limit, schema=_schema(env))
+
+
+class Window(BaseModel):
+    since: datetime | None = None
+    until: datetime | None = None
+
+
+class ResetRequest(BaseModel):
+    """Exactly one of: `all` (the whole model), `intervals` (one or more
+    windows matched exactly — a null/null window is the whole-table row), or
+    `range` (every interval inside [since, until))."""
+
+    all: bool = False
+    intervals: list[Window] | None = None
+    range: Window | None = None
+
+
+@app.post("/state/{full_name}/reset")
+def reset_state(full_name: str, body: ResetRequest, env: str | None = None):
+    """Make the next run redo part of a model's state. The chosen rows flip
+    `applied` → `pending` (a flexible model's coverage is uncovered instead);
+    rows and history are kept and a `running` row is never touched. See
+    `bollhav.postgres.state.write`. Off when LINEAGE_READ_ONLY is set."""
+    if not _writable():
+        raise HTTPException(
+            status_code=403, detail="state resets are off (LINEAGE_READ_ONLY)"
+        )
+    chosen = [
+        k
+        for k, v in (
+            ("all", body.all),
+            ("intervals", body.intervals),
+            ("range", body.range),
+        )
+        if v
+    ]
+    if len(chosen) != 1:
+        raise HTTPException(
+            status_code=400, detail="give exactly one of: all, intervals, range"
+        )
+    schema = _schema(env)
+    with _conn() as c:
+        if read.get_model(c, full_name, schema=schema) is None:
+            raise HTTPException(
+                status_code=404, detail=f"{full_name!r} is not registered"
+            )
+        if body.all:
+            n = write.reset_model(c, full_name, library_schema=schema)
+        elif body.range is not None:
+            if body.range.since is None or body.range.until is None:
+                raise HTTPException(
+                    status_code=400, detail="a range needs both since and until"
+                )
+            n = write.reset_range(
+                c, full_name, body.range.since, body.range.until, library_schema=schema
+            )
+        elif body.intervals:
+            n = write.reset_intervals(
+                c,
+                full_name,
+                [(w.since, w.until) for w in body.intervals],
+                library_schema=schema,
+            )
+        else:  # unreachable: `chosen` guaranteed one of the three
+            raise HTTPException(
+                status_code=400, detail="give exactly one of: all, intervals, range"
+            )
+    return {"full_name": full_name, "reset": n}
 
 
 @app.get("/downstreams/{full_name}")

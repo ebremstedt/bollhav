@@ -101,7 +101,7 @@
     </span>
     <span
       class="item"
-      data-tip="A whole-table model with no time axis: all-or-nothing (loaded or not), never a partial gap. Marked with a `timeless` badge and coloured with the same green / grey."
+      data-tip="A whole-table model with no time axis: all-or-nothing (loaded or not), never a partial gap. Marked with a `timeless` badge and coloured with the same green / red."
     >
       <span class="tl-badge">timeless</span>whole-table model
     </span>
@@ -115,22 +115,15 @@
           : 's'} that have a percentage — a rough backfill completeness score."
       >
         backfill score
-        <b style="color:{GAP_COLORS.covered}">{view.gapScore}%</b>
+        <b
+          class:red={view.gapScore < 80}
+          class:yellow={view.gapScore >= 80 && view.gapScore <= 95}
+          class:green={view.gapScore > 95}>{view.gapScore}%</b
+        >
       </span>
     {/if}
   {:else if view.tab === "models"}
-    <span class="item" data-tip="Temporal — the model's work references time (windowed)."
-      ><span class="mbdg temp">⏱</span>temporal</span
-    >
-    <span class="item" data-tip="Timeless — a whole-table model with no time axis."
-      ><span class="mbdg temp timeless">∞</span>timeless</span
-    >
-    <span class="item" data-tip="Materialization: a stored table."
-      ><span class="mbdg mat">T</span>table</span
-    >
-    <span class="item" data-tip="Materialization: a SQL view."
-      ><span class="mbdg mat view">V</span>view</span
-    >
+    <!-- nothing to explain: the list carries no badges any more -->
   {:else}
     {#each RUN_STATUSES as [k, label]}
       <span class="item">
@@ -143,7 +136,7 @@
     <button
       class="help-btn"
       onclick={() => (showHelp = !showHelp)}
-      aria-expanded={showHelp}>🏷 tag syntax</button
+      aria-expanded={showHelp}>tag expression syntax</button
     >
     {#if showHelp}
       <div class="help-pop">
@@ -152,8 +145,9 @@
           <button class="help-x" onclick={() => (showHelp = false)}>✕</button>
         </div>
         <p>
-          Type a tag or an expression; matching models stay (with their
-          upstreams) and the matched part of each name turns green.
+          Type a model name, a tag or an expression; matching models stay
+          (with their upstreams) and the matched part of each name is
+          highlighted.
         </p>
         <ul>
           <li><code>clean</code> — has tag <code>clean</code> (bare = <code>[clean]</code>)</li>
@@ -219,29 +213,15 @@
     border-radius: 4px;
     padding: 0 4px;
   }
-  /* model temporality / materialization badges — same icons + colours as the
-     Models tab's left-menu list */
-  .mbdg {
-    display: inline-block;
-    font-size: 9px;
-    width: 15px;
-    text-align: center;
-    border-radius: 3px;
-    padding: 1px 0;
-    color: #fff;
-    background: #43a047;
+  /* the score's colour: red under 80 %, yellow up to 95 %, green above */
+  .score b.red {
+    color: #b3261e;
   }
-  .mbdg.temp {
-    background: #2f80ed;
+  .score b.yellow {
+    color: #c48a00;
   }
-  .mbdg.temp.timeless {
-    background: #1e3a8a;
-  }
-  .mbdg.mat {
-    background: #1b5e20;
-  }
-  .mbdg.mat.view {
-    background: #66bb6a;
+  .score b.green {
+    color: #2e7d32;
   }
   .score b {
     font-size: 13px;
@@ -329,6 +309,7 @@
     display: inline-flex;
   }
   .help-btn {
+    font-family: var(--btn-font);
     font-size: 12px;
     padding: 3px 9px;
     border-radius: 6px;
@@ -342,8 +323,10 @@
     bottom: calc(100% + 8px);
     right: 0;
     width: 300px;
-    background: #222;
-    color: #fff;
+    /* follows the site's theme: light in light mode, dark in dark mode */
+    background: var(--bg);
+    color: var(--fg);
+    border: 1px solid var(--control-border);
     border-radius: 8px;
     padding: 11px 13px;
     box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
@@ -361,17 +344,17 @@
   .help-x {
     border: none;
     background: transparent;
-    color: #aaa;
+    color: var(--muted);
     cursor: pointer;
     font-size: 13px;
     line-height: 1;
   }
   .help-x:hover {
-    color: #fff;
+    color: var(--fg);
   }
   .help-pop p {
     margin: 6px 0;
-    color: #d6d9de;
+    color: var(--fg);
   }
   .help-pop ul {
     margin: 6px 0;
@@ -383,29 +366,30 @@
   }
   .help-eg {
     margin-top: 8px;
-    border-top: 1px solid #3a3a3a;
+    border-top: 1px solid var(--border);
     padding-top: 6px;
     font-weight: 700;
   }
   .help-eg + ul li {
     padding: 4px 0;
-    color: #d6d9de;
+    color: var(--fg);
   }
   .help-pop em {
-    color: #fff;
+    color: var(--fg);
     font-style: normal;
     font-weight: 600;
   }
   .help-pop code {
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-family: var(--font-mono);
     font-size: 11px;
-    background: #15803d;
-    color: #fff;
+    background: var(--control-bg);
+    color: var(--fg);
+    border: 1px solid var(--control-border);
     padding: 1px 5px;
     border-radius: 4px;
   }
   .help-foot {
-    border-top: 1px solid #3a3a3a;
+    border-top: 1px solid var(--border);
     padding-top: 6px;
     font-size: 11px;
   }
