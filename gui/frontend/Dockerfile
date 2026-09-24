@@ -2,8 +2,11 @@ FROM node:22-slim
 
 WORKDIR /app
 
-COPY package.json ./
-RUN npm install
+# The lockfile matters: `npm install` from package.json alone trips npm's
+# resolver ("Cannot read properties of null (reading 'edgesOut')") on this
+# dependency tree; `npm ci` installs exactly what the lock says.
+COPY package.json package-lock.json ./
+RUN npm ci
 
 COPY . .
 

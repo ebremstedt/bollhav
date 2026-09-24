@@ -11,12 +11,15 @@ lineage — the cross-pipeline model graph stored in the `z_bollhav` library
 docker compose up --build      # then open http://localhost:53173
 ```
 
-**Point it at your own state DB** (`SEED=0` keeps it read-only — without it the
-demo seed would drop & rebuild your `z_bollhav` schema):
+**Point it at your own state DB** (`SEED=0` keeps the demo seed off — without
+it the seed would drop & rebuild your `z_bollhav` schema):
 
 ```bash
 BOLLHAV_STATE_DSN=postgresql://user:pass@host:5432/db SEED=0 docker compose up --build
 ```
+
+The GUI can also **reset state** (see below). Add `LINEAGE_READ_ONLY=1` to
+switch that off for a deployment that should only look.
 
 That's it. The env switcher in the header then lists every `z_bollhav[_suffix]`
 schema in that database (prod + any dev/PR envs).
@@ -40,7 +43,7 @@ flowchart LR
     REG["bollhav.postgres.registry"]
     DB[("Postgres: z_bollhav.library + errors")]
 
-    FE -->|"GET /graph /match /environments"| API
+    FE -->|"GET /graph /match /environments · POST /state/{name}/reset"| API
     API -->|calls| REG
     REG -->|SELECT| DB
     DB -.->|rows| REG
@@ -53,6 +56,23 @@ The backend is a thin HTTP adapter; the frontend holds no schema knowledge —
 it just renders `/graph`. Three compose services: `db` (Postgres), `backend`
 (FastAPI; the in-repo `bollhav` is mounted at `/src` so registry edits show up
 on restart), `frontend` (Vite dev server, proxies the API).
+
+## Resetting state
+
+The one write path. From the **Grid** tab, clicking a model's name opens its
+panel on the left (reset the whole model, or every interval in a typed range)
+and clicking cells opens the intervals' panel on the right (shift-click a
+range of cells, ⌘ / ctrl-click to add; reset the selected ones). The
+**Lineage** tab's two panels carry the same controls: the ⓘ panel for the
+model, the runs panel for picked rows. Every action asks first.
+
+A reset flips the chosen rows `applied` → `pending` so the next run redoes
+them (a flexible model's coverage is uncovered instead); rows and history are
+kept, and a `running` row is never touched — it's
+`bollhav.postgres.state.write` behind `POST /state/{full_name}/reset` with a
+body of `{"all": true}`, `{"intervals": [{"since", "until"}, …]}` or
+`{"range": {"since", "until"}}` (plus `?env=` for a suffixed environment).
+`LINEAGE_READ_ONLY=1` disables the endpoint and hides the controls.
 
 ## Run it manually (no Docker)
 

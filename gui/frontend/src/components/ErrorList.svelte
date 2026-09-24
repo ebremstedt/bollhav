@@ -18,8 +18,9 @@
 
 <style>
   .mono {
-    font-family: ui-monospace, monospace;
-    font-size: 11px;
+    font-family: var(--table-value-font);
+    font-size: var(--table-value-size);
+    font-weight: var(--table-value-weight);
   }
   .err {
     border-left: 3px solid #e45756;

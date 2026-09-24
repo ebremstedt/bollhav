@@ -1,9 +1,16 @@
 <script>
-  // Shared ⏱ time filter for the runs + grid tabs (lives in their second bar).
+  // Shared time filter for the runs, grid and gaps tabs, in two halves with a
+  // button each: WHEN (when it ran) and WHAT (what was loaded, the interval).
   // Reads/writes the shared time-filter state in the view store.
-  import { view, clearTime } from "../lib/view.svelte.js";
+  import { view } from "../lib/view.svelte.js";
 
-  let showTime = $state(false);
+  // `intervalOnly` hides the WHEN half — for a tab whose rows are intervals
+  // rather than runs (gaps)
+  let { intervalOnly = false } = $props();
+
+  let open = $state(null); // "when" | "what" | null — which popover is open
+  const toggle = (which) => (open = open === which ? null : which);
+
   const LOADED_MODES = [
     ["exact", "exact"],
     ["range", "range"],
@@ -18,68 +25,96 @@
       ? !!view.loadedExact
       : !!(view.loadedFrom || view.loadedTo),
   );
-  let timeActive = $derived(loadedActive || view.intervalMode !== "any");
+  let intervalActive = $derived(view.intervalMode !== "any");
+
+  function clearLoaded() {
+    view.loadedMode = "exact";
+    view.loadedExact = "";
+    view.loadedFrom = "";
+    view.loadedTo = "";
+  }
+  function clearInterval() {
+    view.intervalMode = "any";
+    view.intervalFrom = "";
+    view.intervalTo = "";
+  }
 </script>
 
 <span class="time-wrap">
-  <button
-    class="toggle"
-    class:on={timeActive}
-    onclick={() => (showTime = !showTime)}
-  >
-    ⏱ time
-  </button>
-  {#if showTime}
-    <div class="time-pop">
-      <div class="tp-head">
-        <strong>Filter by time</strong>
-        <button class="tp-x" onclick={() => (showTime = false)}>✕</button>
-      </div>
-      <div class="tp-sec">loaded (when it ran)</div>
-      <span class="seg tp-seg">
-        {#each LOADED_MODES as [val, label]}
-          <button
-            class="seg-btn"
-            class:active={view.loadedMode === val}
-            onclick={() => (view.loadedMode = val)}>{label}</button
-          >
-        {/each}
-      </span>
-      {#if view.loadedMode === "exact"}
-        <label>at <input type="text" placeholder="2026-06-15 18:15:00" bind:value={view.loadedExact} /></label>
-      {:else}
-        <label>from <input type="text" placeholder="2026-06-14 09:30" bind:value={view.loadedFrom} /></label>
-        <label>to <input type="text" placeholder="2026-06-14 17:00:00" bind:value={view.loadedTo} /></label>
+  {#if !intervalOnly}
+    <span class="one">
+      <button class="toggle" class:on={loadedActive} onclick={() => toggle("when")}>when</button>
+      {#if open === "when"}
+        <div class="time-pop">
+          <div class="tp-head">
+            <strong>Filter by when it ran</strong>
+            <button class="tp-x" onclick={() => (open = null)}>✕</button>
+          </div>
+          <div class="tp-sec">loaded (when it ran)</div>
+          <span class="seg tp-seg">
+            {#each LOADED_MODES as [val, label]}
+              <button
+                class="seg-btn"
+                class:active={view.loadedMode === val}
+                onclick={() => (view.loadedMode = val)}>{label}</button
+              >
+            {/each}
+          </span>
+          {#if view.loadedMode === "exact"}
+            <label>at <input type="text" placeholder="2026-06-15 18:15:00" bind:value={view.loadedExact} /></label>
+          {:else}
+            <label>from <input type="text" placeholder="2026-06-14 09:30" bind:value={view.loadedFrom} /></label>
+            <label>to <input type="text" placeholder="2026-06-14 17:00:00" bind:value={view.loadedTo} /></label>
+          {/if}
+          <div class="tp-hint">date, or date + time (HH:MM[:SS])</div>
+          <button class="tp-clear" onclick={clearLoaded}>clear</button>
+        </div>
       {/if}
-      <div class="tp-hint">date, or date + time (HH:MM[:SS])</div>
-      <div class="tp-sec">interval (what was loaded)</div>
-      <span class="seg tp-seg">
-        {#each INTERVAL_MODES as [val, label]}
-          <button
-            class="seg-btn"
-            class:active={view.intervalMode === val}
-            onclick={() => (view.intervalMode = val)}>{label}</button
-          >
-        {/each}
-      </span>
-      {#if view.intervalMode === "range"}
-        <label>from <input type="text" placeholder="2026-06-14" bind:value={view.intervalFrom} /></label>
-        <label>to <input type="text" placeholder="2026-06-18 23:59" bind:value={view.intervalTo} /></label>
-      {/if}
-      <button class="tp-clear" onclick={clearTime}>clear time filter</button>
-    </div>
+    </span>
   {/if}
+  <span class="one">
+    <button class="toggle" class:on={intervalActive} onclick={() => toggle("what")}>what</button>
+    {#if open === "what"}
+      <div class="time-pop">
+        <div class="tp-head">
+          <strong>Filter by what was loaded</strong>
+          <button class="tp-x" onclick={() => (open = null)}>✕</button>
+        </div>
+        <div class="tp-sec">interval (what was loaded)</div>
+        <span class="seg tp-seg">
+          {#each INTERVAL_MODES as [val, label]}
+            <button
+              class="seg-btn"
+              class:active={view.intervalMode === val}
+              onclick={() => (view.intervalMode = val)}>{label}</button
+            >
+          {/each}
+        </span>
+        {#if view.intervalMode === "range"}
+          <label>from <input type="text" placeholder="2026-06-14" bind:value={view.intervalFrom} /></label>
+          <label>to <input type="text" placeholder="2026-06-18 23:59" bind:value={view.intervalTo} /></label>
+        {/if}
+        <button class="tp-clear" onclick={clearInterval}>clear</button>
+      </div>
+    {/if}
+  </span>
 </span>
 
 <style>
   .time-wrap {
+    display: inline-flex;
+    gap: 8px;
+  }
+  .one {
     position: relative;
     display: inline-flex;
   }
   .toggle {
-    font-size: 12px;
-    padding: 4px 10px;
-    border-radius: 6px;
+    font-family: var(--box-option-font);
+    font-size: var(--box-option-size);
+    font-weight: var(--box-option-weight);
+    padding: 6px 15px;
+    border-radius: 8px;
     border: 1px solid var(--control-border);
     background: var(--control-bg);
     color: var(--control-fg);
@@ -133,6 +168,7 @@
     font-size: 12px;
   }
   .time-pop input[type="text"] {
+    font-family: var(--font-mono);
     font-size: 11px;
     padding: 3px 6px;
     width: 150px;
@@ -140,7 +176,6 @@
     border: 1px solid var(--control-border);
     background: var(--input-bg);
     color: var(--control-fg);
-    font-family: ui-monospace, monospace;
   }
   .time-pop input::placeholder {
     color: var(--placeholder);
@@ -153,15 +188,17 @@
   .seg {
     display: inline-flex;
     align-items: center;
-    gap: 2px;
+    gap: 3px;
     border: 1px solid var(--control-border);
-    border-radius: 6px;
+    border-radius: 8px;
     background: var(--control-bg);
-    padding: 2px;
+    padding: 3px;
   }
   .seg-btn {
-    font-size: 12px;
-    padding: 3px 9px;
+    font-family: var(--box-option-font);
+    font-size: var(--box-option-size);
+    font-weight: var(--box-option-weight);
+    padding: 5px 14px;
     border: none;
     border-radius: 4px;
     background: transparent;

@@ -138,6 +138,92 @@ def reset_interval(
     return n
 
 
+def reset_range(
+    conn: "psycopg.Connection",
+    full_name: str,
+    since,
+    until,
+    *,
+    library_schema: str = LIBRARY_SCHEMA,
+) -> int:
+    """Make the next run re-backfill EVERY interval inside `[since, until)`.
+
+    - **fixed** model: flip each row whose window lies inside the range
+      `applied` → `pending` — the operator form of the bulldozer's
+      `reset_window`, without a run id.
+    - **flexible** model: `uncover` the whole range via range subtraction — a
+      coalesced applied row wider than the range is split, not lost.
+
+    Needs a real window (`since`/`until` non-None). Skips a `running` row.
+    Returns rows affected (0 if nothing lies inside, or the model isn't
+    registered)."""
+    resolved = _resolve_state_table(conn, full_name, library_schema)
+    if resolved is None:
+        logger.warning(
+            "state.write: %s is not registered / has no state table", full_name
+        )
+        return 0
+    if since is None or until is None:
+        logger.warning(
+            "state.write: reset_range on %s needs a window (since/until)", full_name
+        )
+        return 0
+    schema, table, fixed = resolved
+
+    if not fixed:
+        from .state_table import uncover_span
+
+        n = uncover_span(conn, schema, table, since, until)
+        logger.info(
+            "state.write: uncovered range [%s, %s) of %s — removed %d applied row(s)",
+            since,
+            until,
+            full_name,
+            n,
+        )
+        return n
+
+    n = conn.execute(
+        sql.SQL(
+            "UPDATE {schema}.{table} " + _RESET_SET + " AND since >= %s AND until <= %s"
+        ).format(schema=sql.Identifier(schema), table=sql.Identifier(table)),
+        [since, until],
+    ).rowcount
+    logger.info(
+        "state.write: reset %d interval(s) of %s in [%s, %s) to pending",
+        n,
+        full_name,
+        since,
+        until,
+    )
+    return n
+
+
+def reset_intervals(
+    conn: "psycopg.Connection",
+    full_name: str,
+    windows,
+    *,
+    library_schema: str = LIBRARY_SCHEMA,
+) -> int:
+    """`reset_interval` for several `(since, until)` windows of one model, in
+    one transaction — either every window resets or none does. Returns the
+    total rows affected."""
+    total = 0
+    with conn.transaction():
+        for since, until in windows:
+            total += reset_interval(
+                conn, full_name, since, until, library_schema=library_schema
+            )
+    logger.info(
+        "state.write: reset %d interval(s) of %s across %d window(s)",
+        total,
+        full_name,
+        len(list(windows)),
+    )
+    return total
+
+
 def reset_model(
     conn: "psycopg.Connection",
     full_name: str,
