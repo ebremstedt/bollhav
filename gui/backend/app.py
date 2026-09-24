@@ -104,28 +104,48 @@ def reset_state(full_name: str, body: ResetRequest, env: str | None = None):
     rows and history are kept and a `running` row is never touched. See
     `bollhav.postgres.state.write`. Off when LINEAGE_READ_ONLY is set."""
     if not _writable():
-        raise HTTPException(status_code=403, detail="state resets are off (LINEAGE_READ_ONLY)")
-    chosen = [k for k, v in (("all", body.all), ("intervals", body.intervals), ("range", body.range)) if v]
+        raise HTTPException(
+            status_code=403, detail="state resets are off (LINEAGE_READ_ONLY)"
+        )
+    chosen = [
+        k
+        for k, v in (
+            ("all", body.all),
+            ("intervals", body.intervals),
+            ("range", body.range),
+        )
+        if v
+    ]
     if len(chosen) != 1:
-        raise HTTPException(status_code=400, detail="give exactly one of: all, intervals, range")
+        raise HTTPException(
+            status_code=400, detail="give exactly one of: all, intervals, range"
+        )
     schema = _schema(env)
     with _conn() as c:
         if read.get_model(c, full_name, schema=schema) is None:
-            raise HTTPException(status_code=404, detail=f"{full_name!r} is not registered")
+            raise HTTPException(
+                status_code=404, detail=f"{full_name!r} is not registered"
+            )
         if body.all:
             n = write.reset_model(c, full_name, library_schema=schema)
-        elif body.range:
+        elif body.range is not None:
             if body.range.since is None or body.range.until is None:
-                raise HTTPException(status_code=400, detail="a range needs both since and until")
+                raise HTTPException(
+                    status_code=400, detail="a range needs both since and until"
+                )
             n = write.reset_range(
                 c, full_name, body.range.since, body.range.until, library_schema=schema
             )
-        else:
+        elif body.intervals:
             n = write.reset_intervals(
                 c,
                 full_name,
                 [(w.since, w.until) for w in body.intervals],
                 library_schema=schema,
+            )
+        else:  # unreachable: `chosen` guaranteed one of the three
+            raise HTTPException(
+                status_code=400, detail="give exactly one of: all, intervals, range"
             )
     return {"full_name": full_name, "reset": n}
 
