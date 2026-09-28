@@ -44,7 +44,11 @@ def test_timestamptz_partition_on_becomes_day_partition(tmp_path):
     table = create(
         tmp_path=tmp_path,
         columns=[
-            IcebergColumn(name="_data_modified", data_type=IcebergType.TIMESTAMPTZ, partition_on=True),
+            IcebergColumn(
+                name="_data_modified",
+                data_type=IcebergType.TIMESTAMPTZ,
+                partition_on=True,
+            ),
             IcebergColumn(name="payload", data_type=IcebergType.STRING),
         ],
     )
@@ -58,7 +62,9 @@ def test_string_partition_on_becomes_identity_partition(tmp_path):
     table = create(
         tmp_path=tmp_path,
         columns=[
-            IcebergColumn(name="hospital", data_type=IcebergType.STRING, partition_on=True),
+            IcebergColumn(
+                name="hospital", data_type=IcebergType.STRING, partition_on=True
+            ),
             IcebergColumn(name="payload", data_type=IcebergType.STRING),
         ],
     )

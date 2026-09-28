@@ -86,9 +86,7 @@ class IcebergData:
         if column is None:
             return UNPARTITIONED_PARTITION_SPEC
         source = schema.find_field(column)
-        if isinstance(
-            source.field_type, (DateType, TimestampType, TimestamptzType)
-        ):
+        if isinstance(source.field_type, (DateType, TimestampType, TimestamptzType)):
             transform, name = DayTransform(), f"{column}_day"
         else:
             transform, name = IdentityTransform(), column
