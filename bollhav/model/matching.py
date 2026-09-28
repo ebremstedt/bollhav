@@ -109,7 +109,7 @@ def matched_with_reload(
     only — it's ignored on fixed-interval models).
 
     Raises:
-        ValueError: If tags is not provided or the expression is invalid.
+        ValueError: If tags is not provided or the expression is invalid
     """
     if not tags:
         raise EmptyTagsError()

@@ -24,7 +24,11 @@ if TYPE_CHECKING:  # real types for the checker; at runtime these go via __getat
         overwrite,
         upsert,
     )
-    from bollhav.iceberg.schema import NotIcebergColumnsError, arrow_schema, iceberg_schema
+    from bollhav.iceberg.schema import (
+        NotIcebergColumnsError,
+        arrow_schema,
+        iceberg_schema,
+    )
     from bollhav.iceberg.write_modes import (
         MissingDataFrameError,
         RecreatePartitionRequiresWindowError,
