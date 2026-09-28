@@ -9,6 +9,21 @@ from typing import TYPE_CHECKING
 
 from pyiceberg.catalog import Catalog  # pyright: ignore[reportMissingImports]  # optional iceberg extra
 from pyiceberg.expressions import AlwaysTrue  # pyright: ignore[reportMissingImports]  # optional iceberg extra
+from pyiceberg.partitioning import (  # pyright: ignore[reportMissingImports]  # optional iceberg extra
+    UNPARTITIONED_PARTITION_SPEC,
+    PartitionField,
+    PartitionSpec,
+)
+from pyiceberg.schema import Schema  # pyright: ignore[reportMissingImports]  # optional iceberg extra
+from pyiceberg.transforms import (  # pyright: ignore[reportMissingImports]  # optional iceberg extra
+    DayTransform,
+    IdentityTransform,
+)
+from pyiceberg.types import (  # pyright: ignore[reportMissingImports]  # optional iceberg extra
+    DateType,
+    TimestampType,
+    TimestamptzType,
+)
 
 from bollhav.iceberg.schema import iceberg_schema
 
@@ -56,9 +71,35 @@ class IcebergData:
 
     def create_table(self) -> None:
         if not self.catalog.table_exists(self.identifier):
+            schema = iceberg_schema(self.model)
             self.catalog.create_table(
-                self.identifier, schema=iceberg_schema(self.model)
+                self.identifier,
+                schema=schema,
+                partition_spec=self._partition_spec(schema=schema),
             )
+
+    def _partition_spec(self, *, schema: Schema) -> PartitionSpec:
+        """The `partition_on` column becomes the table's partition spec: by
+        day for date and timestamp columns, by value for anything else.
+        Without one the table is unpartitioned."""
+        column = self.model.target.partitioned_by
+        if column is None:
+            return UNPARTITIONED_PARTITION_SPEC
+        source = schema.find_field(column)
+        if isinstance(
+            source.field_type, (DateType, TimestampType, TimestamptzType)
+        ):
+            transform, name = DayTransform(), f"{column}_day"
+        else:
+            transform, name = IdentityTransform(), column
+        return PartitionSpec(
+            PartitionField(
+                source_id=source.field_id,
+                field_id=1000,
+                transform=transform,
+                name=name,
+            )
+        )
 
     def recreate_table(self) -> None:
         if self.catalog.table_exists(self.identifier):
