@@ -24,7 +24,11 @@ from psycopg import sql  # noqa: E402
 from bollhav.model.database import Database  # noqa: E402
 from bollhav.model.materialization import Materialization  # noqa: E402
 from bollhav.model.model import Model, ViewWithoutQueryError  # noqa: E402
-from bollhav.model.modelrun import ModelRun  # noqa: E402
+from bollhav.model.modelrun import (  # noqa: E402
+    MissingQueryBuilderError,
+    ModelRun,
+    QueryNotSqlStringError,
+)
 from bollhav.model.source import Source, SourceModel  # noqa: E402
 from bollhav.model.state import State  # noqa: E402
 from bollhav.model.target import Target  # noqa: E402
@@ -171,10 +175,34 @@ class TestViewWithoutQueryBuilder:
         with pytest.raises(ViewWithoutQueryError, match="query_builder"):
             _view(query_builder=None)
 
-    def test_resolve_returns_none_when_unset(self):
-        # A non-view (table) model has no builder — resolve is a no-op None.
+    def test_resolve_raises_when_unset(self):
+        # A non-view (table) model has no builder — asking for its query is a bug.
         m = Model(target=Target(name="orders"), temporality=Temporality.TIMELESS)
-        assert ModelRun(model=m).resolve_query() is None
+        with pytest.raises(MissingQueryBuilderError, match="no query_builder"):
+            ModelRun(model=m).resolve_query()
+
+
+# ── resolve_sql: the str-only variant for non-psycopg sources ────────────────
+
+
+class TestResolveSql:
+    def test_str_passes_through(self):
+        m = _view(query_builder=lambda run, since, until: "SELECT 1")
+        assert ModelRun(model=m).resolve_sql(since=SINCE, until=UNTIL) == "SELECT 1"
+
+    def test_composable_raises(self):
+        m = _view(
+            query_builder=lambda run, since, until: sql.SQL("SELECT * FROM {}").format(
+                sql.Identifier("orders")
+            )
+        )
+        with pytest.raises(QueryNotSqlStringError, match="must return a str"):
+            ModelRun(model=m).resolve_sql()
+
+    def test_unset_raises(self):
+        m = Model(target=Target(name="orders"), temporality=Temporality.TIMELESS)
+        with pytest.raises(MissingQueryBuilderError):
+            ModelRun(model=m).resolve_sql()
 
 
 # ── Postgres backend: create_replace_view accepts str AND Composable ──────────

@@ -13,6 +13,26 @@ if TYPE_CHECKING:
     from bollhav.model.model import Model
 
 
+class MissingQueryBuilderError(ValueError):
+    """`resolve_query` on a model that has no `query_builder`. A model without
+    one has no query to resolve, so asking for it is a programming error."""
+
+    def __init__(self, full_name: str) -> None:
+        super().__init__(f"{full_name!r} has no query_builder to resolve")
+
+
+class QueryNotSqlStringError(TypeError):
+    """`resolve_sql` on a model whose `query_builder` yields something other
+    than a `str`, typically a psycopg `sql.Composable`. Those only run on
+    Postgres; use `resolve_query` there."""
+
+    def __init__(self, full_name: str, got: type) -> None:
+        super().__init__(
+            f"{full_name!r}: query_builder must return a str for resolve_sql, "
+            f"got {got.__name__}"
+        )
+
+
 @dataclass
 class ModelRun:
     """One invocation of a model — the immutable `model` definition paired with
@@ -49,17 +69,29 @@ class ModelRun:
 
     def resolve_query(
         self, since: datetime | None = None, until: datetime | None = None
-    ) -> "str | sql.Composable | None":
+    ) -> "str | sql.Composable":
         """The model's defining SELECT as runnable SQL. A string `query_builder`
         passes through; a callable is invoked as `query_builder(self, since,
         until)` so it can use `self.model.ref(...)` and the window. Returns
-        whatever the builder yields — a `str`, a psycopg `sql.Composable`, … — or
-        `None` if unset. `since`/`until` are `None` for a windowless build (a
-        view / timeless model)."""
+        whatever the builder yields — a `str`, a psycopg `sql.Composable`, … —
+        and raises `MissingQueryBuilderError` if the model has none.
+        `since`/`until` are `None` for a windowless build (a view / timeless
+        model)."""
         qb = self.model.query_builder
         if qb is None:
-            return None
+            raise MissingQueryBuilderError(self.model.target.full_name)
         return qb(self, since, until) if callable(qb) else qb
 
+    def resolve_sql(
+        self, *, since: datetime | None = None, until: datetime | None = None
+    ) -> str:
+        """`resolve_query` for sources that take plain SQL text (MSSQL, files,
+        anything not psycopg): the builder must yield a `str`, or
+        `QueryNotSqlStringError` is raised."""
+        query = self.resolve_query(since, until)
+        if not isinstance(query, str):
+            raise QueryNotSqlStringError(self.model.target.full_name, type(query))
+        return query
 
-__all__ = ["ModelRun"]
+
+__all__ = ["ModelRun", "MissingQueryBuilderError", "QueryNotSqlStringError"]
