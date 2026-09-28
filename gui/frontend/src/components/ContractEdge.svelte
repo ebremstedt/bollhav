@@ -31,7 +31,7 @@
   const SNOW = "❄︎";
 </script>
 
-<BaseEdge {id} path={p[0]} {markerEnd} style="stroke:#9aa0a6;stroke-width:1.5" />
+<BaseEdge {id} path={p[0]} {markerEnd} style="stroke:var(--edge);stroke-width:1.5" />
 {#if data?.contract || data?.freshness}
   <EdgeLabel x={p[1]} y={p[2]} transparent>
     <div class="lbl">

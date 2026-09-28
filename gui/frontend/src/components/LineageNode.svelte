@@ -87,21 +87,24 @@
   tabindex="0"
   onkeydown={(e) => e.key === "Enter" && open()}
 >
-  {#if showPills}
+  <!-- the pills only in verbose; a model's ⓘ badge in both levels -->
+  {#if showPills || isModel}
   <div class="tag-row">
     {#if isModel}
-      <span
-        class="kind-label"
-        style="background:{MODEL_YELLOW};color:{textOn(MODEL_YELLOW)}"
-        title="managed model · {data.kind}">model</span
-      >
-      {#if matColor}
+      {#if showPills}
         <span
           class="kind-label"
-          style="background:{matColor};color:{textOn(matColor)}"
-          title="materialization — a stored table or a SQL view"
-          >{data.modelType.toLowerCase()}</span
+          style="background:{MODEL_YELLOW};color:{textOn(MODEL_YELLOW)}"
+          title="managed model · {data.kind}">model</span
         >
+        {#if matColor}
+          <span
+            class="kind-label"
+            style="background:{matColor};color:{textOn(matColor)}"
+            title="materialization — a stored table or a SQL view"
+            >{data.modelType.toLowerCase()}</span
+          >
+        {/if}
       {/if}
       <button
         class="info"
@@ -163,40 +166,41 @@
 
 <style>
   .card {
+    font-family: var(--font-ui);
     position: relative;
-    min-width: 170px;
-    padding: 11px 10px 8px;
-    border: 2px solid #888;
-    border-radius: 8px;
+    min-width: 255px;
+    /* room for the pills popped out over the top and bottom edges */
+    padding: 21px 15px 18px;
+    border: 3px solid #888;
+    border-radius: 12px;
     background: var(--node-bg);
     box-shadow: var(--node-shadow);
-    font-family: system-ui, sans-serif;
   }
   /* kind tag + info badge, popped out of the top-left corner */
   .tag-row {
     position: absolute;
-    top: -9px;
-    left: -6px;
+    top: -20px;
+    left: -9px;
     display: flex;
     align-items: center;
-    gap: 4px;
+    gap: 8px;
     z-index: 2;
   }
   .kind-label {
-    font-size: 10px;
+    font-size: 22px;
     font-weight: 600;
-    padding: 1px 7px;
-    border-radius: 10px;
+    padding: 3px 15px;
+    border-radius: 21px;
     box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
     white-space: nowrap;
   }
   /* circled "i" sitting just to the right of the kind pill */
   .info {
-    width: 15px;
-    height: 15px;
+    width: 34px;
+    height: 34px;
     padding: 0;
-    line-height: 13px;
-    font-size: 10px;
+    line-height: 30px;
+    font-size: 22px;
     font-weight: 700;
     font-style: italic;
     font-family: Georgia, "Times New Roman", serif;
@@ -215,18 +219,18 @@
      (row-reverse), so one light sits at the same anchor as four. */
   .dots {
     position: absolute;
-    top: -6px;
-    right: -6px;
+    top: -9px;
+    right: -9px;
     display: flex;
     flex-direction: row-reverse;
-    gap: 4px;
+    gap: 6px;
     z-index: 3;
   }
   .dot {
-    width: 11px;
-    height: 11px;
+    width: 16px;
+    height: 16px;
     border-radius: 50%;
-    border: 2px solid var(--node-dot-border);
+    border: 3px solid var(--node-dot-border);
     /* static glow, tinted per-dot via the --glow RGB custom property (no pulse) */
     box-shadow:
       0 0 6px 2px rgba(var(--glow), 0.9),
@@ -249,7 +253,13 @@
     --glow: 47, 143, 255;
   }
   .card.model {
-    border-radius: 6px;
+    border-radius: 9px;
+    /* re-point the node + control vars so the fill, the name, the info badge
+       and the runs / errors buttons all take the model colours (theme.css) */
+    --node-bg: var(--model-bg);
+    --node-fg: var(--model-fg);
+    --control-bg: var(--model-control-bg);
+    --control-border: var(--model-control-border);
   }
   /* non-managed external sources: diagonal striped fill + a DASHED border
      whose colour (set inline) reflects the source kind (api / file / model). */
@@ -266,42 +276,51 @@
   /* managed models: a touch heavier golden frame so they read as the
      first-class thing on the canvas. */
   .card.model {
-    border-width: 2.5px;
+    border-width: 3.5px;
   }
   .name {
-    font-size: 13px;
-    font-weight: 600;
+    font-family: var(--name-font);
+    font-size: 24px;
+    font-weight: var(--name-weight);
     color: var(--node-fg);
-    margin-bottom: 5px;
+    margin-bottom: 8px;
     white-space: pre-line;
     line-height: 1.25;
   }
-  /* the part of a matched model's name that matched the tag query — green,
-     legible on both dark and light backgrounds */
+  /* the part of a matched model's name that matched the tag query — a green
+     tint behind it, so it reads on the dark and the light card alike */
   .name .hit {
-    color: #16a34a;
+    background: rgba(22, 163, 74, 0.35);
+    border-radius: 3px;
   }
+  /* runs / errors: popped out over the bottom edge, mirroring the kind pills
+     across the top, and filled in their status colours */
   .actions {
+    position: absolute;
+    bottom: -20px;
+    right: -9px;
     display: flex;
     align-items: center;
-    gap: 5px;
+    gap: 8px;
+    z-index: 2;
   }
   .mini {
-    font-size: 10px;
-    padding: 1px 7px;
-    border-radius: 9px;
-    border: 1px solid var(--control-border);
-    background: var(--control-bg);
-    color: var(--node-fg);
+    font-size: 22px;
+    font-weight: 600;
+    padding: 3px 15px;
+    border-radius: 21px;
+    border: 1px solid transparent;
+    color: #fff;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
     cursor: pointer;
   }
   .mini.runs {
-    border-color: #2f8fff;
+    background: #2a62b5;
   }
   .mini.errors {
-    border-color: #ff8a8a;
+    background: #8b2332;
   }
   .mini:hover {
-    background: var(--node-bg);
+    filter: brightness(1.12);
   }
 </style>

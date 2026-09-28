@@ -2,6 +2,7 @@
   import { info } from "../lib/selection.svelte.js";
   import { view } from "../lib/view.svelte.js";
   import { getModelMeta } from "../lib/api.js";
+  import ResetBox from "./ResetBox.svelte";
 
   // tier-1 (upstream / sources / last_seen) is already on the graph node;
   // tier-2 (the property bag) is fetched from /model/{name}.
@@ -129,7 +130,7 @@
     {#if meta.contract && (meta.contract.begin || meta.contract.end)}
       <div class="row">
         <span>contract</span>
-        <b>{fmtTs(meta.contract.begin)} → {fmtTs(meta.contract.end)}</b>
+        <b>{meta.contract.begin ? fmtTs(meta.contract.begin) : "∞"} → {meta.contract.end ? fmtTs(meta.contract.end) : "∞"}</b>
       </div>
     {/if}
     {#if meta.partitioned_by}
@@ -221,11 +222,15 @@
   {:else if meta && !hasMeta}
     <div class="foot">no stored metadata — re-run the pipeline to populate</div>
   {/if}
+
+  {#if view.writable && info.name}
+    <ResetBox name={info.name} model sample={meta?.contract?.begin || ""} ondone={() => view.refreshAt++} />
+  {/if}
 </aside>
 
 <style>
   .meta-panel {
-    width: 320px;
+    width: 420px;
     flex: 0 0 320px;
     border-right: 1px solid var(--border);
     background: var(--bg);
@@ -242,7 +247,8 @@
     gap: 8px;
   }
   .title {
-    font-weight: 700;
+    font-family: var(--name-font);
+    font-weight: var(--name-weight);
     font-size: 14px;
     word-break: break-word;
   }
@@ -265,16 +271,11 @@
   .dim {
     color: var(--muted, #888);
   }
-  /* dotted-name colour ramp: catalog (dark blue) · schema (blue) · table
-     (light blue), used everywhere a name shows in this panel. */
-  .cat {
-    color: #2563eb;
-  }
-  .sch {
-    color: #3b82f6;
-  }
+  /* the dotted name's parts, in the normal text colour */
+  .cat,
+  .sch,
   .tbl {
-    color: #60a5fa;
+    color: var(--fg);
   }
   /* a `.stack`ed name puts each dotted segment on its own line */
   .stack :global(span),
@@ -340,16 +341,18 @@
     letter-spacing: 0.3px;
     padding: 1px 5px;
     border-radius: 8px;
-    background: #2b2f36;
-    color: #ffd23f;
+    background: var(--control-bg);
+    border: 1px solid var(--control-border);
+    color: var(--fg);
   }
   .fresh {
     font-size: 9px;
     font-weight: 600;
     padding: 1px 5px;
     border-radius: 8px;
-    background: #16313a;
-    color: #4aa3ff;
+    background: var(--control-bg);
+    border: 1px solid var(--control-border);
+    color: var(--fg);
     white-space: nowrap;
   }
   .devoff {
@@ -379,10 +382,11 @@
   }
   /* columns rendered as a compact table */
   .cols-table {
+    font-family: var(--table-cell-font);
+    font-size: var(--table-cell-size);
+    font-weight: var(--table-cell-weight);
     width: 100%;
     border-collapse: collapse;
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    font-size: 11px;
     margin-top: 3px;
   }
   .cols-table td {
@@ -398,7 +402,6 @@
     white-space: nowrap;
   }
   .cols-table .cflag {
-    color: #ffd23f;
     font-weight: 700;
     text-align: right;
     white-space: nowrap;
@@ -409,15 +412,15 @@
     gap: 5px;
   }
   /* a dotted tag hard-breaks onto one line per segment (white-space: pre-line),
-     shown in yellow, staying inside the panel */
+     staying inside the panel */
   .chip {
     font-size: 10px;
     font-weight: 700;
     padding: 2px 7px;
     border-radius: 9px;
     border: 1px solid var(--control-border);
-    background: var(--node-bg, var(--bg));
-    color: #ffc107;
+    background: var(--control-bg);
+    color: var(--fg);
     max-width: 100%;
     white-space: pre-line;
     overflow-wrap: anywhere;

@@ -6,11 +6,110 @@ body {
   margin: 0;
 }
 
+/* A captioned box around related controls, used by every tab's sub-bar
+   ("filtering", "sorting", "display"): a caption on top, the controls in a
+   row below, each control under its own small label (.sub / .sub-label). */
+.group {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: stretch;
+  align-self: stretch;
+  border: 1px solid var(--control-border);
+  border-radius: 8px;
+  background: var(--control-bg);
+}
+.group-label {
+    font-family: var(--box-title-font);
+    font-size: var(--box-title-size);
+    font-weight: var(--box-title-weight);
+  text-align: center;
+  padding: 2px 10px;
+  color: var(--control-fg);
+  border-bottom: 1px solid var(--control-border);
+  border-radius: 7px 7px 0 0;
+  white-space: nowrap;
+}
+.group-body {
+  flex: 1;
+  display: flex;
+  align-items: stretch; /* every column the same height … */
+  gap: 12px;
+  padding: 4px 8px 6px;
+}
+.sub {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: space-between; /* … label at the top, control at the bottom */
+  gap: 3px;
+}
+.sub-label {
+    font-family: var(--box-sub-font);
+    font-size: var(--box-sub-size);
+    font-weight: var(--box-sub-weight);
+  color: var(--muted);
+}
+/* the control fills the column under its label, so every control in a box
+   starts and ends at the same height, whatever its natural size */
+.sub > :last-child {
+  flex: 1 0 auto;
+}
+
 .wrap {
+  /* ── typography ──────────────────────────────────────────────────────
+     One set of variables per role: change a role here and every element
+     of that role follows. Family, size and weight are separate, so a role
+     can take a family without its size. Defaults keep the current look. */
+  --font-ui: system-ui, sans-serif; /* the base: everything, unless a role says otherwise */
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace; /* code: inputs, tracebacks, syntax */
+  /* the site's name, and the top menu (tabs, environment, refresh, theme) */
+  --brand-font: var(--font-ui);
+  --brand-size: 20px;
+  --brand-weight: 600;
+  --menu-font: var(--font-ui);
+  --menu-size: 18px;
+  --menu-weight: 400;
+  /* standalone buttons: filter, ✕ clear, tag expression syntax, the side panel's tabs */
+  --btn-font: var(--font-ui);
+  --btn-size: 18px;
+  --btn-weight: 400;
+  /* the filtering / sorting / display boxes, level by level:
+     the box's title ("sorting"), its sub-labels ("models", "time"), and the
+     options inside (the segments, when / what, recenter, ascending …) */
+  --box-title-font: var(--font-ui);
+  --box-title-size: 13px;
+  --box-title-weight: 600;
+  --box-sub-font: var(--font-ui);
+  --box-sub-size: 11px;
+  --box-sub-weight: 400;
+  --box-option-font: var(--font-ui);
+  --box-option-size: 18px;
+  --box-option-weight: 400;
+  --box-option-sub-size: 11px; /* the second line of a two-line option ("ascending") */
+  /* information kept in tables: the headings, the text cells (names, types,
+     property values, metrics), and the timestamps / intervals / ids. The
+     first two follow the model-name font and size (set below); the times
+     are monospaced so they line up. */
+  --table-head-font: var(--name-font);
+  --table-head-size: var(--name-size);
+  --table-head-weight: 600;
+  --table-cell-font: var(--name-font);
+  --table-cell-size: var(--name-size);
+  --table-cell-weight: var(--name-weight);
+  --table-value-font: var(--font-mono);
+  --table-value-size: var(--name-size);
+  --table-value-weight: var(--name-weight);
+  /* how a model's name is set wherever one is shown — the models list's look */
+  --name-font: var(--font-ui);
+  --name-weight: 400;
+  --name-size: 15px; /* in the models list and the gaps, runs and grid tables */
   --bg: #fff;
   --fg: #222;
   --border: #e3e3e3;
   --muted: #777;
+
+  --gaps-muted: #000; /* the gaps tab's secondary text (GapsView overrides --muted) */
+  --row-hi: #e3f2e6; /* a clicked (highlighted) table row */
 
   --control-bg: #f5f5f5;
   --control-fg: #222;
@@ -23,8 +122,8 @@ body {
   --err-accent: #c0392b;
   --err-msg: #444;
 
-  --legend-fg: #333;
-  --legend-grp: #555;
+  --legend-fg: #000;
+  --legend-grp: #000;
   --stripe-base: #fff;
   --stripe-line: #e0e0e0;
   --sep: #ddd;
@@ -35,6 +134,17 @@ body {
   --node-stripe: #e9e9e9;
   --node-dot-border: #fff;
   --node-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+
+  /* dependency arrows: path + arrowhead (graph.js / ContractEdge read it) */
+  --edge: #000;
+
+  /* managed-model cards: white with black text and the coloured frame,
+     for easy reading (external sources keep the striped look).
+     LineageNode re-points its node/control vars to these inside .card.model */
+  --model-bg: #fff;
+  --model-fg: #000;
+  --model-control-bg: #f5f5f5;
+  --model-control-border: #bbb;
 }
 
 .wrap.dark {
@@ -42,6 +152,9 @@ body {
   --fg: #eaeaea;
   --border: #333;
   --muted: #9a9a9a;
+
+  --gaps-muted: #9a9a9a;
+  --row-hi: #1f3324;
 
   --control-bg: #2a2a30;
   --control-fg: #eaeaea;
@@ -66,4 +179,12 @@ body {
   --node-stripe: #33333b;
   --node-dot-border: #1b1b1f;
   --node-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+
+  --edge: #fff;
+
+  /* dark mode already fills every card; models use the plain node colours */
+  --model-bg: #26262b;
+  --model-fg: #eaeaea;
+  --model-control-bg: #2a2a30;
+  --model-control-border: #444;
 }

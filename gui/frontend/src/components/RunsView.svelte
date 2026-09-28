@@ -1,26 +1,49 @@
 <script>
-  import { view, passesTime } from "../lib/view.svelte.js";
+  import { view, passesTime, matOk } from "../lib/view.svelte.js";
+  import { ui } from "../lib/url.svelte.js";
+  import ModelFilter from "./ModelFilter.svelte";
   import { getAllErrors, getAllRuns } from "../lib/api.js";
   import { ts, STATUS_COLOR } from "../lib/constants.js";
   import TimeFilter from "./TimeFilter.svelte";
 
-  const LIMITS = [50, 100, 200, 1000];
+  // rows: "height" = as many as the scrolling area holds (the
+  // default), or a fixed count
+  const LIMITS = ["height", 100, 365, "all"];
   // what to show: failures only (default), the run ledger, or both interleaved
   const MODES = [
     ["errors", "errors"],
     ["runs", "runs"],
-    ["both", "errors + runs"],
+    ["both", "all"],
   ];
   // how to render the model name in the `model` column
+  // [key, label]: the top level the model name is shown from
+  // (catalog → catalog.schema.table, schema → schema.table, table → table)
   const NAME_MODES = [
-    ["fqn", "catalog.schema.table"],
-    ["schema", "schema.table"],
+    ["fqn", "catalog"],
+    ["schema", "schema"],
     ["table", "table"],
   ];
 
-  let mode = $state("errors");
-  let limit = $state(50);
-  let nameMode = $state("schema");
+  // height: before any row is on screen, an estimate from the scroll
+  // area's height (a row ≈ 31px, the header ≈ 40px); once rows exist, the
+  // shortest of the first rows is measured for real. Rounded down to fives so
+  // a resize by a few pixels doesn't refetch.
+  let scrollH = $state(0); // bound from the scroll area; changing it re-measures
+  let measured = $state(0);
+  let estimate = $derived(scrollH ? Math.max(10, Math.floor((scrollH - 40) / 31)) : 0);
+  let fit = $derived(measured || estimate);
+  let effectiveLimit = $derived(ui.runsLimit === "height" ? fit : ui.runsLimit === "all" ? 100000 : ui.runsLimit);
+  $effect(() => {
+    void scrollH;
+    void items;
+    const rows = [...document.querySelectorAll(".runs tbody tr")].slice(0, 5);
+    const head = document.querySelector(".runs thead");
+    if (!rows.length || !head) return;
+    const rowH = Math.min(...rows.map((r) => r.offsetHeight).filter(Boolean));
+    if (!rowH) return;
+    const n = Math.max(5, Math.floor((scrollH - head.offsetHeight) / rowH / 5) * 5);
+    if (n !== measured) measured = n;
+  });
   let errs = $state([]);
   let runs = $state([]);
   let loading = $state(false);
@@ -28,10 +51,16 @@
   // which rows have their details dropdown open (by index) — so one button
   // can collapse them all.
   let openSet = $state(new Set());
+  let highlighted = $state(null); // index of the highlighted row (click a row)
 
-  // the shared tag-expression matches (set of full names, or null = inactive).
-  // The model-name filter is lineage-only, so the runs tab isn't narrowed by it.
+  // the shared tag-expression matches (set of full names, or null = inactive)
   let tagMatchSet = $derived(view.tagMatches ? new Set(view.tagMatches) : null);
+  // the site-wide materialization filter (null = inactive)
+  let matSet = $derived(
+    view.matFilter === "all" || !view.full
+      ? null
+      : new Set(view.full.nodes.filter((n) => n.type === "model" && matOk(n)).map((n) => n.name)),
+  );
 
   function toggleRow(i, isOpen) {
     const next = new Set(openSet);
@@ -57,8 +86,9 @@
 
   // (re)load whenever the mode, limit, environment, or a refresh changes.
   $effect(() => {
-    const n = limit;
-    const m = mode;
+    const n = effectiveLimit;
+    if (!n) return; // the scroll area isn't measured yet
+    const m = ui.runsShow;
     void view.env; // reload on env switch
     void view.refreshAt; // reload when the user hits refresh
     loading = true;
@@ -78,10 +108,10 @@
       });
   });
 
-  // unified, newest-first timeline of the selected sources
+  // unified timeline of the selected sources, newest first by default
   let items = $derived.by(() => {
     const out = [];
-    if (mode !== "runs")
+    if (ui.runsShow !== "runs")
       for (const e of errs)
         out.push({
           src: "error",
@@ -93,7 +123,7 @@
           message: e.error_message,
           traceback: e.traceback,
         });
-    if (mode !== "errors")
+    if (ui.runsShow !== "errors")
       for (const r of runs)
         out.push({
           src: "run",
@@ -104,18 +134,20 @@
           status: r.status,
           blocked_reason: r.blocked_reason,
         });
-    // filter by tag-expression match (model-name filter is lineage-only), then cap
+    // filter by tag-expression match, then cap
     let filtered = out;
     if (tagMatchSet) filtered = filtered.filter((o) => tagMatchSet.has(o.full_name));
+    if (matSet) filtered = filtered.filter((o) => matSet.has(o.full_name));
     filtered = filtered.filter((o) => passesTime(o.when, o.since, o.until));
-    filtered.sort((a, b) => (b.when || "").localeCompare(a.when || ""));
-    return filtered.slice(0, limit);
+    const sign = ui.runsOrder === "desc" ? 1 : -1;
+    filtered.sort((a, b) => (b.when || "").localeCompare(a.when || "") * sign);
+    return filtered.slice(0, effectiveLimit || filtered.length);
   });
 
-  // is any filter (tag / time) narrowing the view right now? (the model-name
-  // filter is lineage-only)
+  // is any filter (tag / time) narrowing the view right now?
   let hasFilter = $derived(
     !!tagMatchSet ||
+      !!matSet ||
       (view.loadedMode === "exact"
         ? !!view.loadedExact
         : !!(view.loadedFrom || view.loadedTo)) ||
@@ -125,8 +157,8 @@
   // render the model name per the chosen mode
   function displayName(full) {
     const parts = (full || "").split(".");
-    if (nameMode === "table") return parts[parts.length - 1] || full;
-    if (nameMode === "schema") return parts.slice(-2).join(".");
+    if (ui.runsName === "table") return parts[parts.length - 1] || full;
+    if (ui.runsName === "schema") return parts.slice(-2).join(".");
     return full;
   }
 
@@ -143,37 +175,81 @@
       setTimeout(() => (btn.textContent = "copy"), 1200);
     });
   }
+
 </script>
 
 <section class="runs">
+  <ModelFilter />
   <div class="bar">
-    <span class="seg">
-      {#each MODES as [val, label]}
-        <button class="seg-btn" class:active={mode === val} onclick={() => (mode = val)}>
-          {label}
-        </button>
-      {/each}
+    <!-- captioned boxes: what the list is narrowed to, how it is sorted, how it shows -->
+    <!-- what the list is narrowed to: failures / runs / both, and a time window -->
+    <span class="group">
+      <span class="group-label">filtering</span>
+      <span class="group-body">
+        <span class="sub">
+          <span class="sub-label">show</span>
+          <span class="seg">
+            {#each MODES as [val, label]}
+              <button class="seg-btn" class:active={ui.runsShow === val} onclick={() => (ui.runsShow = val)}>
+                {label}
+              </button>
+            {/each}
+          </span>
+        </span>
+        <span class="sub">
+          <span class="sub-label">time</span>
+          <TimeFilter />
+        </span>
+      </span>
     </span>
-    <button class="collapse" onclick={collapseAll} disabled={openSet.size === 0}>
-      ▾ collapse all{openSet.size ? ` (${openSet.size})` : ""}
-    </button>
-    <TimeFilter />
-    <span class="spacer"></span>
-    <span class="seg">
-      {#each NAME_MODES as [val, label]}
-        <button
-          class="seg-btn"
-          class:active={nameMode === val}
-          onclick={() => (nameMode = val)}>{label}</button
-        >
-      {/each}
+    <span class="group">
+      <span class="group-label">sorting</span>
+      <span class="group-body">
+        <span class="sub">
+          <span class="sub-label">time</span>
+          <span class="seg">
+            <button class="seg-btn" class:active={ui.runsOrder === "desc"} onclick={() => (ui.runsOrder = "desc")}
+              >descending</button
+            >
+            <button class="seg-btn" class:active={ui.runsOrder === "asc"} onclick={() => (ui.runsOrder = "asc")}
+              >ascending</button
+            >
+          </span>
+        </span>
+      </span>
     </span>
-    <span class="seg">
-      {#each LIMITS as n}
-        <button class="seg-btn" class:active={limit === n} onclick={() => (limit = n)}>
-          {n}
-        </button>
-      {/each}
+    <span class="group">
+      <span class="group-label">display</span>
+      <span class="group-body">
+        <span class="sub">
+          <span class="sub-label">number of runs</span>
+          <span class="seg">
+            {#each LIMITS as n}
+              <button class="seg-btn" class:active={ui.runsLimit === n} onclick={() => (ui.runsLimit = n)}>
+                {n}
+              </button>
+            {/each}
+          </span>
+        </span>
+        <span class="sub">
+          <span class="sub-label">model top level</span>
+          <span class="seg">
+            {#each NAME_MODES as [val, label]}
+              <button
+                class="seg-btn"
+                class:active={ui.runsName === val}
+                onclick={() => (ui.runsName = val)}>{label}</button
+              >
+            {/each}
+          </span>
+        </span>
+        <span class="sub">
+          <span class="sub-label">details</span>
+          <button class="collapse" onclick={collapseAll} disabled={openSet.size === 0}>
+            ▾ collapse{openSet.size ? ` (${openSet.size})` : ""}
+          </button>
+        </span>
+      </span>
     </span>
   </div>
 
@@ -186,20 +262,28 @@
       {/if}
     </p>
   {:else}
-    <div class="scroll">
+    <div class="scroll" bind:clientHeight={scrollH}>
       <table>
         <thead>
           <tr>
             <th>when</th>
             <th>model</th>
             <th>interval</th>
-            <th>status<sup class="hint">(hover)</sup></th>
+            <th>status</th>
             <th>details</th>
           </tr>
         </thead>
         <tbody>
           {#each items as it, i (i)}
-            <tr>
+            <!-- click a row to highlight it; clicks inside the details
+                 toggle are the toggle's own -->
+            <tr
+              class:hi={highlighted === i}
+              onclick={(e) => {
+                if (e.target.closest("details")) return;
+                highlighted = highlighted === i ? null : i;
+              }}
+            >
               <td class="mono when">{ts(it.when)}</td>
               <td class="model">
                 <span class="model-name" title={it.full_name}>{displayName(it.full_name)}</span>
@@ -233,8 +317,10 @@
                       <span class="mono det-fqn">{it.full_name}</span>
                     </div>
                     {#if modelTags(it.full_name).length}
+                      <!-- same look as the gaps tab: a green "show tags" pill
+                           that reveals green chips -->
                       <details class="tags-det">
-                        <summary>tags</summary>
+                        <summary>show tags ({modelTags(it.full_name).length})</summary>
                         <span class="tags">
                           {#each modelTags(it.full_name) as t}
                             <span class="tag">{t}</span>
@@ -258,6 +344,9 @@
         </tbody>
       </table>
     </div>
+    <div class="foot">
+      <span class="foot-hint">click a row to highlight it</span>
+    </div>
   {/if}
 </section>
 
@@ -273,18 +362,38 @@
   .bar {
     display: flex;
     align-items: center;
+    justify-content: center;
     flex-wrap: wrap;
-    gap: 8px;
+    gap: 14px;
     padding: 10px 16px;
     border-bottom: 1px solid var(--border);
   }
-  .spacer {
-    flex: 1;
+  .foot {
+    padding: 6px 16px;
+    border-top: 1px solid var(--border);
+    text-align: center;
+  }
+  .foot-hint {
+    font-size: 12px;
+    font-style: italic;
+    color: var(--muted);
+  }
+  /* the highlighted row — same tint as the grid and gaps tabs */
+  tr.hi td {
+    background: var(--row-hi);
+  }
+  tr.hi td:first-child {
+    box-shadow: inset 3px 0 0 #2e7d32;
+  }
+  tbody tr {
+    cursor: pointer;
   }
   .collapse {
-    font-size: 12px;
-    padding: 4px 10px;
-    border-radius: 6px;
+    font-family: var(--box-option-font);
+    font-size: var(--box-option-size);
+    font-weight: var(--box-option-weight);
+    padding: 6px 15px;
+    border-radius: 8px;
     border: 1px solid var(--control-border);
     background: var(--control-bg);
     color: var(--control-fg);
@@ -296,16 +405,21 @@
   }
   .seg {
     display: inline-flex;
-    align-items: center;
-    gap: 2px;
+    align-items: stretch; /* buttons fill the segment's height (see .sub) */
+    gap: 3px;
     border: 1px solid var(--control-border);
-    border-radius: 6px;
+    border-radius: 8px;
     background: var(--control-bg);
-    padding: 2px;
+    padding: 3px;
   }
   .seg-btn {
-    font-size: 12px;
-    padding: 3px 10px;
+    font-family: var(--box-option-font);
+    font-size: var(--box-option-size);
+    font-weight: var(--box-option-weight);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 5px 14px;
     border: none;
     border-radius: 4px;
     background: transparent;
@@ -323,17 +437,21 @@
     padding: 0 16px 16px;
   }
   table {
+    font-family: var(--table-cell-font);
+    font-size: var(--table-cell-size);
+    font-weight: var(--table-cell-weight);
     width: 100%;
     border-collapse: collapse;
-    font-size: 12px;
   }
   thead th {
+    font-family: var(--table-head-font);
+    font-size: var(--table-head-size);
+    font-weight: var(--table-head-weight);
     position: sticky;
     top: 0;
     background: var(--bg);
     text-align: left;
     color: var(--muted);
-    font-weight: 500;
     padding: 8px 8px 6px;
     border-bottom: 1px solid var(--border);
     z-index: 1;
@@ -344,8 +462,9 @@
     vertical-align: top;
   }
   .mono {
-    font-family: ui-monospace, monospace;
-    font-size: 11px;
+    font-family: var(--table-value-font);
+    font-size: var(--table-value-size);
+    font-weight: var(--table-value-weight);
   }
   .when {
     color: var(--muted);
@@ -355,7 +474,9 @@
     white-space: nowrap;
   }
   .model-name {
-    font-weight: 600;
+    font-family: var(--name-font);
+    font-weight: var(--name-weight);
+    font-size: var(--name-size);
   }
   .interval {
     color: var(--muted);
@@ -382,19 +503,13 @@
     word-break: break-word;
     background: #222;
     color: #fff;
-    font-size: 11px;
+    font-size: 15px;
     line-height: 1.45;
-    padding: 8px 10px;
-    border-radius: 6px;
+    padding: 9px 12px;
+    border-radius: 8px;
     box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
     z-index: 30;
     pointer-events: none;
-  }
-  .hint {
-    font-weight: 400;
-    font-size: 9px;
-    color: #ffd23f;
-    margin-left: 1px;
   }
   .dot {
     display: inline-block;
@@ -446,26 +561,26 @@
   .det-fqn {
     color: var(--fg);
   }
+  /* the tags disclosure: a plain summary with the browser's side arrow,
+     like the row's own "show" */
   .tags-det summary {
     cursor: pointer;
     color: var(--muted);
     font-size: 11px;
+    margin-top: 4px;
   }
   .tags {
     display: flex;
     flex-wrap: wrap;
-    gap: 4px;
+    gap: 5px;
     margin-top: 5px;
   }
-  /* always-black chip so the yellow tags read the same in light & dark mode */
   .tag {
     font-size: 10px;
-    font-weight: 700;
-    padding: 1px 7px;
-    border-radius: 10px;
-    background: #000;
-    border: 1px solid #000;
-    color: #ffd23f;
+    color: var(--fg);
+    background: rgba(22, 163, 74, 0.12);
+    border-radius: 4px;
+    padding: 1px 6px;
   }
   .tb-wrap {
     position: relative;
@@ -487,11 +602,11 @@
     opacity: 0.85;
   }
   .tb {
+    font-family: var(--font-mono);
     margin: 4px 0 0;
     padding: 8px;
     background: var(--err-bg);
     border-radius: 4px;
-    font-family: ui-monospace, monospace;
     font-size: 11px;
     white-space: pre-wrap;
     word-break: break-word;

@@ -1,43 +1,28 @@
 <script>
-  import {
-    view,
-    applyFilter,
-    applyTagFilter,
-    clearFocus,
-    refresh,
-    setEnv,
-    setTab,
-  } from "../lib/view.svelte.js";
+  import { view, refresh, setEnv, setTab } from "../lib/view.svelte.js";
 
   // top-level view tabs
   const TABS = [
-    ["lineage", "Lineage"],
     ["models", "Models"],
+    ["gaps", "Gaps"],
     ["runs", "Runs"],
     ["grid", "Grid"],
-    ["gaps", "Gaps"],
+    ["lineage", "Lineage"],
   ];
 
   let { dark = $bindable() } = $props();
 
-  let allTags = $derived(
-    view.full
-      ? [...new Set(view.full.nodes.flatMap((n) => n.tags || []))].sort()
-      : [],
-  );
 </script>
 
 <header>
+  <div class="brand">{view.title}</div>
   <div class="left">
     <span class="seg">
       {#each TABS as [val, label]}
         <button
           class="seg-btn"
           class:active={view.tab === val}
-          onclick={() => setTab(val)}
-          >{label}{#if val === "grid" || val === "gaps"}<sup class="beta"
-              >(beta)</sup
-            >{/if}</button
+          onclick={() => setTab(val)}>{label}</button
         >
       {/each}
     </span>
@@ -61,61 +46,40 @@
   </div>
 
   <div class="right">
-    <!-- the model-name filter lives on the top bar for the lineage + models
-         tabs (it narrows the lineage graph and the models list); the runs /
-         grid / gaps tabs are not filtered by it. -->
-    {#if view.tab === "lineage" || view.tab === "models"}
-      <input
-        class="search"
-        placeholder="filter models by name…"
-        value={view.query}
-        oninput={(e) => {
-          view.query = e.currentTarget.value;
-          if (view.tab === "lineage") applyFilter();
-        }}
-      />
-    {/if}
-    <input
-      class="search tagsearch"
-      list="tag-list"
-      placeholder="tag or tagexpression — clean  ·  [(raw|clean)&amp;orbit]"
-      value={view.tagExpr}
-      oninput={(e) => (view.tagExpr = e.currentTarget.value)}
-      onkeydown={(e) => e.key === "Enter" && applyTagFilter()}
-    />
-    <datalist id="tag-list">
-      {#each allTags as t}
-        <option value={t}></option>
-      {/each}
-    </datalist>
-    <button class="toggle" onclick={applyTagFilter}>filter</button>
-    <button class="clear" onclick={clearFocus}>✕ clear all</button>
+    <!-- filtering by name / tag lives in each tab's sub-bar (ModelFilter) -->
     <span
       class="tip-wrap"
       data-tip="Reload data. Limited to once every 5 seconds."
     >
-      <button class="toggle" onclick={refresh} disabled={!view.canRefresh}>
-        {#if view.refreshing}
-          <span class="ico spin">⟳</span> refreshing…
-        {:else}
-          <span class="ico">⟳</span> refresh{view.cooldown > 0
-            ? ` (${view.cooldown})`
-            : ""}
-        {/if}
+      <button
+        class="toggle"
+        onclick={refresh}
+        disabled={!view.canRefresh}
+        aria-label="refresh"
+        title={view.cooldown > 0 ? `refresh (${view.cooldown}s)` : "refresh"}
+      >
+        <span class="ico" class:spin={view.refreshing}>⟳</span>
       </button>
     </span>
-    <button class="toggle" onclick={() => (dark = !dark)}>
-      {dark ? "☀ light" : "☾ dark"}
+    <button
+      class="toggle"
+      onclick={() => (dark = !dark)}
+      aria-label={dark ? "switch to light mode" : "switch to dark mode"}
+      title={dark ? "light mode" : "dark mode"}
+    >
+      {dark ? "☀" : "☾"}
     </button>
   </div>
 </header>
 
 <style>
+  /* three columns: the site's name, the menu (centred), the buttons (right) */
   header {
     padding: 10px 14px;
     border-bottom: 1px solid var(--border);
     font-size: 14px;
-    display: flex;
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
     align-items: center;
     gap: 10px;
     background: var(--bg);
@@ -123,35 +87,51 @@
   }
   .left,
   .right {
-    flex: 1;
     display: flex;
     align-items: center;
     gap: 10px;
   }
+  .brand {
+    font-family: var(--brand-font);
+    font-size: var(--brand-size);
+    font-weight: var(--brand-weight);
+    grid-column: 1;
+    white-space: nowrap;
+  }
+  .left {
+    grid-column: 2;
+    justify-content: center;
+  }
   .right {
+    grid-column: 3;
     justify-content: flex-end;
   }
   .toggle {
-    font-size: 12px;
-    padding: 4px 10px;
-    border-radius: 6px;
+    font-family: var(--menu-font);
+    font-size: var(--menu-size);
+    font-weight: var(--menu-weight);
+    padding: 6px 15px;
+    border-radius: 8px;
     border: 1px solid var(--control-border);
     background: var(--control-bg);
     color: var(--control-fg);
     cursor: pointer;
+    white-space: nowrap;
   }
   .seg {
     display: inline-flex;
     align-items: center;
-    gap: 2px;
+    gap: 3px;
     border: 1px solid var(--control-border);
-    border-radius: 6px;
+    border-radius: 8px;
     background: var(--control-bg);
-    padding: 2px;
+    padding: 3px;
   }
   .seg-btn {
-    font-size: 12px;
-    padding: 3px 9px;
+    font-family: var(--menu-font);
+    font-size: var(--menu-size);
+    font-weight: var(--menu-weight);
+    padding: 5px 14px;
     border: none;
     border-radius: 4px;
     background: transparent;
@@ -161,11 +141,6 @@
   .seg-btn.active {
     background: #2e7d32;
     color: #fff;
-  }
-  .beta {
-    font-size: 8px;
-    margin-left: 1px;
-    color: #ffd23f;
   }
   .toggle:disabled {
     opacity: 0.55;
@@ -211,8 +186,14 @@
     right: auto;
     left: 14px;
   }
+  /* the ⟳ glyph is drawn small in the system font: scaled up to read the
+     same size as the ☾ / ☀ next to it, without making its button taller */
   .ico {
     display: inline-block;
+    font-size: 1.75em;
+    font-weight: 700;
+    line-height: 0.69;
+    vertical-align: -2px;
   }
   .ico.spin {
     animation: spin 0.7s linear infinite;
@@ -222,39 +203,12 @@
       transform: rotate(360deg);
     }
   }
-  .search {
-    font-size: 12px;
-    padding: 4px 9px;
-    border-radius: 6px;
-    border: 1px solid var(--control-border);
-    background: var(--input-bg);
-    color: var(--control-fg);
-    width: 230px;
-  }
-  .search::placeholder {
-    color: var(--placeholder);
-  }
   .envsel {
-    font-size: 12px;
-    padding: 4px 8px;
-    border-radius: 6px;
-    border: 1px solid var(--control-border);
-    background: var(--control-bg);
-    color: var(--control-fg);
-    cursor: pointer;
-  }
-  .tagsearch {
-    width: 200px;
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    color: #16a34a;
-  }
-  .tagsearch::placeholder {
-    color: var(--placeholder);
-  }
-  .clear {
-    font-size: 12px;
-    padding: 4px 9px;
-    border-radius: 6px;
+    font-family: var(--menu-font);
+    font-size: var(--menu-size);
+    font-weight: var(--menu-weight);
+    padding: 6px 12px;
+    border-radius: 8px;
     border: 1px solid var(--control-border);
     background: var(--control-bg);
     color: var(--control-fg);

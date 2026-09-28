@@ -557,9 +557,11 @@ def get_runs_grouped(
     schema: str = LIBRARY_SCHEMA,
 ) -> list[dict]:
     """Per-model run history for the grid view — every stateful model (ordered
-    by name) with its most recent `limit` run rows (newest first). Unlike
-    `get_recent_runs` it groups by model and is NOT globally capped, so each
-    model keeps its own row of cells."""
+    by name) with its most recent `limit` run rows, newest WINDOW first (not
+    newest run: a row that was reset to pending keeps its place in the grid
+    instead of dropping to the end). Unlike `get_recent_runs` it groups by
+    model and is NOT globally capped, so each model keeps its own row of
+    cells."""
     if not _table_exists(conn, schema, LIBRARY_TABLE):
         return []
     models = conn.execute(
@@ -579,7 +581,7 @@ def get_runs_grouped(
                 sql.SQL(
                     "SELECT status, since, until, applied_at, run_id, temporality, "
                     "blocked_reason FROM {schema}.{table} "
-                    "ORDER BY applied_at DESC NULLS LAST, since DESC NULLS LAST LIMIT %s"
+                    "ORDER BY since DESC NULLS LAST, applied_at DESC NULLS LAST LIMIT %s"
                 ).format(
                     schema=sql.Identifier(st_schema),
                     table=sql.Identifier(st_table),
