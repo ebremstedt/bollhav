@@ -115,6 +115,7 @@ def write_dataframes(
     for chunk in df_gen:
         arrow = _as_arrow(chunk, declared)
         if arrow.num_rows == 0:
+            logger.debug("0 rows for %s, nothing to write", model.target.full_name)
             continue
         if table is None:
             table = catalog.load_table(_identifier(model))
