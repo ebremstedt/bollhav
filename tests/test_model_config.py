@@ -106,6 +106,21 @@ def test_iceberg_with_catalog_ok():
     assert target.catalog == "lake"
 
 
+def test_iceberg_with_indexes_raises():
+    from bollhav.iceberg import IcebergColumn
+    from bollhav.model.database import Database, DatabaseIndex
+
+    with pytest.raises(ValueError, match="Iceberg targets have none"):
+        Target(
+            name="test_table",
+            schema="ns",
+            catalog="lake",
+            database=Database.ICEBERG,
+            columns=[IcebergColumn(name="id")],
+            indexes=[DatabaseIndex(name="ix_id")],
+        )
+
+
 def test_multiple_partition_columns_raises():
     with pytest.raises(
         ValueError, match="At most one column can have partition_on=True"

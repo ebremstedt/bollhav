@@ -102,6 +102,17 @@ class UnknownIndexColumnError(ValueError):
         )
 
 
+class IcebergIndexesNotSupportedError(ValueError):
+    """An Iceberg `Target` declared `indexes`. Iceberg tables have no
+    indexes, so the declaration could never take effect; drop it from the
+    model."""
+
+    def __init__(self, name: str) -> None:
+        super().__init__(
+            f"model {name!r} declares indexes, but Iceberg targets have none"
+        )
+
+
 def resolve_schema_name(name: str, suffix: str, appendix: str | None) -> str:
     """Apply a rotating `suffix` (and optional date `appendix`) to a schema
     name — `warehouse` → `warehouse_pr123_2425_` — or return it unchanged when
@@ -223,6 +234,8 @@ class Target:
         # than at run time.
         if self.database is not None and not self.catalog:
             raise MissingCatalogError(self.name)
+        if self.database is Database.ICEBERG and self.indexes:
+            raise IcebergIndexesNotSupportedError(self.name)
 
         partition_cols = [c for c in self.columns if getattr(c, "partition_on", False)]
         if len(partition_cols) > 1:

@@ -73,19 +73,15 @@ class IcebergData:
         raise IcebergViewsNotSupportedError(self.model.target.full_name)
 
     def create_indexes(self) -> None:
-        # Iceberg has no indexes; the partition_on column is used by the
-        # overwrite window filter. A real PartitionSpec is a later feature.
-        logger.debug(
-            "%s: skipping indexes — Iceberg has none", self.model.target.full_name
-        )
+        # Iceberg has no indexes. Target rejects declared ones at build time;
+        # the lifecycle still calls this for the partition_on column, which
+        # only serves the overwrite window filter here.
+        return None
 
     def add_unique_constraint(self) -> None:
         # Iceberg has no constraints; merge keys live on the model and are
         # enforced by upsert's join, not by the table.
-        logger.debug(
-            "%s: skipping unique constraint — Iceberg has none",
-            self.model.target.full_name,
-        )
+        return None
 
     def create_staging_schema(self) -> None:
         raise IcebergStagingNotSupportedError(self.model.target.full_name)
