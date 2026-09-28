@@ -168,5 +168,5 @@ def match_models(
 ) -> list[Model]:
     """Scan a folder for Model instances and return those matching the tag
     expression, topologically sorted. See `matched_with_reload` for the tag
-    syntax; this is the reload-stripped public view."""
+    syntax; this is the reload-stripped public view"""
     return [model for model, _ in matched_with_reload(folder=folder, tags=tags)]
