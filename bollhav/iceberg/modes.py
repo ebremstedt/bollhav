@@ -62,10 +62,14 @@ def overwrite(
     partition_column = model.target.partitioned_by
     if partition_column is None:
         raise OverwriteRequiresPartitionColumnError(model.target.full_name)
+    # Positional (term, literal) is the documented call, and how pyiceberg itself
+    # builds these. pyright rejects it because pydantic's dataclass_transform
+    # makes it synthesize a keyword-only ctor for each subclass, hiding
+    # LiteralPredicate.__init__ (see pyiceberg.expressions).
     table.overwrite(
         arrow,
         overwrite_filter=And(
-            GreaterThanOrEqual(partition_column, since.isoformat()),
-            LessThan(partition_column, until.isoformat()),
+            GreaterThanOrEqual(partition_column, since.isoformat()),  # pyright: ignore[reportCallIssue]
+            LessThan(partition_column, until.isoformat()),  # pyright: ignore[reportCallIssue]
         ),
     )

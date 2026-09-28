@@ -1,5 +1,6 @@
 import logging
 from datetime import datetime
+from functools import partial
 from typing import Generator
 
 import polars as pl
@@ -92,20 +93,25 @@ def write_dataframes(
                               remaining chunks `append`. Requires the window
                               and a `partition_on=True` column.
     """
-    if model.target.write_mode is WriteMode.RECREATE_PARTITION and (
-        since is None or until is None
-    ):
-        raise RecreatePartitionRequiresWindowError()
-    if model.target.write_mode not in (
-        WriteMode.APPEND,
-        WriteMode.UPSERT_NO_DELETE,
-        WriteMode.RECREATE_PARTITION,
-    ):
-        raise UnhandledWriteModeError(model.target.write_mode)
+    # Resolve the writers before pulling any chunk, so a bad mode or a missing
+    # window fails before the read starts (same shape as postgres.write_modes).
+    match model.target.write_mode:
+        case WriteMode.APPEND:
+            first_write = rest_write = append
+        case WriteMode.UPSERT_NO_DELETE:
+            first_write = rest_write = upsert
+        case WriteMode.RECREATE_PARTITION:
+            if since is None or until is None:
+                raise RecreatePartitionRequiresWindowError()
+            # first chunk replaces the window, the remaining chunks append into it
+            first_write = partial(overwrite, since=since, until=until)
+            rest_write = append
+        case _:
+            raise UnhandledWriteModeError(model.target.write_mode)
 
     declared = arrow_schema(model)
     table: Table | None = None
-    first_chunk = True
+    write_chunk = first_write
     for chunk in df_gen:
         arrow = _as_arrow(chunk, declared)
         if arrow.num_rows == 0:
@@ -118,17 +124,8 @@ def write_dataframes(
             model.target.full_name,
             model.target.write_mode.value,
         )
-        match model.target.write_mode:
-            case WriteMode.APPEND:
-                append(table, model, arrow)
-            case WriteMode.UPSERT_NO_DELETE:
-                upsert(table, model, arrow)
-            case WriteMode.RECREATE_PARTITION:
-                if first_chunk:
-                    overwrite(table, model, arrow, since, until)
-                else:
-                    append(table, model, arrow)
-        first_chunk = False
+        write_chunk(table, model, arrow)
+        write_chunk = rest_write
 
 
 def write(
