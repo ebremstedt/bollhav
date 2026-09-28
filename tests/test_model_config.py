@@ -74,6 +74,38 @@ def test_columns_without_database_raises():
         Target(name="test_table", columns=[make_column("id")])
 
 
+def test_database_without_catalog_raises():
+    with pytest.raises(ValueError, match="catalog must be set"):
+        Target(name="test_table", database=make_db(), columns=[make_column("id")])
+
+
+def test_iceberg_without_catalog_raises():
+    from bollhav.iceberg import IcebergColumn
+    from bollhav.model.database import Database
+
+    with pytest.raises(ValueError, match="catalog must be set"):
+        Target(
+            name="test_table",
+            schema="ns",
+            database=Database.ICEBERG,
+            columns=[IcebergColumn(name="id")],
+        )
+
+
+def test_iceberg_with_catalog_ok():
+    from bollhav.iceberg import IcebergColumn
+    from bollhav.model.database import Database
+
+    target = Target(
+        name="test_table",
+        schema="ns",
+        catalog="lake",
+        database=Database.ICEBERG,
+        columns=[IcebergColumn(name="id")],
+    )
+    assert target.catalog == "lake"
+
+
 def test_multiple_partition_columns_raises():
     with pytest.raises(
         ValueError, match="At most one column can have partition_on=True"
