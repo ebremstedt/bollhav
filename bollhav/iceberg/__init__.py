@@ -9,16 +9,24 @@ on first access, so defining models never needs the optional `iceberg` extra
 from importlib import import_module
 from typing import TYPE_CHECKING, Any
 
-from bollhav.iceberg.columns import IcebergColumn, IcebergType
+from bollhav.iceberg.columns import (
+    IcebergColumn,
+    IcebergPrimaryKeyNotNullableError,
+    IcebergType,
+)
 
 if TYPE_CHECKING:  # real types for the checker; at runtime these go via __getattr__
     from bollhav.iceberg.data import (
         IcebergData,
         IcebergStagingNotSupportedError,
+        IcebergViewWithoutBodyError,
         IcebergViewsNotSupportedError,
+        IcebergWriterConnectionError,
+        IcebergWrongWriterError,
     )
     from bollhav.iceberg.modes import (
         OverwriteRequiresPartitionColumnError,
+        UpsertDuplicateKeysError,
         UpsertRequiresMergeKeysError,
         append,
         overwrite,
@@ -41,11 +49,15 @@ if TYPE_CHECKING:  # real types for the checker; at runtime these go via __getat
 _LAZY = {
     "IcebergData": "data",
     "IcebergStagingNotSupportedError": "data",
+    "IcebergViewWithoutBodyError": "data",
     "IcebergViewsNotSupportedError": "data",
+    "IcebergWriterConnectionError": "data",
+    "IcebergWrongWriterError": "data",
     "NotIcebergColumnsError": "schema",
     "arrow_schema": "schema",
     "iceberg_schema": "schema",
     "OverwriteRequiresPartitionColumnError": "modes",
+    "UpsertDuplicateKeysError": "modes",
     "UpsertRequiresMergeKeysError": "modes",
     "append": "modes",
     "overwrite": "modes",
@@ -60,14 +72,19 @@ _LAZY = {
 __all__ = [
     "IcebergColumn",
     "IcebergData",
+    "IcebergPrimaryKeyNotNullableError",
     "IcebergStagingNotSupportedError",
     "IcebergType",
+    "IcebergViewWithoutBodyError",
     "IcebergViewsNotSupportedError",
+    "IcebergWriterConnectionError",
+    "IcebergWrongWriterError",
     "MissingDataFrameError",
     "NotIcebergColumnsError",
     "OverwriteRequiresPartitionColumnError",
     "RecreatePartitionRequiresWindowError",
     "UnhandledWriteModeError",
+    "UpsertDuplicateKeysError",
     "UpsertRequiresMergeKeysError",
     "append",
     "arrow_schema",

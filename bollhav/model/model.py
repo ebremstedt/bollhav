@@ -7,7 +7,9 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
-from bollhav.model.target import Target
+from bollhav.model.database import Database
+from bollhav.model.writer import Writer
+from bollhav.model.target import DatabaseWithoutColumnsError, Target
 from bollhav.model.contract import Contract
 from bollhav.model.batch import Batch
 from bollhav.model.materialization import Materialization
@@ -87,6 +89,28 @@ class ViewWithRecreateOrTruncateError(ValueError):
         super().__init__(
             f"model {name!r} is a view — recreate_table / "
             f"truncate_table don't apply to views."
+        )
+
+
+class IcebergViewRequiresTrinoWriterError(ValueError):
+    """An Iceberg view model without `writer=Writer.TRINO`. pyiceberg cannot
+    create views, so an Iceberg view has to declare Trino as its writer."""
+
+    def __init__(self, name: str) -> None:
+        super().__init__(
+            f"Model {name!r}: an Iceberg view must declare writer=Writer.TRINO, "
+            f"pyiceberg cannot create views"
+        )
+
+
+class TrinoWritesViewsOnlyError(ValueError):
+    """A table model declared `writer=Writer.TRINO`. Trino is the writer for
+    Iceberg views; tables are created and written through pyiceberg."""
+
+    def __init__(self, name: str) -> None:
+        super().__init__(
+            f"Model {name!r}: writer=Writer.TRINO is for views; tables are "
+            f"written by pyiceberg"
         )
 
 
@@ -262,6 +286,20 @@ class Model:
                 raise TimelessModelWithBatchingError(name)
             if self.contract.begin is not None or self.contract.end is not None:
                 raise TimelessModelWithContractWindowError(name)
+        if (
+            self.target.database is not None
+            and not self.target.columns
+            and not self.is_view
+        ):
+            raise DatabaseWithoutColumnsError()
+        if self.target.writer is Writer.TRINO and not self.is_view:
+            raise TrinoWritesViewsOnlyError(name)
+        if (
+            self.is_view
+            and self.target.database is Database.ICEBERG
+            and self.target.writer is not Writer.TRINO
+        ):
+            raise IcebergViewRequiresTrinoWriterError(name)
         if self.is_view:
             if self.query_builder is None:
                 raise ViewWithoutQueryError(name)
