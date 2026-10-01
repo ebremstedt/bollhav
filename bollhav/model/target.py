@@ -16,7 +16,7 @@ from bollhav.model.column_sorting import sort_columns
 class RecreateAndTruncateError(ValueError):
     """A `Target` set both `recreate_table` and `truncate_table` — recreate
     already leaves the table empty, so truncate is redundant and the two
-    together are contradictory."""
+    together are contradictory"""
 
     def __init__(self) -> None:
         super().__init__(
