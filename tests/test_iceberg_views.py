@@ -198,3 +198,21 @@ def test_the_connection_must_match_the_writer(tmp_path):
     )
     with pytest.raises(IcebergWriterConnectionError, match="needs the pyiceberg"):
         IcebergData(model=table, conn=FakeTrino())
+
+
+def test_namespace_is_created_with_its_location(tmp_path):
+    model = Model(
+        target=Target(
+            name="t",
+            schema="cint_clean_rst",
+            catalog="lake",
+            database=Database.ICEBERG,
+            columns=[IcebergColumn(name="id", data_type=IcebergType.LONG)],
+        ),
+        temporality=Temporality.TIMELESS,
+    )
+    catalog = make_catalog(tmp_path=tmp_path)
+    IcebergData(model=model, conn=catalog).create_schema()
+    assert catalog.load_namespace_properties("cint_clean_rst") == {
+        "location": f"file://{tmp_path}/cint_clean_rst"
+    }

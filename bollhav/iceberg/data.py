@@ -156,7 +156,16 @@ class IcebergData:
         target = self.model.target
         if self.catalog is not None:
             if not self.catalog.namespace_exists(target.schema):
-                self.catalog.create_namespace(target.schema)
+                # pyiceberg sets no location; Trino needs one to place views
+                warehouse = self.catalog.properties.get("warehouse")
+                self.catalog.create_namespace(
+                    target.schema,
+                    properties=(
+                        {"location": f"{warehouse.rstrip('/')}/{target.schema}"}
+                        if warehouse
+                        else {}
+                    ),
+                )
         else:
             self._execute(
                 f"CREATE SCHEMA IF NOT EXISTS "
