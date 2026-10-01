@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from typing import Callable
 
 from bollhav.model.database import Database, DatabaseColumn, DatabaseIndex
+from bollhav.model.writer import Writer
 from bollhav.model.staging import Staging
 from bollhav.model.write_modes import WriteMode
 from bollhav.model.column_sorting import sort_columns
@@ -33,11 +34,20 @@ class ColumnsWithoutDatabaseError(ValueError):
 
 
 class DatabaseWithoutColumnsError(ValueError):
-    """A `Target` set `database` without any `columns` — a database-backed
-    table needs its column schema, so `columns` must be set too."""
+    """A table model set `database` on its `Target` without any `columns` — a
+    database-backed table needs its column schema, so `columns` must be set
+    too. A view takes its columns from its query, so it declares none."""
 
     def __init__(self) -> None:
         super().__init__("columns must be set when database is provided")
+
+
+class WriterRequiresIcebergError(ValueError):
+    """`writer` was set on a target that is not Iceberg. Postgres and MSSQL
+    have one client each, so the writer is only a choice for Iceberg."""
+
+    def __init__(self, name: str) -> None:
+        super().__init__(f"Target {name!r}: writer is only set for Database.ICEBERG")
 
 
 class MissingCatalogError(ValueError):
@@ -146,6 +156,7 @@ class Target:
     sensitive: bool = field(init=False, default=False)
 
     write_mode: WriteMode = WriteMode.APPEND
+    writer: Writer | None = None
     dsn_env_var: str | None = None
     extra: dict | None = None
     recreate_table: bool = False
@@ -224,8 +235,6 @@ class Target:
     def __post_init__(self) -> None:
         if self.recreate_table and self.truncate_table:
             raise RecreateAndTruncateError()
-        if self.database is not None and len(self.columns) == 0:
-            raise DatabaseWithoutColumnsError()
         if len(self.columns) > 0 and self.database is None:
             raise ColumnsWithoutDatabaseError()
         # Postgres / MSSQL identify a table as database.schema.table; Iceberg
@@ -236,6 +245,10 @@ class Target:
             raise MissingCatalogError(self.name)
         if self.database is Database.ICEBERG and self.indexes:
             raise IcebergIndexesNotSupportedError(self.name)
+        if self.writer is not None and self.database is not Database.ICEBERG:
+            raise WriterRequiresIcebergError(self.name)
+        if self.database is Database.ICEBERG and self.writer is None:
+            self.writer = Writer.PYICEBERG
 
         partition_cols = [c for c in self.columns if getattr(c, "partition_on", False)]
         if len(partition_cols) > 1:

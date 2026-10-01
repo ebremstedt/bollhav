@@ -1,6 +1,7 @@
 from bollhav.model.runtime import apply_runtime_overrides
 from bollhav.model.load_models import load_models
 from bollhav.model.database import Database, DatabaseColumn, DatabaseIndex
+from bollhav.model.writer import Writer
 from bollhav.model.intervals import TZInterval
 from bollhav.model.matching import match_models
 from bollhav.model.model import Model
@@ -43,6 +44,7 @@ __all__ = [
     "load_models",
     "WriteMode",
     "Database",
+    "Writer",
     "DatabaseColumn",
     "DatabaseIndex",
     "TZInterval",

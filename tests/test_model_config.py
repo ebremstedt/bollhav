@@ -65,8 +65,22 @@ def test_view_kind_has_no_write_mode_coupling():
 
 
 def test_database_without_columns_raises():
+    # the check sits on the model, since a view takes its columns from its query
     with pytest.raises(ValueError, match="columns must be set"):
-        Target(name="test_table", catalog="cat", database=make_db())
+        Model(
+            target=Target(name="test_table", catalog="cat", database=make_db()),
+            temporality=Temporality.TIMELESS,
+        )
+
+
+def test_view_without_columns_is_allowed():
+    model = Model(
+        target=Target(name="v", catalog="cat", database=make_db()),
+        temporality=Temporality.TIMELESS,
+        materialization=Materialization.VIEW,
+        query_builder="SELECT 1",
+    )
+    assert model.target.columns == []
 
 
 def test_columns_without_database_raises():

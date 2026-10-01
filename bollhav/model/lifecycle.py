@@ -78,6 +78,20 @@ class RecreatePartitionWithoutWindowError(ValueError):
         )
 
 
+class FlexibleReloadWithoutWindowError(ValueError):
+    """A flexible (coverage) model with `contract.begin` set resolved no reload
+    window, so there is no horizon to look for uncovered gaps in. A batched
+    reload always resolves one, so reaching this means the model's contract
+    and batching disagree."""
+
+    def __init__(self, full_name: str) -> None:
+        super().__init__(
+            f"{full_name!r} is a flexible model with contract.begin set, but its "
+            f"reload window resolved to None — there is no horizon to prefill "
+            f"gaps over."
+        )
+
+
 class RecreatePartitionWithoutIntervalError(ValueError):
     """A `RECREATE_PARTITION` model reached execution with no interval — the
     per-unit counterpart of `RecreatePartitionWithoutWindowError`. The write
@@ -273,17 +287,21 @@ def model_lifecycle(func: Callable) -> Callable:
                     if model.state.mode is StateMode.BULLDOZER and not dry_state:
                         state_handler.clear_window(run.window)
                     if model.contract.begin is not None:
+                        # begin set → the reload window spans the contract
                         horizon = resolve_window(
                             batching,
                             model.contract,
                             reload=True,
                             name=model.target.full_name,
                         )
+                        if horizon is None:
+                            raise FlexibleReloadWithoutWindowError(
+                                model.target.full_name
+                            )
                     else:
+                        # else the run window, which is non-None in this branch
+                        # (past the `run.window is None` arm).
                         horizon = run.window
-                    # begin set → a reload window; else the run window, which is
-                    # non-None in this branch (past the `run.window is None` arm).
-                    assert horizon is not None
                     # Force the run-window edges as split points so no unit
                     # straddles the window boundary: `get_actionable_intervals`
                     # only returns units fully inside the window, so a chunk

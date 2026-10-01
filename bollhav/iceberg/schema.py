@@ -19,6 +19,7 @@ from pyiceberg.types import (  # pyright: ignore[reportMissingImports]  # option
     LongType,
     NestedField,
     StringType,
+    TimeType,
     TimestampType,
     TimestamptzType,
 )
@@ -54,6 +55,8 @@ def _iceberg_type(column: IcebergColumn):
             return DecimalType(column.precision or 38, column.scale or 0)
         case IcebergType.DATE:
             return DateType()
+        case IcebergType.TIME:
+            return TimeType()
         case IcebergType.TIMESTAMP:
             return TimestampType()
         case IcebergType.TIMESTAMPTZ:
@@ -80,6 +83,8 @@ def _arrow_type(column: IcebergColumn) -> pa.DataType:
             return pa.decimal128(column.precision or 38, column.scale or 0)
         case IcebergType.DATE:
             return pa.date32()
+        case IcebergType.TIME:
+            return pa.time64("us")
         case IcebergType.TIMESTAMP:
             return pa.timestamp("us")
         case IcebergType.TIMESTAMPTZ:
@@ -100,6 +105,10 @@ def _typed_columns(model: Model) -> list[IcebergColumn]:
 
 
 def iceberg_schema(model: Model) -> Schema:
+    """Field ids follow the declared column order, starting at 1. The
+    `primary_key` columns become the table's identifier fields, and a
+    column's `description` its doc, which Trino shows as the column comment."""
+    columns = list(enumerate(_typed_columns(model), start=1))
     return Schema(
         *[
             NestedField(
@@ -107,9 +116,13 @@ def iceberg_schema(model: Model) -> Schema:
                 name=column.name,
                 field_type=_iceberg_type(column),
                 required=not column.nullable,
+                doc=column.description,
             )
-            for field_id, column in enumerate(_typed_columns(model), start=1)
-        ]
+            for field_id, column in columns
+        ],
+        identifier_field_ids=[
+            field_id for field_id, column in columns if column.primary_key
+        ],
     )
 
 

@@ -234,6 +234,7 @@ def _target_with_suffix(
         columns=list(target.columns),
         indexes=list(target.indexes),
         write_mode=target.write_mode,
+        writer=target.writer,
         dsn_env_var=target.dsn_env_var,
         column_sorting=target.column_sorting,
         extra=target.extra,

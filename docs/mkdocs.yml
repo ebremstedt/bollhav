@@ -84,6 +84,7 @@ nav:
       - Backends:
           - Postgres: POSTGRES.md
           - MSSQL: MSSQL.md
+          - Iceberg: ICEBERG.md
   - Examples:
       - Model: MODEL_EXAMPLE.md
       - Tags: TAGS_EXAMPLE.md
