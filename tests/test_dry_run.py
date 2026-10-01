@@ -236,6 +236,14 @@ class TestLoadModelsShortCircuit:
         }
         strs = {"TAGS": "[x]", "SCHEMA_SUFFIX": ""}
 
+        # one matched run: with none, @load_models returns before main()
+        class _Run:
+            def __init__(self) -> None:
+                self.model = MagicMock()
+                self.model.batching = None
+                self.window = None
+                self.intervals = (None,)
+
         with (
             patch(
                 "bollhav.model.load_models.env_var_bool",
@@ -259,7 +267,10 @@ class TestLoadModelsShortCircuit:
                 "bollhav.model.load_models.env_var_iso8601_datetime",
                 lambda name: None,
             ),
-            patch("bollhav.model.load_models.apply_runtime_overrides", return_value=[]),
+            patch(
+                "bollhav.model.load_models.apply_runtime_overrides",
+                return_value=[_Run()],
+            ),
             patch("bollhav.model.load_models._print_summary", lambda cfg, models: None),
             patch("bollhav.model.dry_run.print_summary"),
         ):

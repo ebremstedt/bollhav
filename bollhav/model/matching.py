@@ -26,7 +26,7 @@ class EmptyTagsError(ValueError):
 class DuplicateModelError(ValueError):
     """Two model files declare the same `full_name` (catalog.schema.table).
     A model's full name must be unique across the scanned folder, since it
-    keys the target, the state rows, and the dependency graph."""
+    keys the target, the state rows, and the dependency graph"""
 
     def __init__(self, full_name: str, file, existing) -> None:
         super().__init__(
@@ -109,7 +109,7 @@ def matched_with_reload(
     only — it's ignored on fixed-interval models).
 
     Raises:
-        ValueError: If tags is not provided or the expression is invalid.
+        ValueError: If tags is not provided or the expression is invalid
     """
     if not tags:
         raise EmptyTagsError()
@@ -168,5 +168,5 @@ def match_models(
 ) -> list[Model]:
     """Scan a folder for Model instances and return those matching the tag
     expression, topologically sorted. See `matched_with_reload` for the tag
-    syntax; this is the reload-stripped public view."""
+    syntax; this is the reload-stripped public view"""
     return [model for model, _ in matched_with_reload(folder=folder, tags=tags)]

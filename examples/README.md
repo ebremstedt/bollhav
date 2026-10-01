@@ -12,6 +12,7 @@ time so you can see how that feature behaves on its own.
 | [`latest_window_vs_batch/`](latest_window_vs_batch/) | `window_expression` + `interval_expression` together — big-warehouse scenario (daily scope, 15-minute writes) |
 | [`reload_flag/`](reload_flag/) | `r:` tag prefix — reprocess a model's full declared bounds, overriding latest/backfill |
 | [`lookback_and_retries/`](lookback_and_retries/) | `Batch(lookback=N, retries=N)` — extending intervals for late data and wiring up a retry loop |
+| [`iceberg/`](iceberg/) | `Database.ICEBERG` — the intelligence-src-entity-raw payload pattern written to local Iceberg tables via a sqlite `SqlCatalog`; no database needed |
 
 ## `company_xyz_pipeline/`
 

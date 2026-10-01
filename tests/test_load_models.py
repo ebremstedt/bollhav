@@ -137,6 +137,29 @@ def _run_decorator(**env):
     return apm_kwargs, received
 
 
+def test_no_matched_models_skips_main() -> None:
+    patches = _patches()
+    called: dict = {}
+
+    with (
+        patches[0],
+        patches[1],
+        patches[2],
+        patches[3],
+        patches[4],
+        patch("bollhav.model.load_models.apply_runtime_overrides", return_value=[]),
+        patch("bollhav.model.load_models._print_summary", lambda cfg, runs: None),
+    ):
+
+        @load_models
+        def main(runs, debug):
+            called["runs"] = runs
+
+        main()
+
+    assert called == {}
+
+
 class TestEnvReading:
     def test_basic(self) -> None:
         apm, received = _run_decorator()

@@ -41,16 +41,21 @@ class DatabaseWithoutColumnsError(ValueError):
 
 
 class MissingCatalogError(ValueError):
-    """A database-backed `Target` left `catalog` unset. A model's identity is
-    `catalog.schema.table`, so the catalog is required to keep names unique
-    across databases in the shared library."""
+    """A `Target` with a `database` left `catalog` unset. For Postgres / MSSQL
+    the catalog is the database name and part of the model's identity,
+    `catalog.schema.table`, so it is required to keep names unique across
+    databases in the shared library. For Iceberg it is the pyiceberg catalog
+    the table is registered in, which the pipeline has to build and which
+    query engines match on, so leaving it out only defers the failure to
+    run time."""
 
     def __init__(self, name: str) -> None:
         super().__init__(
-            f"catalog must be set on model {name!r} — a database-backed "
-            f"model's identity is catalog.schema.table, so the catalog is "
-            f"required to keep names unique across databases in the shared "
-            f"library (referencing by anything less risks collisions)."
+            f"catalog must be set on model {name!r} — a Postgres / MSSQL "
+            f"model's identity is catalog.schema.table, and an Iceberg model "
+            f"is registered in a named pyiceberg catalog, so the catalog is "
+            f"required to keep names unique and resolvable (referencing by "
+            f"anything less risks collisions)."
         )
 
 
@@ -94,6 +99,17 @@ class UnknownIndexColumnError(ValueError):
     def __init__(self, index_name: str, unknown: list) -> None:
         super().__init__(
             f"Index {index_name!r} references unknown column(s): {unknown}"
+        )
+
+
+class IcebergIndexesNotSupportedError(ValueError):
+    """An Iceberg `Target` declared `indexes`. Iceberg tables have no
+    indexes, so the declaration could never take effect; drop it from the
+    model."""
+
+    def __init__(self, name: str) -> None:
+        super().__init__(
+            f"model {name!r} declares indexes, but Iceberg targets have none"
         )
 
 
@@ -212,8 +228,14 @@ class Target:
             raise DatabaseWithoutColumnsError()
         if len(self.columns) > 0 and self.database is None:
             raise ColumnsWithoutDatabaseError()
+        # Postgres / MSSQL identify a table as database.schema.table; Iceberg
+        # registers namespace.table in a named catalog. Either way a database
+        # target without a catalog is not fully addressed, so fail here rather
+        # than at run time.
         if self.database is not None and not self.catalog:
             raise MissingCatalogError(self.name)
+        if self.database is Database.ICEBERG and self.indexes:
+            raise IcebergIndexesNotSupportedError(self.name)
 
         partition_cols = [c for c in self.columns if getattr(c, "partition_on", False)]
         if len(partition_cols) > 1:

@@ -237,6 +237,10 @@ def load_models(
                 state_disabled=cfg.state_disabled,
                 state_mode=cfg.state_mode,
             )
+            # matching has already logged the error; there is nothing to hand
+            # to main(), so don't make every pipeline guard against an empty list
+            if not runs:
+                return
             if cfg.state_disabled:
                 logger.info(
                     "STATE_DISABLED: state + staging cleared on %d matched model(s)",
