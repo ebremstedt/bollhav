@@ -4,7 +4,7 @@ A web app that shows the model graph with live state, runs, errors and gaps,
 and can reset state so the next run redoes it. The Python side is the
 `bollhav.gui` package (a FastAPI app reading the state databases through
 `bollhav.postgres.state`); the frontend is the Svelte app in [frontend/](frontend/),
-built into `bollhav/gui/static/` and shipped inside the wheel.
+built into `bollhav/gui/static/` and shipped inside the wheel
 
 ## Run it
 
