@@ -4,7 +4,7 @@ import json
 import logging
 from collections.abc import Callable
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypeVar
 from uuid import uuid4
 
 from bollhav.model.database import Database
@@ -16,7 +16,13 @@ from bollhav.model.materialization import Materialization
 from bollhav.model.temporality import Temporality
 from bollhav.model.state import State
 from bollhav.model.tags import Tags
-from bollhav.model.source import Source
+from bollhav.model.source import (
+    Source,
+    SourceApi,
+    SourceFile,
+    SourceHardcoded,
+    SourceModel,
+)
 from bollhav.model.curfew import Curfew
 from bollhav.model.people import People
 
@@ -24,6 +30,11 @@ if TYPE_CHECKING:
     from psycopg import sql
 
     from bollhav.model.modelrun import ModelRun
+
+# The kinds a Source's `type` can be, for the `Model.single_*_source` getters.
+SourceType = TypeVar(
+    "SourceType", bound="SourceModel | SourceFile | SourceApi | SourceHardcoded"
+)
 
 logger = logging.getLogger(__name__)
 
@@ -139,6 +150,33 @@ class GatedUpstreamWithoutStateError(ValueError):
             f"with a contract) but has no state — contracts are only checked "
             f"for state-tracked models. Add state=State(...), or drop the "
             f"contract."
+        )
+
+
+class SingleUpstreamError(ValueError):
+    """`Model.single_upstream` was asked of a model that does not declare
+    exactly one typed upstream — none (the UNKNOWN sentinel) or several. The
+    accessor is for an execute that reads one input and needs to know where
+    from; a model with several inputs has to pick among `upstream` itself."""
+
+    def __init__(self, name: str, names: list[str]) -> None:
+        super().__init__(
+            f"model {name!r} does not have a single upstream — "
+            f"{len(names)} declared: {', '.join(names) or '(none)'}. "
+            f"single_upstream needs exactly one Source with a type; pick "
+            f"from model.upstream for a model with several."
+        )
+
+
+class UpstreamKindError(TypeError):
+    """One of `Model.single_model_source` / `single_file_source` /
+    `single_api_source` / `single_hardcoded_source` found the model's one
+    upstream to be of another kind — a file where a table was expected, say."""
+
+    def __init__(self, name: str, source: str, wanted: str, found: str) -> None:
+        super().__init__(
+            f"model {name!r}: upstream {source!r} is a {found} source, "
+            f"not the {wanted} that was asked for."
         )
 
 
@@ -378,6 +416,55 @@ class Model:
                 f"  curfew:        {sense} {wins}{day_part} ({self.curfew.tz})",
             ]
         logger.debug("\n".join(lines))
+
+    @property
+    def single_upstream(self) -> Source:
+        """The model's one declared upstream, for an execute that reads
+        exactly one input and needs to know where from — its catalog, the
+        DSN variable it is read through, its read query. Raises
+        `SingleUpstreamError` when the model declares none (the UNKNOWN
+        sentinel is not an upstream) or several."""
+        declared = [source for source in self.upstream if source.type is not None]
+        if len(self.upstream) != 1 or len(declared) != 1:
+            raise SingleUpstreamError(
+                self.target.full_name, [source.name for source in declared]
+            )
+        return declared[0]
+
+    @property
+    def single_model_source(self) -> SourceModel:
+        """The model's one upstream as the table it is — its `catalog`,
+        `schema`, `dsn_env_var`, `read_query`, `partitioned_by` — for an
+        execute that reads one table. Raises `SingleUpstreamError` when
+        there is not exactly one upstream, `UpstreamKindError` when it is a
+        file, an API or hardcoded rows."""
+        return self._single_source_of(SourceModel)
+
+    @property
+    def single_file_source(self) -> SourceFile:
+        """The model's one upstream as the file it is — its `path`,
+        `dateformat`, `separator`. Raises as `single_model_source` does."""
+        return self._single_source_of(SourceFile)
+
+    @property
+    def single_api_source(self) -> SourceApi:
+        """The model's one upstream as the API it is — its `base_url`.
+        Raises as `single_model_source` does."""
+        return self._single_source_of(SourceApi)
+
+    @property
+    def single_hardcoded_source(self) -> SourceHardcoded:
+        """The model's one upstream as the hardcoded rows or SQL it is.
+        Raises as `single_model_source` does."""
+        return self._single_source_of(SourceHardcoded)
+
+    def _single_source_of(self, kind: type[SourceType]) -> SourceType:
+        source = self.single_upstream
+        if not isinstance(source.type, kind):
+            raise UpstreamKindError(
+                self.target.full_name, source.name, kind.__name__, source.kind
+            )
+        return source.type
 
     @property
     def gated_upstreams(self) -> list[Source]:

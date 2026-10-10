@@ -324,3 +324,85 @@ class TestUpstreamRequiresState:
         m = make_model()
         assert m.upstream_names == []
         assert m.inputs_known is False
+
+
+class TestSingleUpstream:
+    def test_one_typed_upstream_is_returned(self):
+        from bollhav.model.source import Source, SourceModel
+
+        source = Source("CID.dbo.F_CONTACT", type=SourceModel(catalog="CID"))
+        m = make_model(upstream=[source])
+        assert m.single_upstream is source
+        assert m.single_upstream.name == "CID.dbo.F_CONTACT"
+
+    def test_no_upstream_raises(self):
+        from bollhav.model.model import SingleUpstreamError
+
+        with pytest.raises(SingleUpstreamError, match="0 declared"):
+            make_model().single_upstream
+
+    def test_untyped_upstream_raises(self):
+        from bollhav.model.model import SingleUpstreamError
+        from bollhav.model.source import Source
+
+        with pytest.raises(SingleUpstreamError, match="0 declared"):
+            make_model(upstream=[Source("somewhere", type=None)]).single_upstream
+
+    def test_several_upstreams_raise(self):
+        from bollhav.model.model import SingleUpstreamError
+        from bollhav.model.source import Source, SourceModel
+
+        m = make_model(
+            upstream=[
+                Source("raw.orders", type=SourceModel()),
+                Source("raw.customers", type=SourceModel()),
+            ]
+        )
+        with pytest.raises(
+            SingleUpstreamError, match="2 declared: raw.orders, raw.customers"
+        ):
+            m.single_upstream
+
+    def test_each_kind_has_a_typed_getter(self):
+        from pathlib import Path
+
+        from bollhav.model.source import (
+            Source,
+            SourceApi,
+            SourceFile,
+            SourceHardcoded,
+            SourceModel,
+        )
+
+        table = make_model(
+            upstream=[Source("CID.dbo.F_CONTACT", type=SourceModel(catalog="CID"))]
+        )
+        assert table.single_model_source.catalog == "CID"
+        file = make_model(
+            upstream=[Source("ticker_<date>.csv", type=SourceFile(path=Path("docs")))]
+        )
+        assert file.single_file_source.path == Path("docs")
+        api = make_model(
+            upstream=[Source("fhir", type=SourceApi(base_url="https://fhir.example"))]
+        )
+        assert api.single_api_source.base_url == "https://fhir.example"
+        rows = make_model(
+            upstream=[Source("seed", type=SourceHardcoded(rows=[{"id": 1}]))]
+        )
+        assert rows.single_hardcoded_source.rows == [{"id": 1}]
+
+    def test_another_kind_raises(self):
+        from bollhav.model.model import UpstreamKindError
+        from bollhav.model.source import Source, SourceModel
+
+        m = make_model(upstream=[Source("raw.orders", type=SourceModel())])
+        with pytest.raises(
+            UpstreamKindError, match="is a model source, not the SourceFile"
+        ):
+            m.single_file_source
+
+    def test_kind_getter_without_an_upstream_raises(self):
+        from bollhav.model.model import SingleUpstreamError
+
+        with pytest.raises(SingleUpstreamError):
+            make_model().single_model_source
