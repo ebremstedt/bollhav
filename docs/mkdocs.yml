@@ -1,6 +1,6 @@
 site_name: bollhav
 site_description: Model definition framework that standardizes data-pipeline code
-site_url: https://bollhav.bremstedtanalytics.se/
+site_url: https://bollhav.dev/
 repo_url: https://github.com/ebremstedt/bollhav
 repo_name: ebremstedt/bollhav
 edit_uri: edit/main/docs/content/

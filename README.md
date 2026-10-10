@@ -15,8 +15,8 @@
 
 <p align="center">
   <a href="https://bollhav.dev">Docs</a> ·
-  <a href="https://learn.bollhav.dev">Learn</a> ·
-  <a href="https://lab.bollhav.dev">Lab</a>
+  <a href="https://bollhav.dev/learn/">Learn</a> ·
+  <a href="https://bollhav.dev/lab/">Lab</a>
 </p>
 
 The idea is a clean separation: a **Model** is a pure data object that declares
