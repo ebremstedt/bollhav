@@ -40,7 +40,8 @@ def _catalogs() -> dict[str, str]:
         return dict(sorted(named.items()))
     return {
         "default": os.environ.get(
-            "BOLLHAV_STATE_DSN", "postgresql://postgres:postgres@localhost:5432/postgres"
+            "BOLLHAV_STATE_DSN",
+            "postgresql://postgres:postgres@localhost:5432/postgres",
         )
     }
 
@@ -98,7 +99,9 @@ def _now() -> str:
 # for the runs list. Read here model by model so the precompute never holds
 # more than one model's rows as dicts.
 # Final so they stay literal strings, which is what psycopg's sql.SQL takes.
-_STATE_COLUMNS: Final = "status, since, until, applied_at, run_id, temporality, blocked_reason"
+_STATE_COLUMNS: Final = (
+    "status, since, until, applied_at, run_id, temporality, blocked_reason"
+)
 GRID_ORDER: Final = "since DESC NULLS LAST, applied_at DESC NULLS LAST"
 RUNS_ORDER: Final = "applied_at DESC NULLS LAST, since DESC NULLS LAST"
 
@@ -112,7 +115,9 @@ def _stateful_models(conn, schema: str = LIBRARY_SCHEMA) -> list[tuple[str, str,
         sql.SQL(
             "SELECT full_name, state_schema, state_table FROM {schema}.{table} "
             "WHERE state_table IS NOT NULL ORDER BY full_name"
-        ).format(schema=sql.Identifier(schema), table=sql.Identifier(read.LIBRARY_TABLE))
+        ).format(
+            schema=sql.Identifier(schema), table=sql.Identifier(read.LIBRARY_TABLE)
+        )
     ).fetchall()
     return [
         (name, st_schema, st_table)
@@ -126,7 +131,11 @@ def _state_rows(
 ) -> list[dict]:
     rows = conn.execute(
         sql.SQL(
-            "SELECT " + _STATE_COLUMNS + " FROM {schema}.{table} ORDER BY " + order + " LIMIT %s"
+            "SELECT "
+            + _STATE_COLUMNS
+            + " FROM {schema}.{table} ORDER BY "
+            + order
+            + " LIMIT %s"
         ).format(schema=sql.Identifier(st_schema), table=sql.Identifier(st_table)),
         [limit],
     ).fetchall()
@@ -162,7 +171,12 @@ def _compute(catalog: str) -> Snapshot:
             grid.append(
                 (
                     full_name,
-                    [_row_json(r) for r in _state_rows(c, st_schema, st_table, GRID_ORDER, CACHE_RUNS)],
+                    [
+                        _row_json(r)
+                        for r in _state_rows(
+                            c, st_schema, st_table, GRID_ORDER, CACHE_RUNS
+                        )
+                    ],
                 )
             )
             recent = [
@@ -217,7 +231,9 @@ def _refresher() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     if REFRESH_SECONDS > 0:
-        threading.Thread(target=_refresher, name="lineage-refresher", daemon=True).start()
+        threading.Thread(
+            target=_refresher, name="lineage-refresher", daemon=True
+        ).start()
     yield
 
 
@@ -345,7 +361,9 @@ def _refresh_model(catalog: str, full_name: str) -> str:
     with _conn(catalog) as c:
         node = read.get_model(c, full_name)
         if node is None:
-            raise HTTPException(status_code=404, detail=f"{full_name!r} is not registered")
+            raise HTTPException(
+                status_code=404, detail=f"{full_name!r} is not registered"
+            )
         meta = read.get_model_metadata(c, full_name) or {}
         st_schema, st_table = node["state_schema"], node["state_table"]
         has_blocked, has_stale = read._blocked_kinds(c, st_schema, st_table)
@@ -357,10 +375,15 @@ def _refresh_model(catalog: str, full_name: str) -> str:
             "has_blocked": has_blocked,
             "has_stale": has_stale,
         }
-        gaps_row = _one(read.get_gaps_grouped(c, schema=LIBRARY_SCHEMA, full_name=full_name))
+        gaps_row = _one(
+            read.get_gaps_grouped(c, schema=LIBRARY_SCHEMA, full_name=full_name)
+        )
         stateful = st_schema and st_table and read._table_exists(c, st_schema, st_table)
         grid_rows = (
-            [_row_json(r) for r in _state_rows(c, st_schema, st_table, GRID_ORDER, CACHE_RUNS)]
+            [
+                _row_json(r)
+                for r in _state_rows(c, st_schema, st_table, GRID_ORDER, CACHE_RUNS)
+            ]
             if stateful
             else []
         )
@@ -380,14 +403,17 @@ def _refresh_model(catalog: str, full_name: str) -> str:
         if old is None:
             return computed_at
         nodes = [
-            {**n, **lights} if n.get("name") == full_name else n for n in old.graph["nodes"]
+            {**n, **lights} if n.get("name") == full_name else n
+            for n in old.graph["nodes"]
         ]
         if any(g["full_name"] == full_name for g in old.gaps):
             gaps = [gaps_row if g["full_name"] == full_name else g for g in old.gaps]
         else:
             gaps = old.gaps + ([gaps_row] if gaps_row else [])
         if any(fn == full_name for fn, _ in old.grid):
-            grid = [(fn, grid_rows if fn == full_name else rows) for fn, rows in old.grid]
+            grid = [
+                (fn, grid_rows if fn == full_name else rows) for fn, rows in old.grid
+            ]
         else:
             grid = old.grid + ([(full_name, grid_rows)] if stateful else [])
         runs = heapq.nlargest(
@@ -415,7 +441,11 @@ def refresh_model(full_name: str, catalog: str | None = None, env: str | None = 
     name = _catalog(catalog)
     if REFRESH_SECONDS <= 0 or _schema(env) != LIBRARY_SCHEMA:
         return {"full_name": full_name, "cached": False}
-    return {"full_name": full_name, "cached": True, "computed_at": _refresh_model(name, full_name)}
+    return {
+        "full_name": full_name,
+        "cached": True,
+        "computed_at": _refresh_model(name, full_name),
+    }
 
 
 @app.get("/environments")
@@ -614,7 +644,8 @@ def grid(limit: int = 40, env: str | None = None, catalog: str | None = None):
     if snapshot is not None:
         # the rows are already JSON: splice the slices together, no re-encoding
         body = "[%s]" % ",".join(
-            '{"full_name":%s,"runs":[%s]}' % (json.dumps(full_name), ",".join(rows[:limit]))
+            '{"full_name":%s,"runs":[%s]}'
+            % (json.dumps(full_name), ",".join(rows[:limit]))
             for full_name, rows in snapshot.grid
         )
         return Response(content=body, media_type="application/json")

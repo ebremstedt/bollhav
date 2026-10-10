@@ -26,7 +26,9 @@ def apply_dsn_aliases(environ: MutableMapping[str, str]) -> None:
         if not value:
             continue
         if name.startswith("EXPLORER_DSN_"):
-            environ.setdefault("BOLLHAV_STATE_DSN_" + name[len("EXPLORER_DSN_") :], value)
+            environ.setdefault(
+                "BOLLHAV_STATE_DSN_" + name[len("EXPLORER_DSN_") :], value
+            )
         elif name == "EXPLORER_DSN":
             environ.setdefault("BOLLHAV_STATE_DSN", value)
 

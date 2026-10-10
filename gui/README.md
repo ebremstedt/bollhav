@@ -14,7 +14,7 @@ BOLLHAV_STATE_DSN=postgresql://user:pass@host:5432/db bollhav-gui    # http://lo
 ```
 
 One process serves the API and the UI. `LINEAGE_READ_ONLY=1` switches the
-reset controls off for a deployment that should only look.
+reset controls off for a deployment that should only look
 
 **The demo** (brings its own Postgres and seeds a `raw → clean → consume` DAG
 with run history and errors), from this folder:
