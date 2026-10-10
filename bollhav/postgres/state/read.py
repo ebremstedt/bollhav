@@ -346,6 +346,7 @@ def get_recent_runs(
 def get_gaps_grouped(
     conn: "psycopg.Connection",
     schema: str = LIBRARY_SCHEMA,
+    full_name: str | None = None,
 ) -> list[dict]:
     """Per stateful model, the **backfill gaps** between its contract and its
     state table — the `[since, until)` spans of the contract window that aren't
@@ -370,18 +371,23 @@ def get_gaps_grouped(
     A view (`is_view`) is one CREATE VIEW, not materialized per window, so it
     can't have a per-window gap: its coverage is all-or-nothing across
     `[begin, end]` (`pct_covered` 0 or 100, empty `gaps`), keyed on its existence
-    row — a view is never "needs backfill". Ordered by name."""
+    row — a view is never "needs backfill". Ordered by name; `full_name`
+    narrows it to that one model (the GUI's per-model refresh)."""
     if not _table_exists(conn, schema, LIBRARY_TABLE):
         return []
-    models = conn.execute(
-        sql.SQL(
-            "SELECT full_name, temporality, model_type, state_schema, state_table, "
-            "metadata FROM {schema}.{table} ORDER BY full_name"
-        ).format(
-            schema=sql.Identifier(schema),
-            table=sql.Identifier(LIBRARY_TABLE),
-        )
-    ).fetchall()
+    query = sql.SQL(
+        "SELECT full_name, temporality, model_type, state_schema, state_table, "
+        "metadata FROM {schema}.{table}"
+    ).format(
+        schema=sql.Identifier(schema),
+        table=sql.Identifier(LIBRARY_TABLE),
+    )
+    params: list[str] = []
+    if full_name is not None:
+        query += sql.SQL(" WHERE full_name = %s")
+        params.append(full_name)
+    query += sql.SQL(" ORDER BY full_name")
+    models = conn.execute(query, params).fetchall()
 
     out: list[dict] = []
     for full_name, temporality, model_type, st_schema, st_table, metadata in models:

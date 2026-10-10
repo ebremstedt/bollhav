@@ -1,5 +1,5 @@
 <script>
-  import { view, refresh, setEnv, setTab } from "../lib/view.svelte.js";
+  import { view, refresh, setCatalog, setEnv, setTab } from "../lib/view.svelte.js";
 
   // top-level view tabs
   const TABS = [
@@ -12,6 +12,23 @@
 
   let { dark = $bindable() } = $props();
 
+  // the cache's state for the selection, shown next to the switchers
+  const hhmm = (iso) =>
+    iso ? new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "";
+  let fresh = $derived.by(() => {
+    const f = view.freshness;
+    if (!f.cached)
+      return { text: "live", tip: "A dev environment is small and read live, nothing is cached." };
+    if (view.refreshing || f.refreshing)
+      return { text: "computing…", tip: "This catalog's library is being recomputed right now." };
+    const newer = f.computed_at && view.loadedAt && f.computed_at !== view.loadedAt;
+    return {
+      text: `as of ${hhmm(view.loadedAt || f.computed_at)}${newer ? " · newer ready" : ""}`,
+      tip: newer
+        ? "The backend has computed a newer snapshot than the one on screen. ⟳ loads it."
+        : "When this catalog's data was computed. It is recomputed in the background on a schedule; ⟳ starts a recompute now.",
+    };
+  });
 </script>
 
 <header>
@@ -26,6 +43,22 @@
         >
       {/each}
     </span>
+    {#if view.catalogs.length > 1}
+      <span
+        class="tip-wrap tipleft"
+        data-tip="Catalog — which database to read. Each database keeps the state and library of the models that live in it, so each is a lineage of its own."
+      >
+        <select
+          class="envsel"
+          value={view.catalog}
+          onchange={(e) => setCatalog(e.currentTarget.value)}
+        >
+          {#each view.catalogs as c}
+            <option value={c.catalog}>{c.catalog}</option>
+          {/each}
+        </select>
+      </span>
+    {/if}
     {#if view.environments.length}
       <span
         class="tip-wrap tipleft"
@@ -43,6 +76,9 @@
         </select>
       </span>
     {/if}
+    {#if view.refreshSeconds > 0}
+      <span class="tip-wrap tipleft fresh" data-tip={fresh.tip}>{fresh.text}</span>
+    {/if}
   </div>
 
   <div class="right">
@@ -53,12 +89,13 @@
     >
       <button
         class="toggle"
+        class:busy={view.refreshing}
         onclick={refresh}
         disabled={!view.canRefresh}
         aria-label="refresh"
         title={view.cooldown > 0 ? `refresh (${view.cooldown}s)` : "refresh"}
       >
-        <span class="ico" class:spin={view.refreshing}>⟳</span>
+        <span class="ico">⟳</span>
       </button>
     </span>
     <button
@@ -195,13 +232,36 @@
     line-height: 0.69;
     vertical-align: -2px;
   }
-  .ico.spin {
-    animation: spin 0.7s linear infinite;
+  /* while a refresh is in flight: the button pulses green, like the per-model
+     refresh pills */
+  .toggle.busy {
+    opacity: 1;
+    color: #1b1b1f;
+    border-color: transparent;
+    animation: pulse-green 2.4s ease-in-out infinite;
   }
-  @keyframes spin {
-    to {
-      transform: rotate(360deg);
+  @keyframes pulse-green {
+    0%,
+    100% {
+      background: #7fc8a0;
+      box-shadow: 0 0 0 0 rgba(127, 200, 160, 0.55);
     }
+    50% {
+      background: #a8dcbf;
+      box-shadow: 0 0 0 6px rgba(127, 200, 160, 0);
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .toggle.busy {
+      animation: none;
+      background: #7fc8a0;
+    }
+  }
+  .fresh {
+    font-size: 12px;
+    color: var(--muted);
+    white-space: nowrap;
+    cursor: help;
   }
   .envsel {
     font-family: var(--menu-font);

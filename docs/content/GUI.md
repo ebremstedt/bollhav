@@ -46,7 +46,14 @@ The key property: **all SQL/schema knowledge lives in bollhav** (`bollhav.postgr
 
 ## Get started locally
 
-The fastest way is Docker — two commands, depending on whether you want the demo or your own data. (Full details in the [`gui/` README](https://github.com/ebremstedt/bollhav/tree/main/gui).)
+**Against your own state DB** — the GUI ships with bollhav behind the `gui` extra. One process serves the API and the UI:
+
+```bash
+pip install 'bollhav[gui]'
+BOLLHAV_STATE_DSN=postgresql://user:pass@host:5432/db bollhav-gui    # then open http://localhost:8137
+```
+
+One `BOLLHAV_STATE_DSN_<NAME>` per database instead lists them as **catalogs** in the header. `LINEAGE_READ_ONLY=1` switches the state-reset controls off. All settings are in the [`gui/` README](https://github.com/ebremstedt/bollhav/tree/main/gui).
 
 **See the demo** — brings its own Postgres and seeds a realistic `raw → clean → consume` DAG (with run history and a few errors). Nothing to set up:
 
@@ -76,40 +83,36 @@ The GUI is read-only over your data, and the **environment switcher** in the hea
     - Add a second demo env to toggle between: `docker compose exec backend python seed_dev.py`
     - Ports are deliberately rare (UI `53173`, API `58137`, Postgres `55432`) so nothing local needs to be free.
 
-### Without Docker
+### Developing the GUI
 
-Needs a reachable Postgres (`BOLLHAV_STATE_DSN`, default `postgresql://postgres:postgres@localhost:5432/postgres`) and Node. `gui/` lives inside the bollhav repo, so install the in-repo `bollhav` (the `bollhav==3.0.0rc19` pin in `pyproject.toml` is for the Docker image and isn't on public PyPI):
+From a checkout: the backend with reload, the frontend with Vite's hot reload proxying the API to it.
 
 ```bash
-# backend — serves lineage JSON on :8137
-cd gui/backend
-pip install fastapi uvicorn "psycopg[binary]"
-pip install -e ../..      # the in-repo bollhav package
-python seed.py            # populate the demo DAG (drops z_bollhav first!)
-uvicorn app:app --port 8137
+pip install -e '.[gui]'
+BOLLHAV_STATE_DSN=... uvicorn bollhav.gui.serve:create_app --factory --port 8137
 
-# frontend — Svelte Flow UI on :5173, proxies JSON to :8137
 cd gui/frontend
-npm install
-npm run dev
+npm ci
+npm run dev               # http://127.0.0.1:5173
 ```
 
-To read a **real** state DB instead of the demo, skip `seed.py` and point `BOLLHAV_STATE_DSN` at your database before starting uvicorn.
+`npm run build` writes the bundle into the Python package (`bollhav/gui/static/`); the release workflow does that before building the wheel, so a published `bollhav[gui]` always carries the frontend that matches it.
 
 ## Endpoints
 
-Every endpoint is a thin wrapper over `bollhav.postgres.registry`:
+Every endpoint is a thin wrapper over `bollhav.postgres.state.read` (and `write` for the one reset). All take `?catalog=` and most `?env=`; `/docs` on the running app is the full list.
 
-| Endpoint | Registry function | Returns |
-|---|---|---|
-| `GET /graph` | `get_graph` | the whole DAG — nodes (models + sources) and edges, for the canvas |
-| `GET /match?expr=` | `match_tags` | full names matching a tag expression (drives the tag filter) |
-| `GET /models` | `list_models` | every registered model |
-| `GET /lineage/{full_name}` | `get_lineage` | one model's direct upstream / sources |
-| `GET /tree/{full_name}` | `get_upstream_tree` | the recursive upstream tree |
-| `GET /state/{full_name}` | `get_recent_state` | recent state rows for a model |
-| `GET /downstreams/{full_name}` | `get_downstreams` | who depends on this model |
-| `GET /errors` | `get_errors` | recent rows from the shared `errors` table |
+| Endpoint | Returns |
+|---|---|
+| `GET /config`, `GET /catalogs`, `GET /environments` | what the header needs: title, default catalog, the catalogs and the library schemas in one |
+| `GET /graph` | the whole DAG — nodes (models + sources) and edges, for the canvas |
+| `GET /match?expr=` | full names matching a tag expression (drives the tag filter) |
+| `GET /models`, `GET /model/{full_name}` | every registered model; one model's metadata |
+| `GET /lineage/{full_name}`, `GET /tree/{full_name}`, `GET /downstreams/{full_name}` | direct upstreams, the recursive upstream tree, who depends on it |
+| `GET /state/{full_name}`, `GET /runs`, `GET /grid`, `GET /gaps` | state rows for a model; recent runs, per-model run history and backfill gaps across models |
+| `GET /errors` | recent rows from the shared `errors` table |
+| `GET /freshness`, `POST /refresh`, `POST /refresh/{full_name}` | when the catalog's cache was computed; recompute it, or one model |
+| `POST /state/{full_name}/reset` | the one write: flip rows back to `pending` (off with `LINEAGE_READ_ONLY`) |
 
 ## Relation to the TUI
 

@@ -1,101 +1,104 @@
-# bollhav-gui
+# bollhav GUI
 
-A web app that visualizes [bollhav](https://github.com/ebremstedt/bollhav)
-lineage — the cross-pipeline model graph stored in the `z_bollhav` library
+A web app that shows the model graph with live state, runs, errors and gaps,
+and can reset state so the next run redoes it. The Python side is the
+`bollhav.gui` package (a FastAPI app reading the state databases through
+`bollhav.postgres.state`); the frontend is the Svelte app in [frontend/](frontend/),
+built into `bollhav/gui/static/` and shipped inside the wheel.
 
 ## Run it
 
-**See the demo** (brings its own Postgres + seeded data — nothing to set up)
+```bash
+pip install 'bollhav[gui]'
+BOLLHAV_STATE_DSN=postgresql://user:pass@host:5432/db bollhav-gui    # http://localhost:8137
+```
+
+One process serves the API and the UI. `LINEAGE_READ_ONLY=1` switches the
+reset controls off for a deployment that should only look.
+
+**The demo** (brings its own Postgres and seeds a `raw → clean → consume` DAG
+with run history and errors), from this folder:
 
 ```bash
 docker compose up --build      # then open http://localhost:53173
 ```
 
-**Point it at your own state DB** (`SEED=0` keeps the demo seed off — without
-it the seed would drop & rebuild your `z_bollhav` schema):
+`BOLLHAV_STATE_DSN=... SEED=0 docker compose up --build` points the demo stack
+at a real state DB instead. `SEED=0` matters: the seed drops and rebuilds
+`z_bollhav` first.
 
-```bash
-BOLLHAV_STATE_DSN=postgresql://user:pass@host:5432/db SEED=0 docker compose up --build
-```
+## Settings
 
-The GUI can also **reset state** (see below). Add `LINEAGE_READ_ONLY=1` to
-switch that off for a deployment that should only look.
+All by environment variable.
 
-That's it. The env switcher in the header then lists every `z_bollhav[_suffix]`
-schema in that database (prod + any dev/PR envs).
-
----
-
-Everything below is reference — you don't need it to run the app
-
-| URL | what |
+| Variable | What |
 |---|---|
-| http://localhost:53173 | the lineage graph |
-| http://localhost:58137/docs | the API (Swagger) |
-| http://localhost:58137/graph | the raw graph JSON |
+| `BOLLHAV_STATE_DSN` | the state database (one catalog, called `default`) |
+| `BOLLHAV_STATE_DSN_<NAME>` | one per catalog instead; the header's switcher lists them by `name` |
+| `EXPLORER_DSN`, `EXPLORER_DSN_<NAME>` | aliases for the two above, for deployments that use those names |
+| `LINEAGE_DEFAULT_CATALOG` | the catalog read when the URL names none (else the first by name) |
+| `LINEAGE_REFRESH_SECONDS` | how often each catalog's prod library is precomputed (default 300; 0 = no cache, everything live) |
+| `LINEAGE_READ_ONLY` | `1` disables `POST /state/{name}/reset` and hides the controls |
+| `LINEAGE_TITLE`, `LINEAGE_DEFAULT_TAGS` | header title; a tag expression to open with instead of one random model |
+| `BOLLHAV_GUI_HOST`, `BOLLHAV_GUI_PORT` | where `bollhav-gui` listens (default `0.0.0.0:8137`) |
+| `STATIC_DIR` | serve the frontend from here instead of the bundle in the package |
 
-## How it's put together
+A pipeline keeps its state and library in the database it writes to, so every
+database holds a library of its own; a **catalog** is one such database and
+the switch next to it in the header picks the environment (prod `z_bollhav`
+or a suffixed dev run) inside it.
 
-```mermaid
-flowchart LR
-    FE["Svelte Flow UI (frontend/)"]
-    API["FastAPI (backend/app.py)"]
-    REG["bollhav.postgres.registry"]
-    DB[("Postgres: z_bollhav.library + errors")]
+## The cache
 
-    FE -->|"GET /graph /match /environments · POST /state/{name}/reset"| API
-    API -->|calls| REG
-    REG -->|SELECT| DB
-    DB -.->|rows| REG
-    REG -.->|dicts| API
-    API -.->|JSON| FE
-```
+A catalog's prod library is computed in the background every
+`LINEAGE_REFRESH_SECONDS` and served from memory, so big catalogs open at
+once; the header and footer say when it was computed. The header's ⟳ loads
+the newest precompute or starts one, the ⟳ on a model recomputes that model
+alone, right away, as does a state reset. Dev environments are small and
+always read live.
 
-**All SQL/schema knowledge lives in bollhav** (`bollhav.postgres.registry`).
-The backend is a thin HTTP adapter; the frontend holds no schema knowledge —
-it just renders `/graph`. Three compose services: `db` (Postgres), `backend`
-(FastAPI; the in-repo `bollhav` is mounted at `/src` so registry edits show up
-on restart), `frontend` (Vite dev server, proxies the API).
+Budget roughly 100 MB per thousand models with a year of daily runs each, and
+twice that for a moment while a recompute replaces the previous snapshot. Reads
+run in autocommit mode so a big library does not exhaust Postgres's lock slots
+inside one transaction.
 
 ## Resetting state
 
 The one write path. From the **Grid** tab, clicking a model's name opens its
 panel on the left (reset the whole model, or every interval in a typed range)
 and clicking cells opens the intervals' panel on the right (shift-click a
-range of cells, ⌘ / ctrl-click to add; reset the selected ones). The
-**Lineage** tab's two panels carry the same controls: the ⓘ panel for the
-model, the runs panel for picked rows. Every action asks first.
+range, ⌘ / ctrl-click to add). The **Lineage** tab's two panels carry the same
+controls. Every action asks first.
 
 A reset flips the chosen rows `applied` → `pending` so the next run redoes
 them (a flexible model's coverage is uncovered instead); rows and history are
-kept, and a `running` row is never touched — it's
-`bollhav.postgres.state.write` behind `POST /state/{full_name}/reset` with a
-body of `{"all": true}`, `{"intervals": [{"since", "until"}, …]}` or
-`{"range": {"since", "until"}}` (plus `?env=` for a suffixed environment).
-`LINEAGE_READ_ONLY=1` disables the endpoint and hides the controls.
+kept and a `running` row is never touched. It is `bollhav.postgres.state.write`
+behind `POST /state/{full_name}/reset` with `{"all": true}`,
+`{"intervals": [{"since", "until"}, …]}` or `{"range": {"since", "until"}}`,
+plus `?env=` / `?catalog=`.
 
-## Run it manually (no Docker)
+## Developing the GUI
 
-Prerequisites: a reachable **Postgres** (set `BOLLHAV_STATE_DSN`, default
-`postgresql://postgres:postgres@localhost:5432/postgres`) and **Node**.
-`gui/` lives inside the bollhav repo, so install the in-repo `bollhav`
-alongside the backend's own deps (the `bollhav==3.0.0rc19` pin in
-`pyproject.toml` is for the Docker image and isn't on public PyPI):
+Backend with reload, frontend with Vite's hot reload proxying the API:
 
 ```bash
-# 1. backend (serves the lineage JSON on :8137)
-cd backend
-pip install fastapi uvicorn "psycopg[binary]"
-pip install -e ../..                # the in-repo bollhav package
-python seed.py                      # populate the demo DAG (drops z_bollhav first!)
-uvicorn app:app --port 8137
+pip install -e '.[gui]'                                   # from the repo root
+BOLLHAV_STATE_DSN=... uvicorn bollhav.gui.serve:create_app --factory --port 8137
 
-# 2. frontend (Svelte Flow UI on :5173, proxies the JSON to :8137)
-cd frontend
-npm install
-npm run dev
+cd gui/frontend
+npm ci
+npm run dev                                               # http://127.0.0.1:5173
 ```
 
-Then open `http://127.0.0.1:5173`. To read a **real** state DB instead of the
-demo, skip `seed.py` and point `BOLLHAV_STATE_DSN` at your database before
-starting uvicorn. The API docs are at `http://127.0.0.1:8137/docs`.
+`npm run build` writes the bundle to `bollhav/gui/static/` (gitignored); the
+release workflow does that before building the wheel, so a published
+`bollhav[gui]` always carries the frontend that matches it. The API docs are at
+`/docs`.
+
+| Path | What |
+|---|---|
+| `bollhav/gui/app.py` | the API: every route is a query against the selected catalog |
+| `bollhav/gui/serve.py` | `create_app`: env aliases, `/healthz`, the SPA |
+| `bollhav/gui/__main__.py` | `bollhav-gui`: uvicorn |
+| `gui/frontend/` | the Svelte source |
+| `gui/backend/` | the demo image and its seed scripts |

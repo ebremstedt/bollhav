@@ -6,6 +6,7 @@
   import RunsTable from "./RunsTable.svelte";
   import ErrorList from "./ErrorList.svelte";
   import ResetBox from "./ResetBox.svelte";
+  import RefreshModel from "./RefreshModel.svelte";
 
   let runs = $state([]);
   let errs = $state([]);
@@ -64,6 +65,7 @@
 <aside class="panel">
   <div class="panel-head">
     <span class="panel-title">{selection.name}</span>
+    <RefreshModel name={selection.name} />
     <button class="x" onclick={() => (selection.name = null)}>✕</button>
   </div>
 

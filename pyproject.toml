@@ -25,10 +25,14 @@ mssql = ["pyodbc>=5"]
 # The Iceberg backend needs pyiceberg (+ pyarrow). Optional like mssql — the
 # catalog implementation (sql/rest/...) and its driver are the app's choice.
 iceberg = ["pyiceberg[pyarrow]>=0.9"]
+# The GUI (bollhav.gui): a FastAPI app serving the state libraries as JSON plus
+# the built Svelte frontend. `bollhav-gui` runs it; see gui/README.md.
+gui = ["fastapi>=0.115", "uvicorn>=0.30"]
 
 [project.scripts]
 bollhav = "bollhav._tui_entry:main"
 bollhav-tui = "bollhav._tui_entry:main"
+bollhav-gui = "bollhav._gui_entry:main"
 
 [project.urls]
 Homepage = "https://github.com/ebremstedt/bollhav"
@@ -43,6 +47,12 @@ build-backend = "setuptools.build_meta"
 # auto-discovery sees multiple top-level packages (gui + bollhav) and aborts.
 [tool.setuptools.packages.find]
 include = ["bollhav*"]
+
+# The GUI's built frontend (gui/frontend, `npm run build`) lands in
+# bollhav/gui/static/ and ships inside the wheel so `bollhav-gui` serves it.
+# It is gitignored; the release workflow builds it before `python -m build`.
+[tool.setuptools.package-data]
+"bollhav.gui" = ["static/*", "static/*/*"]
 
 # Type-check the library only. tests/ has many harmless narrowing errors;
 # scoping here means a bare `pyright` (locally and in CI) checks just bollhav/.

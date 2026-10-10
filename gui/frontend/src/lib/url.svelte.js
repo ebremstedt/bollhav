@@ -1,7 +1,7 @@
 // The address bar mirrors every choice the user makes, so a link reproduces
-// the exact view for a colleague: tab, environment, the focused model or the
-// tag filter, materialization, time window, the lineage's side panels, and
-// each tab's sorting / display choices.
+// the exact view for a colleague: tab, catalog, environment, the focused model
+// or the tag filter, materialization, time window, the lineage's side panels,
+// and each tab's sorting / display choices.
 //
 // `ui` holds the per-tab choices that used to be local component state (a
 // component unmounts on a tab switch and would otherwise forget them). The
@@ -9,7 +9,7 @@
 // it, writing only what differs from the defaults so links stay short, and
 // restoreUrl() reads it back on load.
 //
-// Keys:  tab · env · model · filter · mat · upstreams · detail
+// Keys:  tab · catalog · env · model · filter · mat · upstreams · detail
 //        loaded | loaded_from loaded_to · interval interval_from interval_to
 //        panel panel_tab panel_runs · info · theme
 //        grid_sort grid_dir grid_cells grid_runs grid_models grid_row
@@ -18,7 +18,7 @@
 //        models_sort models_dir models_pane models_open
 import { view } from "./view.svelte.js";
 import { selection, info } from "./selection.svelte.js";
-import { setApiEnv } from "./api.js";
+import { setApiCatalog, setApiEnv } from "./api.js";
 
 export const ui = $state({
   ready: false, // set once restoreUrl() has run; until then nothing is written back
@@ -82,6 +82,7 @@ function put(p, key, val, def) {
 export function urlQuery() {
   const p = new URLSearchParams();
   put(p, "tab", view.tab, "gaps");
+  put(p, "catalog", view.catalog, view.defaultCatalog);
   put(p, "env", view.env, null);
   // the narrowing: an applied tag expression, or the focused model
   put(p, "filter", view.tagApplied, "");
@@ -131,14 +132,16 @@ export function urlQuery() {
   return p.toString();
 }
 
-// Read the address bar into the state, before anything is fetched (the env
-// must be set first so every read hits the right schema). Returns the two
-// choices that need the graph to be loaded before they can apply — the
-// focused model and the tag filter — for init() to finish.
+// Read the address bar into the state, before anything is fetched (the
+// catalog and env must be set first so every read hits the right database and
+// schema). Returns the two choices that need the graph to be loaded before
+// they can apply — the focused model and the tag filter — for init() to finish.
 export function restoreUrl() {
   const p = new URLSearchParams(location.search);
   const g = (k) => p.get(k);
   view.tab = oneOf(g("tab"), ["gaps", "models", "runs", "grid", "lineage"], "gaps");
+  view.catalog = g("catalog") || null;
+  setApiCatalog(view.catalog);
   view.env = g("env") || null;
   setApiEnv(view.env);
   const mat = oneOf(g("mat"), ["table", "view"], null);

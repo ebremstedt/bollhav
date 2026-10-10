@@ -9,6 +9,12 @@ const HOST = process.env.VITE_HOST || "127.0.0.1";
 
 export default defineConfig({
   plugins: [svelte()],
+  build: {
+    // The bundle lands inside the Python package as bollhav.gui's static/:
+    // what `bollhav-gui` serves and what a release ships.
+    outDir: "../../bollhav/gui/static",
+    emptyOutDir: true,
+  },
   server: {
     host: HOST,
     port: 5173,
@@ -16,7 +22,10 @@ export default defineConfig({
     proxy: {
       "/graph": API,
       "/config": API,
+      "/catalogs": API,
       "/environments": API,
+      "/freshness": API,
+      "/refresh": API,
       "/tree": API,
       "/lineage": API,
       "/state": API,

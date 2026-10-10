@@ -1,7 +1,7 @@
 <script>
   import { Handle, Position } from "@xyflow/svelte";
   import { selection, info } from "../lib/selection.svelte.js";
-  import { view } from "../lib/view.svelte.js";
+  import { view, refreshModel } from "../lib/view.svelte.js";
   import {
     MODEL_YELLOW,
     UNMANAGED_GREY,
@@ -72,6 +72,14 @@
     e?.stopPropagation();
     selection.name = data.name;
     selection.tab = tab;
+  }
+
+  // the "refresh" pill: recompute this one model in the cache. Only when the
+  // selection is served from the cache (a dev environment is read live).
+  let refreshBusy = $derived(view.modelRefreshing === data.name);
+  function refresh(e) {
+    e?.stopPropagation();
+    refreshModel(data.name);
   }
 </script>
 
@@ -158,6 +166,15 @@
     <div class="actions">
       <button class="mini runs" onclick={(e) => show("state", e)}>runs</button>
       <button class="mini errors" onclick={(e) => show("errors", e)}>errors</button>
+      {#if view.freshness.cached}
+        <button
+          class="mini refresh"
+          class:busy={refreshBusy}
+          disabled={view.modelRefreshing != null}
+          title="recompute this model now: its status, gaps, runs and errors"
+          onclick={refresh}>refresh</button
+        >
+      {/if}
     </div>
   {/if}
 </div>
@@ -320,7 +337,46 @@
   .mini.errors {
     background: #8b2332;
   }
+  /* refresh: the card's own control colours, so it reads as an action on
+     the cache rather than a status like runs / errors */
+  .mini.refresh {
+    background: var(--control-bg);
+    color: var(--control-fg);
+    border-color: var(--control-border);
+  }
   .mini:hover {
     filter: brightness(1.12);
+  }
+  .mini.refresh:hover {
+    border-color: var(--node-fg);
+    color: var(--node-fg);
+  }
+  .mini:disabled {
+    cursor: default;
+    opacity: 0.6;
+  }
+  /* while this model recomputes: the pill keeps its text and pulses green */
+  .mini.busy {
+    opacity: 1;
+    color: #1b1b1f;
+    border-color: transparent;
+    animation: pulse-green 2.4s ease-in-out infinite;
+  }
+  @keyframes pulse-green {
+    0%,
+    100% {
+      background: #7fc8a0;
+      box-shadow: 0 0 0 0 rgba(127, 200, 160, 0.55);
+    }
+    50% {
+      background: #a8dcbf;
+      box-shadow: 0 0 0 7px rgba(127, 200, 160, 0);
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .mini.busy {
+      animation: none;
+      background: #7fc8a0;
+    }
   }
 </style>

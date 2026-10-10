@@ -22,10 +22,22 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install build twine
-          pip install ".[dev]"
+          pip install ".[dev,tui,gui]"
 
       - name: Run tests
         run: pytest
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # The GUI bundle goes into bollhav/gui/static/, shipped by the wheel.
+      - name: Build the GUI frontend
+        working-directory: gui/frontend
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build
 
       - name: Build package
         run: python -m build

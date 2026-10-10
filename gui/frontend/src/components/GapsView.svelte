@@ -1,5 +1,6 @@
 <script>
   import { view, matOk } from "../lib/view.svelte.js";
+  import RefreshModel from "./RefreshModel.svelte";
   import { ui } from "../lib/url.svelte.js";
   import ModelFilter from "./ModelFilter.svelte";
   import { getGaps } from "../lib/api.js";
@@ -75,13 +76,20 @@
       : new Set(view.full.nodes.filter((n) => n.type === "model" && matOk(n)).map((n) => n.name)),
   );
 
-  // (re)load on env / refresh change — same trigger pattern as the grid tab
+  // (re)load on catalog / env / refresh change — same trigger pattern as the
+  // grid tab. Each load takes a sequence number; an answer that arrives after
+  // a newer load started (a quick catalog switch while a big catalog was still
+  // answering) is dropped, not drawn.
+  let seq = 0;
   $effect(() => {
+    if (!view.catalog) return; // the catalogs haven't been listed yet
     void view.env;
     void view.refreshAt;
+    const mine = ++seq;
     loading = true;
     getGaps()
       .then((d) => {
+        if (mine !== seq) return;
         groups = d;
         loaded = true;
         // project backfill score: the mean coverage % across every model that
@@ -94,11 +102,14 @@
           : null;
       })
       .catch(() => {
+        if (mine !== seq) return;
         groups = [];
         view.gapScore = null;
         view.gapScored = 0;
       })
-      .finally(() => (loading = false));
+      .finally(() => {
+        if (mine === seq) loading = false;
+      });
   });
 
   // the time filter's interval range (from / to), applied to each model's
@@ -389,6 +400,7 @@
         <aside class="side">
           <div class="det-head">
             <span class="det-title" title={panel.full_name}>{shortName(panel.full_name)}</span>
+            <RefreshModel name={panel.full_name} />
             <button class="x" onclick={() => (panel = null)}>✕</button>
           </div>
           {#if panel.span}

@@ -1,5 +1,6 @@
 <script>
   import { view, matOk } from "../lib/view.svelte.js";
+  import RefreshModel from "./RefreshModel.svelte";
   import { ui } from "../lib/url.svelte.js";
   import ModelFilter from "./ModelFilter.svelte";
   import { getModelMeta } from "../lib/api.js";
@@ -54,6 +55,7 @@
   });
 
   $effect(() => {
+    void view.catalog;
     void view.env;
     const list = filtered;
     if (list.length && (!ui.modelsOpen || !list.some((m) => m.name === ui.modelsOpen))) {
@@ -63,17 +65,22 @@
 
   let node = $derived(models.find((m) => m.name === ui.modelsOpen) || null);
 
+  // the property bag of the open model; a stale answer (the model or the
+  // catalog changed meanwhile) is dropped, not drawn
+  let seq = 0;
   $effect(() => {
     const name = ui.modelsOpen;
+    void view.catalog;
     void view.env;
     void view.refreshAt;
     meta = null;
     if (!name) return;
+    const mine = ++seq;
     loading = true;
     getModelMeta(name)
-      .then((d) => (meta = d))
-      .catch(() => (meta = null))
-      .finally(() => (loading = false));
+      .then((d) => mine === seq && (meta = d))
+      .catch(() => mine === seq && (meta = null))
+      .finally(() => mine === seq && (loading = false));
   });
 
   let hasMeta = $derived(meta && Object.keys(meta).length > 0);
@@ -245,6 +252,7 @@
       <div class="detail">
         <div class="d-head">
           <span class="d-title">{shortName(ui.modelsOpen)}</span>
+          <RefreshModel name={ui.modelsOpen} />
           <span class="d-badges">
             {#if hasMeta && meta.enabled === false}
               <span class="pill off">disabled</span>
