@@ -21,7 +21,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install ".[dev,tui]"
+          pip install ".[dev,tui,gui]"
 
       - name: Type check (pyright)
         uses: jakebailey/pyright-action@v2

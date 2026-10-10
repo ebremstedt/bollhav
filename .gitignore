@@ -171,5 +171,8 @@ docs/site/
 
 # bollhav TUI local config (per-checkout, not shared)
 .bollhav-tui.json
+
+# the GUI's built frontend (gui/frontend `npm run build`), shipped in the wheel
+bollhav/gui/static/
 learn/node_modules/
 learn/.astro/

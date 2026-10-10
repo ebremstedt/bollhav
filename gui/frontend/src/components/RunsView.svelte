@@ -84,25 +84,32 @@
       : {},
   );
 
-  // (re)load whenever the mode, limit, environment, or a refresh changes.
+  // (re)load whenever the mode, limit, catalog, environment, or a refresh
+  // changes. Each load takes a sequence number; an answer that arrives after a
+  // newer load started (a quick catalog switch while a big catalog was still
+  // answering) is dropped, not drawn.
+  let seq = 0;
   $effect(() => {
     const n = effectiveLimit;
     if (!n) return; // the scroll area isn't measured yet
     const m = ui.runsShow;
+    if (!view.catalog) return; // the catalogs haven't been listed yet
     void view.env; // reload on env switch
     void view.refreshAt; // reload when the user hits refresh
+    const mine = ++seq;
     loading = true;
     openSet = new Set(); // rows change → drop stale open state
     const tasks = [];
     if (m === "errors" || m === "both")
-      tasks.push(getAllErrors(n).then((d) => (errs = d)));
+      tasks.push(getAllErrors(n).then((d) => mine === seq && (errs = d)));
     else errs = [];
     if (m === "runs" || m === "both")
-      tasks.push(getAllRuns(n).then((d) => (runs = d)));
+      tasks.push(getAllRuns(n).then((d) => mine === seq && (runs = d)));
     else runs = [];
     Promise.all(tasks)
       .catch(() => {})
       .finally(() => {
+        if (mine !== seq) return;
         loading = false;
         loaded = true;
       });

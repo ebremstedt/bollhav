@@ -15,7 +15,11 @@ services:
       retries: 30
 
   backend:
-    build: ./backend
+    # Built from the repo root so the image installs bollhav[gui] from this
+    # checkout (see backend/Dockerfile).
+    build:
+      context: ..
+      dockerfile: gui/backend/Dockerfile
     environment:
       # Defaults to the bundled `db` (demo). Override from your shell to read a
       # real state DB:  BOLLHAV_STATE_DSN=... SEED=0 docker compose up

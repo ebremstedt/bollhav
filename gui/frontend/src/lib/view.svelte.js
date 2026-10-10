@@ -1,7 +1,18 @@
 // Shared runes state for the lineage graph. The full graph is kept in memory
 // so we can re-filter (focus a model + its upstreams) without refetching.
 // Header writes `query`; Flow reads the laid-out `nodes`/`edges`.
-import { getGraph, getMatch, getEnvironments, getConfig, setApiEnv } from "./api.js";
+import {
+  getGraph,
+  getMatch,
+  getCatalogs,
+  getEnvironments,
+  getConfig,
+  getFreshness,
+  refreshCatalog,
+  refreshModel as apiRefreshModel,
+  setApiCatalog,
+  setApiEnv,
+} from "./api.js";
 import {
   layout,
   toFlow,
@@ -31,8 +42,17 @@ export const view = $state({
   tagHighlights: {}, // name -> the model's matched tags (server-computed)
   matFilter: "all", // site-wide materialization filter: "all" | "TABLE" | "VIEW"
   hideUpstreams: true, // when focusing/filtering, drop the upstream closure (the default)
-  environments: [], // [{schema,label}] — bollhav library schemas in the DB
+  catalogs: [], // [{catalog}] — the state databases the backend reads, its default first
+  catalog: null, // selected catalog (null until /catalogs has answered)
+  defaultCatalog: null, // the backend's default; a link omits the catalog when it's this one
+  environments: [], // [{schema,label}] — bollhav library schemas in the selected catalog
   env: null, // selected env schema (null = prod z_bollhav)
+  // the backend's cache, for the selection: a prod library is precomputed
+  // every `refreshSeconds` and served from memory; a dev env is read live
+  freshness: { cached: false, computed_at: null, refreshing: false },
+  refreshSeconds: 0, // 0 = no cache
+  loadedAt: null, // computed_at of the graph on screen (null when read live)
+  modelRefreshing: null, // the model whose own recompute is in flight
   nodes: [],
   edges: [],
   refreshAt: 0, // bumped on refresh() so open panels reload too
@@ -40,7 +60,7 @@ export const view = $state({
   // computed + set by GapsView, read by the bottom Legend
   gapScored: 0, // how many models the score averaged over
   recenterAt: 0, // bumped by the sub-bar "recenter" button; Flow re-fits the view
-  refreshing: false, // true while a refresh() fetch is in flight (spinner)
+  refreshing: false, // true while a refresh() fetch is in flight (the ⟳ button pulses green)
   canRefresh: true, // false during the fetch + 5s cooldown (button disabled)
   cooldown: 0, // seconds left on the post-refresh cooldown (5..1, then 0)
   // site-wide name presentation: "lengthen" (catalog.schema.table on one line)
@@ -140,15 +160,41 @@ export function setNameStyle(style) {
   rerender();
 }
 
+// Each graph load takes a sequence number; an answer that arrives after a
+// newer load started (a quick catalog or env switch while a big catalog was
+// still answering) is dropped, not drawn.
+let graphSeq = 0;
+
 export async function loadGraph() {
-  view.full = await getGraph();
+  const mine = ++graphSeq;
+  const full = await getGraph();
+  if (mine !== graphSeq) return;
+  view.full = full;
+  view.loadedAt = full.computed_at ?? null;
   // re-narrow to the active focus / tag filter so refresh keeps the view;
   // with neither (e.g. right after an env switch) land on a random model
   if (!view.focused && !view.tagMatches) focusRandom();
   rerender();
 }
 
-// Fetch the list of environments (library schemas) in the connected DB.
+// Fetch the catalogs (state databases) the backend reads, and settle on one:
+// the link's choice when it is a known catalog, else the backend's default.
+export async function loadCatalogs() {
+  try {
+    view.catalogs = await getCatalogs();
+  } catch {
+    view.catalogs = [];
+  }
+  // an unreachable /catalogs (an older backend) leaves one catalog, "default",
+  // which such a backend ignores; the tabs wait for a non-null catalog
+  view.defaultCatalog = view.catalogs[0]?.catalog ?? "default";
+  if (!view.catalogs.some((c) => c.catalog === view.catalog)) {
+    view.catalog = view.defaultCatalog;
+  }
+  setApiCatalog(view.catalog);
+}
+
+// Fetch the list of environments (library schemas) in the selected catalog.
 export async function loadEnvironments() {
   try {
     view.environments = await getEnvironments();
@@ -157,10 +203,42 @@ export async function loadEnvironments() {
   }
 }
 
-// Initial load: discover environments, then draw the (prod) graph.
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// How fresh the selection's data is: served from the cache (and computed
+// when), or read live. Polled every minute so "as of" follows the backend's
+// background recomputes.
+export async function loadFreshness() {
+  try {
+    view.freshness = await getFreshness();
+  } catch {
+    view.freshness = { cached: false, computed_at: null, refreshing: false };
+  }
+}
+let freshnessTimer = null;
+
+// Recompute one model in the backend's cache, then reload what's on screen
+// (the tabs and the graph re-read the patched cache, which is fast).
+export async function refreshModel(name) {
+  if (view.modelRefreshing) return;
+  view.modelRefreshing = name;
+  try {
+    await apiRefreshModel(name);
+  } catch {
+    // the reload below still shows whatever the cache holds
+  } finally {
+    view.modelRefreshing = null;
+  }
+  view.refreshAt++;
+  await loadGraph();
+  await loadFreshness();
+}
+
+// Initial load: discover catalogs and environments, then draw the (prod) graph.
 // `restored` is what restoreUrl() read from a shared link: the focused model
 // and / or the tag filter, which need the graph before they can apply.
 export async function init(restored = {}) {
+  await loadCatalogs();
   await loadEnvironments();
   let cfg = {};
   try {
@@ -171,8 +249,13 @@ export async function init(restored = {}) {
   // the site's name — env-var configurable on the backend (LINEAGE_TITLE)
   if (cfg.title) view.title = cfg.title;
   view.writable = cfg.writable !== false;
+  view.refreshSeconds = cfg.refresh_seconds || 0;
   document.title = view.title;
-  view.full = await getGraph();
+  const mine = ++graphSeq;
+  const full = await getGraph();
+  if (mine !== graphSeq) return; // a catalog / env switch during the load took over
+  view.full = full;
+  view.loadedAt = full.computed_at ?? null;
   // Narrow the graph BEFORE the first render so slow clients never lay out the
   // whole DAG. A shared link's filter or model wins; else a deployment's
   // `default_tags` (env var); else one random model.
@@ -189,6 +272,8 @@ export async function init(restored = {}) {
   if (!prefiltered && cfg.default_tags) prefiltered = await applyTags(cfg.default_tags);
   if (!prefiltered) focusRandom();
   rerender();
+  await loadFreshness();
+  if (!freshnessTimer) freshnessTimer = setInterval(loadFreshness, 60_000);
 }
 
 // Make a tag expression the narrowing (its matches + their highlights);
@@ -222,11 +307,9 @@ function focusRandom() {
   view.focused = pick.name;
 }
 
-// Switch the active environment (a library schema). Clears any focus / tag
-// filter (they're env-specific) and reloads the graph for the new env.
-export async function setEnv(schema) {
-  view.env = schema || null;
-  setApiEnv(view.env);
+// Drop the narrowing (name focus, tag filter) and the time filters: they
+// belong to the place being read, so a switch of env or catalog starts over.
+function clearNarrowing() {
   view.query = "";
   view.focused = null;
   view.tagExpr = "";
@@ -234,21 +317,63 @@ export async function setEnv(schema) {
   view.tagMatches = null;
   view.tagHighlights = {};
   clearTime();
-  await loadGraph();
 }
 
-// Re-fetch the graph (updated run / error badges) and signal open side panels
-// to reload their runs + errors. Rate-limited to once per 5s; the spinner runs
-// only while the fetch is in flight, the button stays disabled for the cooldown.
+// Switch the active environment (a library schema). Clears any focus / tag
+// filter (they're env-specific) and reloads the graph for the new env.
+export async function setEnv(schema) {
+  view.env = schema || null;
+  setApiEnv(view.env);
+  clearNarrowing();
+  await loadGraph();
+  await loadFreshness();
+}
+
+// Switch the active catalog (a state database). Environments are per
+// catalog, so the env goes back to prod and the list is fetched again; then
+// the graph is reloaded like on an env switch.
+export async function setCatalog(catalog) {
+  view.catalog = catalog || view.defaultCatalog;
+  setApiCatalog(view.catalog);
+  view.env = null;
+  setApiEnv(null);
+  clearNarrowing();
+  await loadEnvironments();
+  await loadGraph();
+  await loadFreshness();
+}
+
+// Get the newest data. For a cached (prod) selection: when the backend holds
+// a newer precompute than what's on screen, just reload it; otherwise ask the
+// backend to recompute the catalog now and wait for it (up to three minutes).
+// For a live selection: re-fetch. Then the graph and every open tab / panel
+// reload. Rate-limited to once per 5s; the ⟳ button pulses green while work is in
+// flight, the button stays disabled for the cooldown.
 export async function refresh() {
   if (!view.canRefresh) return;
   view.canRefresh = false;
   view.refreshing = true;
-  view.refreshAt++;
   try {
-    // hold the spinner ~0.8s so the click clearly registers before the
-    // success state, even though the localhost fetch is near-instant
+    await loadFreshness();
+    const f = view.freshness;
+    if (f.cached && f.computed_at === view.loadedAt && !f.refreshing) {
+      const before = f.computed_at;
+      try {
+        await refreshCatalog();
+        for (let i = 0; i < 60; i++) {
+          await sleep(3000);
+          await loadFreshness();
+          if (view.freshness.computed_at !== before && !view.freshness.refreshing) break;
+        }
+      } catch {
+        // an older backend without /refresh: fall through to a plain reload
+      }
+    }
+    view.refreshAt++;
+    // hold the pulse ~0.8s so the click clearly registers before the
+    // success state, even though the fetch is near-instant
     await Promise.all([loadGraph(), new Promise((r) => setTimeout(r, 800))]);
+    await loadFreshness();
   } finally {
     view.refreshing = false;
     // green "done" + 5..1 countdown, re-enabling at 0

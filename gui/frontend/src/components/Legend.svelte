@@ -9,6 +9,38 @@
 
   let showHelp = $state(false);
 
+  // how the data on screen is kept: precomputed (a prod library) or live
+  const hhmm = (iso) =>
+    iso ? new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "";
+  // two items: what the cache is, and how refreshing works
+  let cache = $derived.by(() => {
+    const minutes = Math.round(view.refreshSeconds / 60);
+    const every = minutes >= 1 ? `${minutes} min` : `${view.refreshSeconds} s`;
+    const everyLong =
+      minutes >= 1
+        ? `${minutes} minute${minutes === 1 ? "" : "s"}`
+        : `${view.refreshSeconds} seconds`;
+    if (!view.freshness.cached)
+      return {
+        cache: {
+          text: "live · no cache",
+          tip: `Dev environments are read live. Model metadata for a catalog is cached every ${everyLong} instead.`,
+        },
+        refresh: null,
+      };
+    const at = hhmm(view.loadedAt || view.freshness.computed_at);
+    return {
+      cache: {
+        text: `cache: every ${every}${at ? ` · as of ${at}` : ""}`,
+        tip: `Model metadata is cached every ${everyLong} to enable quick loading. Dev environments are read live.`,
+      },
+      refresh: {
+        text: "refresh",
+        tip: "Each model has a refresh button, so you don't have to wait for another cache run.",
+      },
+    };
+  });
+
   // run-status colours shown on the runs + grid tabs
   const RUN_STATUSES = [
     ["applied", "applied (ok)"],
@@ -130,6 +162,14 @@
         <span class="sw dot" style="background:{STATUS_COLOR[k]}"></span>{label}
       </span>
     {/each}
+  {/if}
+
+  {#if view.refreshSeconds > 0}
+    <span class="sep"></span>
+    <span class="item cache" data-tip={cache.cache.tip}>{cache.cache.text}</span>
+    {#if cache.refresh}
+      <span class="item cache" data-tip={cache.refresh.tip}>{cache.refresh.text}</span>
+    {/if}
   {/if}
 
   <span class="help-wrap">
@@ -303,6 +343,9 @@
     width: 1px;
     height: 16px;
     background: var(--sep);
+  }
+  .cache {
+    color: var(--muted);
   }
   .help-wrap {
     position: relative;

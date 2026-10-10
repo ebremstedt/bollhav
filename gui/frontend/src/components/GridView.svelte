@@ -1,5 +1,6 @@
 <script>
   import { view, passesTime, matOk } from "../lib/view.svelte.js";
+  import RefreshModel from "./RefreshModel.svelte";
   import { ui } from "../lib/url.svelte.js";
   import ModelFilter from "./ModelFilter.svelte";
   import { getGrid, getErrors } from "../lib/api.js";
@@ -76,22 +77,30 @@
       : new Set(view.full.nodes.filter((n) => n.type === "model" && matOk(n)).map((n) => n.name)),
   );
 
+  // Each load takes a sequence number; an answer that arrives after a newer
+  // load started (a quick catalog switch while a big catalog was still
+  // answering) is dropped, not drawn.
+  let seq = 0;
   async function load(n) {
+    const mine = ++seq;
     loading = true;
     try {
-      groups = await getGrid(n);
+      const d = await getGrid(n);
+      if (mine !== seq) return;
+      groups = d;
       loaded = true;
     } catch {
-      groups = [];
+      if (mine === seq) groups = [];
     } finally {
-      loading = false;
+      if (mine === seq) loading = false;
     }
   }
 
-  // (re)load on env / refresh / limit change
+  // (re)load on catalog / env / refresh / limit change
   $effect(() => {
     const n = effectiveLimit;
     if (!n) return; // the scroll area isn't measured yet
+    if (!view.catalog) return; // the catalogs haven't been listed yet
     void view.env;
     void view.refreshAt;
     selected = null;
@@ -308,6 +317,7 @@
         <aside class="detail left">
           <div class="det-head">
             <span class="det-title" title={modelPanel}>{shortName(modelPanel)}</span>
+            <RefreshModel name={modelPanel} />
             <button class="x" onclick={() => (modelPanel = null)}>✕</button>
           </div>
           <div class="det-kv"><span>full name</span><span class="mono small">{modelPanel}</span></div>
@@ -358,6 +368,7 @@
         <aside class="detail">
           <div class="det-head">
             <span class="det-title" title={selected.full_name}>{shortName(selected.full_name)}</span>
+            <RefreshModel name={selected.full_name} />
             <button class="x" onclick={() => (selected = null)}>✕</button>
           </div>
           {#if one}
