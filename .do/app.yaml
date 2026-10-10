@@ -1,0 +1,90 @@
+# bollhav.dev as one DigitalOcean App Platform app: the docs at /, learn at
+# /learn and lab at /lab, three static sites built from this repo on every
+# push to main. Replaces the separate bollhav-learn and bollhav-lab apps.
+#
+# App Platform trims the matched prefix before it reaches a component, so
+# /learn/_astro/x.css is served from learn's dist/_astro/x.css. The two
+# single-page sites therefore build with BASE_PATH set (below), which makes
+# their asset URLs carry the prefix; without it they build for the root, as
+# their old apps still do.
+#
+# Rollout (in this order, nothing user-visible breaks in between):
+#   1. doctl apps update 5f566227-0449-40d5-9106-9a2146795460 --spec .do/app.yaml
+#      — updates the existing `bollhav` app in place, so bollhav.dev and its
+#      certificate stay. Until step 2 lands, /learn and /lab build for the
+#      root and look broken; nothing links to them yet.
+#   2. Merge the branch that carries this file and the BASE_PATH-aware configs
+#      (learn/astro.config.mjs, lab/vite.config.js); the push redeploys.
+#   3. Cloudflare → Rules → Redirect Rules, two dynamic 301s:
+#        learn.bollhav.dev/*  →  https://bollhav.dev/learn/${1}
+#        lab.bollhav.dev/*    →  https://bollhav.dev/lab/${1}
+#      The proxied DNS records stay as they are; the rules answer at the edge.
+#   4. doctl apps delete c7f5bacc-7867-4e68-a91d-b1ce0a50e9ac   # bollhav-learn
+#      doctl apps delete dbc00245-5756-48b7-87da-76deb7582338   # bollhav-lab
+name: bollhav
+region: ams
+features:
+  - buildpack-stack=ubuntu-22
+alerts:
+  - rule: DEPLOYMENT_FAILED
+  - rule: DOMAIN_FAILED
+domains:
+  - domain: bollhav.dev
+    type: PRIMARY
+    zone: bollhav.dev
+  - domain: www.bollhav.dev
+    type: ALIAS
+    zone: bollhav.dev
+ingress:
+  rules:
+    - match:
+        path:
+          prefix: /learn
+      component:
+        name: bollhav-learn
+    - match:
+        path:
+          prefix: /lab
+      component:
+        name: bollhav-lab
+    - match:
+        path:
+          prefix: /
+      component:
+        name: bollhav-docs
+static_sites:
+  - name: bollhav-docs
+    github:
+      repo: ebremstedt/bollhav
+      branch: main
+      deploy_on_push: true
+    source_dir: docs
+    environment_slug: python
+    build_command: pip install -r requirements.txt && mkdocs build
+    output_dir: site
+  - name: bollhav-learn
+    github:
+      repo: ebremstedt/bollhav
+      branch: main
+      deploy_on_push: true
+    source_dir: learn
+    environment_slug: node-js
+    build_command: npm ci && npm run build
+    output_dir: dist
+    envs:
+      - key: BASE_PATH
+        value: /learn
+        scope: BUILD_TIME
+  - name: bollhav-lab
+    github:
+      repo: ebremstedt/bollhav
+      branch: main
+      deploy_on_push: true
+    source_dir: lab
+    environment_slug: node-js
+    build_command: npm ci && npm run build
+    output_dir: dist
+    envs:
+      - key: BASE_PATH
+        value: /lab
+        scope: BUILD_TIME
