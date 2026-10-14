@@ -1,0 +1,410 @@
+/* bollhav deck
+   Layout: one full-viewport slide at a time over a canvas "ball sea"; slide
+   content sits in a left-aligned measure with a mono eyebrow number; the
+   chrome (home link, theme/outline/fullscreen, counter, arrows) is pinned to
+   the viewport edges. Colours come from the logo: navy, two blues, cream. */
+
+:root {
+  --bg: #f3ead7;
+  --bg-glow: #e6dcc2;
+  --bg-2: #e9dfc6;
+  --fg: #142448;
+  --fg-2: #4a5a80;
+  --accent: #2b5ca8;
+  --accent-2: #93b8dd;
+  --line: rgba(20, 36, 72, 0.16);
+  --code-bg: #10203f;
+  --code-fg: #e9e2d0;
+  --code-line: rgba(255, 255, 255, 0.08);
+
+  /* canvas sea */
+  --ball-a: #1c2f5e;
+  --ball-b: #3f67a8;
+  --ball-c: #9cc0e4;
+  --ball-d: #c9ddf1;
+  --ball-rim: #1c2f5e;
+  --sea-alpha: 0.42;
+
+  --font-display: 'Familjen Grotesk', system-ui, 'Helvetica Neue', Arial, sans-serif;
+  --font-body: var(--font-display);
+  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --bg: #0a142c;
+    --bg-glow: #16305f;
+    --bg-2: #13244a;
+    --fg: #efe6d0;
+    --fg-2: #aab7d2;
+    --accent: #93b8dd;
+    --accent-2: #3f67a8;
+    --line: rgba(239, 230, 208, 0.16);
+    --code-bg: #0e1c3a;
+    --code-fg: #e9e2d0;
+    --code-line: rgba(239, 230, 208, 0.12);
+    --ball-a: #bcd6ef;
+    --ball-b: #9cc0e4;
+    --ball-c: #3f67a8;
+    --ball-d: #1f3a6e;
+    --ball-rim: #efe3c9;
+    --sea-alpha: 0.5;
+    color-scheme: dark;
+  }
+}
+:root[data-theme='dark'] {
+  --bg: #0a142c;
+  --bg-glow: #16305f;
+  --bg-2: #13244a;
+  --fg: #efe6d0;
+  --fg-2: #aab7d2;
+  --accent: #93b8dd;
+  --accent-2: #3f67a8;
+  --line: rgba(239, 230, 208, 0.16);
+  --code-bg: #0e1c3a;
+  --code-fg: #e9e2d0;
+  --code-line: rgba(239, 230, 208, 0.12);
+  --ball-a: #bcd6ef;
+  --ball-b: #9cc0e4;
+  --ball-c: #3f67a8;
+  --ball-d: #1f3a6e;
+  --ball-rim: #efe3c9;
+  --sea-alpha: 0.5;
+  color-scheme: dark;
+}
+
+/* ---------- base ---------- */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+}
+
+body {
+  background: var(--bg);
+  background-image: radial-gradient(120% 70% at 50% 115%, var(--bg-glow) 0%, var(--bg) 60%);
+  background-attachment: fixed;
+  color: var(--fg);
+  font-family: var(--font-body);
+  font-size: 16px;
+  line-height: 1.45;
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+a {
+  color: var(--accent);
+  text-decoration-thickness: 0.08em;
+  text-underline-offset: 0.15em;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* ---------- slide typography (what a slide author gets for free) ---------- */
+
+.slide-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr); /* a long code line can't widen the slide */
+  gap: clamp(0.9rem, 2vh, 1.4rem);
+  min-width: 0;
+}
+
+.slide-body h1 {
+  margin: 0;
+  font-size: clamp(3rem, 9vw, 7rem);
+  font-weight: 700;
+  line-height: 0.95;
+  letter-spacing: -0.035em;
+  text-wrap: balance;
+}
+
+.slide-body h2 {
+  margin: 0 0 0.1em;
+  font-size: clamp(1.9rem, 4.8vw, 3.9rem);
+  font-weight: 700;
+  line-height: 1.02;
+  letter-spacing: -0.025em;
+  text-wrap: balance;
+}
+
+.slide-body h3 {
+  margin: 0;
+  font-size: clamp(1.15rem, 2vw, 1.6rem);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.slide-body p,
+.slide-body li {
+  margin: 0;
+  font-size: clamp(1.05rem, 1.7vw, 1.5rem);
+  line-height: 1.45;
+  max-width: 62ch;
+}
+
+.slide-body p + p {
+  margin-top: -0.2rem;
+}
+
+.slide-body .lead {
+  font-size: clamp(1.25rem, 2.4vw, 2rem);
+  color: var(--fg-2);
+  max-width: 34ch;
+  text-wrap: balance;
+}
+
+.slide-body .muted {
+  color: var(--fg-2);
+}
+
+.slide-body ul,
+.slide-body ol {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.55em;
+}
+
+.slide-body ul li {
+  position: relative;
+  padding-left: 1.4em;
+}
+
+/* a small ball as the bullet */
+.slide-body ul li::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0.55em;
+  width: 0.6em;
+  height: 0.6em;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 32%, #ffffffb8 0%, var(--accent) 65%);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--fg) 35%, transparent);
+}
+
+.slide-body ol {
+  counter-reset: item;
+}
+
+.slide-body ol li {
+  position: relative;
+  padding-left: 2.2em;
+  counter-increment: item;
+}
+
+.slide-body ol li::before {
+  content: counter(item, decimal-leading-zero);
+  position: absolute;
+  left: 0;
+  top: 0.25em;
+  font-family: var(--font-mono);
+  font-size: 0.7em;
+  letter-spacing: 0.08em;
+  color: var(--accent);
+}
+
+.slide-body blockquote {
+  margin: 0;
+  font-size: clamp(1.6rem, 3.8vw, 3.2rem);
+  font-weight: 500;
+  line-height: 1.12;
+  letter-spacing: -0.015em;
+  max-width: 24ch;
+  text-wrap: balance;
+}
+
+.slide-body blockquote cite {
+  display: block;
+  margin-top: 0.8em;
+  font-style: normal;
+  font-size: 0.42em;
+  font-family: var(--font-mono);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--fg-2);
+}
+
+.slide-body code {
+  font-family: var(--font-mono);
+  font-size: 0.86em;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: 0.35em;
+  padding: 0.08em 0.4em;
+}
+
+.slide-body img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  box-shadow: 0 24px 60px -30px rgba(10, 20, 44, 0.6);
+}
+
+.slide-body img.plain {
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.slide-body table {
+  border-collapse: collapse;
+  font-size: clamp(0.95rem, 1.4vw, 1.25rem);
+  width: 100%;
+  max-width: 62rem;
+}
+
+.slide-body th,
+.slide-body td {
+  text-align: left;
+  padding: 0.5em 0.8em;
+  border-bottom: 1px solid var(--line);
+  vertical-align: top;
+}
+
+.slide-body th {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  font-size: 0.8em;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--fg-2);
+}
+
+.slide-body .table {
+  overflow-x: auto;
+  min-width: 0;
+}
+
+/* two (or more) columns; stacks on narrow screens */
+.slide-body .cols {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 17rem), 1fr));
+  gap: clamp(1.25rem, 4vw, 4rem);
+  align-items: start;
+}
+
+.slide-body .cols > * {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.9rem;
+}
+
+/* a key cap, for hints and shortcut lists */
+kbd {
+  font-family: var(--font-mono);
+  font-size: 0.8em;
+  padding: 0.1em 0.45em;
+  border: 1px solid var(--line);
+  border-bottom-width: 2px;
+  border-radius: 0.35em;
+  background: var(--bg-2);
+}
+
+/* ---------- code blocks (Code.svelte) ---------- */
+
+.code {
+  margin: 0;
+  min-width: 0;
+  max-width: 100%;
+  background: var(--code-bg);
+  color: var(--code-fg);
+  border: 1px solid var(--code-line);
+  border-radius: 14px;
+  box-shadow: 0 30px 60px -36px rgba(10, 20, 44, 0.7);
+  font-family: var(--font-mono);
+  font-size: clamp(0.78rem, 1.25vw, 1.08rem);
+  line-height: 1.6;
+}
+
+.code figcaption {
+  display: flex;
+  align-items: center;
+  gap: 0.6em;
+  padding: 0.6em 1.2em;
+  border-bottom: 1px solid var(--code-line);
+  font-size: 0.78em;
+  letter-spacing: 0.08em;
+  color: color-mix(in srgb, var(--code-fg) 70%, transparent);
+}
+
+.code figcaption::before {
+  content: '';
+  width: 0.7em;
+  height: 0.7em;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 32%, #ffffffb8 0%, #93b8dd 65%);
+}
+
+.code pre {
+  margin: 0;
+  padding: 1em 1.25em;
+  overflow-x: auto;
+  tab-size: 4;
+}
+
+.code code {
+  font: inherit;
+  background: none;
+  border: 0;
+  padding: 0;
+}
+
+.tk-k { color: #93b8dd; }
+.tk-s { color: #e9c98c; }
+.tk-c { color: #7f90b8; font-style: italic; }
+.tk-n { color: #e5b1a6; }
+.tk-d { color: #f0dfb4; }
+.tk-t { color: #ffffff; }
+.tk-v { color: #b9d0ee; }
+.tk-p { color: #7f90b8; user-select: none; }
+
+/* ---------- motion ---------- */
+
+@keyframes deck-rise {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes deck-slide {
+  from {
+    opacity: 0;
+    transform: translateX(var(--dx, 28px));
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition-duration: 0.01ms !important;
+  }
+}

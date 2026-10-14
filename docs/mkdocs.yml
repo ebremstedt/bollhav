@@ -1,6 +1,8 @@
 site_name: bollhav
 site_description: Model definition framework that standardizes data-pipeline code
-site_url: https://bollhav.dev/
+# Served under /docs on bollhav.dev (the deck sits at the root — see
+# .do/app.yaml). Pages link relatively, so only this URL carries the prefix.
+site_url: https://bollhav.dev/docs/
 repo_url: https://github.com/ebremstedt/bollhav
 repo_name: ebremstedt/bollhav
 edit_uri: edit/main/docs/content/
