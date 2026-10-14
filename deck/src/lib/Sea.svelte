@@ -10,7 +10,9 @@
 
   const { Engine, Bodies, Body, Composite } = Matter
 
-  let { progress = 0, theme = 'light', dir = 1 } = $props()
+  // `hoop` turns on the game: a hoop sweeps across the screen and a ball you
+  // launch (click) that passes through it scores; `onscore(total)` reports.
+  let { progress = 0, theme = 'light', dir = 1, hoop = false, onscore = () => {} } = $props()
 
   // ---- knobs ----
   const PILE = 0.18 // share of the viewport height the settled pile fills
@@ -36,7 +38,14 @@
   let kick = 0
   let shove = 0
   let sprites = new Map()
-  let tokens = { a: '#1c2f5e', b: '#3f67a8', c: '#9cc0e4', d: '#fbf6ea', rim: '#1c2f5e', alpha: 0.5 }
+  let tokens = { a: '#1c2f5e', b: '#3f67a8', c: '#9cc0e4', d: '#fbf6ea', rim: '#1c2f5e', accent: '#2b5ca8', alpha: 0.5 }
+
+  // ---- the hoop game ----
+  const HOOP_RX = 42 // half-width of the opening
+  const HOOP_RY = 13 // the rim's vertical squash (seen at an angle)
+  let score = 0
+  let pops = [] // "+1" popups: { x, y, age }
+  let hoopFlash = 0 // pulses when a ball goes through
 
   const reduced = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches
   const WALL = 400 // thick walls so a fast ball can't tunnel through
@@ -51,6 +60,8 @@
       c: g('--ball-c', tokens.c),
       d: g('--ball-d', tokens.d),
       rim: g('--ball-rim', tokens.rim),
+      accent: g('--accent', tokens.accent),
+      warm: g('--warm-1', '#ff7a45'),
       alpha: parseFloat(g('--sea-alpha', '0.5')),
     }
     sprites = new Map()
@@ -167,9 +178,50 @@
     return s
   }
 
-  function render() {
+  // where the hoop is: a slow sweep across the middle band, bobbing
+  function hoopAt(sec) {
+    return {
+      x: W * (0.5 + 0.38 * Math.sin(sec * 0.45)),
+      y: H * (0.45 + 0.12 * Math.sin(sec * 0.8 + 1)),
+    }
+  }
+
+  // half the rim: the back arc goes behind the balls, the front arc over them
+  function rimArc(hx, hy, back, scale) {
+    ctx.save()
+    ctx.strokeStyle = tokens.accent
+    ctx.lineWidth = 3.5
+    ctx.lineCap = 'round'
+    ctx.shadowColor = tokens.accent
+    ctx.shadowBlur = 10 * hoopFlash
+    ctx.beginPath()
+    ctx.ellipse(hx, hy, HOOP_RX * scale, HOOP_RY * scale, 0, back ? Math.PI : 0, back ? 2 * Math.PI : Math.PI)
+    ctx.stroke()
+    if (!back) {
+      // a little net under the front of the rim
+      ctx.globalAlpha = 0.45
+      ctx.lineWidth = 1.2
+      for (let i = -2; i <= 2; i++) {
+        const t = i / 2
+        ctx.beginPath()
+        ctx.moveTo(hx + HOOP_RX * scale * t, hy + Math.sqrt(1 - t * t) * HOOP_RY * scale)
+        ctx.lineTo(hx + HOOP_RX * scale * t * 0.55, hy + HOOP_RY * scale + 30)
+        ctx.stroke()
+      }
+      ctx.beginPath()
+      ctx.moveTo(hx - HOOP_RX * scale * 0.55, hy + HOOP_RY * scale + 30)
+      ctx.lineTo(hx + HOOP_RX * scale * 0.55, hy + HOOP_RY * scale + 30)
+      ctx.stroke()
+    }
+    ctx.restore()
+  }
+
+  function render(sec = 0) {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
     ctx.clearRect(0, 0, W, H)
+    const h = hoop ? hoopAt(sec) : null
+    const scale = 1 + 0.25 * hoopFlash
+    if (h) rimArc(h.x, h.y, true, scale)
     // opaque: translucent balls blend where they touch and the pile goes white
     ctx.globalAlpha = 1
     for (const b of balls) {
@@ -177,6 +229,42 @@
       const s = sprite(b.tone, Math.round(b.r))
       const w = s.width / dpr
       ctx.drawImage(s, x - w / 2, y - w / 2, w, w)
+    }
+    if (h) rimArc(h.x, h.y, false, scale)
+    // the "+1"s
+    ctx.save()
+    ctx.font = `600 ${Math.round(22)}px ${getComputedStyle(document.documentElement).getPropertyValue('--font-mono') || 'monospace'}`
+    ctx.textAlign = 'center'
+    ctx.fillStyle = tokens.warm
+    for (const p of pops) {
+      ctx.globalAlpha = 1 - p.age
+      ctx.fillText('+1', p.x, p.y - 30 - p.age * 40)
+    }
+    ctx.restore()
+  }
+
+  // a launched ball whose path crossed the hoop's opening this frame scores
+  function checkHoop(sec) {
+    const h = hoopAt(sec)
+    for (const b of balls) {
+      if (!b.live) continue
+      const p = b.body.position
+      if (b.py !== undefined && (b.py - h.y) * (p.y - h.y) < 0) {
+        const t = (h.y - b.py) / (p.y - b.py)
+        const xAt = b.px + (p.x - b.px) * t
+        if (Math.abs(xAt - h.x) <= HOOP_RX - b.r * 0.5) {
+          score += 1
+          hoopFlash = 1
+          pops.push({ x: h.x, y: h.y, age: 0 })
+          onscore(score)
+          b.live = false // one point per flight
+        }
+      }
+      b.px = p.x
+      b.py = p.y
+      // back in the pile and slow: the flight is over
+      const v = b.body.velocity
+      if (p.y > H * 0.78 && Math.hypot(v.x, v.y) < 1.5) b.live = false
     }
   }
 
@@ -226,7 +314,14 @@
         Body.setVelocity(b.body, { x: 0, y: 0 })
       }
     }
-    render()
+
+    if (hoop) {
+      checkHoop(sec)
+      hoopFlash *= Math.pow(0.5, dt / 250)
+      for (const p of pops) p.age += dt / 900
+      pops = pops.filter((p) => p.age < 1)
+    }
+    render(sec)
   }
 
   // click a ball and it shoots up, 40–70% of the way to the top, then lands.
@@ -243,8 +338,20 @@
       if (Math.hypot(p.x - px, p.y - py) > Math.max(b.r, 22)) continue
       const rise = (0.4 + Math.random() * 0.3) * H * 1.1
       Body.setVelocity(b.body, { x: (Math.random() - 0.5) * 5, y: -Math.sqrt(2 * G * rise) })
+      b.live = true // in flight: eligible to score
+      b.px = p.x
+      b.py = p.y
     }
   }
+
+  // the game (re)starts from zero when the hoop is switched on
+  $effect(() => {
+    if (hoop) {
+      score = 0
+      pops = []
+      onscore(0)
+    }
+  })
 
   // reduced motion: let the pile settle off-screen, then show it still
   function settle() {

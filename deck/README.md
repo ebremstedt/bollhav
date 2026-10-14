@@ -72,6 +72,11 @@ are not in the deck; copy one to start a new slide.
 | `o` | outline (click any slide title to jump) |
 | `f` | fullscreen |
 | `t` | light / dark |
+| `h` | the hoop game (also the hoop button, top right) |
+
+The hoop game: a hoop sweeps across the screen for 15 seconds; click a ball
+to launch it, and every launched ball that passes through the hoop scores.
+The best score is kept in the browser.
 
 Swipe on touch screens. The URL hash is the slide number (`#4`), so a slide
 can be linked to. The theme follows the OS until toggled; the choice is saved.

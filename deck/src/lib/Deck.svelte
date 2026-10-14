@@ -30,7 +30,45 @@
   let outlineOpen = $state(false)
   let theme = $state(initialTheme())
   let titles = $state([])
+  let hoopOn = $state(false) // the hoop game; the button top right or `h`
+  let score = $state(0)
+  let high = $state(readHigh())
   let root
+
+  // a round lasts ROUND seconds; then the hoop goes away and the score resets
+  const ROUND = 15
+  let timeLeft = $state(ROUND)
+  $effect(() => {
+    if (!hoopOn) return
+    timeLeft = ROUND
+    const start = performance.now()
+    const id = setInterval(() => {
+      timeLeft = Math.max(0, Math.ceil(ROUND - (performance.now() - start) / 1000))
+      if (timeLeft === 0) {
+        hoopOn = false
+        score = 0
+      }
+    }, 200)
+    return () => clearInterval(id)
+  })
+
+  function readHigh() {
+    try {
+      return parseInt(localStorage.getItem('hoopHigh'), 10) || 0
+    } catch {
+      return 0
+    }
+  }
+
+  // the best score survives in this browser
+  $effect(() => {
+    if (score > high) {
+      high = score
+      try {
+        localStorage.setItem('hoopHigh', String(score))
+      } catch {}
+    }
+  })
 
   const progress = $derived(n > 1 ? current / (n - 1) : 0)
 
@@ -108,24 +146,34 @@
       case 't':
         toggleTheme()
         break
+      case 'h':
+        hoopOn = !hoopOn
+        break
       case 'Escape':
         outlineOpen = false
         break
     }
   }
 
-  // swipe (touch only, so mouse text selection is untouched)
+  // swipe (touch only, so mouse text selection is untouched). The decision
+  // is made while the finger moves, not on release: a browser that decides
+  // mid-gesture to scroll instead fires pointercancel and never pointerup.
   let swipe = null
   function onPointerDown(e) {
     if (e.pointerType !== 'touch' || outlineOpen) return
-    swipe = { x: e.clientX, y: e.clientY }
+    swipe = { x: e.clientX, y: e.clientY, done: false }
   }
-  function onPointerUp(e) {
-    if (!swipe) return
+  function onPointerMove(e) {
+    if (!swipe || swipe.done || e.pointerType !== 'touch') return
     const dx = e.clientX - swipe.x
     const dy = e.clientY - swipe.y
+    if (Math.abs(dx) > 48 && Math.abs(dx) > Math.abs(dy) * 1.3) {
+      swipe.done = true
+      dx < 0 ? next() : prev()
+    }
+  }
+  function onPointerEnd() {
     swipe = null
-    if (Math.abs(dx) > 48 && Math.abs(dx) > Math.abs(dy) * 1.3) dx < 0 ? next() : prev()
   }
 
   // theme -> <html data-theme>
@@ -158,9 +206,16 @@
   })
 </script>
 
-<svelte:window onkeydown={onKey} onhashchange={onHash} onpointerdown={onPointerDown} onpointerup={onPointerUp} />
+<svelte:window
+  onkeydown={onKey}
+  onhashchange={onHash}
+  onpointerdown={onPointerDown}
+  onpointermove={onPointerMove}
+  onpointerup={onPointerEnd}
+  onpointercancel={onPointerEnd}
+/>
 
-<Sea {progress} {theme} {dir} />
+<Sea {progress} {theme} {dir} hoop={hoopOn} onscore={(s) => (score = s)} />
 
 <div class="deck" data-dir={dir} bind:this={root}>
   {#each slides as S, i (i)}
@@ -188,6 +243,18 @@
         <a href={l.href}>{l.label}</a>
       {/each}
     </nav>
+    {#if hoopOn}
+      <span class="scorepill" title="Click a ball to launch it through the hoop. {ROUND} seconds per round">
+        <b>{score}</b> <span class="sep">·</span> <span class="time" class:low={timeLeft <= 5}>{timeLeft}s</span>
+        <span class="sep">·</span> best <b>{high}</b>
+      </span>
+    {/if}
+    <button class="btn" class:on={hoopOn} onclick={() => (hoopOn = !hoopOn)} title="Hoop game (h)" aria-label="Hoop game" aria-pressed={hoopOn}>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+        <ellipse cx="12" cy="9" rx="8" ry="3" />
+        <path d="M6 11.5l1.5 6.5M18 11.5l-1.5 6.5M9 12l.6 6M15 12l-.6 6M7.5 18h9" stroke-width="1.3" />
+      </svg>
+    </button>
     <button class="btn" onclick={toggleTheme} title="Theme (t)" aria-label="Toggle theme">
       {#if theme === 'dark'}
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
@@ -218,7 +285,7 @@
     {pad(current + 1)} <span class="sep">/</span> {pad(n)}
   </button>
   {#if current === 0 && n > 1}
-    <p class="hint"><kbd>o</kbd> outline <span class="sep">·</span> <kbd>f</kbd> fullscreen <span class="sep">·</span> <kbd>t</kbd> theme</p>
+    <p class="hint"><kbd>o</kbd> outline <span class="sep">·</span> <kbd>f</kbd> fullscreen <span class="sep">·</span> <kbd>t</kbd> theme <span class="sep">·</span> <kbd>h</kbd> hoop</p>
   {/if}
   <div class="group">
     <button class="btn" onclick={prev} disabled={current === 0} aria-label="Previous slide">
@@ -270,6 +337,9 @@
     height: 100dvh;
     overflow-y: auto;
     overflow-x: hidden;
+    /* a slide is a scroll container, so the swipe rule must sit here: the
+       browser only looks at touch-action up to the nearest scrollable box */
+    touch-action: pan-y;
     display: flex;
     flex-direction: column;
     /* the bottom fifth belongs to the ball pile */
@@ -454,6 +524,48 @@
   }
   .counter:hover {
     color: var(--fg);
+  }
+  .btn.on {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--bg);
+  }
+
+  /* score and best, beside the hoop button */
+  .scorepill {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    height: 2.5rem;
+    padding-inline: 0.85rem;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--bg) 72%, transparent);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    font-family: var(--font-mono);
+    font-size: 0.85rem;
+    letter-spacing: 0.04em;
+    color: var(--fg-2);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+  .scorepill b {
+    font-weight: 700;
+    font-size: 1rem;
+  }
+  .scorepill b:first-of-type {
+    color: var(--warm-1); /* the score, orange red */
+  }
+  .scorepill b:last-of-type {
+    color: var(--warm-2); /* the best, gold */
+  }
+  .scorepill .time {
+    min-width: 2.2em;
+    text-align: center;
+  }
+  .scorepill .time.low {
+    color: var(--warm-1);
   }
   .sep {
     opacity: 0.45;
