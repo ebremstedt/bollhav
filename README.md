@@ -14,7 +14,8 @@
 </p>
 
 <p align="center">
-  <a href="https://bollhav.dev">Docs</a> ·
+  <a href="https://bollhav.dev">Why bollhav</a> ·
+  <a href="https://bollhav.dev/docs/">Docs</a> ·
   <a href="https://bollhav.dev/learn/">Learn</a> ·
   <a href="https://bollhav.dev/lab/">Lab</a>
 </p>
