@@ -88,6 +88,7 @@ html,
 body {
   margin: 0;
   height: 100%;
+  -webkit-text-size-adjust: 100%; /* no text inflation on iOS */
 }
 
 body {

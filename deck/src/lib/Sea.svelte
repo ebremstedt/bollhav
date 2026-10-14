@@ -13,10 +13,11 @@
   let { progress = 0, theme = 'light', dir = 1 } = $props()
 
   // ---- knobs ----
-  const PX_PER_BALL = 1300 // viewport area per ball: 1440×900 → ~1000 balls
+  const PILE = 0.18 // share of the viewport height the settled pile fills
+  const PACKING = 0.88 // measured: 1000 balls of r 5–12 fill ~20% of 1440×900
   const MAX_BALLS = 1100
-  const MIN_BALLS = 220
-  const R_MIN = 5
+  const MIN_BALLS = 120
+  const R_MIN = 5 // ball radius range at desktop width; scaled down on narrow screens
   const R_MAX = 12
   const ROCK_PERIOD = 3.4 // seconds for one left-right rock of the tank
   const ROCK_TILT = 0.22 // radians the gravity vector swings each way
@@ -60,9 +61,19 @@
     return r < 0.2 ? 'a' : r < 0.55 ? 'b' : r < 0.85 ? 'c' : 'd'
   }
 
-  // how many balls the tank holds, from the viewport size
+  // smaller balls on a narrow screen, so a phone gets a sea and not a pile
+  // of boulders
+  const radiusScale = () => Math.min(1, Math.max(0.7, W / 1440))
+
+  // how many balls fill PILE of the viewport height: the pile's area over
+  // the mean ball area (r uniform in [rMin, rMax] → π(a² + ab + b²)/3)
   function targetCount() {
-    return Math.min(MAX_BALLS, Math.max(MIN_BALLS, Math.round((W * H) / PX_PER_BALL)))
+    const s = radiusScale()
+    const a = R_MIN * s
+    const b = R_MAX * s
+    const meanArea = (Math.PI * (a * a + a * b + b * b)) / 3
+    const n = Math.round((W * H * PILE * PACKING) / meanArea)
+    return Math.min(MAX_BALLS, Math.max(MIN_BALLS, n))
   }
 
   function makeWalls() {
@@ -79,8 +90,9 @@
   // balls rain in from above the viewport (or start settled, for reduced motion)
   function spawn(count, settled = false) {
     const bodies = []
+    const s = radiusScale()
     for (let i = 0; i < count; i++) {
-      const r = R_MIN + Math.random() * (R_MAX - R_MIN)
+      const r = (R_MIN + Math.random() * (R_MAX - R_MIN)) * s
       const x = r + Math.random() * (W - 2 * r)
       const y = settled ? H - Math.random() * H * 0.3 : -r - Math.random() * H * 1.2
       const body = Bodies.circle(x, y, r, MATERIAL)
