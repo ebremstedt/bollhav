@@ -16,6 +16,8 @@
   --code-bg: #10203f;
   --code-fg: #e9e2d0;
   --code-line: rgba(255, 255, 255, 0.08);
+  --warm-1: #e2541f; /* the score: orange red */
+  --warm-2: #d99a12; /* the best score: gold */
 
   /* canvas sea */
   --ball-a: #1c2f5e;
@@ -46,6 +48,8 @@
     --code-bg: #0e1c3a;
     --code-fg: #e9e2d0;
     --code-line: rgba(239, 230, 208, 0.12);
+    --warm-1: #ff7a45;
+    --warm-2: #ffc247;
     --ball-a: #bcd6ef;
     --ball-b: #9cc0e4;
     --ball-c: #3f67a8;
@@ -67,6 +71,8 @@
   --code-bg: #0e1c3a;
   --code-fg: #e9e2d0;
   --code-line: rgba(239, 230, 208, 0.12);
+  --warm-1: #ff7a45;
+  --warm-2: #ffc247;
   --ball-a: #bcd6ef;
   --ball-b: #9cc0e4;
   --ball-c: #3f67a8;
