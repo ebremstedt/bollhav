@@ -474,7 +474,7 @@
       display: none;
     }
     .slide {
-      padding-block: 4rem max(4.5rem, 16vh);
+      padding-block: 4rem max(4.5rem, 22vh);
     }
   }
 

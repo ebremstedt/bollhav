@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>deck · phone preview</title>
+    <!-- Dev only: Vite serves this page but does not build it (only index.html
+         is an entry), so it never ships. It frames the deck at phone sizes;
+         media queries, 100dvh and the ball count all follow the frame. -->
+    <style>
+      :root { color-scheme: dark; }
+      html, body { margin: 0; height: 100%; background: #202532; color: #c9d1e2; font: 14px/1.4 ui-monospace, Menlo, monospace; }
+      body { display: grid; grid-template-rows: auto 1fr; }
+      .bar { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; padding: .6rem .9rem; border-bottom: 1px solid #343b4d; }
+      .bar button { font: inherit; color: inherit; background: #2b3242; border: 1px solid #3f4860; border-radius: 6px; padding: .3rem .7rem; cursor: pointer; }
+      .bar button[aria-pressed="true"] { background: #93b8dd; color: #0a142c; border-color: #93b8dd; }
+      .bar .size { margin-left: auto; opacity: .7; }
+      .stage { display: grid; place-items: center; padding: 1.5rem; overflow: auto; }
+      .device { position: relative; background: #0b0d12; border-radius: 44px; padding: 12px; box-shadow: 0 30px 80px -30px #000, inset 0 0 0 2px #2a3040; }
+      .device iframe { display: block; border: 0; border-radius: 32px; background: #0a142c; }
+      .notch { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); width: 36%; height: 26px; background: #0b0d12; border-radius: 0 0 18px 18px; pointer-events: none; }
+    </style>
+  </head>
+  <body>
+    <div class="bar">
+      <span>phone preview</span>
+      <button data-w="360" data-h="780">small 360×780</button>
+      <button data-w="390" data-h="844" aria-pressed="true">iPhone 390×844</button>
+      <button data-w="412" data-h="915">Pixel 412×915</button>
+      <button data-w="430" data-h="932">large 430×932</button>
+      <button id="rotate">rotate</button>
+      <button id="reload">reload</button>
+      <span class="size" id="label"></span>
+    </div>
+    <div class="stage">
+      <div class="device">
+        <iframe id="frame" src="/" title="the deck at phone size"></iframe>
+        <div class="notch"></div>
+      </div>
+    </div>
+    <script>
+      const frame = document.getElementById('frame')
+      const label = document.getElementById('label')
+      const sizes = [...document.querySelectorAll('button[data-w]')]
+      let w = 390, h = 844, landscape = false
+      function apply() {
+        const W = landscape ? h : w, H = landscape ? w : h
+        frame.width = W; frame.height = H
+        frame.style.width = W + 'px'; frame.style.height = H + 'px'
+        label.textContent = `${W} × ${H}`
+      }
+      sizes.forEach(b => b.addEventListener('click', () => {
+        sizes.forEach(x => x.setAttribute('aria-pressed', x === b))
+        w = +b.dataset.w; h = +b.dataset.h; apply()
+      }))
+      document.getElementById('rotate').addEventListener('click', () => { landscape = !landscape; apply() })
+      document.getElementById('reload').addEventListener('click', () => { frame.src = frame.src })
+      apply()
+    </script>
+  </body>
+</html>
