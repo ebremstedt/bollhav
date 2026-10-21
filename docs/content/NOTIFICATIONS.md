@@ -46,12 +46,12 @@ Model(
 `@model_lifecycle` records each model's outcome and run time. When `main()` returns, `@load_models` sends **one message per channel**, so models that share a channel appear together:
 
 ```
-Pipeline success: **daily-cha-facts-29876070-b2z6r**
+Pipeline success: **daily-orders-29876070-b2z6r**
 
-TAGS: `[fact & rst]`
+TAGS: `[orders]`
 
-- lakehouse.cha_clean_rst.FactCase: 4m 12s
-- lakehouse.cha_clean_rst.FactCaseLocation: 0m 48s
+- warehouse.orders: 4m 12s
+- warehouse.order_lines: 0m 48s
 
 2 model(s) done in 5m 0s
 ```
