@@ -17,7 +17,6 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest", "ruff", "time-machine", "pyright"]
-tui = ["textual>=0.50"]
 # The MSSQL backend needs pyodbc (a C-extension). It's optional — Postgres
 # users never install it, tests mock it, and pyright is told the import may be
 # absent (see the `# pyright: ignore` on each `import pyodbc`)
@@ -30,8 +29,6 @@ iceberg = ["pyiceberg[pyarrow]>=0.9"]
 gui = ["fastapi>=0.115", "uvicorn>=0.30"]
 
 [project.scripts]
-bollhav = "bollhav._tui_entry:main"
-bollhav-tui = "bollhav._tui_entry:main"
 bollhav-gui = "bollhav._gui_entry:main"
 
 [project.urls]

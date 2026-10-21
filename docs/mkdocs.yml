@@ -82,7 +82,6 @@ nav:
       - Environment: ENV.md
       - Decorators: DECORATORS.md
       - Tags: TAGS.md
-      - TUI: TUI.md
       - GUI: GUI.md
       - Backends:
           - Postgres: POSTGRES.md
