@@ -103,6 +103,27 @@ def test_teams_send_failure_is_logged_not_raised(monkeypatch, caplog):
     assert "failed to send" in caplog.text
 
 
+def test_teams_caps_an_oversized_message_in_the_middle(monkeypatch):
+    monkeypatch.setenv("HOOK", "https://example.test/webhook")
+    posted = []
+    monkeypatch.setattr(
+        n, "_post_json", lambda url, payload, timeout=10.0: posted.append(payload)
+    )
+    text = "HEAD " + "x" * 60_000 + " TAIL"
+    Teams(webhook_env="HOOK").send(text)
+    sent = posted[0]["attachments"][0]["content"]["body"][0]["text"]
+    assert len(sent.encode("utf-8")) <= n.TEAMS_MAX_BYTES
+    assert sent.startswith("HEAD ") and sent.endswith(" TAIL")
+    assert "message capped for Teams" in sent and "bytes cut here" in sent
+
+
+def test_capped_leaves_a_fitting_message_alone_and_respects_utf8():
+    assert n._capped("short") == "short"
+    capped = n._capped("ä" * 30_000, limit=1_000)
+    assert len(capped.encode("utf-8")) <= 1_000
+    assert capped.startswith("ä") and capped.endswith("ä")
+
+
 def test_teams_channels_with_the_same_env_var_are_equal():
     assert Teams("HOOK") == Teams("HOOK")
     assert Teams("HOOK") != Teams("OTHER")
@@ -184,6 +205,45 @@ def test_env_var_garbage_is_ignored_with_a_warning(monkeypatch, caplog):
         n.send_success()
     assert len(ok.sent) == 1
     assert "NOTIFICATIONS_ENABLED must be true or false" in caplog.text
+
+
+# ── suffixed runs ──
+
+
+def test_a_suffixed_run_is_quiet_by_default():
+    both = Recorder()
+    model = _model("orders", Notifications(on_any=both))
+    n.OUTCOMES.record(model, 1.0)
+    n.send_success(schema_suffix="test")
+    n.OUTCOMES.reset()
+    n.OUTCOMES.record(model, 1.0, RuntimeError("x"))
+    n.send_failure(RuntimeError("x"), runs=[ModelRun(model=model)], table_suffix="v2")
+    n.OUTCOMES.reset()
+    n.send_failure(
+        ConnectionError("no db"), runs=[ModelRun(model=model)], schema_suffix="test"
+    )
+    assert both.sent == []
+
+
+def test_env_var_true_lifts_the_suffix_rule_for_the_run(monkeypatch):
+    monkeypatch.setenv("NOTIFICATIONS_ENABLED", "true")
+    ok = Recorder()
+    n.OUTCOMES.record(_model("orders", Notifications(on_success=ok)), 1.0)
+    n.send_success(schema_suffix="test")
+    assert len(ok.sent) == 1 and "SCHEMA SUFFIX: `test`" in ok.sent[0]
+
+
+def test_suffixed_runs_opt_in_and_the_card_names_the_suffix(monkeypatch):
+    monkeypatch.setenv("HOSTNAME", "dev-1")
+    both = Recorder()
+    model = _model("orders", Notifications(on_any=both, suffixed_runs=True))
+    n.OUTCOMES.record(model, 1.0)
+    n.send_success(tags="[orders]", schema_suffix="test", table_suffix="v2")
+    (text,) = both.sent
+    assert text.startswith(
+        "Pipeline success: **dev-1**\n\nTAGS: `[orders]`\n\n"
+        "SCHEMA SUFFIX: `test`\n\nTABLE SUFFIX: `v2`\n\n"
+    )
 
 
 # ── success ──

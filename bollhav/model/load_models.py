@@ -288,11 +288,21 @@ def load_models(
             try:
                 func(runs=runs, debug=cfg.debug)
             except BaseException as exc:
-                send_failure(exc, runs, tags=cfg.tags)
+                send_failure(
+                    exc,
+                    runs,
+                    tags=cfg.tags,
+                    schema_suffix=cfg.schema_suffix,
+                    table_suffix=cfg.table_suffix,
+                )
                 raise
             if not cfg.dry_state:
                 PROGRESS.finish()
-            send_success(tags=cfg.tags)
+            send_success(
+                tags=cfg.tags,
+                schema_suffix=cfg.schema_suffix,
+                table_suffix=cfg.table_suffix,
+            )
 
         return wrapper
 

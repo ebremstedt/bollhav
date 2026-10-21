@@ -64,7 +64,7 @@ Non-negative int, optional. Sets every model's `batching.time.lookback`. Units a
 
 ## NOTIFICATIONS_ENABLED
 
-Bool, optional. Overrides every model's `Notifications.enabled` for this run: `false` silences all notifications (a dev run, a backfill), `true` turns them on even for models that declare `enabled=False`. Unset, each model's own setting applies. See [Notifications](NOTIFICATIONS.md).
+Bool, optional. Overrides every model's `Notifications.enabled` for this run: `false` silences all notifications (a dev run, a backfill), `true` turns them on even for models that declare `enabled=False` and also on a run with a schema or table suffix, which is otherwise quiet. Unset, each model's own settings apply. See [Notifications](NOTIFICATIONS.md).
 
 ## PROGRESS_BAR
 
