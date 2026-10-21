@@ -72,7 +72,7 @@ Model(
 )
 ```
 
-With `TEAMS_WEBHOOK` and `TEAMS_WEBHOOK_ERRORS` set in the pod's environment, a clean run posts one card per channel listing the models; a failure posts to the errors channel, names the model and the exception, lists what had completed, and @mentions the owners and maintainers of the models that asked for it.
+With `TEAMS_WEBHOOK` and `TEAMS_WEBHOOK_ERRORS` set in the pod's environment, a clean run posts one card per channel listing the models; a failure posts to the errors channel, names the model and the exception, lists what had completed, and @mentions the owners and maintainers of the models that asked for it
 
 ## What gets sent, and when
 
