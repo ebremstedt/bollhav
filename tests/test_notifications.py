@@ -230,19 +230,18 @@ def test_env_var_true_lifts_the_suffix_rule_for_the_run(monkeypatch):
     ok = Recorder()
     n.OUTCOMES.record(_model("orders", Notifications(on_success=ok)), 1.0)
     n.send_success(schema_suffix="test")
-    assert len(ok.sent) == 1 and "SCHEMA SUFFIX: `test`" in ok.sent[0]
+    assert len(ok.sent) == 1
 
 
-def test_suffixed_runs_opt_in_and_the_card_names_the_suffix(monkeypatch):
+def test_suffixed_runs_opt_in_and_the_card_reads_as_usual(monkeypatch):
     monkeypatch.setenv("HOSTNAME", "dev-1")
     both = Recorder()
     model = _model("orders", Notifications(on_any=both, suffixed_runs=True))
     n.OUTCOMES.record(model, 1.0)
     n.send_success(tags="[orders]", schema_suffix="test", table_suffix="v2")
     (text,) = both.sent
-    assert text.startswith(
-        "Pipeline success: **dev-1**\n\nTAGS: `[orders]`\n\n"
-        "SCHEMA SUFFIX: `test`\n\nTABLE SUFFIX: `v2`\n\n"
+    assert text == (
+        "Pipeline success: **dev-1**\n\nTAGS: `[orders]`\n\n1 model(s) done in 0m 1s"
     )
 
 

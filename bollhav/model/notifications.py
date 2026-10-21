@@ -164,7 +164,7 @@ class Notifications:
     together: one message per channel per run. `enabled` is the switch, and
     the `NOTIFICATIONS_ENABLED` env var overrides it for a whole run. A run
     with a schema or table suffix is a dev run and stays quiet unless
-    `suffixed_runs` is True; its cards then name the suffix."""
+    `suffixed_runs` is True."""
 
     on_any: Channel | None = None
     on_success: Channel | None = None
@@ -229,18 +229,10 @@ def _duration(seconds: float) -> str:
     return f"{hours}h {minutes}m {secs}s" if hours else f"{minutes}m {secs}s"
 
 
-def _header(
-    kind: str, tags: str | None, schema_suffix: str = "", table_suffix: str = ""
-) -> str:
+def _header(kind: str, tags: str | None) -> str:
     host = os.environ.get("HOSTNAME", socket.gethostname())
-    lines = [f"Pipeline {kind}: **{host}**"]
-    if tags:
-        lines.append(f"TAGS: `{tags}`")
-    if schema_suffix:
-        lines.append(f"SCHEMA SUFFIX: `{schema_suffix}`")
-    if table_suffix:
-        lines.append(f"TABLE SUFFIX: `{table_suffix}`")
-    return "\n\n".join(lines)
+    header = f"Pipeline {kind}: **{host}**"
+    return f"{header}\n\nTAGS: `{tags}`" if tags else header
 
 
 def _channel(model: Model, attr: str, suffixed: bool = False) -> Channel | None:
@@ -323,7 +315,7 @@ def send_success(
     for channel, outcomes in _grouped(completed, "success_channel", suffixed):
         total = _duration(sum(o.seconds for o in outcomes))
         summary = f"{len(outcomes)} model(s) done in {total}"
-        text = f"{_header('success', tags, schema_suffix, table_suffix)}\n\n"
+        text = f"{_header('success', tags)}\n\n"
         if _detail(outcomes) is Detail.MODELS:
             text += f"{_model_lines(outcomes)}\n\n"
         channel.send(
@@ -344,7 +336,7 @@ def send_failure(
     matched model's failure channel hears it instead. A suffixed run only
     reaches models with `suffixed_runs=True`."""
     suffixed = bool(schema_suffix or table_suffix)
-    header = _header("failure", tags, schema_suffix, table_suffix)
+    header = _header("failure", tags)
     failed = [o for o in OUTCOMES.items if o.error is not None]
     completed = [o for o in OUTCOMES.items if o.error is None]
     if failed:

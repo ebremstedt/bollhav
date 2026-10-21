@@ -16,7 +16,7 @@ Models default to **no notifications** (`notifications=None`).
 | `detail` | `Detail` | `Detail.MINIMAL` | `MINIMAL`: the outcome, the model count and the total time. `MODELS`: every model with its run time, and on a failure the models that completed before it |
 | `mention` | `Mention` | `Mention.NOBODY` | Whom to address from the model's [`people`](MODEL.md): `ON_FAILURE` pings owners and maintainers when the run raises, `ALWAYS` on every message. Each person once per message |
 | `enabled` | `bool` | `True` | The switch. [`NOTIFICATIONS_ENABLED`](ENV.md#notifications_enabled) in the environment overrides it either way |
-| `suffixed_runs` | `bool` | `False` | Whether a run with a [schema or table suffix](ENV.md#schema_suffix), a dev run, is reported. Off, so a developer's test run never posts to the team channel; on, and the card names the suffix |
+| `suffixed_runs` | `bool` | `False` | Whether a run with a [schema or table suffix](ENV.md#schema_suffix), a dev run, is reported. Off, so a developer's test run never posts to the team channel |
 
 So one channel for everything is `Notifications(on_any=...)`, two separate ones are `Notifications(on_success=..., on_failure=...)`, and `Notifications(on_any=..., on_failure=...)` sends everything to one place with failures diverted.
 
@@ -111,6 +111,6 @@ The host name is the pod name on Kubernetes, and `TAGS` is the run's tag express
 
 Notifications are per model, so a job with thirty models and one channel still sends one message. Leave `notifications` off the models nobody needs to hear about, or point an `on_success` and an `on_failure` at different channels to keep an alerts channel free of green cards.
 
-A run with `SCHEMA_SUFFIX` or `TABLE_SUFFIX` in effect is a dev run and sends nothing, whatever the channels say, unless the model sets `suffixed_runs=True`. Cards from such a run carry a `SCHEMA SUFFIX` or `TABLE SUFFIX` line after the `TAGS`, so nobody mistakes them for production.
+A run with `SCHEMA_SUFFIX` or `TABLE_SUFFIX` in effect is a dev run and sends nothing, whatever the channels say, unless the model sets `suffixed_runs=True`.
 
 To silence a whole run without touching the models, set `NOTIFICATIONS_ENABLED=false` in its environment: a dev container, a backfill, a test. `NOTIFICATIONS_ENABLED=true` does the opposite: it turns on models that declare `enabled=False` and lifts the suffix rule, so a suffixed test run can post on purpose. Unset, each model's own settings apply.
