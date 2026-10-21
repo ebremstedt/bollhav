@@ -45,7 +45,7 @@ Model(
 
 - **Every send logs one line**, so the run's log says what happened: `Teams notification sent via TEAMS_WEBHOOK`, `TEAMS_WEBHOOK not set, skipping Teams notification`, or `Teams notification via TEAMS_WEBHOOK failed to send: <error>`. A failed send is logged, never raised.
 - **Oversized messages are capped.** Teams rejects cards above about 28 KB, so the whole payload is kept under 26 KB. The text is cut in the middle, where nothing of interest sits, and a note in the gap says how many bytes went. A failure card keeps its header and model line at the top and the last lines of the error at the bottom.
-- **Mentions** become real @mentions for contacts with an email, which is the UPN Teams resolves. A contact without one is named in plain text.
+- **Mentions** become real @mentions for contacts with an email, which is the UPN Teams resolves. A contact without one is named in plain text
 
 ### Getting a webhook URL
 
