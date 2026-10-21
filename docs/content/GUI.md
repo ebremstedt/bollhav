@@ -10,10 +10,6 @@ It lives in the repo under [`gui/`](https://github.com/ebremstedt/bollhav/tree/m
 
 The **detail level** is a toggle in the header (the 🎄) — **lappland** is a bare graph (just boxes, names, arrows); **stockholm** turns on every decoration.
 
-![GUI — lappland (bare)](GUI_lappland.png)
-
-![GUI — stockholm (full detail)](GUI_stockholm.png)
-
 - **Managed models** have a solid yellow outline with a `model` pill and a `table` / `view` materialization pill. **Unmanaged sources** have a dashed outline coloured by kind (`model` / `api` / `file` / `hardcoded`) with an `unmanaged` pill.
 - **Status lights** (top-right of a box): error (red), running (green), **blocked** (orange — an upstream hasn't produced the data yet), and **stale** (blue — an upstream is present but too old for a freshness contract).
 - **The dependency arrows** are labelled (in stockholm) with the upstream **contract**: the completeness level (`exists` / `exact` / `encapsulate` / `through` / `whole`) and any **❄ freshness** bound.
