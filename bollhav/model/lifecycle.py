@@ -3,11 +3,13 @@ from __future__ import annotations
 import inspect
 import logging
 import os
+import time
 import traceback as _tb
 from datetime import datetime, timezone
 from functools import wraps
 from typing import Callable
 
+from bollhav.model.notifications import OUTCOMES
 from bollhav.model.progress_bar import PROGRESS
 from bollhav.model.state_dry_plan import _fmt_window, _print_state_plan
 from bollhav.model.window import (
@@ -353,7 +355,14 @@ def model_lifecycle(func: Callable) -> Callable:
                 return None
             if mark_applied:
                 return None
-            return func(*args, **kwargs)
+            started = time.monotonic()
+            try:
+                result = func(*args, **kwargs)
+            except BaseException as exc:
+                OUTCOMES.record(model, time.monotonic() - started, exc)
+                raise
+            OUTCOMES.record(model, time.monotonic() - started)
+            return result
         finally:
             PROGRESS.finish_model()
             if (

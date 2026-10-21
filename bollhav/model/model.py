@@ -25,6 +25,7 @@ from bollhav.model.source import (
 )
 from bollhav.model.curfew import Curfew
 from bollhav.model.people import People
+from bollhav.model.notifications import Notifications
 
 if TYPE_CHECKING:
     from psycopg import sql
@@ -262,6 +263,7 @@ class Model:
         description: str | None = None,
         upstream: list[Source] | None = None,
         people: People | None = None,
+        notifications: Notifications | None = None,
         **kwargs,
     ):
         self.target = target
@@ -285,6 +287,7 @@ class Model:
             )
         )
         self.people = people
+        self.notifications = notifications
         self.extra = kwargs
         self._validate_kind_consistency()
         self._validate_upstream_requires_state()

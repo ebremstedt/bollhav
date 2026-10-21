@@ -17,6 +17,7 @@ from roskarl import (
 
 from bollhav.model.runtime import apply_runtime_overrides
 from bollhav.model.modelrun import ModelRun
+from bollhav.model.notifications import OUTCOMES, send_failure, send_success
 from bollhav.model.window import compute_intervals
 from bollhav.model.progress_bar import get_progress_level, PROGRESS, ProgressLevel
 from bollhav.model.state import StateMode
@@ -208,6 +209,9 @@ def load_models(
                                       supplied window + chunk), never the backlog.
                                       No DDL, no data writes. An assertion, not a
                                       verification — only what you select
+        NOTIFICATIONS_ENABLED         bool; overrides every model's
+                                      Notifications.enabled for this run —
+                                      false silences all, true forces all on
     """
 
     def decorator(func: Callable[..., None]) -> Callable[[], None]:
@@ -280,9 +284,25 @@ def load_models(
             # (state tables, library registration, prefill, interval filtering)
             # and the POST-model sweep now live in `@model_lifecycle`, which
             # runs with the connection the user opens in `main()`.
-            func(runs=runs, debug=cfg.debug)
+            OUTCOMES.reset()
+            try:
+                func(runs=runs, debug=cfg.debug)
+            except BaseException as exc:
+                send_failure(
+                    exc,
+                    runs,
+                    tags=cfg.tags,
+                    schema_suffix=cfg.schema_suffix,
+                    table_suffix=cfg.table_suffix,
+                )
+                raise
             if not cfg.dry_state:
                 PROGRESS.finish()
+            send_success(
+                tags=cfg.tags,
+                schema_suffix=cfg.schema_suffix,
+                table_suffix=cfg.table_suffix,
+            )
 
         return wrapper
 

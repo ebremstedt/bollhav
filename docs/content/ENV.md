@@ -62,6 +62,10 @@ Bool, default `false`. Run in latest mode — process the most recent complete w
 
 Non-negative int, optional. Sets every model's `batching.time.lookback`. Units are cron-ticks of the model's `chunk`, not calendar days — see [Lookback](DECORATORS.md#lookback) for the worked examples.
 
+## NOTIFICATIONS_ENABLED
+
+Bool, optional. Overrides every model's `Notifications.enabled` for this run: `false` silences all notifications (a dev run, a backfill), `true` turns them on even for models that declare `enabled=False` and also on a run with a schema or table suffix, which is otherwise quiet. Unset, each model's own settings apply. See [Notifications](NOTIFICATIONS.md).
+
 ## PROGRESS_BAR
 
 One of `minimal` / `model` / `batch`, default `model`. Controls the verbosity of the [`@progress_bar`](DECORATORS.md#progress-bar) execution decorator.

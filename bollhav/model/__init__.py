@@ -31,6 +31,7 @@ from bollhav.model.state import (
 )
 from bollhav.model.tags import Tags
 from bollhav.model.people import Contact, People
+from bollhav.model.notifications import Detail, Mention, Notifications, Teams
 from bollhav.model.upstream import (
     Freshness,
     FreshnessScope,
@@ -76,6 +77,10 @@ __all__ = [
     "Tags",
     "Contact",
     "People",
+    "Detail",
+    "Mention",
+    "Notifications",
+    "Teams",
     "UpstreamContract",
     "Freshness",
     "FreshnessScope",
