@@ -47,12 +47,12 @@ class Channel(Protocol):
     def send(self, text: str, mentions: tuple[Contact, ...] = ()) -> None: ...
 
 
-TEAMS_MAX_BYTES = 20_000
-"""Teams rejects a webhook message above about 28 KB of JSON; this leaves room
-for the card envelope and the mentions."""
+TEAMS_MAX_BYTES = 26_000
+"""Teams rejects a webhook message above about 28 KB of JSON. The whole
+payload, card, mentions and envelope, is kept under this."""
 
 
-def _capped(text: str, limit: int = TEAMS_MAX_BYTES) -> str:
+def _capped(text: str, limit: int) -> str:
     """`text` untouched when it fits in `limit` bytes of UTF-8. Otherwise its
     head and tail with the middle cut out, and a note in the gap saying how
     much went: the start names the run and the model, the end has the last
@@ -61,17 +61,23 @@ def _capped(text: str, limit: int = TEAMS_MAX_BYTES) -> str:
     if len(data) <= limit:
         return text
     note = "\n\n… message capped for Teams, {cut:,} bytes cut here …\n\n"
-    budget = limit - len(note.format(cut=len(data)).encode("utf-8"))
+    budget = max(limit - len(note.format(cut=len(data)).encode("utf-8")), 0)
     head_len, tail_len = budget * 2 // 3, budget // 3
     head = data[:head_len].decode("utf-8", errors="ignore")
     tail = data[len(data) - tail_len :].decode("utf-8", errors="ignore")
     return head + note.format(cut=len(data) - head_len - tail_len) + tail
 
 
+def _json_bytes(payload: dict) -> bytes:
+    """The payload as it goes on the wire: UTF-8, not ASCII escapes, so an
+    `ä` costs two bytes rather than six and the size check means something."""
+    return json.dumps(payload, ensure_ascii=False).encode("utf-8")
+
+
 def _post_json(url: str, payload: dict, timeout: float = 10.0) -> None:
     request = urllib.request.Request(
         url,
-        data=json.dumps(payload).encode("utf-8"),
+        data=_json_bytes(payload),
         headers={"Content-Type": "application/json"},
     )
     with urllib.request.urlopen(request, timeout=timeout) as response:
@@ -94,38 +100,50 @@ class Teams:
         if not url:
             logger.info("%s not set, skipping Teams notification", self.webhook_env)
             return
-        text = _capped(text)
-        content: dict = {
-            "type": "AdaptiveCard",
-            "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
-            "version": "1.4",
-            "body": [{"type": "TextBlock", "text": text, "wrap": True}],
-        }
-        if mentions:
-            # A contact with an email is a real @mention (the email is the UPN
-            # Teams resolves); one without is named in plain text.
-            tags = [f"<at>{c.name}</at>" if c.email else c.name for c in mentions]
-            content["body"][0]["text"] = f"{text}\n\n{' '.join(tags)}"
-            entities = [
-                {
-                    "type": "mention",
-                    "text": f"<at>{c.name}</at>",
-                    "mentioned": {"id": c.email, "name": c.name},
-                }
-                for c in mentions
-                if c.email
-            ]
+        # A contact with an email is a real @mention (the email is the UPN
+        # Teams resolves); one without is named in plain text.
+        tags = [f"<at>{c.name}</at>" if c.email else c.name for c in mentions]
+        entities = [
+            {
+                "type": "mention",
+                "text": f"<at>{c.name}</at>",
+                "mentioned": {"id": c.email, "name": c.name},
+            }
+            for c in mentions
+            if c.email
+        ]
+        suffix = f"\n\n{' '.join(tags)}" if tags else ""
+
+        def payload_for(body: str) -> dict:
+            content: dict = {
+                "type": "AdaptiveCard",
+                "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+                "version": "1.4",
+                "body": [{"type": "TextBlock", "text": body, "wrap": True}],
+            }
             if entities:
                 content["msteams"] = {"entities": entities}
-        payload = {
-            "type": "message",
-            "attachments": [
-                {
-                    "contentType": "application/vnd.microsoft.card.adaptive",
-                    "content": content,
-                }
-            ],
-        }
+            return {
+                "type": "message",
+                "attachments": [
+                    {
+                        "contentType": "application/vnd.microsoft.card.adaptive",
+                        "content": content,
+                    }
+                ],
+            }
+
+        # Budget the text so the whole payload fits: the envelope, the mentions
+        # and JSON escaping all cost bytes on top of the text itself, so trim
+        # the text by the overshoot and measure again. Two rounds in practice.
+        budget = TEAMS_MAX_BYTES
+        payload = payload_for(_capped(text, budget) + suffix)
+        for _ in range(4):
+            excess = len(_json_bytes(payload)) - TEAMS_MAX_BYTES
+            if excess <= 0 or budget <= 0:
+                break
+            budget -= excess + 16
+            payload = payload_for(_capped(text, max(budget, 0)) + suffix)
         try:
             _post_json(url, payload)
         except Exception as exc:

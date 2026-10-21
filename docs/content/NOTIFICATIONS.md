@@ -24,7 +24,7 @@ A channel is any object with `send(text: str)`. One ships:
 
 | Channel | Fields | Behaviour |
 |---|---|---|
-| `Teams(webhook_env)` | the **name of an env var** holding a Teams incoming-webhook URL | Posts an Adaptive Card. Env var unset → nothing is sent, so local runs stay quiet. A failed send is logged, never raised. Every send logs one line: sent, skipped or failed. A message over 20 KB is cut in the middle with a note saying how much went, since Teams rejects cards above about 28 KB. Mentions become real @mentions for contacts with an email, plain names otherwise. |
+| `Teams(webhook_env)` | the **name of an env var** holding a Teams incoming-webhook URL | Posts an Adaptive Card. Env var unset → nothing is sent, so local runs stay quiet. A failed send is logged, never raised. Every send logs one line: sent, skipped or failed. A message that would push the card past 26 KB is cut in the middle with a note saying how much went, since Teams rejects cards above about 28 KB. Mentions become real @mentions for contacts with an email, plain names otherwise. |
 
 ```python
 from bollhav.model import Model, Notifications, Teams

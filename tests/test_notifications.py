@@ -117,11 +117,56 @@ def test_teams_caps_an_oversized_message_in_the_middle(monkeypatch):
     assert "message capped for Teams" in sent and "bytes cut here" in sent
 
 
+def _sent_payloads(monkeypatch) -> list:
+    monkeypatch.setenv("HOOK", "https://example.test/webhook")
+    posted: list = []
+    monkeypatch.setattr(
+        n, "_post_json", lambda url, payload, timeout=10.0: posted.append(payload)
+    )
+    return posted
+
+
+def test_the_whole_payload_stays_under_the_limit_with_many_mentions(monkeypatch):
+    posted = _sent_payloads(monkeypatch)
+    crowd = tuple(
+        Contact(name=f"Person Number {i}", email=f"person{i}@example.test")
+        for i in range(50)
+    )
+    Teams(webhook_env="HOOK").send("x" * 100_000, mentions=crowd)
+    assert len(n._json_bytes(posted[0])) <= n.TEAMS_MAX_BYTES
+    card = posted[0]["attachments"][0]["content"]
+    assert len(card["msteams"]["entities"]) == 50
+    assert card["body"][0]["text"].endswith("<at>Person Number 49</at>")
+    assert "message capped for Teams" in card["body"][0]["text"]
+
+
+def test_the_whole_payload_stays_under_the_limit_with_swedish_text(monkeypatch):
+    posted = _sent_payloads(monkeypatch)
+    Teams(webhook_env="HOOK").send("å" * 60_000)
+    assert len(n._json_bytes(posted[0])) <= n.TEAMS_MAX_BYTES
+    assert (
+        "message capped for Teams"
+        in posted[0]["attachments"][0]["content"]["body"][0]["text"]
+    )
+
+
+def test_a_fitting_message_is_sent_untouched_even_with_mentions(monkeypatch):
+    posted = _sent_payloads(monkeypatch)
+    Teams(webhook_env="HOOK").send("hello " + "ä" * 5_000, mentions=(ERIK, ANNA))
+    text = posted[0]["attachments"][0]["content"]["body"][0]["text"]
+    assert text == "hello " + "ä" * 5_000 + "\n\n<at>Erik</at> <at>Anna</at>"
+
+
+def test_json_goes_on_the_wire_as_utf8_not_ascii_escapes():
+    assert n._json_bytes({"t": "ä"}) == '{"t": "ä"}'.encode("utf-8")
+
+
 def test_capped_leaves_a_fitting_message_alone_and_respects_utf8():
-    assert n._capped("short") == "short"
+    assert n._capped("short", limit=100) == "short"
     capped = n._capped("ä" * 30_000, limit=1_000)
     assert len(capped.encode("utf-8")) <= 1_000
     assert capped.startswith("ä") and capped.endswith("ä")
+    assert n._capped("x" * 500, limit=0).strip().startswith("… message capped")
 
 
 def test_teams_channels_with_the_same_env_var_are_equal():
@@ -243,6 +288,50 @@ def test_suffixed_runs_opt_in_and_the_card_reads_as_usual(monkeypatch):
     assert text == (
         "Pipeline success: **dev-1**\n\nTAGS: `[orders]`\n\n1 model(s) done in 0m 1s"
     )
+
+
+def test_suffixed_opt_in_covers_failures_too():
+    errors = Recorder()
+    model = _model("orders", Notifications(on_failure=errors, suffixed_runs=True))
+    n.OUTCOMES.record(model, 2.0, RuntimeError("x"))
+    n.send_failure(RuntimeError("x"), runs=[ModelRun(model=model)], schema_suffix="t")
+    n.OUTCOMES.reset()
+    n.send_failure(
+        ConnectionError("no db"), runs=[ModelRun(model=model)], table_suffix="v2"
+    )
+    assert len(errors.sent) == 2
+    assert "RuntimeError: x" in errors.sent[0]
+    assert "ConnectionError: no db" in errors.sent[1]
+
+
+def test_env_var_false_beats_the_suffixed_opt_in(monkeypatch):
+    monkeypatch.setenv("NOTIFICATIONS_ENABLED", "false")
+    both = Recorder()
+    model = _model("orders", Notifications(on_any=both, suffixed_runs=True))
+    n.OUTCOMES.record(model, 1.0)
+    n.send_success(schema_suffix="test")
+    n.send_success()
+    assert both.sent == []
+
+
+def test_an_empty_env_var_counts_as_unset(monkeypatch):
+    monkeypatch.setenv("NOTIFICATIONS_ENABLED", "")
+    assert Notifications(enabled=False).is_enabled() is False
+    assert Notifications().is_enabled() is True
+
+
+def test_a_shared_channel_lists_only_the_models_that_may_report():
+    ok = Recorder()
+    on = Notifications(on_success=ok, detail=Detail.MODELS)
+    off = Notifications(on_success=ok, detail=Detail.MODELS, enabled=False)
+    n.OUTCOMES.record(_model("orders", on), 1.0)
+    n.OUTCOMES.record(_model("customers", off), 1.0)
+    n.OUTCOMES.record(_model("audit", None), 1.0)
+    n.send_success()
+    (text,) = ok.sent
+    assert "warehouse.orders" in text
+    assert "customers" not in text and "audit" not in text
+    assert "1 model(s) done" in text
 
 
 # ── success ──

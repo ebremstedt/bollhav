@@ -309,3 +309,115 @@ def test_deprecated_backfill_since_alias_when_run_since_unset():
         ),
     ):
         assert _window_dt("RUN_SINCE", "BACKFILL_SINCE", True, None) == legacy
+
+
+class TestNotificationsThroughTheDecorator:
+    """The wiring from `@load_models` to the notification senders: real models
+    with real `Notifications` flow through, outcomes are recorded by what
+    `main()` runs, and the run's tags and suffixes reach the sender."""
+
+    class _Recorder:
+        def __init__(self) -> None:
+            self.sent: list[str] = []
+
+        def send(self, text, mentions=()):
+            self.sent.append(text)
+
+    def _run(self, notifications, *, raise_in_main=None, times=1, **env):
+        from bollhav.model.modelrun import ModelRun
+        from bollhav.model.model import Model
+        from bollhav.model.notifications import OUTCOMES
+        from bollhav.model.target import Target
+        from bollhav.model.temporality import Temporality
+
+        model = Model(
+            target=Target(name="orders", schema="warehouse"),
+            temporality=Temporality.TIMELESS,
+            notifications=notifications,
+        )
+        patches = _patches(**env)
+        with (
+            patches[0],
+            patches[1],
+            patches[2],
+            patches[3],
+            patches[4],
+            patch(
+                "bollhav.model.load_models.apply_runtime_overrides",
+                side_effect=lambda **kw: [ModelRun(model=model)],
+            ),
+            patch("bollhav.model.load_models._print_summary", lambda cfg, runs: None),
+        ):
+
+            @load_models
+            def main(runs, debug):
+                # what @model_lifecycle does around each model's run
+                for run in runs:
+                    OUTCOMES.record(run.model, 1.0)
+                if raise_in_main:
+                    raise raise_in_main
+
+            for _ in range(times):
+                main()
+
+    @pytest.fixture(autouse=True)
+    def _clean_env(self, monkeypatch):
+        monkeypatch.delenv("NOTIFICATIONS_ENABLED", raising=False)
+        monkeypatch.setenv("HOSTNAME", "pod-1")
+
+    def test_a_clean_run_reports_with_the_run_tags(self):
+        from bollhav.model.notifications import Notifications
+
+        both = self._Recorder()
+        self._run(Notifications(on_any=both), tags="[orders]", use_schema_suffix=False)
+        assert both.sent == [
+            "Pipeline success: **pod-1**\n\nTAGS: `[orders]`\n\n1 model(s) done in 0m 1s"
+        ]
+
+    def test_outcomes_are_reset_between_runs(self):
+        from bollhav.model.notifications import Notifications
+
+        both = self._Recorder()
+        self._run(Notifications(on_any=both), times=2, use_schema_suffix=False)
+        assert len(both.sent) == 2
+        assert all("1 model(s) done" in text for text in both.sent)
+
+    def test_a_schema_suffix_keeps_the_run_quiet_unless_the_model_opts_in(self):
+        from bollhav.model.notifications import Notifications
+
+        quiet, loud = self._Recorder(), self._Recorder()
+        self._run(Notifications(on_any=quiet), schema_suffix="dev")
+        self._run(Notifications(on_any=loud, suffixed_runs=True), schema_suffix="dev")
+        assert quiet.sent == []
+        assert len(loud.sent) == 1
+
+    def test_env_var_true_makes_a_suffixed_run_report(self, monkeypatch):
+        from bollhav.model.notifications import Notifications
+
+        monkeypatch.setenv("NOTIFICATIONS_ENABLED", "true")
+        both = self._Recorder()
+        self._run(Notifications(on_any=both), schema_suffix="dev")
+        assert len(both.sent) == 1
+
+    def test_env_var_false_silences_a_production_run(self, monkeypatch):
+        from bollhav.model.notifications import Notifications
+
+        monkeypatch.setenv("NOTIFICATIONS_ENABLED", "false")
+        both = self._Recorder()
+        self._run(Notifications(on_any=both), use_schema_suffix=False)
+        assert both.sent == []
+
+    def test_a_raise_in_main_reports_the_failure_and_still_raises(self):
+        from bollhav.model.notifications import Notifications
+
+        errors = self._Recorder()
+        with pytest.raises(RuntimeError, match="boom"):
+            self._run(
+                Notifications(on_failure=errors),
+                raise_in_main=RuntimeError("boom"),
+                tags="[orders]",
+                use_schema_suffix=False,
+            )
+        (text,) = errors.sent
+        assert text.startswith("Pipeline failure: **pod-1**\n\nTAGS: `[orders]`")
+        assert "RuntimeError: boom" in text
