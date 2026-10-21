@@ -105,7 +105,7 @@ A channel shared by models with different `detail` uses the more detailed level.
 
 When `main()` raises, the models that raised report on their `on_failure` channel with the exception, and at `Detail.MODELS` also the models that completed before the failure. A run that fails before reaching any model, a connection that never opened for instance, reports to every matched model's failure channel instead. A failed run sends no success message, even for the models that completed before the failure
 
-The host name is the pod name on Kubernetes, and `TAGS` is the run's tag expression, so a message says which job it came from without any configuration.
+The host name is the pod name on Kubernetes, and `TAGS` is the run's tag expression, so a message says which job it came from without any configuration
 
 ## Keeping it quiet
 
