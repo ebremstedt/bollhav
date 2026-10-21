@@ -21,11 +21,10 @@ The **detail level** is a toggle in the header (the 🎄) — **lappland** is a 
 
 ## End to end — from pipelines to the browser
 
-How a model travels from the code that defines it, into the library and state tables, out through the API, and onto the screen — and how the [TUI](TUI.md) drives the same pipelines:
+How a model travels from the code that defines it, into the library and state tables, out through the API, and onto the screen:
 
 ```mermaid
 flowchart TD
-    TUI["bollhav TUI"] --> PIPE
     PIPE["Pipelines (main.py + @load_models)"] --> MODELS
     MODELS["Models to ModelRuns (matched by TAGS)"] --> LC
     LC["Lifecycle hooks (@model_lifecycle)"] -->|register + state + errors| DB
@@ -38,9 +37,8 @@ flowchart TD
 
 1. **Pipelines define models.** Each pipeline's `main.py` is wrapped by `@load_models`, which discovers `Model`s (their `Target`, `Temporality`, `State`, and upstream contracts), matches them by `TAGS`, and hands back `ModelRun`s with the run window resolved.
 2. **Running them writes the bookkeeping.** The lifecycle hooks register each model into the shared `library`, seed and flip its **state** rows (`pending → running → applied / blocked`) as units of work run, and log any failure to the shared `errors` table — all in the one central `z_bollhav` schema. State is also read *back* at the start of a run to skip already-`applied` units.
-3. **The TUI drives the same pipelines.** It just runs the nearest `main.py` with the env you pick — so a TUI-triggered run flows through the identical lifecycle into the same library/state. (See [TUI](TUI.md).)
-4. **The API reads, read-only.** The FastAPI backend is a thin adapter over `bollhav.postgres.registry` — every endpoint is one `SELECT` against `library` / state / `errors`. It never writes.
-5. **The frontend presents it.** Svelte Flow fetches `/graph` (and the per-model endpoints on click) and renders the DAG — managed models vs unmanaged sources, status lights, and contract/freshness on the dependency arrows.
+3. **The API reads, read-only.** The FastAPI backend is a thin adapter over `bollhav.postgres.registry` — every endpoint is one `SELECT` against `library` / state / `errors`. It never writes.
+4. **The frontend presents it.** Svelte Flow fetches `/graph` (and the per-model endpoints on click) and renders the DAG — managed models vs unmanaged sources, status lights, and contract/freshness on the dependency arrows.
 
 The key property: **all SQL/schema knowledge lives in bollhav** (`bollhav.postgres.registry`). The backend holds no SQL; the frontend holds no schema knowledge — it just renders what `/graph` returns.
 
@@ -113,7 +111,3 @@ Every endpoint is a thin wrapper over `bollhav.postgres.state.read` (and `write`
 | `GET /errors` | recent rows from the shared `errors` table |
 | `GET /freshness`, `POST /refresh`, `POST /refresh/{full_name}` | when the catalog's cache was computed; recompute it, or one model |
 | `POST /state/{full_name}/reset` | the one write: flip rows back to `pending` (off with `LINEAGE_READ_ONLY`) |
-
-## Relation to the TUI
-
-The [TUI](TUI.md) and the GUI are complementary: the **TUI runs** pipelines (it triggers `main.py` with a chosen env and streams the output), while the **GUI visualizes** what those runs have recorded (lineage, state, errors). Both work against the same central `z_bollhav` schema — the TUI through a normal pipeline run, the GUI read-only through `bollhav.postgres.registry`.

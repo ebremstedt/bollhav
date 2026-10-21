@@ -1,7 +1,7 @@
 """`bollhav.iceberg` must import without the optional `iceberg` extra.
 
 The model-config side (IcebergColumn / IcebergType) is used by apps that never
-install pyiceberg, and CI installs only `.[dev,tui]`. The catalog / table side
+install pyiceberg, and CI installs only `.[dev,gui]`. The catalog / table side
 is resolved lazily on first attribute access, so *that* is what pulls
 pyiceberg in. Checked in a subprocess so the sys.modules tampering can't leak
 into other tests.
