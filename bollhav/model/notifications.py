@@ -75,12 +75,23 @@ class Teams:
 
 @dataclass(frozen=True)
 class Notifications:
-    """Where a model's outcome goes. Either channel may be left unset. Models
-    that share a channel are reported together: one message per channel per
-    run, listing every model on it."""
+    """Where a model's outcome goes. `on_any` hears both outcomes; `on_success`
+    and `on_failure` override it for their outcome, so one channel for
+    everything, two to split, or one plus an override all work. Models that
+    share a channel are reported together: one message per channel per run,
+    listing every model on it."""
 
+    on_any: Channel | None = None
     on_success: Channel | None = None
     on_failure: Channel | None = None
+
+    @property
+    def success_channel(self) -> Channel | None:
+        return self.on_success if self.on_success is not None else self.on_any
+
+    @property
+    def failure_channel(self) -> Channel | None:
+        return self.on_failure if self.on_failure is not None else self.on_any
 
 
 @dataclass
@@ -126,9 +137,9 @@ def _header(kind: str, tags: str | None) -> str:
 def _grouped(
     outcomes: Iterable[Outcome], attr: str
 ) -> list[tuple[Channel, list[Outcome]]]:
-    """Outcomes grouped by the channel their model names for `attr`
-    (`on_success` / `on_failure`); models without one are left out. Grouping
-    is by equality, so two `Teams("X")` are one channel."""
+    """Outcomes grouped by the channel their model resolves for `attr`
+    (`success_channel` / `failure_channel`); models without one are left out.
+    Grouping is by equality, so two `Teams("X")` are one channel."""
     groups: list[tuple[Channel, list[Outcome]]] = []
     for outcome in outcomes:
         notifications = outcome.model.notifications
@@ -148,7 +159,7 @@ def send_success(tags: str | None = None) -> None:
     """After a clean `main()`: one message per `on_success` channel, listing the
     models that completed on it with their run times."""
     completed = (o for o in OUTCOMES.items if o.error is None)
-    for channel, outcomes in _grouped(completed, "on_success"):
+    for channel, outcomes in _grouped(completed, "success_channel"):
         lines = [
             f"- {o.model.target.full_name}: {_duration(o.seconds)}" for o in outcomes
         ]
@@ -169,7 +180,7 @@ def send_failure(
     matched model's failure channel hears it instead."""
     failed = [o for o in OUTCOMES.items if o.error is not None]
     if failed:
-        for channel, outcomes in _grouped(failed, "on_failure"):
+        for channel, outcomes in _grouped(failed, "failure_channel"):
             lines = [
                 f"- {o.model.target.full_name} after {_duration(o.seconds)}: "
                 f"{type(o.error).__name__}: {o.error}"
@@ -180,7 +191,7 @@ def send_failure(
     channels: list[Channel] = []
     for run in runs:
         notifications = run.model.notifications
-        channel = notifications.on_failure if notifications else None
+        channel = notifications.failure_channel if notifications else None
         if channel is not None and channel not in channels:
             channels.append(channel)
     for channel in channels:

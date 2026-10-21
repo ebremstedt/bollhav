@@ -10,8 +10,11 @@ Models default to **no notifications** (`notifications=None`).
 
 | Field | Type | Default | Purpose |
 |---|---|---|---|
-| `on_success` | channel | `None` | Where to report when the run completes cleanly |
-| `on_failure` | channel | `None` | Where to report when the run raises |
+| `on_any` | channel | `None` | Where to report either outcome |
+| `on_success` | channel | `None` | Where to report a clean run; overrides `on_any` for that outcome |
+| `on_failure` | channel | `None` | Where to report a raise; overrides `on_any` for that outcome |
+
+So one channel for everything is `Notifications(on_any=...)`, two separate ones are `Notifications(on_success=..., on_failure=...)`, and `Notifications(on_any=..., on_failure=...)` sends everything to one place with failures diverted.
 
 A channel is any object with `send(text: str)`. One ships:
 
@@ -22,6 +25,13 @@ A channel is any object with `send(text: str)`. One ships:
 ```python
 from bollhav.model import Model, Notifications, Teams
 
+# one channel for both outcomes
+Model(
+    target=...,
+    notifications=Notifications(on_any=Teams(webhook_env="TEAMS_WEBHOOK")),
+)
+
+# successes and failures apart
 Model(
     target=...,
     notifications=Notifications(

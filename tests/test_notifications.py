@@ -99,6 +99,29 @@ def test_model_carries_notifications_and_defaults_to_none():
     assert model.notifications.on_failure is None
 
 
+def test_on_any_covers_both_outcomes_and_the_specific_ones_override_it():
+    both, errors = Recorder(), Recorder()
+    only = Notifications(on_any=both)
+    assert only.success_channel is both and only.failure_channel is both
+    split = Notifications(on_any=both, on_failure=errors)
+    assert split.success_channel is both and split.failure_channel is errors
+    assert Notifications().success_channel is None
+
+
+def test_on_any_hears_a_success_and_a_failure(monkeypatch):
+    both = Recorder()
+    model = _model("orders", Notifications(on_any=both))
+    n.OUTCOMES.record(model, 3.0)
+    n.send_success()
+    n.OUTCOMES.reset()
+    n.OUTCOMES.record(model, 3.0, RuntimeError("x"))
+    n.send_failure(RuntimeError("x"), runs=[ModelRun(model=model)])
+    assert [t.split(":")[0] for t in both.sent] == [
+        "Pipeline success",
+        "Pipeline failure",
+    ]
+
+
 # ── success ──
 
 
