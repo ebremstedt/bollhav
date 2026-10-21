@@ -8,7 +8,7 @@ import pytest
 from bollhav.model import notifications as n
 from bollhav.model.model import Model
 from bollhav.model.modelrun import ModelRun
-from bollhav.model.notifications import Notifications, Teams
+from bollhav.model.notifications import Detail, Notifications, Teams
 from bollhav.model.target import Target
 from bollhav.model.temporality import Temporality
 
@@ -125,12 +125,35 @@ def test_on_any_hears_a_success_and_a_failure(monkeypatch):
 # ── success ──
 
 
+def test_minimal_success_has_tags_and_the_summary_but_no_model_lines(monkeypatch):
+    monkeypatch.setenv("HOSTNAME", "daily-x-123")
+    ok = Recorder()
+    n.OUTCOMES.record(_model("orders", Notifications(on_success=ok)), 65.0)
+    n.OUTCOMES.record(_model("customers", Notifications(on_success=ok)), 10.0)
+    n.send_success(tags="[all]")
+    (text,) = ok.sent
+    assert text == (
+        "Pipeline success: **daily-x-123**\n\nTAGS: `[all]`\n\n2 model(s) done in 1m 15s"
+    )
+
+
+def test_a_channel_is_detailed_when_any_of_its_models_asks_for_it():
+    ok = Recorder()
+    n.OUTCOMES.record(_model("orders", Notifications(on_success=ok)), 1.0)
+    n.OUTCOMES.record(
+        _model("customers", Notifications(on_success=ok, detail=Detail.MODELS)), 2.0
+    )
+    n.send_success()
+    assert "- warehouse.orders: 0m 1s" in ok.sent[0]
+
+
 def test_success_sends_one_message_per_channel_listing_its_models(monkeypatch):
     monkeypatch.setenv("HOSTNAME", "daily-x-123")
     a, b = Recorder(), Recorder()
-    n.OUTCOMES.record(_model("orders", Notifications(on_success=a)), 65.0)
-    n.OUTCOMES.record(_model("customers", Notifications(on_success=a)), 10.0)
-    n.OUTCOMES.record(_model("audit", Notifications(on_success=b)), 1.0)
+    detailed = lambda ch: Notifications(on_success=ch, detail=Detail.MODELS)  # noqa: E731
+    n.OUTCOMES.record(_model("orders", detailed(a)), 65.0)
+    n.OUTCOMES.record(_model("customers", detailed(a)), 10.0)
+    n.OUTCOMES.record(_model("audit", detailed(b)), 1.0)
     n.OUTCOMES.record(_model("silent", None), 1.0)
     n.send_success(tags="[all]")
     assert len(a.sent) == 1 and len(b.sent) == 1
@@ -166,6 +189,28 @@ def test_failure_reports_the_raising_model_on_its_own_channel():
     (text,) = errors.sent
     assert text.startswith("Pipeline failure: **")
     assert "- warehouse.orders after 0m 12s: ValueError: bad rows" in text
+
+
+def test_detailed_failure_also_lists_what_completed_before_it():
+    errors = Recorder()
+    done = _model("orders", Notifications(on_failure=errors, detail=Detail.MODELS))
+    bad = _model("customers", Notifications(on_failure=errors, detail=Detail.MODELS))
+    n.OUTCOMES.record(done, 5.0)
+    n.OUTCOMES.record(bad, 2.0, RuntimeError("x"))
+    n.send_failure(RuntimeError("x"), runs=[ModelRun(model=done), ModelRun(model=bad)])
+    (text,) = errors.sent
+    assert "- warehouse.customers after 0m 2s: RuntimeError: x" in text
+    assert "Done before the failure:\n- warehouse.orders: 0m 5s" in text
+
+
+def test_minimal_failure_does_not_list_the_completed_models():
+    errors = Recorder()
+    done = _model("orders", Notifications(on_failure=errors))
+    bad = _model("customers", Notifications(on_failure=errors))
+    n.OUTCOMES.record(done, 5.0)
+    n.OUTCOMES.record(bad, 2.0, RuntimeError("x"))
+    n.send_failure(RuntimeError("x"), runs=[ModelRun(model=done), ModelRun(model=bad)])
+    assert "Done before" not in errors.sent[0]
 
 
 def test_failure_outside_any_model_reaches_every_failure_channel_once():

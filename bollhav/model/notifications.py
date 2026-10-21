@@ -12,6 +12,7 @@ import os
 import socket
 import urllib.request
 from dataclasses import dataclass
+from enum import Enum
 from typing import TYPE_CHECKING, Iterable, Protocol
 
 if TYPE_CHECKING:
@@ -73,17 +74,28 @@ class Teams:
             )
 
 
+class Detail(Enum):
+    """How much a message says. MINIMAL: the outcome, the model count and the
+    total time. MODELS: every model with its own run time, and on a failure
+    also the models that completed before it. A channel shared by models that
+    disagree uses the more detailed level."""
+
+    MINIMAL = "minimal"
+    MODELS = "models"
+
+
 @dataclass(frozen=True)
 class Notifications:
-    """Where a model's outcome goes. `on_any` hears both outcomes; `on_success`
-    and `on_failure` override it for their outcome, so one channel for
-    everything, two to split, or one plus an override all work. Models that
-    share a channel are reported together: one message per channel per run,
-    listing every model on it."""
+    """Where a model's outcome goes, and how much to say. `on_any` hears both
+    outcomes; `on_success` and `on_failure` override it for their outcome, so
+    one channel for everything, two to split, or one plus an override all
+    work. Models that share a channel are reported together: one message per
+    channel per run."""
 
     on_any: Channel | None = None
     on_success: Channel | None = None
     on_failure: Channel | None = None
+    detail: Detail = Detail.MINIMAL
 
     @property
     def success_channel(self) -> Channel | None:
@@ -155,20 +167,32 @@ def _grouped(
     return groups
 
 
+def _detail(outcomes: Iterable[Outcome]) -> Detail:
+    """The group's level: MODELS if any member asks for it."""
+    for outcome in outcomes:
+        notifications = outcome.model.notifications
+        if notifications is not None and notifications.detail is Detail.MODELS:
+            return Detail.MODELS
+    return Detail.MINIMAL
+
+
+def _model_lines(outcomes: Iterable[Outcome]) -> str:
+    return "\n".join(
+        f"- {o.model.target.full_name}: {_duration(o.seconds)}" for o in outcomes
+    )
+
+
 def send_success(tags: str | None = None) -> None:
     """After a clean `main()`: one message per `on_success` channel, listing the
     models that completed on it with their run times."""
     completed = (o for o in OUTCOMES.items if o.error is None)
     for channel, outcomes in _grouped(completed, "success_channel"):
-        lines = [
-            f"- {o.model.target.full_name}: {_duration(o.seconds)}" for o in outcomes
-        ]
         total = _duration(sum(o.seconds for o in outcomes))
-        channel.send(
-            f"{_header('success', tags)}\n\n"
-            + "\n".join(lines)
-            + f"\n\n{len(outcomes)} model(s) done in {total}"
-        )
+        summary = f"{len(outcomes)} model(s) done in {total}"
+        text = f"{_header('success', tags)}\n\n"
+        if _detail(outcomes) is Detail.MODELS:
+            text += f"{_model_lines(outcomes)}\n\n"
+        channel.send(text + summary)
 
 
 def send_failure(
@@ -179,6 +203,7 @@ def send_failure(
     run failed outside any model (a connection that never opened, say), every
     matched model's failure channel hears it instead."""
     failed = [o for o in OUTCOMES.items if o.error is not None]
+    completed = [o for o in OUTCOMES.items if o.error is None]
     if failed:
         for channel, outcomes in _grouped(failed, "failure_channel"):
             lines = [
@@ -186,7 +211,10 @@ def send_failure(
                 f"{type(o.error).__name__}: {o.error}"
                 for o in outcomes
             ]
-            channel.send(f"{_header('failure', tags)}\n\n" + "\n".join(lines))
+            text = f"{_header('failure', tags)}\n\n" + "\n".join(lines)
+            if completed and _detail(outcomes) is Detail.MODELS:
+                text += f"\n\nDone before the failure:\n{_model_lines(completed)}"
+            channel.send(text)
         return
     channels: list[Channel] = []
     for run in runs:
@@ -198,4 +226,4 @@ def send_failure(
         channel.send(f"{_header('failure', tags)}\n\n{type(exc).__name__}: {exc}")
 
 
-__all__ = ["Channel", "Notifications", "Teams", "Outcome", "OUTCOMES"]
+__all__ = ["Channel", "Detail", "Notifications", "Teams", "Outcome", "OUTCOMES"]

@@ -13,6 +13,7 @@ Models default to **no notifications** (`notifications=None`).
 | `on_any` | channel | `None` | Where to report either outcome |
 | `on_success` | channel | `None` | Where to report a clean run; overrides `on_any` for that outcome |
 | `on_failure` | channel | `None` | Where to report a raise; overrides `on_any` for that outcome |
+| `detail` | `Detail` | `Detail.MINIMAL` | `MINIMAL`: the outcome, the model count and the total time. `MODELS`: every model with its run time, and on a failure the models that completed before it |
 
 So one channel for everything is `Notifications(on_any=...)`, two separate ones are `Notifications(on_success=..., on_failure=...)`, and `Notifications(on_any=..., on_failure=...)` sends everything to one place with failures diverted.
 
@@ -43,7 +44,17 @@ Model(
 
 ## What gets sent, and when
 
-`@model_lifecycle` records each model's outcome and run time. When `main()` returns, `@load_models` sends **one message per channel**, so models that share a channel appear together:
+`@model_lifecycle` records each model's outcome and run time. When `main()` returns, `@load_models` sends **one message per channel**, so models that share a channel appear together. Every message starts with the host and the run's `TAGS`. At `Detail.MINIMAL`:
+
+```
+Pipeline success: **daily-orders-29876070-b2z6r**
+
+TAGS: `[orders]`
+
+2 model(s) done in 5m 0s
+```
+
+At `Detail.MODELS` the models are listed with their run times:
 
 ```
 Pipeline success: **daily-orders-29876070-b2z6r**
@@ -56,7 +67,9 @@ TAGS: `[orders]`
 2 model(s) done in 5m 0s
 ```
 
-When `main()` raises, the models that raised report on their `on_failure` channel with the exception. A run that fails before reaching any model, a connection that never opened for instance, reports to every matched model's failure channel instead. A failed run sends no success message, even for the models that completed before the failure.
+A channel shared by models with different `detail` uses the more detailed level.
+
+When `main()` raises, the models that raised report on their `on_failure` channel with the exception, and at `Detail.MODELS` also the models that completed before the failure. A run that fails before reaching any model, a connection that never opened for instance, reports to every matched model's failure channel instead. A failed run sends no success message, even for the models that completed before the failure.
 
 The host name is the pod name on Kubernetes, and `TAGS` is the run's tag expression, so a message says which job it came from without any configuration.
 
