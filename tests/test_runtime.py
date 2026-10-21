@@ -407,6 +407,25 @@ class TestCurfewPreservedThroughOverrides:
         assert run.model.curfew.windows == [(time(9), time(17))]
 
 
+class TestNotificationsPreservedThroughOverrides:
+    def test_notifications_and_people_survive_the_runtime_copy(self):
+        from bollhav.model import Contact, Notifications, People, Teams
+
+        notifications = Notifications(on_any=Teams(webhook_env="HOOK"))
+        people = People(owners=(Contact(name="Anna", email="anna@example.test"),))
+        m = Model(
+            target=Target(name="orders", schema="public", schema_suffix_appendix=None),
+            batching=Batch(time=TimeChunking(chunk="@hourly", tz=UTC)),
+            contract=Contract(begin=_SINCE, end=_UNTIL),
+            temporality=Temporality.TEMPORAL,
+            notifications=notifications,
+            people=people,
+        )
+        run = _apply(m)
+        assert run.model.notifications is notifications
+        assert run.model.people is people
+
+
 class TestRunModeWindowMatrix:
     """The run-mode combinatorics at the resolution layer: STATE_MODE
     (bulldozer / discover / torch) × window source (latest / explicit backfill /

@@ -43,7 +43,8 @@ def _model(
 
 
 @pytest.fixture(autouse=True)
-def _fresh_outcomes():
+def _fresh_outcomes(monkeypatch):
+    monkeypatch.delenv("NOTIFICATIONS_ENABLED", raising=False)
     n.OUTCOMES.reset()
     yield
     n.OUTCOMES.reset()
@@ -80,6 +81,14 @@ def test_teams_posts_an_adaptive_card_to_the_url_in_the_env_var(monkeypatch):
     assert card["body"] == [
         {"type": "TextBlock", "text": "hello **world**", "wrap": True}
     ]
+
+
+def test_teams_logs_a_sent_notification(monkeypatch, caplog):
+    monkeypatch.setenv("HOOK", "https://example.test/webhook")
+    monkeypatch.setattr(n, "_post_json", lambda url, payload, timeout=10.0: None)
+    with caplog.at_level(logging.INFO):
+        Teams(webhook_env="HOOK").send("hello")
+    assert "Teams notification sent via HOOK" in caplog.text
 
 
 def test_teams_send_failure_is_logged_not_raised(monkeypatch, caplog):
@@ -131,6 +140,50 @@ def test_on_any_hears_a_success_and_a_failure(monkeypatch):
         "Pipeline success",
         "Pipeline failure",
     ]
+
+
+# ── enabled ──
+
+
+def test_disabled_notifications_send_nothing():
+    both = Recorder()
+    model = _model("orders", Notifications(on_any=both, enabled=False))
+    n.OUTCOMES.record(model, 1.0)
+    n.send_success()
+    n.OUTCOMES.reset()
+    n.OUTCOMES.record(model, 1.0, RuntimeError("x"))
+    n.send_failure(RuntimeError("x"), runs=[ModelRun(model=model)])
+    n.OUTCOMES.reset()
+    n.send_failure(ConnectionError("no db"), runs=[ModelRun(model=model)])
+    assert both.sent == []
+
+
+def test_env_var_false_silences_every_model(monkeypatch):
+    monkeypatch.setenv("NOTIFICATIONS_ENABLED", "False")
+    ok = Recorder()
+    n.OUTCOMES.record(_model("orders", Notifications(on_success=ok)), 1.0)
+    n.send_success()
+    assert ok.sent == []
+
+
+def test_env_var_true_forces_a_disabled_model_on(monkeypatch):
+    monkeypatch.setenv("NOTIFICATIONS_ENABLED", "true")
+    ok = Recorder()
+    n.OUTCOMES.record(
+        _model("orders", Notifications(on_success=ok, enabled=False)), 1.0
+    )
+    n.send_success()
+    assert len(ok.sent) == 1
+
+
+def test_env_var_garbage_is_ignored_with_a_warning(monkeypatch, caplog):
+    monkeypatch.setenv("NOTIFICATIONS_ENABLED", "yes")
+    ok = Recorder()
+    n.OUTCOMES.record(_model("orders", Notifications(on_success=ok)), 1.0)
+    with caplog.at_level(logging.WARNING):
+        n.send_success()
+    assert len(ok.sent) == 1
+    assert "NOTIFICATIONS_ENABLED must be true or false" in caplog.text
 
 
 # ── success ──

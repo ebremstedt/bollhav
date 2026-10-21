@@ -22,6 +22,22 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+ENABLED_ENV = "NOTIFICATIONS_ENABLED"
+
+
+def _enabled_override() -> bool | None:
+    """`NOTIFICATIONS_ENABLED` as a bool, None when unset. A value that is not
+    true/false is logged and ignored: a typo must not fail or silence a run."""
+    value = os.environ.get(ENABLED_ENV, "")
+    if not value:
+        return None
+    if value.upper() == "TRUE":
+        return True
+    if value.upper() == "FALSE":
+        return False
+    logger.warning("%s must be true or false, not %r; ignored", ENABLED_ENV, value)
+    return None
+
 
 class Channel(Protocol):
     """Anything that can deliver a text message. `Teams` is the one shipped;
@@ -45,7 +61,8 @@ def _post_json(url: str, payload: dict, timeout: float = 10.0) -> None:
 class Teams:
     """A Microsoft Teams incoming webhook. The env var named `webhook_env` holds
     the URL; unset means nothing is sent, so local runs stay quiet. A failed
-    send is logged, never raised — a notification must not fail a run."""
+    send is logged, never raised — a notification must not fail a run. Every
+    send logs one line: sent, skipped or failed."""
 
     webhook_env: str
 
@@ -91,6 +108,8 @@ class Teams:
             logger.warning(
                 "Teams notification via %s failed to send: %s", self.webhook_env, exc
             )
+            return
+        logger.info("Teams notification sent via %s", self.webhook_env)
 
 
 class Detail(Enum):
@@ -118,13 +137,22 @@ class Notifications:
     `on_any` hears both outcomes; `on_success` and `on_failure` override it
     for their outcome, so one channel for everything, two to split, or one
     plus an override all work. Models that share a channel are reported
-    together: one message per channel per run."""
+    together: one message per channel per run. `enabled` is the switch, and
+    the `NOTIFICATIONS_ENABLED` env var overrides it for a whole run."""
 
     on_any: Channel | None = None
     on_success: Channel | None = None
     on_failure: Channel | None = None
     detail: Detail = Detail.MINIMAL
     mention: Mention = Mention.NOBODY
+    enabled: bool = True
+
+    def is_enabled(self) -> bool:
+        """`enabled`, unless `NOTIFICATIONS_ENABLED` is set: the env var wins
+        either way, so a run can be silenced or forced from outside without
+        touching the model."""
+        override = _enabled_override()
+        return self.enabled if override is None else override
 
     def mentions_on(self, failure: bool) -> bool:
         if self.mention is Mention.ALWAYS:
@@ -180,16 +208,25 @@ def _header(kind: str, tags: str | None) -> str:
     return f"{header}\n\nTAGS: `{tags}`" if tags else header
 
 
+def _channel(model: Model, attr: str) -> Channel | None:
+    """The model's channel for `attr` (`success_channel` / `failure_channel`),
+    or None when it has no notifications or they are disabled."""
+    notifications = model.notifications
+    if notifications is None or not notifications.is_enabled():
+        return None
+    return getattr(notifications, attr)
+
+
 def _grouped(
     outcomes: Iterable[Outcome], attr: str
 ) -> list[tuple[Channel, list[Outcome]]]:
     """Outcomes grouped by the channel their model resolves for `attr`
-    (`success_channel` / `failure_channel`); models without one are left out.
-    Grouping is by equality, so two `Teams("X")` are one channel."""
+    (`success_channel` / `failure_channel`); models without one, or with
+    notifications disabled, are left out. Grouping is by equality, so two
+    `Teams("X")` are one channel."""
     groups: list[tuple[Channel, list[Outcome]]] = []
     for outcome in outcomes:
-        notifications = outcome.model.notifications
-        channel = getattr(notifications, attr, None) if notifications else None
+        channel = _channel(outcome.model, attr)
         if channel is None:
             continue
         for known, members in groups:
@@ -273,8 +310,7 @@ def send_failure(
         return
     by_channel: list[tuple[Channel, list[Model]]] = []
     for run in runs:
-        notifications = run.model.notifications
-        channel = notifications.failure_channel if notifications else None
+        channel = _channel(run.model, "failure_channel")
         if channel is None:
             continue
         for known, members in by_channel:

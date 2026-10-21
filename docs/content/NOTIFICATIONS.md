@@ -15,6 +15,7 @@ Models default to **no notifications** (`notifications=None`).
 | `on_failure` | channel | `None` | Where to report a raise; overrides `on_any` for that outcome |
 | `detail` | `Detail` | `Detail.MINIMAL` | `MINIMAL`: the outcome, the model count and the total time. `MODELS`: every model with its run time, and on a failure the models that completed before it |
 | `mention` | `Mention` | `Mention.NOBODY` | Whom to address from the model's [`people`](MODEL.md): `ON_FAILURE` pings owners and maintainers when the run raises, `ALWAYS` on every message. Each person once per message |
+| `enabled` | `bool` | `True` | The switch. [`NOTIFICATIONS_ENABLED`](ENV.md#notifications_enabled) in the environment overrides it either way |
 
 So one channel for everything is `Notifications(on_any=...)`, two separate ones are `Notifications(on_success=..., on_failure=...)`, and `Notifications(on_any=..., on_failure=...)` sends everything to one place with failures diverted.
 
@@ -22,7 +23,7 @@ A channel is any object with `send(text: str)`. One ships:
 
 | Channel | Fields | Behaviour |
 |---|---|---|
-| `Teams(webhook_env)` | the **name of an env var** holding a Teams incoming-webhook URL | Posts an Adaptive Card. Env var unset → nothing is sent, so local runs stay quiet. A failed send is logged, never raised. Mentions become real @mentions for contacts with an email, plain names otherwise. |
+| `Teams(webhook_env)` | the **name of an env var** holding a Teams incoming-webhook URL | Posts an Adaptive Card. Env var unset → nothing is sent, so local runs stay quiet. A failed send is logged, never raised. Every send logs one line: sent, skipped or failed. Mentions become real @mentions for contacts with an email, plain names otherwise. |
 
 ```python
 from bollhav.model import Model, Notifications, Teams
@@ -108,3 +109,5 @@ The host name is the pod name on Kubernetes, and `TAGS` is the run's tag express
 ## Keeping it quiet
 
 Notifications are per model, so a job with thirty models and one channel still sends one message. Leave `notifications` off the models nobody needs to hear about, or point an `on_success` and an `on_failure` at different channels to keep an alerts channel free of green cards.
+
+To silence a whole run without touching the models, set `NOTIFICATIONS_ENABLED=false` in its environment: a dev container, a backfill, a test. `NOTIFICATIONS_ENABLED=true` does the opposite and turns on models that declare `enabled=False`. Unset, each model's own `enabled` applies.

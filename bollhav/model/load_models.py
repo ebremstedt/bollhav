@@ -209,6 +209,9 @@ def load_models(
                                       supplied window + chunk), never the backlog.
                                       No DDL, no data writes. An assertion, not a
                                       verification — only what you select
+        NOTIFICATIONS_ENABLED         bool; overrides every model's
+                                      Notifications.enabled for this run —
+                                      false silences all, true forces all on
     """
 
     def decorator(func: Callable[..., None]) -> Callable[[], None]:
