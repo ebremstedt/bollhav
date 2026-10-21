@@ -8,26 +8,37 @@ import pytest
 from bollhav.model import notifications as n
 from bollhav.model.model import Model
 from bollhav.model.modelrun import ModelRun
-from bollhav.model.notifications import Detail, Notifications, Teams
+from bollhav.model.notifications import Detail, Mention, Notifications, Teams
+from bollhav.model.people import Contact, People
 from bollhav.model.target import Target
 from bollhav.model.temporality import Temporality
 
 
 class Recorder:
-    """A channel that keeps what it was asked to send."""
+    """A channel that keeps what it was asked to send, and whom to mention."""
 
     def __init__(self) -> None:
         self.sent: list[str] = []
+        self.mentions: list[tuple[Contact, ...]] = []
 
-    def send(self, text: str) -> None:
+    def send(self, text: str, mentions: tuple[Contact, ...] = ()) -> None:
         self.sent.append(text)
+        self.mentions.append(mentions)
 
 
-def _model(name: str, notifications: Notifications | None) -> Model:
+ERIK = Contact(name="Erik", email="erik@example.test")
+ANNA = Contact(name="Anna", email="anna@example.test")
+NO_EMAIL = Contact(name="Ops desk")
+
+
+def _model(
+    name: str, notifications: Notifications | None, people: People | None = None
+) -> Model:
     return Model(
         target=Target(name=name, schema="warehouse"),
         temporality=Temporality.TIMELESS,
         notifications=notifications,
+        people=people,
     )
 
 
@@ -231,6 +242,71 @@ def test_failure_sends_nothing_without_failure_channels():
     n.OUTCOMES.record(model, 1.0, RuntimeError("x"))
     n.send_failure(RuntimeError("x"), runs=[ModelRun(model=model)])
     assert ok.sent == []
+
+
+# ── mentions ──
+
+
+def test_nobody_is_mentioned_by_default():
+    ok = Recorder()
+    n.OUTCOMES.record(
+        _model("orders", Notifications(on_success=ok), People(owners=(ERIK,))), 1.0
+    )
+    n.send_success()
+    assert ok.mentions == [()]
+
+
+def test_on_failure_mentions_owners_and_maintainers_only_when_it_fails():
+    both = Recorder()
+    people = People(owners=(ERIK,), maintainers=(ANNA,))
+    model = _model(
+        "orders", Notifications(on_any=both, mention=Mention.ON_FAILURE), people
+    )
+    n.OUTCOMES.record(model, 1.0)
+    n.send_success()
+    assert both.mentions == [()]
+    n.OUTCOMES.reset()
+    n.OUTCOMES.record(model, 1.0, RuntimeError("x"))
+    n.send_failure(RuntimeError("x"), runs=[ModelRun(model=model)])
+    assert both.mentions[-1] == (ERIK, ANNA)
+
+
+def test_always_mentions_on_success_and_each_person_once():
+    ok = Recorder()
+    notif = Notifications(on_success=ok, mention=Mention.ALWAYS)
+    n.OUTCOMES.record(_model("orders", notif, People(owners=(ERIK,))), 1.0)
+    n.OUTCOMES.record(_model("customers", notif, People(maintainers=(ERIK, ANNA))), 1.0)
+    n.OUTCOMES.record(
+        _model("audit", Notifications(on_success=ok), People(owners=(NO_EMAIL,))), 1.0
+    )
+    n.send_success()
+    assert ok.mentions == [(ERIK, ANNA)]
+
+
+def test_a_run_that_fails_before_any_model_mentions_the_matched_models_people():
+    errors = Recorder()
+    notif = Notifications(on_failure=errors, mention=Mention.ON_FAILURE)
+    runs = [ModelRun(model=_model("orders", notif, People(owners=(ERIK,))))]
+    n.send_failure(ConnectionError("no db"), runs=runs)
+    assert errors.mentions == [(ERIK,)]
+
+
+def test_teams_renders_mentions_as_entities_and_names_the_emailless(monkeypatch):
+    monkeypatch.setenv("HOOK", "https://example.test/webhook")
+    posted = []
+    monkeypatch.setattr(
+        n, "_post_json", lambda url, payload, timeout=10.0: posted.append(payload)
+    )
+    Teams(webhook_env="HOOK").send("broke", mentions=(ERIK, NO_EMAIL))
+    card = posted[0]["attachments"][0]["content"]
+    assert card["body"][0]["text"] == "broke\n\n<at>Erik</at> Ops desk"
+    assert card["msteams"]["entities"] == [
+        {
+            "type": "mention",
+            "text": "<at>Erik</at>",
+            "mentioned": {"id": "erik@example.test", "name": "Erik"},
+        }
+    ]
 
 
 # ── duration formatting ──

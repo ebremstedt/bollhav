@@ -18,15 +18,17 @@ from typing import TYPE_CHECKING, Iterable, Protocol
 if TYPE_CHECKING:
     from bollhav.model.model import Model
     from bollhav.model.modelrun import ModelRun
+    from bollhav.model.people import Contact
 
 logger = logging.getLogger(__name__)
 
 
 class Channel(Protocol):
     """Anything that can deliver a text message. `Teams` is the one shipped;
-    a custom channel only needs `send`."""
+    a custom channel only needs `send`. `mentions` are the people to address,
+    from the models' `People`; a channel that can't mention may ignore them."""
 
-    def send(self, text: str) -> None: ...
+    def send(self, text: str, mentions: tuple[Contact, ...] = ()) -> None: ...
 
 
 def _post_json(url: str, payload: dict, timeout: float = 10.0) -> None:
@@ -47,22 +49,39 @@ class Teams:
 
     webhook_env: str
 
-    def send(self, text: str) -> None:
+    def send(self, text: str, mentions: tuple[Contact, ...] = ()) -> None:
         url = os.environ.get(self.webhook_env)
         if not url:
             logger.info("%s not set, skipping Teams notification", self.webhook_env)
             return
+        content: dict = {
+            "type": "AdaptiveCard",
+            "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+            "version": "1.4",
+            "body": [{"type": "TextBlock", "text": text, "wrap": True}],
+        }
+        if mentions:
+            # A contact with an email is a real @mention (the email is the UPN
+            # Teams resolves); one without is named in plain text.
+            tags = [f"<at>{c.name}</at>" if c.email else c.name for c in mentions]
+            content["body"][0]["text"] = f"{text}\n\n{' '.join(tags)}"
+            entities = [
+                {
+                    "type": "mention",
+                    "text": f"<at>{c.name}</at>",
+                    "mentioned": {"id": c.email, "name": c.name},
+                }
+                for c in mentions
+                if c.email
+            ]
+            if entities:
+                content["msteams"] = {"entities": entities}
         payload = {
             "type": "message",
             "attachments": [
                 {
                     "contentType": "application/vnd.microsoft.card.adaptive",
-                    "content": {
-                        "type": "AdaptiveCard",
-                        "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
-                        "version": "1.4",
-                        "body": [{"type": "TextBlock", "text": text, "wrap": True}],
-                    },
+                    "content": content,
                 }
             ],
         }
@@ -84,18 +103,33 @@ class Detail(Enum):
     MODELS = "models"
 
 
+class Mention(Enum):
+    """Whether to address the model's `people` (owners and maintainers) in the
+    message. ON_FAILURE pings them only when the run raises."""
+
+    NOBODY = "nobody"
+    ON_FAILURE = "on_failure"
+    ALWAYS = "always"
+
+
 @dataclass(frozen=True)
 class Notifications:
-    """Where a model's outcome goes, and how much to say. `on_any` hears both
-    outcomes; `on_success` and `on_failure` override it for their outcome, so
-    one channel for everything, two to split, or one plus an override all
-    work. Models that share a channel are reported together: one message per
-    channel per run."""
+    """Where a model's outcome goes, how much to say, and whom to address.
+    `on_any` hears both outcomes; `on_success` and `on_failure` override it
+    for their outcome, so one channel for everything, two to split, or one
+    plus an override all work. Models that share a channel are reported
+    together: one message per channel per run."""
 
     on_any: Channel | None = None
     on_success: Channel | None = None
     on_failure: Channel | None = None
     detail: Detail = Detail.MINIMAL
+    mention: Mention = Mention.NOBODY
+
+    def mentions_on(self, failure: bool) -> bool:
+        if self.mention is Mention.ALWAYS:
+            return True
+        return failure and self.mention is Mention.ON_FAILURE
 
     @property
     def success_channel(self) -> Channel | None:
@@ -176,6 +210,25 @@ def _detail(outcomes: Iterable[Outcome]) -> Detail:
     return Detail.MINIMAL
 
 
+def _mentions(models: Iterable[Model], failure: bool) -> tuple[Contact, ...]:
+    """The people of the models whose `mention` setting applies to this
+    outcome, owners and maintainers alike, each person once."""
+    seen: set[str] = set()
+    people: list[Contact] = []
+    for model in models:
+        notifications = model.notifications
+        if notifications is None or not notifications.mentions_on(failure):
+            continue
+        if model.people is None:
+            continue
+        for contact in (model.people.owners or ()) + (model.people.maintainers or ()):
+            key = (contact.email or contact.name).lower()
+            if key not in seen:
+                seen.add(key)
+                people.append(contact)
+    return tuple(people)
+
+
 def _model_lines(outcomes: Iterable[Outcome]) -> str:
     return "\n".join(
         f"- {o.model.target.full_name}: {_duration(o.seconds)}" for o in outcomes
@@ -192,7 +245,9 @@ def send_success(tags: str | None = None) -> None:
         text = f"{_header('success', tags)}\n\n"
         if _detail(outcomes) is Detail.MODELS:
             text += f"{_model_lines(outcomes)}\n\n"
-        channel.send(text + summary)
+        channel.send(
+            text + summary, _mentions((o.model for o in outcomes), failure=False)
+        )
 
 
 def send_failure(
@@ -214,16 +269,33 @@ def send_failure(
             text = f"{_header('failure', tags)}\n\n" + "\n".join(lines)
             if completed and _detail(outcomes) is Detail.MODELS:
                 text += f"\n\nDone before the failure:\n{_model_lines(completed)}"
-            channel.send(text)
+            channel.send(text, _mentions((o.model for o in outcomes), failure=True))
         return
-    channels: list[Channel] = []
+    by_channel: list[tuple[Channel, list[Model]]] = []
     for run in runs:
         notifications = run.model.notifications
         channel = notifications.failure_channel if notifications else None
-        if channel is not None and channel not in channels:
-            channels.append(channel)
-    for channel in channels:
-        channel.send(f"{_header('failure', tags)}\n\n{type(exc).__name__}: {exc}")
+        if channel is None:
+            continue
+        for known, members in by_channel:
+            if known == channel:
+                members.append(run.model)
+                break
+        else:
+            by_channel.append((channel, [run.model]))
+    for channel, models in by_channel:
+        channel.send(
+            f"{_header('failure', tags)}\n\n{type(exc).__name__}: {exc}",
+            _mentions(models, failure=True),
+        )
 
 
-__all__ = ["Channel", "Detail", "Notifications", "Teams", "Outcome", "OUTCOMES"]
+__all__ = [
+    "Channel",
+    "Detail",
+    "Mention",
+    "Notifications",
+    "Teams",
+    "Outcome",
+    "OUTCOMES",
+]

@@ -14,6 +14,7 @@ Models default to **no notifications** (`notifications=None`).
 | `on_success` | channel | `None` | Where to report a clean run; overrides `on_any` for that outcome |
 | `on_failure` | channel | `None` | Where to report a raise; overrides `on_any` for that outcome |
 | `detail` | `Detail` | `Detail.MINIMAL` | `MINIMAL`: the outcome, the model count and the total time. `MODELS`: every model with its run time, and on a failure the models that completed before it |
+| `mention` | `Mention` | `Mention.NOBODY` | Whom to address from the model's [`people`](MODEL.md): `ON_FAILURE` pings owners and maintainers when the run raises, `ALWAYS` on every message. Each person once per message |
 
 So one channel for everything is `Notifications(on_any=...)`, two separate ones are `Notifications(on_success=..., on_failure=...)`, and `Notifications(on_any=..., on_failure=...)` sends everything to one place with failures diverted.
 
@@ -21,7 +22,7 @@ A channel is any object with `send(text: str)`. One ships:
 
 | Channel | Fields | Behaviour |
 |---|---|---|
-| `Teams(webhook_env)` | the **name of an env var** holding a Teams incoming-webhook URL | Posts an Adaptive Card. Env var unset → nothing is sent, so local runs stay quiet. A failed send is logged, never raised. |
+| `Teams(webhook_env)` | the **name of an env var** holding a Teams incoming-webhook URL | Posts an Adaptive Card. Env var unset → nothing is sent, so local runs stay quiet. A failed send is logged, never raised. Mentions become real @mentions for contacts with an email, plain names otherwise. |
 
 ```python
 from bollhav.model import Model, Notifications, Teams
@@ -41,6 +42,37 @@ Model(
     ),
 )
 ```
+
+## Full example
+
+```python
+from bollhav.model import (
+    Contact,
+    Detail,
+    Mention,
+    Model,
+    Notifications,
+    People,
+    Target,
+    Teams,
+)
+
+Model(
+    target=Target(name="orders", schema="warehouse", ...),
+    people=People(
+        owners=(Contact(name="Anna Andersson", email="anna.andersson@example.com"),),
+        maintainers=(Contact(name="Erik Eriksson", email="erik.eriksson@example.com"),),
+    ),
+    notifications=Notifications(
+        on_any=Teams(webhook_env="TEAMS_WEBHOOK"),            # everything goes here...
+        on_failure=Teams(webhook_env="TEAMS_WEBHOOK_ERRORS"),  # ...except failures
+        detail=Detail.MODELS,                                  # list every model and its time
+        mention=Mention.ON_FAILURE,                            # ping Anna and Erik when it breaks
+    ),
+)
+```
+
+With `TEAMS_WEBHOOK` and `TEAMS_WEBHOOK_ERRORS` set in the pod's environment, a clean run posts one card per channel listing the models; a failure posts to the errors channel, names the model and the exception, lists what had completed, and @mentions the owners and maintainers of the models that asked for it.
 
 ## What gets sent, and when
 
