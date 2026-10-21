@@ -17,6 +17,7 @@ from roskarl import (
 
 from bollhav.model.runtime import apply_runtime_overrides
 from bollhav.model.modelrun import ModelRun
+from bollhav.model.notifications import OUTCOMES, send_failure, send_success
 from bollhav.model.window import compute_intervals
 from bollhav.model.progress_bar import get_progress_level, PROGRESS, ProgressLevel
 from bollhav.model.state import StateMode
@@ -280,9 +281,15 @@ def load_models(
             # (state tables, library registration, prefill, interval filtering)
             # and the POST-model sweep now live in `@model_lifecycle`, which
             # runs with the connection the user opens in `main()`.
-            func(runs=runs, debug=cfg.debug)
+            OUTCOMES.reset()
+            try:
+                func(runs=runs, debug=cfg.debug)
+            except BaseException as exc:
+                send_failure(exc, runs, tags=cfg.tags)
+                raise
             if not cfg.dry_state:
                 PROGRESS.finish()
+            send_success(tags=cfg.tags)
 
         return wrapper
 

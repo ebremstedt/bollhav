@@ -73,6 +73,7 @@ nav:
           - Contract: CONTRACT.md
           - Batch: BATCH.md
           - Curfew: CURFEW.md
+          - Notifications: NOTIFICATIONS.md
           - State: STATE.md
           - Upstream: UPSTREAM.md
           - Tagging: TAGGING.md
