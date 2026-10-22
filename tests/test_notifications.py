@@ -67,7 +67,7 @@ def _run(
 
 
 @pytest.fixture(autouse=True)
-def _clean_env(monkeypatch):
+def _clean_env(monkeypatch, env_var_bool_from_environ):
     monkeypatch.delenv("NOTIFICATIONS_ENABLED", raising=False)
 
 

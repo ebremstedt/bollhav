@@ -363,7 +363,7 @@ class TestNotificationsThroughTheDecorator:
                 main()
 
     @pytest.fixture(autouse=True)
-    def _clean_env(self, monkeypatch):
+    def _clean_env(self, monkeypatch, env_var_bool_from_environ):
         monkeypatch.delenv("NOTIFICATIONS_ENABLED", raising=False)
         monkeypatch.setenv("HOSTNAME", "pod-1")
 

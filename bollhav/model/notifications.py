@@ -172,8 +172,6 @@ def resolve_mentions(models: Iterable[Model], failure: bool) -> tuple[Contact, .
 
 
 def send_quietly(send: Callable[..., None], *args, **kwargs) -> None:
-    """Call a sender and log, never raise, whatever it throws: a notification
-    must not fail a run, nor replace the exception the run failed with."""
     try:
         send(*args, **kwargs)
     except Exception:
@@ -218,13 +216,7 @@ def send_success(runs: Iterable[ModelRun], tags: str | None = None) -> None:
 def send_failure(
     exc: BaseException, runs: Iterable[ModelRun], tags: str | None = None
 ) -> None:
-    """After a `main()` that raised: one message per `on_failure` channel. A
-    model that raised reports on its own channel with its exception; when the
-    run died of something else afterwards (a model's error was caught and the
-    loop went on, then a connection dropped), that exception is named too.
-    When the run failed outside any model (a connection that never opened,
-    say), every matched model's failure channel hears it instead. A suffixed
-    run only reaches models with `suffixed_runs=True`."""
+    """One message per main() raise"""
     runs = list(runs)
     header = message_header("failure", tags)
     failed = [r for r in runs if r.outcome is not None and r.outcome.error is not None]
