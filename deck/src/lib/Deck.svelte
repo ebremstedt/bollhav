@@ -10,10 +10,9 @@
     slides = [],
     title = 'bollhav',
     home = 'https://bollhav.dev',
+    // learn and lab are kept out for now
     links = [
       { label: 'Docs', href: 'https://bollhav.dev/docs/' },
-      { label: 'Learn', href: 'https://bollhav.dev/learn/' },
-      { label: 'Lab', href: 'https://bollhav.dev/lab/' },
       { label: 'GitHub', href: 'https://github.com/ebremstedt/bollhav' },
     ],
   } = $props()
@@ -149,6 +148,11 @@
       case 'h':
         hoopOn = !hoopOn
         break
+      case 'd': {
+        const docs = links.find((l) => l.label === 'Docs')
+        if (docs) location.href = docs.href
+        break
+      }
       case 'Escape':
         outlineOpen = false
         break
@@ -285,7 +289,7 @@
     {pad(current + 1)} <span class="sep">/</span> {pad(n)}
   </button>
   {#if current === 0 && n > 1}
-    <p class="hint"><kbd>o</kbd> outline <span class="sep">·</span> <kbd>f</kbd> fullscreen <span class="sep">·</span> <kbd>t</kbd> theme <span class="sep">·</span> <kbd>h</kbd> hoop</p>
+    <p class="hint"><kbd>o</kbd> outline <span class="sep">·</span> <kbd>f</kbd> fullscreen <span class="sep">·</span> <kbd>t</kbd> theme <span class="sep">·</span> <kbd>h</kbd> hoop <span class="sep">·</span> <kbd>d</kbd> docs</p>
   {/if}
   <div class="group">
     <button class="btn" onclick={prev} disabled={current === 0} aria-label="Previous slide">

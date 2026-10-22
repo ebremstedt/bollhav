@@ -18,6 +18,19 @@
   let folded = $state<Record<string, boolean>>({})
   let loaded = $state(false)
 
+  // the list fades out at the bottom while there is more of it to scroll to
+  let aside: HTMLElement
+  let more = $state(false)
+  const measure = () => {
+    if (aside) more = aside.scrollTop + aside.clientHeight < aside.scrollHeight - 2
+  }
+  $effect(() => {
+    measure()
+    const ro = new ResizeObserver(measure)
+    ro.observe(aside)
+    return () => ro.disconnect()
+  })
+
   $effect(() => {
     try {
       const saved = localStorage.getItem(KEY)
@@ -64,7 +77,7 @@
   <button type="button" class="scrim" aria-label="Close the page list" onclick={close}></button>
 {/if}
 
-<aside class="side" class:open={menu.open}>
+<aside class="side" class:open={menu.open} class:more bind:this={aside} onscroll={measure}>
   <nav aria-label="Pages">
     {#each page.data.nav as group, i (group.name)}
       {#if group.parent && group.parent !== page.data.nav[i - 1]?.parent}
@@ -103,5 +116,6 @@
         {/if}
       {/if}
     {/each}
+    <p class="side-links"><a href="https://bollhav.dev/">Slide deck</a> <a href="https://github.com/ebremstedt/bollhav">GitHub</a></p>
   </nav>
 </aside>

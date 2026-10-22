@@ -13,7 +13,9 @@
 
   // `hoop` turns on the game: a hoop sweeps across the screen and a ball you
   // launch (click) that passes through it scores; `onscore(total)` reports.
-  let { progress = 0, dir = 1, hoop = false, onscore = () => {} } = $props()
+  // density scales how many balls (0..1 of the full pile), storm how hard the
+  // tank rocks and how far a slide change pushes (0 is still water)
+  let { progress = 0, dir = 1, hoop = false, onscore = () => {}, density = 1, storm = 1 } = $props()
 
   // ---- knobs ----
   const PILE = 0.18 // share of the viewport height the settled pile fills
@@ -85,7 +87,7 @@
     const b = R_MAX * s
     const meanArea = (Math.PI * (a * a + a * b + b * b)) / 3
     const n = Math.round((W * H * PILE * PACKING) / meanArea)
-    return Math.min(MAX_BALLS, Math.max(MIN_BALLS, n))
+    return Math.round(Math.min(MAX_BALLS, Math.max(MIN_BALLS, n)) * density)
   }
 
   function makeWalls() {
@@ -277,7 +279,7 @@
       const inBand = direction > 0 ? p.x < band : p.x > W - band
       if (!inBand || p.y < H * 0.5) continue
       const v = b.body.velocity
-      Body.setVelocity(b.body, { x: v.x + PUSH * direction, y: v.y - 2 })
+      Body.setVelocity(b.body, { x: v.x + PUSH * storm * direction, y: v.y - 2 * storm })
     }
   }
 
@@ -294,8 +296,8 @@
 
     // rock the tank: the gravity vector swings like a pendulum, harder just
     // after a slide change
-    const tilt = ROCK_TILT * Math.sin((2 * Math.PI * sec) / ROCK_PERIOD) * (1 + kick)
-    engine.gravity.x = Math.sin(tilt) + 0.5 * shove
+    const tilt = ROCK_TILT * storm * Math.sin((2 * Math.PI * sec) / ROCK_PERIOD) * (1 + kick)
+    engine.gravity.x = Math.sin(tilt) + 0.5 * shove * storm
     engine.gravity.y = Math.cos(tilt)
 
     // fixed physics steps, at most two per frame so a slow frame can't spiral
@@ -344,6 +346,13 @@
       b.py = p.y
     }
   }
+
+  // more or fewer balls as the density slider moves: they rain in, or the
+  // highest ones leave
+  $effect(() => {
+    void density
+    if (engine && ctx) fill(reduced())
+  })
 
   // the game (re)starts from zero when the hoop is switched on
   $effect(() => {

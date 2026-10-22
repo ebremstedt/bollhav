@@ -1,11 +1,12 @@
 <script lang="ts">
   // A progress line along the top, and the keys: the arrows move between
-  // pages in reading order, unless the user is typing in a field, and t
-  // toggles the theme.
+  // pages in reading order, unless the user is typing in a field, t toggles
+  // the theme and f fullscreen.
   import { base } from '$app/paths'
   import { goto } from '$app/navigation'
   import { page } from '$app/state'
   import { toggleTheme } from '$lib/theme'
+  import { toggleFullscreen } from '$lib/fullscreen'
 
   const order = $derived(page.data.order)
   const n = $derived(order.length)
@@ -25,6 +26,8 @@
       goto(`${base}${prev.url}`)
     } else if (e.key === 't') {
       toggleTheme()
+    } else if (e.key === 'f') {
+      toggleFullscreen()
     }
   }
 </script>
@@ -34,5 +37,5 @@
 <div class="progress" style:width="{((index + 1) / n) * 100}%"></div>
 
 <p class="keys" aria-label="Keyboard shortcuts">
-  <kbd>←</kbd> <kbd>→</kbd> page <span class="sep">·</span> <kbd>t</kbd> theme
+  <kbd>←</kbd> <kbd>→</kbd> page <span class="sep">·</span> <kbd>t</kbd> theme <span class="sep">·</span> <kbd>f</kbd> fullscreen
 </p>
