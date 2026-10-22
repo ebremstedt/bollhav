@@ -104,7 +104,7 @@ def test_model_stores_people():
 
     o = People(
         owners=(Contact(name="Axel", email="axel@example.com"),),
-        creator="axel",
+        creators=(Contact(name="axel"),),
         maintainers=(Contact(name="platform"),),
     )
     m = make_model(people=o)

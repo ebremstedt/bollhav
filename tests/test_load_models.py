@@ -326,7 +326,7 @@ class TestNotificationsThroughTheDecorator:
     def _run(self, notifications, *, raise_in_main=None, times=1, **env):
         from bollhav.model.modelrun import ModelRun
         from bollhav.model.model import Model
-        from bollhav.model.notifications import OUTCOMES
+        from bollhav.model.modelrun import Outcome
         from bollhav.model.target import Target
         from bollhav.model.temporality import Temporality
 
@@ -334,6 +334,8 @@ class TestNotificationsThroughTheDecorator:
             target=Target(name="orders", schema="warehouse"),
             temporality=Temporality.TIMELESS,
             notifications=notifications,
+            # the harness bypasses apply_runtime_overrides, which stamps this
+            suffixed=bool(env.get("schema_suffix") or env.get("table_suffix")),
         )
         patches = _patches(**env)
         with (
@@ -353,7 +355,7 @@ class TestNotificationsThroughTheDecorator:
             def main(runs, debug):
                 # what @model_lifecycle does around each model's run
                 for run in runs:
-                    OUTCOMES.record(run.model, 1.0)
+                    run.outcome = Outcome(seconds=1.0)
                 if raise_in_main:
                     raise raise_in_main
 
@@ -361,7 +363,7 @@ class TestNotificationsThroughTheDecorator:
                 main()
 
     @pytest.fixture(autouse=True)
-    def _clean_env(self, monkeypatch):
+    def _clean_env(self, monkeypatch, env_var_bool_from_environ):
         monkeypatch.delenv("NOTIFICATIONS_ENABLED", raising=False)
         monkeypatch.setenv("HOSTNAME", "pod-1")
 
@@ -421,3 +423,24 @@ class TestNotificationsThroughTheDecorator:
         (text,) = errors.sent
         assert text.startswith("Pipeline failure: **pod-1**\n\nTAGS: `[orders]`")
         assert "RuntimeError: boom" in text
+
+    class _Broken:
+        def send(self, text, mentions=()):
+            raise RuntimeError("webhook exploded")
+
+    def test_a_channel_that_raises_does_not_fail_a_clean_run(self, caplog):
+        from bollhav.model.notifications import Notifications
+
+        self._run(Notifications(on_any=self._Broken()), use_schema_suffix=False)
+        assert "webhook exploded" in caplog.text
+
+    def test_a_channel_that_raises_keeps_the_runs_own_exception(self, caplog):
+        from bollhav.model.notifications import Notifications
+
+        with pytest.raises(RuntimeError, match="boom"):
+            self._run(
+                Notifications(on_failure=self._Broken()),
+                raise_in_main=RuntimeError("boom"),
+                use_schema_suffix=False,
+            )
+        assert "webhook exploded" in caplog.text

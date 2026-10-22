@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from functools import wraps
 from typing import Callable
 
-from bollhav.model.notifications import OUTCOMES
+from bollhav.model.modelrun import Outcome
 from bollhav.model.progress_bar import PROGRESS
 from bollhav.model.state_dry_plan import _fmt_window, _print_state_plan
 from bollhav.model.window import (
@@ -229,6 +229,10 @@ def model_lifecycle(func: Callable) -> Callable:
 
                 data_handler = IcebergData(model=model, conn=data_conn)
 
+        # From here on a failure is this model's: its assets, its state
+        # bootstrap, its body. Lock contention above is not (the caller skips
+        # a locked model), so it is not recorded as an outcome.
+        started = time.monotonic()
         try:
             if data_handler is not None:
                 data_handler.create_schema()
@@ -355,14 +359,12 @@ def model_lifecycle(func: Callable) -> Callable:
                 return None
             if mark_applied:
                 return None
-            started = time.monotonic()
-            try:
-                result = func(*args, **kwargs)
-            except BaseException as exc:
-                OUTCOMES.record(model, time.monotonic() - started, exc)
-                raise
-            OUTCOMES.record(model, time.monotonic() - started)
+            result = func(*args, **kwargs)
+            run.outcome = Outcome(seconds=time.monotonic() - started)
             return result
+        except BaseException as exc:
+            run.outcome = Outcome(seconds=time.monotonic() - started, error=exc)
+            raise
         finally:
             PROGRESS.finish_model()
             if (

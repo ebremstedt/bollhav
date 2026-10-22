@@ -44,33 +44,33 @@ class TestPeople:
     def test_all_fields_none_is_valid(self):
         o = People()
         assert o.owners is None
-        assert o.creator is None
+        assert o.creators is None
         assert o.maintainers is None
 
     def test_stores_all_fields(self):
         o = People(
             owners=(Contact(name="Axel", email="axel@example.com"),),
-            creator="axel",
+            creators=(Contact(name="axel"),),
             maintainers=(Contact(name="platform"),),
         )
         assert o.owners[0].name == "Axel"
-        assert o.creator == "axel"
+        assert o.creators[0].name == "axel"
         assert o.maintainers[0].name == "platform"
 
     def test_partial_fields_valid(self):
-        assert People(creator="axel").creator == "axel"
+        assert People(creators=(Contact(name="axel"),)).creators[0].name == "axel"
         assert (
             People(maintainers=(Contact(name="analytics"),)).maintainers[0].name
             == "analytics"
         )
 
-    def test_rejects_empty_creator(self):
-        with pytest.raises(OwnerError, match="creator"):
-            People(creator="")
+    def test_rejects_empty_creators(self):
+        with pytest.raises(OwnerError, match="creators"):
+            People(creators=())
 
-    def test_rejects_whitespace_creator(self):
-        with pytest.raises(OwnerError, match="creator"):
-            People(creator="   ")
+    def test_rejects_non_contact_creators(self):
+        with pytest.raises(OwnerError, match="creators"):
+            People(creators=("axel",))  # type: ignore[arg-type]
 
     def test_accepts_multiple_owners(self):
         o = People(owners=(Contact(name="Axel"), Contact(name="Sam")))

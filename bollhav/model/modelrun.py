@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Iterable
 from uuid import UUID, uuid4
 
 from bollhav.model.intervals import TZInterval
@@ -33,6 +33,22 @@ class QueryNotSqlStringError(TypeError):
         )
 
 
+def duration_string(seconds: float) -> str:
+    """Seconds as `1h 2m 5s` / `4m 12s`, for a run's time in a message."""
+    minutes, secs = divmod(int(seconds), 60)
+    hours, minutes = divmod(minutes, 60)
+    return f"{hours}h {minutes}m {secs}s" if hours else f"{minutes}m {secs}s"
+
+
+@dataclass
+class Outcome:
+    """What happened when a model ran, as `@model_lifecycle` saw it: how long
+    it took, and the exception if it raised."""
+
+    seconds: float
+    error: BaseException | None = None
+
+
 @dataclass
 class ModelRun:
     """One invocation of a model — the immutable `model` definition paired with
@@ -48,6 +64,10 @@ class ModelRun:
                      for a model with no window (oneshot / view).
         run_id     — minted once here and shared across this run's state
                      transitions (insert / mark_running / mark_applied / …).
+        outcome    — set by `@model_lifecycle` once the model ran or failed:
+                     how long it took and the exception, if any. `None` until
+                     then (not reached, dry run, curfew). What the
+                     notification senders read after `main()`.
 
     `is_reload` / `is_latest` / `is_backfill` record **which mode** resolved the
     window — exactly one is `True` on a run built by `apply_runtime_overrides`
@@ -66,6 +86,7 @@ class ModelRun:
     is_reload: bool = False
     is_latest: bool = False
     is_backfill: bool = False
+    outcome: Outcome | None = None
 
     def resolve_query(
         self, since: datetime | None = None, until: datetime | None = None
@@ -94,4 +115,16 @@ class ModelRun:
         return query
 
 
-__all__ = ["ModelRun", "MissingQueryBuilderError", "QueryNotSqlStringError"]
+def total_seconds(runs: Iterable[ModelRun]) -> float:
+    """The run times of the runs that reached their model, added up."""
+    return sum(o.seconds for r in runs if (o := r.outcome) is not None)
+
+
+__all__ = [
+    "ModelRun",
+    "Outcome",
+    "duration_string",
+    "total_seconds",
+    "MissingQueryBuilderError",
+    "QueryNotSqlStringError",
+]

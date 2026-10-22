@@ -257,6 +257,26 @@ class TestModelLifecycle:
         data_cls.return_value.create_table.assert_called_once()
         state_cls.assert_not_called()  # no state → no state bootstrap
 
+    def test_a_failure_in_setup_is_recorded_as_the_models_outcome(self):
+        """A model whose DDL raises never runs its body, but the failure is
+        still its own: the run's outcome carries the model and the exception."""
+        run = self._stateless_model()
+
+        @model_lifecycle
+        def execute_model(run, data_conn, state_conn=None):
+            raise AssertionError("the body must not run")
+
+        with (
+            patch("bollhav.postgres.data.PostgresData") as data_cls,
+            patch("bollhav.postgres.state.PostgresState"),
+        ):
+            data_cls.return_value.create_table.side_effect = RuntimeError("DDL failed")
+            with pytest.raises(RuntimeError, match="DDL failed"):
+                execute_model(run, "DATA")
+
+        assert run.outcome is not None
+        assert isinstance(run.outcome.error, RuntimeError)
+
     def test_stateful_bootstraps_then_runs(self):
         """Stateful model: state bootstrap runs (ensure_library /
         register_model / ensure_tables, seed intervals, filter actionable)
