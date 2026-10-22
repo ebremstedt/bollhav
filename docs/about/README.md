@@ -20,12 +20,6 @@ with a [tag expression](../concepts/tags.md), run the whole pipeline on
 your laptop against one Postgres container, and backfill faster by
 starting another process; see [Testing locally](../articles/local_testing.md).
 
-## Permissive by design
-
-You can use the model objects as configuration, for whatever kind of
-database you run against, or use the backends that come with bollhav:
-[Postgres, MSSQL and Iceberg](../backends.md).
-
 ## With or without an orchestrator
 
 You can run bollhav without an orchestrator at all: with state on, the
