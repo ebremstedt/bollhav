@@ -67,44 +67,38 @@ daily_orders = Model(
             chunk="@daily",
             tz=STOCKHOLM,
             lookback=2,  # redo the two days before the window too: late orders
-            flexibility=ChunkFlex(floor_chunk="@hourly"),  # a partial day is fine, down to the hour
         ),
-        size=50_000,  # rows per read chunk
+        size=50_000,
         retries=2,
     ),
-    # progress is tracked, one state row per day; one run of this model at a time
     state=State(mode=StateMode.DISCOVER, allow_concurrent_runs=False),
-    # what it reads, and what it waits for
     upstream=[
         Source(
             "shop.raw.orders",
             type=SourceModel(),
-            contract=UpstreamContract.ENCAPSULATE,  # the day's orders must be in
+            contract=UpstreamContract.ENCAPSULATE, 
             freshness=Freshness(within=timedelta(hours=6), scope=FreshnessScope.LATEST),
         ),
         Source(
             "shop.raw.customers",
             type=SourceModel(),
-            contract=UpstreamContract.WHOLE,  # the whole table, as of now
+            contract=UpstreamContract.WHOLE, 
             deactivate_for_dev=True,  # a dev run reads prod's copy and does not wait for it
         ),
     ],
-    # never between 02:00 and 04:00 Stockholm time, while the source loads
     curfew=Curfew(windows=[(time(2), time(4))], tz=STOCKHOLM),
-    # on top of the tags derived from the name: shop, marts, daily orders...
     tagging=Tags(tags={"finance", "daily"}),
-    # who to ask, and who is told
     people=People(
-        owners=(Contact("Erik Bremstedt", "erik@example.com"),),
-        maintainers=(Contact("Data platform", "platform@example.com"),),
-        creators=(Contact("Erik Bremstedt"),),
+        owners=(Contact("Maja Lindqvist", "maja.lindqvist@example.com"),),
+        maintainers=(Contact("Jonas Ek", "jonas.ek@example.com"), Contact("Priya Nair", "priya.nair@example.com")),
+        creators=(Contact("Tomas Berg"),),
     ),
     notifications=Notifications(
         on_failure=MicrosoftTeams(webhook_env="TEAMS_WEBHOOK_FINANCE"),
         detail=Detail.MODELS,
         mention=Mention.ON_FAILURE,
     ),
-    enabled=True,  # False parks the model: still declared, never run
+    enabled=True, 
 )
 ```
 
