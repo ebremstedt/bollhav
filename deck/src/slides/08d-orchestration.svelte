@@ -17,7 +17,7 @@
         <h3>Choreography</h3>
         <p class="muted how">a new approach</p>
         <p>
-          But bollhav models can also be choreographed by <strong>bollhav state</strong>. Instead of being told what
+          Bollhav models can also be choreographed by <strong>bollhav state</strong>. Instead of being told what
           to do, bollhav models ask state what is missing, and run those things on an interval of your own choosing.
         </p>
       </div>
