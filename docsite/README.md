@@ -9,7 +9,8 @@ Platform serves it as the `bollhav-docs` component (see `.do/app.yaml`).
 A page exists because the file exists. Every `.md` in `docs/` is a page at
 its path, titled by its first heading, and the sidebar is built from the
 folders: one group per folder, a folder's `README.md` as its overview at the
-folder's own URL. The groups come in the order `content.ts` lists them;
+folder's own URL. There is no home page: `/` forwards to the Model overview,
+and the deck is the site's front. The groups come in the order `content.ts` lists them;
 pages within a group are alphabetical, overview first. Nothing is
 registered anywhere.
 

@@ -19,19 +19,16 @@ export type PageRef = { url: string; title: string }
 export type Group = { name: string; label: string; parent: string; pages: PageRef[] }
 
 // the sidebar order; a folder not listed comes after these, alphabetically
-const order = ['', 'about', 'model', 'concepts', 'examples', 'articles']
+const order = ['about', 'model', 'concepts', 'examples', 'articles']
 
 // a folder's README.md is its overview and lives at the folder's own URL
 export const urlFor = (path: string) => {
-  if (path === 'README.md') return '/'
   if (path.endsWith('/README.md')) return `/${posix.dirname(path)}/`
   return `/${path.replace(/\.md$/, '')}/`
 }
 
-// the first heading of any level; a page with none is named after its file.
-// The home page has no heading of its own, so it is Home.
+// the first heading of any level; a page with none is named after its file
 function titleOf(markdown: string, path: string): string {
-  if (path === 'README.md') return 'Home'
   const match = markdown.match(/^#{1,6}\s+(.+?)\s*#*\s*$/m)
   return match ? match[1].replace(/`/g, '') : posix.basename(path, '.md')
 }
@@ -58,7 +55,7 @@ const compare = (a: Page, b: Page) => {
   return ra - rb || ka.localeCompare(kb)
 }
 
-/** Every page in reading order: home, then the groups in `order`, each with its overview first. */
+/** Every page in reading order: the groups in `order`, each with its overview first. */
 export function allPages(): Page[] {
   const pages: Page[] = []
   for (const [key, markdown] of Object.entries(files)) {
@@ -78,7 +75,6 @@ export function allPages(): Page[] {
 export function pageFor(param: string): Page | undefined {
   const clean = param.replace(/\/+$/, '')
   const pages = allPages()
-  if (clean === '') return pages.find((p) => p.path === 'README.md')
   return pages.find((p) => p.path === `${clean}.md`) ?? pages.find((p) => p.path === `${clean}/README.md`)
 }
 

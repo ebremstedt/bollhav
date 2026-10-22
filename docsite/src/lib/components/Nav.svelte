@@ -21,7 +21,7 @@
           <path d="M4 7h16M4 12h16M4 17h16" />
         </svg>
       </button>
-      <a class="brand" href="{base}/">
+      <a class="brand" href="{base}/model/">
         <img src="{base}/bollhav_logo_small.png" alt="" width="28" height="23" />
         <span>bollhav</span>
       </a>

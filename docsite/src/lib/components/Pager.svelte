@@ -1,7 +1,6 @@
 <script lang="ts">
   // The deck's bottom bar: a progress line along the top, the page counter
-  // (and the sea's sliders on the home page) on the left, the keys in the
-  // middle, previous and next on the right. The arrows move between pages in
+  // on the left, the keys in the middle, previous and next on the right. The arrows move between pages in
   // reading order, unless the user is typing in a field; t toggles the theme
   // and f fullscreen.
   import { base } from '$app/paths'
@@ -10,14 +9,12 @@
   import { toggleTheme } from '$lib/theme'
   import { toggleFullscreen } from '$lib/fullscreen'
   import { menu } from '$lib/ui.svelte'
-  import SeaControls from './SeaControls.svelte'
 
   const order = $derived(page.data.order)
   const n = $derived(order.length)
   const index = $derived(Math.max(0, order.findIndex((p) => base + p.url === page.url.pathname)))
   const prev = $derived(index > 0 ? order[index - 1] : null)
   const next = $derived(index < n - 1 ? order[index + 1] : null)
-  const home = $derived(page.data.path === 'README.md')
   const pad = (i: number) => String(i).padStart(2, '0')
 
   function onKey(e: KeyboardEvent) {
@@ -47,9 +44,6 @@
     <button type="button" class="counter" onclick={() => (menu.open = !menu.open)} title="Pages">
       {pad(index + 1)} <span class="sep">/</span> {pad(n)}
     </button>
-    {#if home}
-      <SeaControls />
-    {/if}
   </div>
   <p class="keys" aria-label="Keyboard shortcuts">
     <kbd>←</kbd> <kbd>→</kbd> page <span class="sep">·</span> <kbd>t</kbd> theme <span class="sep">·</span> <kbd>f</kbd> fullscreen
