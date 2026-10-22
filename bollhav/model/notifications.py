@@ -1,9 +1,3 @@
-"""Notifications: `notifications=Notifications(...)` on a `Model` says where a
-run's outcome goes, and a channel (`bollhav.channels`, or your own `Channel`)
-says how it gets there. The decorators do the sending: `@model_lifecycle` sets
-each model's `Outcome` on its `ModelRun`, `@load_models` sends one message per
-channel from the runs when `main()` returns or raises."""
-
 from __future__ import annotations
 
 import logging
@@ -12,6 +6,8 @@ import socket
 from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING, Callable, Iterable, Protocol
+
+from roskarl import env_var_bool
 
 from bollhav.model.modelrun import ModelRun, duration_string, total_seconds
 
@@ -31,15 +27,11 @@ class NotificationsError(ValueError):
 def _enabled_override() -> bool | None:
     """`NOTIFICATIONS_ENABLED` as a bool, None when unset. A value that is not
     true/false is logged and ignored: a typo must not fail or silence a run."""
-    value = os.environ.get(ENABLED_ENV, "")
-    if not value:
+    try:
+        return env_var_bool(ENABLED_ENV, should_print_unset=False)
+    except ValueError:
+        logger.warning("%s must be true or false; ignored", ENABLED_ENV)
         return None
-    if value.upper() == "TRUE":
-        return True
-    if value.upper() == "FALSE":
-        return False
-    logger.warning("%s must be true or false, not %r; ignored", ENABLED_ENV, value)
-    return None
 
 
 class Channel(Protocol):
