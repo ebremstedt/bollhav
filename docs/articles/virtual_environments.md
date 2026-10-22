@@ -10,4 +10,4 @@
 
 ## See also
 
-- [Testing locally](local_testing.md) · [Backends](../backends.md)
+- [Testing locally](local_testing.md) · [Backends](../concepts/backends.md)

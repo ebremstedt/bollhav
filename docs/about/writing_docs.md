@@ -12,8 +12,7 @@ docs/
 ├─ model/                  the Model and its sub-objects
 │  ├─ README.md            overview
 │  ├─ target.md, contract.md, batch.md, temporality.md, state.md, upstream.md, …
-├─ concepts/               env, decorators, tags, gui
-├─ backends.md             postgres, mssql, iceberg, in short
+├─ concepts/               env, decorators, tags, gui, backends
 ├─ examples/
 ├─ articles/               README.md is the index
 └─ about/
