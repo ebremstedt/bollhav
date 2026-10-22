@@ -208,7 +208,10 @@
   // outline titles come from each slide's first heading
   $effect(() => {
     titles = [...root.querySelectorAll('.slide')].map(
-      (s, i) => s.querySelector('h1, h2, h3')?.textContent?.trim() || `Slide ${i + 1}`,
+      (s, i) => {
+        const h = s.querySelector('h1, h2, h3')
+        return h?.dataset.title || h?.textContent?.trim() || `Slide ${i + 1}`
+      },
     )
   })
 

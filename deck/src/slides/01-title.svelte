@@ -9,22 +9,21 @@
 <Slide layout="title" title="bollhav">
   <img class="plain logo" src="./bollhav.png" alt="" width="200" height="165" />
   <div class="tagline">
-    <p class="lead">A framework that standardizes pipeline models</p>
-    <aside class="note">
-      <svg class="arrow" viewBox="0 0 60 50" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-        <path d="M56 4 C 42 6, 24 20, 6 44" />
-        <path d="M7 31 L6 44 L19 42" />
-      </svg>
-      <div class="text">
-        <p>and in the process,<br />creates great metadata for</p>
-        <ul>
-          <li>execution</li>
-          <li>state</li>
-          <li>lineage</li>
-          <li>orchestration</li>
-        </ul>
-      </div>
-    </aside>
+    <p class="lead">
+      A framework that standardizes pipeline
+      <span class="noted"
+        >models<span class="note">
+          <svg class="arrow" viewBox="0 0 60 50" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M56 4 C 42 6, 24 20, 6 44" />
+            <path d="M7 31 L6 44 L19 42" />
+          </svg>
+          <span class="text">
+            and in the process,<br />creates great metadata for
+            <span class="pros"><span>execution</span><span>state</span><span>lineage</span><span>orchestration</span></span>
+          </span>
+        </span></span
+      >
+    </p>
   </div>
   <p><code>pip install bollhav</code></p>
   <p class="start">
@@ -43,11 +42,9 @@
     order: -1; /* above the heading */
   }
 
-  /* the tagline, with a note hanging off the end of it, up and to the side,
-     an arrow pointing back at the words; on a narrow screen the note sits
-     below the tagline instead */
+  /* the tagline, with a note above "models": the arrow rises from the word
+     up to the right, the words at its end. Hidden on a narrow screen */
   .tagline {
-    position: relative;
     width: max-content;
     max-width: 100%;
     margin-inline: auto;
@@ -60,15 +57,21 @@
     }
   }
 
+  .noted {
+    position: relative;
+    white-space: nowrap;
+  }
+
   .note {
     position: absolute;
-    left: calc(100% + 0.4rem);
-    bottom: 0.9rem;
+    left: 55%;
+    bottom: 100%;
     display: flex;
     align-items: flex-end;
     gap: 0.3rem;
     width: max-content;
     text-align: left;
+    white-space: normal;
     font-family: var(--font-mono);
     font-size: 0.78rem;
     line-height: 1.35;
@@ -84,55 +87,37 @@
   }
 
   .note .text {
+    display: block;
     margin-bottom: 1rem;
     transform: rotate(-3deg);
   }
 
-  .note p {
-    margin: 0;
-    font-size: inherit;
-    max-width: none;
-  }
-
-  .note ul {
-    margin: 0.3rem 0 0;
-    padding: 0;
-    list-style: none;
+  .note .pros {
     display: grid;
     gap: 0.1rem;
-  }
-
-  .note li {
-    font-size: inherit;
-    padding-left: 1.1em;
+    margin-top: 0.3rem;
     color: var(--fg);
   }
 
-  .note li::before {
+  .note .pros > span {
+    position: relative;
+    padding-left: 1.1em;
+  }
+
+  .note .pros > span::before {
+    content: '';
+    position: absolute;
+    left: 0.15em;
     top: 0.45em;
-    width: 0.5em;
-    height: 0.5em;
+    width: 0.4em;
+    height: 0.4em;
+    border-radius: 50%;
+    background: var(--accent);
   }
 
   @media (max-width: 1100px) {
     .note {
-      position: static;
-      width: auto;
-      margin-top: 0.9rem;
-      justify-content: center;
-    }
-    .note .arrow {
       display: none;
-    }
-    .note .text {
-      margin: 0;
-      transform: none;
-      text-align: center;
-    }
-    .note ul {
-      display: flex;
-      justify-content: center;
-      gap: 1.2rem;
     }
   }
 
