@@ -72,17 +72,6 @@ class Mention(Enum):
 
 @dataclass(frozen=True)
 class Notifications:
-    """Where a model's outcome goes, how much to say, and whom to address.
-    `on_any` hears both outcomes; `on_success` and `on_failure` override it
-    for their outcome, so one channel for everything, two to split, or one
-    plus an override all work. Models that share a channel are reported
-    together: one message per channel per run. `mention` says when the
-    model's people are addressed and the `mention_*` flags which roles:
-    owners and maintainers by default, creators on request. `enabled` is the
-    switch, and the `NOTIFICATIONS_ENABLED` env var overrides it for a whole
-    run. A run with a schema or table suffix is a dev run and stays quiet
-    unless `suffixed_runs` is True."""
-
     on_any: Channel | None = None
     on_success: Channel | None = None
     on_failure: Channel | None = None
@@ -121,11 +110,6 @@ class Notifications:
         return self.on_failure if self.on_failure is not None else self.on_any
 
     def channel(self, *, failure: bool, suffixed: bool) -> Channel | None:
-        """Where this outcome is reported, or None when the model stays quiet:
-        disabled, or a suffixed run (`Model.suffixed`, stamped by the runtime)
-        it did not opt in to. An explicit `NOTIFICATIONS_ENABLED=true` lifts
-        the suffix rule too: it means "this run reports", whatever kind of run
-        it is."""
         if not self.is_enabled():
             return None
         if suffixed and not self.suffixed_runs and not _enabled_override():
@@ -141,6 +125,19 @@ class Outcome:
     model: Model
     seconds: float
     error: BaseException | None = None
+
+    @property
+    def line(self) -> str:
+        """The model and its run time, as a list item on a card."""
+        return f"- {self.model.target.full_name}: {_duration(self.seconds)}"
+
+    @property
+    def failure_line(self) -> str:
+        """The model, how long it ran, and what it raised."""
+        return (
+            f"- {self.model.target.full_name} after {_duration(self.seconds)}: "
+            f"{type(self.error).__name__}: {self.error}"
+        )
 
 
 @dataclass
@@ -239,12 +236,6 @@ def send_quietly(send: Callable[..., None], *args, **kwargs) -> None:
         logger.exception("Notification failed; the run is unaffected")
 
 
-def _model_lines(outcomes: Iterable[Outcome]) -> str:
-    return "\n".join(
-        f"- {o.model.target.full_name}: {_duration(o.seconds)}" for o in outcomes
-    )
-
-
 def send_success(tags: str | None = None) -> None:
     """After a clean `main()`: one message per `on_success` channel, listing the
     models that completed on it with their run times. A suffixed run only
@@ -255,7 +246,7 @@ def send_success(tags: str | None = None) -> None:
         summary = f"{len(outcomes)} model(s) done in {total}"
         text = f"{_header('success', tags)}\n\n"
         if _detail(outcomes) is Detail.MODELS:
-            text += f"{_model_lines(outcomes)}\n\n"
+            text += "\n".join(o.line for o in outcomes) + "\n\n"
         channel.send(
             text + summary, _mentions((o.model for o in outcomes), failure=False)
         )
@@ -264,29 +255,18 @@ def send_success(tags: str | None = None) -> None:
 def send_failure(
     exc: BaseException, runs: Iterable[ModelRun], tags: str | None = None
 ) -> None:
-    """After a `main()` that raised: one message per `on_failure` channel. A
-    model that raised reports on its own channel with its exception; when the
-    run died of something else afterwards (a model's error was caught and the
-    loop went on, then a connection dropped), that exception is named too.
-    When the run failed outside any model (a connection that never opened,
-    say), every matched model's failure channel hears it instead. A suffixed
-    run only reaches models with `suffixed_runs=True`."""
     header = _header("failure", tags)
     failed = [o for o in OUTCOMES.items if o.error is not None]
     completed = [o for o in OUTCOMES.items if o.error is None]
     if failed:
         own = any(o.error is exc for o in failed)
         for channel, outcomes in _grouped(failed, failure=True):
-            lines = [
-                f"- {o.model.target.full_name} after {_duration(o.seconds)}: "
-                f"{type(o.error).__name__}: {o.error}"
-                for o in outcomes
-            ]
-            text = f"{header}\n\n" + "\n".join(lines)
+            text = f"{header}\n\n" + "\n".join(o.failure_line for o in outcomes)
             if not own:
                 text += f"\n\nThe run then failed with {type(exc).__name__}: {exc}"
             if completed and _detail(outcomes) is Detail.MODELS:
-                text += f"\n\nDone before the failure:\n{_model_lines(completed)}"
+                done = "\n".join(o.line for o in completed)
+                text += f"\n\nDone before the failure:\n{done}"
             channel.send(text, _mentions((o.model for o in outcomes), failure=True))
         return
     by_channel: list[tuple[Channel, list[Model]]] = []
