@@ -18,6 +18,13 @@
       <img class="plain pic" src="./dancer.png" alt="" width="512" height="512" />
     </div>
   </div>
+  <p class="credit">
+    <a href="https://www.flaticon.com/free-icons/conductor" title="conductor icons">Conductor icon by mia elysia</a>
+    <span class="sep">·</span>
+    <a href="https://www.flaticon.com/free-icons/ballet" title="ballet icons">Ballet icon by NeXore88</a>
+    <span class="sep">·</span>
+    Flaticon
+  </p>
 </Slide>
 
 <style>
@@ -56,6 +63,31 @@
     text-transform: uppercase;
     color: var(--fg-2);
     margin-bottom: 0.6rem;
+  }
+
+  /* where the pictures come from */
+  .credit {
+    margin-top: 0.5rem;
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    letter-spacing: 0.04em;
+    color: var(--fg-2);
+  }
+
+  .credit a {
+    color: inherit;
+    text-decoration: none;
+    border-bottom: 1px solid color-mix(in srgb, var(--fg-2) 40%, transparent);
+  }
+
+  .credit a:hover {
+    color: var(--accent);
+    border-color: var(--accent);
+  }
+
+  .credit .sep {
+    opacity: 0.45;
+    margin-inline: 0.3em;
   }
 
   @media (max-width: 760px) {
