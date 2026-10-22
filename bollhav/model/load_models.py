@@ -17,7 +17,12 @@ from roskarl import (
 
 from bollhav.model.runtime import apply_runtime_overrides
 from bollhav.model.modelrun import ModelRun
-from bollhav.model.notifications import OUTCOMES, send_failure, send_success
+from bollhav.model.notifications import (
+    OUTCOMES,
+    send_failure,
+    send_quietly,
+    send_success,
+)
 from bollhav.model.window import compute_intervals
 from bollhav.model.progress_bar import get_progress_level, PROGRESS, ProgressLevel
 from bollhav.model.state import StateMode
@@ -288,7 +293,8 @@ def load_models(
             try:
                 func(runs=runs, debug=cfg.debug)
             except BaseException as exc:
-                send_failure(
+                send_quietly(
+                    send_failure,
                     exc,
                     runs,
                     tags=cfg.tags,
@@ -298,7 +304,8 @@ def load_models(
                 raise
             if not cfg.dry_state:
                 PROGRESS.finish()
-            send_success(
+            send_quietly(
+                send_success,
                 tags=cfg.tags,
                 schema_suffix=cfg.schema_suffix,
                 table_suffix=cfg.table_suffix,

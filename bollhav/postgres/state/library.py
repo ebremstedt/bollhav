@@ -289,7 +289,14 @@ class Library(_PostgresStateBase):
                         if model.people.owners is not None
                         else None
                     ),
-                    "creator": model.people.creator,
+                    "creators": (
+                        [
+                            {"name": c.name, "email": c.email}
+                            for c in model.people.creators
+                        ]
+                        if model.people.creators is not None
+                        else None
+                    ),
                     "maintainers": (
                         [
                             {"name": c.name, "email": c.email}

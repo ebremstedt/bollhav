@@ -421,3 +421,24 @@ class TestNotificationsThroughTheDecorator:
         (text,) = errors.sent
         assert text.startswith("Pipeline failure: **pod-1**\n\nTAGS: `[orders]`")
         assert "RuntimeError: boom" in text
+
+    class _Broken:
+        def send(self, text, mentions=()):
+            raise RuntimeError("webhook exploded")
+
+    def test_a_channel_that_raises_does_not_fail_a_clean_run(self, caplog):
+        from bollhav.model.notifications import Notifications
+
+        self._run(Notifications(on_any=self._Broken()), use_schema_suffix=False)
+        assert "webhook exploded" in caplog.text
+
+    def test_a_channel_that_raises_keeps_the_runs_own_exception(self, caplog):
+        from bollhav.model.notifications import Notifications
+
+        with pytest.raises(RuntimeError, match="boom"):
+            self._run(
+                Notifications(on_failure=self._Broken()),
+                raise_in_main=RuntimeError("boom"),
+                use_schema_suffix=False,
+            )
+        assert "webhook exploded" in caplog.text

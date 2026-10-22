@@ -31,13 +31,12 @@ class People:
     """Involved people and accountability metadata for a model"""
 
     owners: tuple[Contact, ...] | None = None
-    creator: str | None = None
+    creators: tuple[Contact, ...] | None = None
     maintainers: tuple[Contact, ...] | None = None
 
     def __post_init__(self) -> None:
-        if self.creator is not None and not self.creator.strip():
-            raise OwnerError("People.creator must be a non-empty string when set")
         self.owners = self._validate_contacts("owners", self.owners)
+        self.creators = self._validate_contacts("creators", self.creators)
         self.maintainers = self._validate_contacts("maintainers", self.maintainers)
 
     @staticmethod

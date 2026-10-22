@@ -409,9 +409,10 @@ class TestCurfewPreservedThroughOverrides:
 
 class TestNotificationsPreservedThroughOverrides:
     def test_notifications_and_people_survive_the_runtime_copy(self):
-        from bollhav.model import Contact, Notifications, People, Teams
+        from bollhav.channels import MicrosoftTeams
+        from bollhav.model import Contact, Notifications, People
 
-        notifications = Notifications(on_any=Teams(webhook_env="HOOK"))
+        notifications = Notifications(on_any=MicrosoftTeams(webhook_env="HOOK"))
         people = People(owners=(Contact(name="Anna", email="anna@example.test"),))
         m = Model(
             target=Target(name="orders", schema="public", schema_suffix_appendix=None),

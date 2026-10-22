@@ -225,13 +225,13 @@ class TestBuildMetadataPeople:
         m = _model()
         m.people = People(
             owners=(Contact(name="Axel", email="axel@example.com"),),
-            creator="axel",
+            creators=(Contact(name="axel"),),
             maintainers=(Contact(name="platform", email="platform@example.com"),),
         )
         meta = PostgresState._build_metadata(m)
         assert meta["people"] == {
             "owners": [{"name": "Axel", "email": "axel@example.com"}],
-            "creator": "axel",
+            "creators": [{"name": "axel", "email": None}],
             "maintainers": [{"name": "platform", "email": "platform@example.com"}],
         }
 
@@ -240,10 +240,12 @@ class TestBuildMetadataPeople:
         from bollhav.model.people import Contact, People
 
         m = _model()
-        m.people = People(creator="bot", maintainers=(Contact(name="analytics"),))
+        m.people = People(
+            creators=(Contact(name="bot"),), maintainers=(Contact(name="analytics"),)
+        )
         meta = PostgresState._build_metadata(m)
         assert meta["people"]["owners"] is None
-        assert meta["people"]["creator"] == "bot"
+        assert meta["people"]["creators"] == [{"name": "bot", "email": None}]
         assert meta["people"]["maintainers"] == [{"name": "analytics", "email": None}]
 
 

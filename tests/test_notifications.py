@@ -1,5 +1,5 @@
-"""Notifications: the Teams channel, the per-run outcome registry, and the
-one-message-per-channel grouping that load_models sends from."""
+"""Notifications: the per-run outcome registry and the one-message-per-channel
+grouping that load_models sends from. The Teams channel has its own tests."""
 
 import logging
 
@@ -8,7 +8,12 @@ import pytest
 from bollhav.model import notifications as n
 from bollhav.model.model import Model
 from bollhav.model.modelrun import ModelRun
-from bollhav.model.notifications import Detail, Mention, Notifications, Teams
+from bollhav.model.notifications import (
+    Detail,
+    Mention,
+    Notifications,
+    NotificationsError,
+)
 from bollhav.model.people import Contact, People
 from bollhav.model.target import Target
 from bollhav.model.temporality import Temporality
@@ -29,6 +34,7 @@ class Recorder:
 ERIK = Contact(name="Erik", email="erik@example.test")
 ANNA = Contact(name="Anna", email="anna@example.test")
 NO_EMAIL = Contact(name="Ops desk")
+BOT = Contact(name="Build bot", email="bot@example.test")
 
 
 def _model(
@@ -48,130 +54,6 @@ def _fresh_outcomes(monkeypatch):
     n.OUTCOMES.reset()
     yield
     n.OUTCOMES.reset()
-
-
-# ── Teams ──
-
-
-def test_teams_is_silent_without_the_env_var(monkeypatch, caplog):
-    monkeypatch.delenv("HOOK", raising=False)
-    posted = []
-    monkeypatch.setattr(
-        n, "_post_json", lambda url, payload, timeout=10.0: posted.append(url)
-    )
-    with caplog.at_level(logging.INFO):
-        Teams(webhook_env="HOOK").send("hello")
-    assert posted == []
-    assert "HOOK not set" in caplog.text
-
-
-def test_teams_posts_an_adaptive_card_to_the_url_in_the_env_var(monkeypatch):
-    monkeypatch.setenv("HOOK", "https://example.test/webhook")
-    posted = []
-    monkeypatch.setattr(
-        n,
-        "_post_json",
-        lambda url, payload, timeout=10.0: posted.append((url, payload)),
-    )
-    Teams(webhook_env="HOOK").send("hello **world**")
-    ((url, payload),) = posted
-    assert url == "https://example.test/webhook"
-    card = payload["attachments"][0]["content"]
-    assert card["type"] == "AdaptiveCard"
-    assert card["body"] == [
-        {"type": "TextBlock", "text": "hello **world**", "wrap": True}
-    ]
-
-
-def test_teams_logs_a_sent_notification(monkeypatch, caplog):
-    monkeypatch.setenv("HOOK", "https://example.test/webhook")
-    monkeypatch.setattr(n, "_post_json", lambda url, payload, timeout=10.0: None)
-    with caplog.at_level(logging.INFO):
-        Teams(webhook_env="HOOK").send("hello")
-    assert "Teams notification sent via HOOK" in caplog.text
-
-
-def test_teams_send_failure_is_logged_not_raised(monkeypatch, caplog):
-    monkeypatch.setenv("HOOK", "https://example.test/webhook")
-
-    def boom(url, payload, timeout=10.0):
-        raise OSError("connection refused")
-
-    monkeypatch.setattr(n, "_post_json", boom)
-    with caplog.at_level(logging.WARNING):
-        Teams(webhook_env="HOOK").send("hello")
-    assert "failed to send" in caplog.text
-
-
-def test_teams_caps_an_oversized_message_in_the_middle(monkeypatch):
-    monkeypatch.setenv("HOOK", "https://example.test/webhook")
-    posted = []
-    monkeypatch.setattr(
-        n, "_post_json", lambda url, payload, timeout=10.0: posted.append(payload)
-    )
-    text = "HEAD " + "x" * 60_000 + " TAIL"
-    Teams(webhook_env="HOOK").send(text)
-    sent = posted[0]["attachments"][0]["content"]["body"][0]["text"]
-    assert len(sent.encode("utf-8")) <= n.TEAMS_MAX_BYTES
-    assert sent.startswith("HEAD ") and sent.endswith(" TAIL")
-    assert "message capped for Teams" in sent and "bytes cut here" in sent
-
-
-def _sent_payloads(monkeypatch) -> list:
-    monkeypatch.setenv("HOOK", "https://example.test/webhook")
-    posted: list = []
-    monkeypatch.setattr(
-        n, "_post_json", lambda url, payload, timeout=10.0: posted.append(payload)
-    )
-    return posted
-
-
-def test_the_whole_payload_stays_under_the_limit_with_many_mentions(monkeypatch):
-    posted = _sent_payloads(monkeypatch)
-    crowd = tuple(
-        Contact(name=f"Person Number {i}", email=f"person{i}@example.test")
-        for i in range(50)
-    )
-    Teams(webhook_env="HOOK").send("x" * 100_000, mentions=crowd)
-    assert len(n._json_bytes(posted[0])) <= n.TEAMS_MAX_BYTES
-    card = posted[0]["attachments"][0]["content"]
-    assert len(card["msteams"]["entities"]) == 50
-    assert card["body"][0]["text"].endswith("<at>Person Number 49</at>")
-    assert "message capped for Teams" in card["body"][0]["text"]
-
-
-def test_the_whole_payload_stays_under_the_limit_with_swedish_text(monkeypatch):
-    posted = _sent_payloads(monkeypatch)
-    Teams(webhook_env="HOOK").send("å" * 60_000)
-    assert len(n._json_bytes(posted[0])) <= n.TEAMS_MAX_BYTES
-    assert (
-        "message capped for Teams"
-        in posted[0]["attachments"][0]["content"]["body"][0]["text"]
-    )
-
-
-def test_a_fitting_message_is_sent_untouched_even_with_mentions(monkeypatch):
-    posted = _sent_payloads(monkeypatch)
-    Teams(webhook_env="HOOK").send("hello " + "ä" * 5_000, mentions=(ERIK, ANNA))
-    text = posted[0]["attachments"][0]["content"]["body"][0]["text"]
-    assert text == "hello " + "ä" * 5_000 + "\n\n<at>Erik</at> <at>Anna</at>"
-
-
-def test_json_goes_on_the_wire_as_utf8_not_ascii_escapes():
-    assert n._json_bytes({"t": "ä"}) == '{"t": "ä"}'.encode("utf-8")
-
-
-def test_capped_leaves_a_fitting_message_alone_and_respects_utf8():
-    assert n._capped("short", limit=100) == "short"
-    capped = n._capped("ä" * 30_000, limit=1_000)
-    assert len(capped.encode("utf-8")) <= 1_000
-    assert capped.startswith("ä") and capped.endswith("ä")
-    assert n._capped("x" * 500, limit=0).strip().startswith("… message capped")
-
-
-def test_teams_channels_with_the_same_env_var_are_equal():
-    assert Teams("HOOK") == Teams("HOOK")
-    assert Teams("HOOK") != Teams("OTHER")
 
 
 # ── the model ──
@@ -492,22 +374,67 @@ def test_a_run_that_fails_before_any_model_mentions_the_matched_models_people():
     assert errors.mentions == [(ERIK,)]
 
 
-def test_teams_renders_mentions_as_entities_and_names_the_emailless(monkeypatch):
-    monkeypatch.setenv("HOOK", "https://example.test/webhook")
-    posted = []
-    monkeypatch.setattr(
-        n, "_post_json", lambda url, payload, timeout=10.0: posted.append(payload)
+def test_mention_flags_pick_the_roles():
+    both = Recorder()
+    people = People(owners=(ERIK,), creators=(BOT,), maintainers=(ANNA,))
+    notif = Notifications(
+        on_any=both,
+        mention=Mention.ALWAYS,
+        mention_owners=False,
+        mention_creators=True,
     )
-    Teams(webhook_env="HOOK").send("broke", mentions=(ERIK, NO_EMAIL))
-    card = posted[0]["attachments"][0]["content"]
-    assert card["body"][0]["text"] == "broke\n\n<at>Erik</at> Ops desk"
-    assert card["msteams"]["entities"] == [
-        {
-            "type": "mention",
-            "text": "<at>Erik</at>",
-            "mentioned": {"id": "erik@example.test", "name": "Erik"},
-        }
-    ]
+    n.OUTCOMES.record(_model("orders", notif, people), 1.0)
+    n.send_success()
+    assert both.mentions == [(ANNA, BOT)]
+
+
+def test_creators_are_not_mentioned_by_default():
+    both = Recorder()
+    people = People(owners=(ERIK,), creators=(BOT,))
+    n.OUTCOMES.record(
+        _model("orders", Notifications(on_any=both, mention=Mention.ALWAYS), people),
+        1.0,
+    )
+    n.send_success()
+    assert both.mentions == [(ERIK,)]
+
+
+def test_a_mention_that_would_address_nobody_is_rejected():
+    with pytest.raises(NotificationsError, match="nobody"):
+        Notifications(
+            on_any=Recorder(),
+            mention=Mention.ON_FAILURE,
+            mention_owners=False,
+            mention_maintainers=False,
+        )
+
+
+def test_failure_names_the_runs_own_exception_when_a_model_error_was_caught():
+    errors = Recorder()
+    model = _model("orders", Notifications(on_failure=errors))
+    n.OUTCOMES.record(model, 1.0, RuntimeError("locked, skipped"))
+    n.send_failure(ConnectionError("db went away"), runs=[ModelRun(model=model)])
+    (text,) = errors.sent
+    assert "- warehouse.orders after 0m 1s: RuntimeError: locked, skipped" in text
+    assert "The run then failed with ConnectionError: db went away" in text
+
+
+def test_failure_does_not_repeat_the_exception_that_is_the_models_own():
+    errors = Recorder()
+    model = _model("orders", Notifications(on_failure=errors))
+    exc = RuntimeError("x")
+    n.OUTCOMES.record(model, 1.0, exc)
+    n.send_failure(exc, runs=[ModelRun(model=model)])
+    assert "The run then failed" not in errors.sent[0]
+
+
+def test_send_quietly_logs_and_swallows(caplog):
+    def bad() -> None:
+        raise RuntimeError("channel down")
+
+    with caplog.at_level(logging.ERROR):
+        n.send_quietly(bad)
+    assert "channel down" in caplog.text
 
 
 # ── duration formatting ──
