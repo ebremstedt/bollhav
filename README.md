@@ -4,7 +4,7 @@
 
 <p align="center">
   <strong>Bollhav</strong><br>
-  A Python framework that standardizes pipeline models<br>
+  A framework that standardizes pipeline models<br>
   <sub>and in the process, creates great metadata for execution, state and lineage</sub>
 </p>
 

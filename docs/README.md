@@ -3,7 +3,7 @@
 </p>
 
 <div class="tagline">
-<p align="center"><strong>Bollhav</strong><br>a Python framework that standardizes pipeline models</p>
+<p align="center"><strong>Bollhav</strong><br>a framework that standardizes pipeline models</p>
 <span class="note">
   <svg class="arrow" viewBox="0 0 60 50" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
     <path d="M56 4 C 42 6, 24 20, 6 44" />

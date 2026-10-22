@@ -8,7 +8,7 @@
   import { base } from '$app/paths'
   import { page } from '$app/state'
   import { menu } from '$lib/ui.svelte'
-  import { deck, github } from '$lib/sites'
+  import { deck, github, toDeck } from '$lib/sites'
 
   type Group = (typeof page.data.nav)[number]
 
@@ -117,6 +117,6 @@
         {/if}
       {/if}
     {/each}
-    <p class="side-links"><a href={deck}>Slide deck</a> <a href={github}>GitHub</a></p>
+    <p class="side-links"><a href={deck} onclick={toDeck}>Slide deck</a> <a href={github}>GitHub</a></p>
   </nav>
 </aside>

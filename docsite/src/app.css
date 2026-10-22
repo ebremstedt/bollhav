@@ -30,7 +30,7 @@
 
   --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
   --radius: 14px;
-  --top-h: 3.5rem;
+  --top-h: 3.25rem;
   --measure: 40rem; /* the width of a text block, the same for every element whatever its font size */
   color-scheme: light;
 }
@@ -171,7 +171,7 @@ kbd {
   align-items: center;
   gap: 1rem;
   min-height: var(--top-h);
-  padding: 0.5rem 0;
+  padding: 0.375rem 0;
 }
 
 .top-left,
@@ -187,7 +187,7 @@ kbd {
   gap: 0.6rem;
   color: var(--fg);
   text-decoration: none;
-  font-size: 1.25rem;
+  font-size: 1.1rem;
   font-weight: 700;
   letter-spacing: -0.02em;
   line-height: 1.2;
@@ -925,7 +925,7 @@ p {
   font-weight: 600;
 }
 
-/* ---------- pager ---------- */
+/* ---------- the bottom bar, the deck's ---------- */
 
 .progress {
   position: fixed;
@@ -937,101 +937,78 @@ p {
   transition: width 0.45s var(--ease);
 }
 
-.pager {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+.bottom {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 30;
+  display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 1rem;
-  margin-top: 2rem;
+  padding-inline: clamp(0.75rem, 2vw, 1.5rem);
+  padding-bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px));
+  pointer-events: none;
 }
 
-.pager .step {
-  display: grid;
-  gap: 0.2rem;
-  padding: 0.8rem 1rem;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  color: var(--fg);
-  text-decoration: none;
-  background: color-mix(in srgb, var(--bg) 70%, transparent);
-  transition:
-    border-color 0.2s var(--ease),
-    transform 0.2s var(--ease);
+.bottom > * {
+  pointer-events: auto;
 }
 
-.pager .step:hover {
-  border-color: var(--accent);
-  transform: translateY(-1px);
+.bottom .group {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
 }
 
-.pager .step .eyebrow {
+.toggle:disabled {
+  opacity: 0.35;
+  cursor: default;
+  transform: none;
+  border-color: var(--line);
+}
+
+/* the counter and the keys sit over the page, so they get a soft pill */
+.counter,
+.keys {
   margin: 0;
-}
-
-.pager .step.next {
-  text-align: right;
-}
-
-.pager .step-title {
-  font-weight: 600;
-  letter-spacing: -0.01em;
-}
-
-.counter {
+  max-width: none;
   font-family: var(--font-mono);
-  font-size: 0.9rem;
-  letter-spacing: 0.12em;
-  font-variant-numeric: tabular-nums;
   color: var(--fg-2);
-  border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--bg) 70%, transparent);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
   border-radius: 999px;
   padding: 0.5rem 0.8rem;
   white-space: nowrap;
+}
+
+.counter {
+  font-size: 0.85rem;
+  letter-spacing: 0.12em;
+  font-variant-numeric: tabular-nums;
+  border: 0;
+  cursor: pointer;
+}
+
+.counter:hover {
+  color: var(--fg);
+}
+
+.keys {
+  font-size: 0.78rem;
+  letter-spacing: 0.04em;
 }
 
 .sep {
   opacity: 0.45;
 }
 
-/* the keybindings, as a pill at the bottom like the deck's hint */
-.keys {
-  position: fixed;
-  left: 50%;
-  bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px));
-  transform: translateX(-50%);
-  z-index: 30;
-  margin: 0;
-  max-width: none;
-  pointer-events: none;
-  font-family: var(--font-mono);
-  font-size: 0.78rem;
-  letter-spacing: 0.04em;
-  color: var(--fg-2);
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  padding: 0.5rem 0.8rem;
-  background: color-mix(in srgb, var(--bg) 70%, transparent);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
-  white-space: nowrap;
-}
-
 @media (max-width: 40rem) {
   .keys,
   .wide-only {
     display: none;
-  }
-
-  .pager {
-    grid-template-columns: 1fr;
-  }
-
-  .counter {
-    justify-self: center;
-  }
-
-  .pager .step.next {
-    text-align: left;
   }
 }
 
@@ -1105,12 +1082,7 @@ p {
 /* ---------- the sea's sliders, on the home page ---------- */
 
 .sea-controls {
-  position: fixed;
-  right: calc(1rem + env(safe-area-inset-right, 0px));
-  bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px));
-  z-index: 30;
   display: flex;
-  flex-direction: row-reverse; /* the button stays in the corner */
   align-items: center;
   gap: 0.5rem;
 }
@@ -1125,7 +1097,7 @@ p {
   color: var(--accent);
 }
 
-/* the sliders, in one row to the left of the button */
+/* the sliders, in one row to the right of the button */
 .sea-controls form {
   display: flex;
   align-items: center;

@@ -5,15 +5,16 @@
   // (#3 is the third slide) so any slide can be linked to.
   import { tick } from 'svelte'
   import Sea from './Sea.svelte'
+  import { DOCS, GITHUB, docsUrl } from './sites.js'
 
   let {
     slides = [],
     title = 'bollhav',
     home = 'https://bollhav.dev',
-    // learn and lab are kept out for now. Locally, the docs are the local ones
+    // learn and lab are kept out for now
     links = [
-      { label: 'Docs', href: import.meta.env.DEV ? 'http://localhost:5190/' : 'https://bollhav.dev/docs/' },
-      { label: 'GitHub', href: 'https://github.com/ebremstedt/bollhav' },
+      { label: 'Docs', href: DOCS },
+      { label: 'GitHub', href: GITHUB },
     ],
   } = $props()
 
@@ -74,7 +75,12 @@
   function initialTheme() {
     // ?theme=dark|light forces a theme for this visit (a projector link)
     const forced = new URLSearchParams(location.search).get('theme')
-    if (forced === 'dark' || forced === 'light') return forced
+    if (forced === 'dark' || forced === 'light') {
+      try {
+        localStorage.setItem('theme', forced)
+      } catch {}
+      return forced
+    }
     try {
       const saved = localStorage.getItem('theme')
       if (saved === 'dark' || saved === 'light') return saved
@@ -148,11 +154,9 @@
       case 'h':
         hoopOn = !hoopOn
         break
-      case 'd': {
-        const docs = links.find((l) => l.label === 'Docs')
-        if (docs) location.href = docs.href
+      case 'd':
+        location.href = docsUrl(theme)
         break
-      }
       case 'Escape':
         outlineOpen = false
         break
@@ -244,7 +248,7 @@
   <div class="group">
     <nav class="links" aria-label="Site">
       {#each links as l}
-        <a href={l.href}>{l.label}</a>
+        <a href={l.href === DOCS ? docsUrl(theme) : l.href}>{l.label}</a>
       {/each}
     </nav>
     {#if hoopOn}
@@ -321,7 +325,7 @@
     </ol>
     <nav class="outline-links" aria-label="Site">
       {#each links as l}
-        <a href={l.href}>{l.label}</a>
+        <a href={l.href === DOCS ? docsUrl(theme) : l.href}>{l.label}</a>
       {/each}
     </nav>
   </aside>

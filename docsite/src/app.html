@@ -8,7 +8,7 @@
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="bollhav" />
     <meta property="og:title" content="bollhav docs" />
-    <meta property="og:description" content="A Python framework that standardizes pipeline code" />
+    <meta property="og:description" content="A framework that standardizes pipeline models" />
     <meta property="og:image" content="https://bollhav.dev/docs/assets/og-image.jpg" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
@@ -20,6 +20,7 @@
         const q = new URLSearchParams(location.search).get('theme')
         const t = q === 'dark' || q === 'light' ? q : localStorage.getItem('theme')
         if (t === 'dark' || t === 'light') document.documentElement.dataset.theme = t
+        if (t === q) localStorage.setItem('theme', t) // a theme in the URL is kept
       } catch {}
     </script>
     %sveltekit.head%

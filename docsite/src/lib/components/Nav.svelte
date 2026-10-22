@@ -4,7 +4,7 @@
   import Search from './Search.svelte'
   import ThemeToggle from './ThemeToggle.svelte'
   import { toggleFullscreen } from '$lib/fullscreen'
-  import { deck, github } from '$lib/sites'
+  import { deck, github, toDeck } from '$lib/sites'
 </script>
 
 <header class="top">
@@ -29,7 +29,7 @@
     <Search />
     <div class="top-right">
       <nav class="links" aria-label="Site">
-        <a href={deck}>Slide deck</a>
+        <a href={deck} onclick={toDeck}>Slide deck</a>
         <a href={github}>GitHub</a>
       </nav>
       <ThemeToggle />

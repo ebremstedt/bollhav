@@ -1,14 +1,15 @@
 <script>
   import Slide from '../lib/Slide.svelte'
 
-  // locally, the local docs
-  const docs = import.meta.env.DEV ? 'http://localhost:5190/' : 'https://bollhav.dev/docs/'
+  import { docsUrl } from '../lib/sites.js'
+
+  const docs = $derived(docsUrl(document.documentElement.dataset.theme))
 </script>
 
 <Slide layout="title" title="bollhav">
   <img class="plain logo" src="./bollhav.png" alt="" width="200" height="165" />
   <div class="tagline">
-    <p class="lead">A Python framework that standardizes pipeline models</p>
+    <p class="lead">A framework that standardizes pipeline models</p>
     <aside class="note">
       <svg class="arrow" viewBox="0 0 60 50" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
         <path d="M56 4 C 42 6, 24 20, 6 44" />

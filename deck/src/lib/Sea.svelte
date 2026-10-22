@@ -353,6 +353,28 @@
     }
   })
 
+  // The balls drop once a visit. After that every page starts with the pile
+  // already at rest: the flag lives in this tab, and travels in the URL
+  // between the deck and the docs when they are two origins (locally).
+  function dropped() {
+    try {
+      if (new URLSearchParams(location.search).get('sea') === 'dropped') return true
+      return sessionStorage.getItem('sea') === 'dropped'
+    } catch {
+      return false
+    }
+  }
+  function markDropped() {
+    try {
+      sessionStorage.setItem('sea', 'dropped')
+    } catch {}
+  }
+  // the balls go to the floor and find their rest in silence
+  function presettle() {
+    for (const b of balls) Body.setPosition(b.body, { x: b.body.position.x, y: H - Math.random() * H * 0.3 })
+    for (let i = 0; i < 180; i++) Engine.update(engine, STEP)
+  }
+
   // reduced motion: let the pile settle off-screen, then show it still
   function settle() {
     engine.gravity.x = 0
@@ -378,7 +400,11 @@
       raf = requestAnimationFrame(loop)
     }
     if (still) settle()
-    else raf = requestAnimationFrame(loop)
+    else {
+      if (dropped()) presettle()
+      raf = requestAnimationFrame(loop)
+    }
+    markDropped()
 
     const onResize = () => {
       layout()
