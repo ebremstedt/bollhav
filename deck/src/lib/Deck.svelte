@@ -5,6 +5,7 @@
   // (#3 is the third slide) so any slide can be linked to.
   import { tick } from 'svelte'
   import Sea from './Sea.svelte'
+  import SeaControls from './SeaControls.svelte'
   import { DOCS, GITHUB, docsUrl } from './sites.js'
 
   let {
@@ -31,6 +32,8 @@
   let theme = $state(initialTheme())
   let titles = $state([])
   let hoopOn = $state(false) // the hoop game; the button top right
+  let density = $state(1) // the sea's sliders, beside the counter
+  let storm = $state(1)
   let score = $state(0)
   let high = $state(readHigh())
   let root
@@ -223,7 +226,7 @@
   onpointercancel={onPointerEnd}
 />
 
-<Sea {progress} {theme} {dir} hoop={hoopOn} onscore={(s) => (score = s)} />
+<Sea {progress} {theme} {dir} hoop={hoopOn} onscore={(s) => (score = s)} {density} {storm} />
 
 <div class="deck" data-dir={dir} bind:this={root}>
   {#each slides as S, i (i)}
@@ -289,9 +292,14 @@
 </header>
 
 <footer class="chrome bottom">
-  <button class="counter" onclick={() => (outlineOpen = !outlineOpen)} title="Outline (o)">
-    {pad(current + 1)} <span class="sep">/</span> {pad(n)}
-  </button>
+  <div class="group">
+    <button class="counter" onclick={() => (outlineOpen = !outlineOpen)} title="Outline (o)">
+      {pad(current + 1)} <span class="sep">/</span> {pad(n)}
+    </button>
+    <div class="wide-only">
+      <SeaControls bind:density bind:storm />
+    </div>
+  </div>
   {#if current === 0 && n > 1}
     <p class="hint">
       <kbd>←</kbd> <kbd>→</kbd> <span class="sep">·</span> <kbd>f</kbd> fullscreen <span class="sep">·</span> <kbd>t</kbd> theme
