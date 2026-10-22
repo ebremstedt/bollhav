@@ -110,9 +110,14 @@ class Notifications:
         return self.failure_channel if failure else self.success_channel
 
 
-def _header(kind: str, tags: str | None) -> str:
-    host = os.environ.get("HOSTNAME", socket.gethostname())
-    header = f"Pipeline {kind}: **{host}**"
+def resolve_host() -> str:
+    """Where the run happened: the pod name on Kubernetes, else the hostname."""
+    return os.environ.get("HOSTNAME", socket.gethostname())
+
+
+def message_header(kind: str, tags: str | None) -> str:
+    """The opening of every message: the outcome, the host, the run's tags."""
+    header = f"Pipeline {kind}: **{resolve_host()}**"
     return f"{header}\n\nTAGS: `{tags}`" if tags else header
 
 
@@ -214,7 +219,7 @@ def send_success(runs: Iterable[ModelRun], tags: str | None = None) -> None:
     for channel, group in group_runs_by_channel(completed, failure=False):
         models = [r.model for r in group]
         summary = f"{len(group)} model(s) done in {duration_string(_seconds(group))}"
-        text = f"{_header('success', tags)}\n\n"
+        text = f"{message_header('success', tags)}\n\n"
         if resolve_detail_level(models) is Detail.MODELS:
             text += f"{_lines(group)}\n\n"
         channel.send(text + summary, resolve_mentions(models, failure=False))
@@ -231,7 +236,7 @@ def send_failure(
     say), every matched model's failure channel hears it instead. A suffixed
     run only reaches models with `suffixed_runs=True`."""
     runs = list(runs)
-    header = _header("failure", tags)
+    header = message_header("failure", tags)
     failed = [r for r in runs if r.outcome is not None and r.outcome.error is not None]
     completed = [r for r in runs if r.outcome is not None and r.outcome.error is None]
     if failed:
