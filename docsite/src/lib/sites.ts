@@ -7,12 +7,17 @@ import { currentTheme } from '$lib/theme'
 export const deck = dev ? 'http://localhost:5180/' : 'https://bollhav.dev/'
 export const github = 'https://github.com/ebremstedt/bollhav'
 
-export const toDeck = (e: MouseEvent) => {
-  if (!dev) return
-  e.preventDefault()
+export function deckUrl() {
+  if (!dev) return deck
   const q = new URLSearchParams({ theme: currentTheme() })
   try {
     if (sessionStorage.getItem('sea') === 'dropped') q.set('sea', 'dropped')
   } catch {}
-  location.href = `${deck}?${q}`
+  return `${deck}?${q}`
+}
+
+export const toDeck = (e: MouseEvent) => {
+  if (!dev) return
+  e.preventDefault()
+  location.href = deckUrl()
 }

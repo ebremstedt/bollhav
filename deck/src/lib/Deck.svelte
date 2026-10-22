@@ -157,6 +157,9 @@
       case 'd':
         location.href = docsUrl(theme)
         break
+      case 's':
+        go(0)
+        break
       case 'Escape':
         outlineOpen = false
         break
@@ -293,7 +296,10 @@
     {pad(current + 1)} <span class="sep">/</span> {pad(n)}
   </button>
   {#if current === 0 && n > 1}
-    <p class="hint"><kbd>o</kbd> outline <span class="sep">·</span> <kbd>f</kbd> fullscreen <span class="sep">·</span> <kbd>t</kbd> theme <span class="sep">·</span> <kbd>h</kbd> hoop <span class="sep">·</span> <kbd>d</kbd> docs</p>
+    <p class="hint">
+      <kbd>←</kbd> <kbd>→</kbd> <span class="sep">·</span> <kbd>o</kbd> outline <span class="sep">·</span> <kbd>f</kbd> fullscreen <span class="sep">·</span> <kbd>t</kbd> theme
+      <span class="sep">·</span> <kbd>d</kbd> docs <span class="sep">·</span> <kbd>s</kbd> slides <span class="sep">·</span> <kbd>h</kbd> hoop
+    </p>
   {/if}
   <div class="group">
     <button class="btn" onclick={prev} disabled={current === 0} aria-label="Previous slide">

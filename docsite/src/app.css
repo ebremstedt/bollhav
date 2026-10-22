@@ -23,7 +23,7 @@
 
   --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
   --radius: 14px;
-  --top-h: 3.25rem;
+  --top-h: 3rem;
   --measure: 40rem; /* the width of a text block, the same for every element whatever its font size */
   color-scheme: light;
 }
@@ -152,7 +152,7 @@ kbd {
   align-items: center;
   gap: 1rem;
   min-height: var(--top-h);
-  padding: 0.375rem 0;
+  padding: 0.25rem 0;
 }
 
 .top-left,
@@ -168,7 +168,7 @@ kbd {
   gap: 0.6rem;
   color: var(--fg);
   text-decoration: none;
-  font-size: 1.1rem;
+  font-size: 1rem;
   font-weight: 700;
   letter-spacing: -0.02em;
   line-height: 1.2;
@@ -403,6 +403,14 @@ kbd {
   .layout {
     grid-template-columns: 17rem minmax(0, 1fr);
     gap: 2.5rem;
+  }
+
+  /* o hides the page list on a wide screen */
+  .layout.no-side {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .layout.no-side .side {
+    display: none;
   }
 }
 

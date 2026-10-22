@@ -7,12 +7,13 @@
   import Nav from '$lib/components/Nav.svelte'
   import Sidebar from '$lib/components/Sidebar.svelte'
   import Pager from '$lib/components/Pager.svelte'
+  import { menu } from '$lib/ui.svelte'
 
   let { children }: { children: Snippet } = $props()
 </script>
 
 <Nav />
-<div class="shell layout">
+<div class="shell layout" class:no-side={menu.hidden}>
   <Sidebar />
   <main>
     {@render children()}
