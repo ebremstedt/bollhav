@@ -18,6 +18,7 @@
     "marked": "^15.0.0",
     "marked-gfm-heading-id": "^4.1.0",
     "marked-highlight": "^2.2.0",
+    "matter-js": "^0.20.0",
     "mermaid": "^11.4.0"
   },
   "devDependencies": {

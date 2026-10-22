@@ -1,5 +1,6 @@
 <script lang="ts">
   import { mermaidDiagrams } from '$lib/mermaid'
+  import Sea from '$lib/Sea.svelte'
 
   let { data } = $props()
   const github = 'https://github.com/ebremstedt/bollhav/blob/main'
@@ -8,6 +9,10 @@
 <svelte:head>
   <title>{data.path === 'README.md' ? 'bollhav' : `${data.title} · bollhav`}</title>
 </svelte:head>
+
+{#if data.path === 'README.md'}
+  <Sea />
+{/if}
 
 <article class="prose" class:home={data.path === 'README.md'} data-pagefind-body use:mermaidDiagrams={data.path}>
   {@html data.html}

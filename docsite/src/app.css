@@ -14,6 +14,13 @@
   --warm-1: #e2541f;
   --warm-2: #d99a12;
   --code-fg: #a8400f; /* inline code: a deep warm orange that holds up on cream */
+  /* the ball sea on the home page (src/lib/Sea.svelte) */
+  --ball-a: #1c2f5e;
+  --ball-b: #3f67a8;
+  --ball-c: #9cc0e4;
+  --ball-d: #c9ddf1;
+  --ball-rim: #1c2f5e;
+  --sea-alpha: 0.42;
   --good: #1e7a42;
   --bad: #b8421a;
 
@@ -41,6 +48,12 @@
     --warm-1: #ff7a45;
     --warm-2: #ffc247;
     --code-fg: #ff8a5b;
+    --ball-a: #bcd6ef;
+    --ball-b: #9cc0e4;
+    --ball-c: #3f67a8;
+    --ball-d: #1f3a6e;
+    --ball-rim: #efe3c9;
+    --sea-alpha: 0.5;
     --good: #8fd6a4;
     --bad: #ff9a76;
     color-scheme: dark;
@@ -58,6 +71,12 @@
   --warm-1: #ff7a45;
   --warm-2: #ffc247;
   --code-fg: #ff8a5b;
+  --ball-a: #bcd6ef;
+  --ball-b: #9cc0e4;
+  --ball-c: #3f67a8;
+  --ball-d: #1f3a6e;
+  --ball-rim: #efe3c9;
+  --sea-alpha: 0.5;
   --good: #8fd6a4;
   --bad: #ff9a76;
   color-scheme: dark;
