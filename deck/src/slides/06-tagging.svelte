@@ -14,9 +14,9 @@
     </div>
     <div>
       <h3>With or, and negation</h3>
-      <Code lang="bash" code={`$ TAGS='[(erp|crm) & raw & not:latest]' python main.py`} />
+      <Code lang="bash" code={`$ TAGS='[(erp|crm) & not:latest]' python main.py`} />
       <p class="muted">
-        Every raw model from <code>erp</code> or <code>crm</code>, except the ones tagged <code>latest</code>.
+        Every model from <code>erp</code> or <code>crm</code>, except the ones tagged <code>latest</code>.
       </p>
     </div>
   </div>

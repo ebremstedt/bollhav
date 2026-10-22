@@ -4,6 +4,18 @@
 </script>
 
 <Slide kicker="Virtual environments" title="Two ways to version models" layout="wide">
+  {#snippet heading()}
+    Two ways to version
+    <span class="noted"
+      >models<span class="note">
+        <svg class="arrow" viewBox="0 0 60 50" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M56 4 C 42 6, 24 20, 6 44" />
+          <path d="M7 31 L6 44 L19 42" />
+        </svg>
+        <span class="text">an umbrella term:<br />a table or a view</span>
+      </span></span
+    >
+  {/snippet}
   <div class="cols">
     <div>
       <h3>Version the schema</h3>
@@ -32,6 +44,49 @@
 </Slide>
 
 <style>
+  /* a note above "models" in the heading, the arrow rising from the word up
+     to the right, the words at its end */
+  .noted {
+    position: relative;
+    white-space: nowrap;
+  }
+
+  .note {
+    position: absolute;
+    left: 55%;
+    bottom: 100%;
+    display: flex;
+    align-items: flex-end;
+    gap: 0.3rem;
+    width: max-content;
+    text-align: left;
+    white-space: normal;
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+    font-weight: 400;
+    line-height: 1.35;
+    letter-spacing: 0.02em;
+    color: var(--fg-2);
+  }
+
+  .note .arrow {
+    flex: none;
+    width: 2.4rem;
+    height: auto;
+    color: var(--accent);
+  }
+
+  .note .text {
+    margin-bottom: 1.1rem;
+    transform: rotate(-3deg);
+  }
+
+  @media (max-width: 900px) {
+    .note {
+      display: none;
+    }
+  }
+
   .row {
     display: flex;
     flex-wrap: wrap;

@@ -3,15 +3,15 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <title>Why bollhav</title>
-    <meta name="description" content="bollhav: a Python framework that standardizes pipeline code" />
+    <title>Slide deck · bollhav</title>
+    <meta name="description" content="bollhav: a framework that standardizes pipeline models" />
     <link rel="icon" type="image/png" href="./favicon.png" />
     <!-- Link previews (Teams, Slack, LinkedIn, iMessage, X, …). og:image must be
          absolute; it is the docs' card, served under /docs. -->
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="bollhav" />
-    <meta property="og:title" content="Why bollhav" />
-    <meta property="og:description" content="A Python framework that standardizes pipeline code" />
+    <meta property="og:title" content="bollhav: the slide deck" />
+    <meta property="og:description" content="A framework that standardizes pipeline models" />
     <meta property="og:url" content="https://bollhav.dev/" />
     <meta property="og:image" content="https://bollhav.dev/docs/assets/og-image.jpg" />
     <meta property="og:image:type" content="image/jpeg" />
@@ -19,8 +19,8 @@
     <meta property="og:image:height" content="630" />
     <meta property="og:image:alt" content="bollhav logo" />
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="Why bollhav" />
-    <meta name="twitter:description" content="A Python framework that standardizes pipeline code" />
+    <meta name="twitter:title" content="bollhav: the slide deck" />
+    <meta name="twitter:description" content="A framework that standardizes pipeline models" />
     <meta name="twitter:image" content="https://bollhav.dev/docs/assets/og-image.jpg" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -34,6 +34,7 @@
         const q = new URLSearchParams(location.search).get('theme')
         const t = q === 'dark' || q === 'light' ? q : localStorage.getItem('theme')
         if (t === 'dark' || t === 'light') document.documentElement.dataset.theme = t
+        if (t === q) localStorage.setItem('theme', t) // a theme in the URL is kept
       } catch {}
     </script>
   </head>

@@ -1,0 +1,92 @@
+// The pages of the site: every Markdown file of docs/, imported as text so
+// Vite watches them and a save reloads the page in dev. The sidebar is
+// derived from the folders, a page's title from its first heading, and the
+// reading order from the two together: nothing is written by hand except
+// the order of the groups.
+import { posix } from 'node:path'
+import { pagesDir } from './paths'
+
+// keyed by the file's path from here; the page's path is the part after docs/
+const files = import.meta.glob('../../../../docs/**/*.md', { query: '?raw', import: 'default', eager: true }) as Record<
+  string,
+  string
+>
+const pagePath = (key: string) => key.slice(key.indexOf('/docs/') + '/docs/'.length)
+
+export type Page = { path: string; url: string; title: string; group: string; markdown: string; source: string }
+export type PageRef = { url: string; title: string }
+// name is the folder, unique; label is what the sidebar prints
+export type Group = { name: string; label: string; parent: string; pages: PageRef[] }
+
+// the sidebar order; a folder not listed comes after these, alphabetically
+const order = ['about', 'model', 'concepts', 'examples', 'articles']
+
+// a folder's README.md is its overview and lives at the folder's own URL
+export const urlFor = (path: string) => {
+  if (path.endsWith('/README.md')) return `/${posix.dirname(path)}/`
+  return `/${path.replace(/\.md$/, '')}/`
+}
+
+// the first heading of any level; a page with none is named after its file
+function titleOf(markdown: string, path: string): string {
+  const match = markdown.match(/^#{1,6}\s+(.+?)\s*#*\s*$/m)
+  return match ? match[1].replace(/`/g, '') : posix.basename(path, '.md')
+}
+
+const groupOf = (path: string) => (path.includes('/') ? path.split('/')[0] : '')
+
+const groupRank = (group: string) => {
+  const at = order.indexOf(group)
+  return at === -1 ? order.length : at
+}
+
+const pageRank = (page: Page) => {
+  const rest = page.group ? page.path.slice(page.group.length + 1) : page.path
+  return [rest === 'README.md' ? 0 : 1, rest.toLowerCase()] as const
+}
+
+const compare = (a: Page, b: Page) => {
+  if (a.group !== b.group) {
+    const byRank = groupRank(a.group) - groupRank(b.group)
+    return byRank || a.group.localeCompare(b.group)
+  }
+  const [ra, ka] = pageRank(a)
+  const [rb, kb] = pageRank(b)
+  return ra - rb || ka.localeCompare(kb)
+}
+
+/** Every page in reading order: the groups in `order`, each with its overview first. */
+export function allPages(): Page[] {
+  const pages: Page[] = []
+  for (const [key, markdown] of Object.entries(files)) {
+    const path = pagePath(key)
+    pages.push({
+      path,
+      url: urlFor(path),
+      title: titleOf(markdown, path),
+      group: groupOf(path),
+      markdown,
+      source: posix.join(pagesDir, path),
+    })
+  }
+  return pages.sort(compare)
+}
+
+export function pageFor(param: string): Page | undefined {
+  const clean = param.replace(/\/+$/, '')
+  const pages = allPages()
+  return pages.find((p) => p.path === `${clean}.md`) ?? pages.find((p) => p.path === `${clean}/README.md`)
+}
+
+export const refOf = ({ url, title }: Page): PageRef => ({ url, title })
+
+export function groups(pages: Page[]): Group[] {
+  const out: Group[] = []
+  for (const page of pages) {
+    const name = page.group
+    const last = out[out.length - 1]
+    if (last && last.name === name) last.pages.push(refOf(page))
+    else out.push({ name, label: name, parent: '', pages: [refOf(page)] })
+  }
+  return out
+}

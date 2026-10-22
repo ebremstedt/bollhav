@@ -1,4 +1,5 @@
 <script>
+  import { untrack } from 'svelte'
   // The ball sea, as physics: a tank seen from the side, full of balls that
   // are rigid bodies in Matter.js. With enough small, slippery balls the pile
   // behaves like a granular fluid: a push on one side sends a wave across the
@@ -12,7 +13,9 @@
 
   // `hoop` turns on the game: a hoop sweeps across the screen and a ball you
   // launch (click) that passes through it scores; `onscore(total)` reports.
-  let { progress = 0, theme = 'light', dir = 1, hoop = false, onscore = () => {} } = $props()
+  // density scales how many balls (0..1 of the full pile), storm how hard the
+  // tank rocks and how far a slide change pushes (0 is still water)
+  let { progress = 0, theme = 'light', dir = 1, hoop = false, onscore = () => {}, density = 1, storm = 1 } = $props()
 
   // ---- knobs ----
   const PILE = 0.18 // share of the viewport height the settled pile fills
@@ -84,7 +87,7 @@
     const b = R_MAX * s
     const meanArea = (Math.PI * (a * a + a * b + b * b)) / 3
     const n = Math.round((W * H * PILE * PACKING) / meanArea)
-    return Math.min(MAX_BALLS, Math.max(MIN_BALLS, n))
+    return Math.round(Math.min(MAX_BALLS, Math.max(MIN_BALLS, n)) * density)
   }
 
   function makeWalls() {
@@ -276,7 +279,7 @@
       const inBand = direction > 0 ? p.x < band : p.x > W - band
       if (!inBand || p.y < H * 0.5) continue
       const v = b.body.velocity
-      Body.setVelocity(b.body, { x: v.x + PUSH * direction, y: v.y - 2 })
+      Body.setVelocity(b.body, { x: v.x + PUSH * storm * direction, y: v.y - 2 * storm })
     }
   }
 
@@ -293,8 +296,8 @@
 
     // rock the tank: the gravity vector swings like a pendulum, harder just
     // after a slide change
-    const tilt = ROCK_TILT * Math.sin((2 * Math.PI * sec) / ROCK_PERIOD) * (1 + kick)
-    engine.gravity.x = Math.sin(tilt) + 0.5 * shove
+    const tilt = ROCK_TILT * storm * Math.sin((2 * Math.PI * sec) / ROCK_PERIOD) * (1 + kick)
+    engine.gravity.x = Math.sin(tilt) + 0.5 * shove * storm
     engine.gravity.y = Math.cos(tilt)
 
     // fixed physics steps, at most two per frame so a slow frame can't spiral
@@ -353,6 +356,35 @@
     }
   })
 
+  // more or fewer balls as the density slider moves: they rain in, or the
+  // highest ones leave
+  $effect(() => {
+    void density
+    if (engine && ctx) fill(reduced())
+  })
+
+  // The balls drop once a visit. After that every page starts with the pile
+  // already at rest: the flag lives in this tab, and travels in the URL
+  // between the deck and the docs when they are two origins (locally).
+  function dropped() {
+    try {
+      if (new URLSearchParams(location.search).get('sea') === 'dropped') return true
+      return sessionStorage.getItem('sea') === 'dropped'
+    } catch {
+      return false
+    }
+  }
+  function markDropped() {
+    try {
+      sessionStorage.setItem('sea', 'dropped')
+    } catch {}
+  }
+  // the balls go to the floor and find their rest in silence
+  function presettle() {
+    for (const b of balls) Body.setPosition(b.body, { x: b.body.position.x, y: H - Math.random() * H * 0.3 })
+    for (let i = 0; i < 180; i++) Engine.update(engine, STEP)
+  }
+
   // reduced motion: let the pile settle off-screen, then show it still
   function settle() {
     engine.gravity.x = 0
@@ -365,7 +397,9 @@
     ctx = canvas.getContext('2d')
     engine = Engine.create({ gravity: { x: 0, y: 1 } })
     readTokens()
-    layout()
+    // the first fill reads density; that must not make this effect re-run
+    // (and rebuild the tank) when the slider moves: the density effect does that
+    untrack(layout)
 
     let raf = 0
     let running = true
@@ -378,7 +412,11 @@
       raf = requestAnimationFrame(loop)
     }
     if (still) settle()
-    else raf = requestAnimationFrame(loop)
+    else {
+      if (dropped()) presettle()
+      raf = requestAnimationFrame(loop)
+    }
+    markDropped()
 
     const onResize = () => {
       layout()

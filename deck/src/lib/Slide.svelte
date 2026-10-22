@@ -8,7 +8,9 @@
   //           title    the opening slide: big <h1>, centred
   //           center   everything centred (a statement, a single image)
   //           wide     the content column runs the full width
-  let { title = '', kicker = '', layout = 'default', children } = $props()
+  //   heading an optional snippet rendered inside the heading instead of the
+  //           plain title, for markup on a word; `title` stays the outline's text
+  let { title = '', kicker = '', layout = 'default', heading, children } = $props()
 </script>
 
 <div class="slide-body layout-{layout}">
@@ -17,9 +19,9 @@
   {/if}
   {#if title}
     {#if layout === 'title'}
-      <h1>{title}</h1>
+      <h1 data-title={title}>{#if heading}{@render heading()}{:else}{title}{/if}</h1>
     {:else}
-      <h2>{title}</h2>
+      <h2 data-title={title}>{#if heading}{@render heading()}{:else}{title}{/if}</h2>
     {/if}
   {/if}
   {@render children?.()}

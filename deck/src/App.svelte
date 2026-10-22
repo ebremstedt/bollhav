@@ -3,4 +3,4 @@
   import slides from './slides/index.js'
 </script>
 
-<Deck {slides} title="Why bollhav" home="#1" />
+<Deck {slides} title="Slide deck" home="#1" />

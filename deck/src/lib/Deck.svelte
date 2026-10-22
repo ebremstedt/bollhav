@@ -5,16 +5,17 @@
   // (#3 is the third slide) so any slide can be linked to.
   import { tick } from 'svelte'
   import Sea from './Sea.svelte'
+  import SeaControls from './SeaControls.svelte'
+  import { DOCS, GITHUB, docsUrl } from './sites.js'
 
   let {
     slides = [],
     title = 'bollhav',
     home = 'https://bollhav.dev',
+    // learn and lab are kept out for now
     links = [
-      { label: 'Docs', href: 'https://bollhav.dev/docs/' },
-      { label: 'Learn', href: 'https://bollhav.dev/learn/' },
-      { label: 'Lab', href: 'https://bollhav.dev/lab/' },
-      { label: 'GitHub', href: 'https://github.com/ebremstedt/bollhav' },
+      { label: 'Docs', href: DOCS },
+      { label: 'GitHub', href: GITHUB },
     ],
   } = $props()
 
@@ -30,7 +31,10 @@
   let outlineOpen = $state(false)
   let theme = $state(initialTheme())
   let titles = $state([])
-  let hoopOn = $state(false) // the hoop game; the button top right or `h`
+  let hoopOn = $state(false) // the hoop game; the button top right
+  let seaOn = $state(true) // the sea's controls, beside the counter
+  let density = $state(1)
+  let storm = $state(1)
   let score = $state(0)
   let high = $state(readHigh())
   let root
@@ -75,7 +79,12 @@
   function initialTheme() {
     // ?theme=dark|light forces a theme for this visit (a projector link)
     const forced = new URLSearchParams(location.search).get('theme')
-    if (forced === 'dark' || forced === 'light') return forced
+    if (forced === 'dark' || forced === 'light') {
+      try {
+        localStorage.setItem('theme', forced)
+      } catch {}
+      return forced
+    }
     try {
       const saved = localStorage.getItem('theme')
       if (saved === 'dark' || saved === 'light') return saved
@@ -146,8 +155,11 @@
       case 't':
         toggleTheme()
         break
-      case 'h':
-        hoopOn = !hoopOn
+      case 'd':
+        location.href = docsUrl(theme)
+        break
+      case 's':
+        go(0)
         break
       case 'Escape':
         outlineOpen = false
@@ -197,7 +209,10 @@
   // outline titles come from each slide's first heading
   $effect(() => {
     titles = [...root.querySelectorAll('.slide')].map(
-      (s, i) => s.querySelector('h1, h2, h3')?.textContent?.trim() || `Slide ${i + 1}`,
+      (s, i) => {
+        const h = s.querySelector('h1, h2, h3')
+        return h?.dataset.title || h?.textContent?.trim() || `Slide ${i + 1}`
+      },
     )
   })
 
@@ -215,7 +230,9 @@
   onpointercancel={onPointerEnd}
 />
 
-<Sea {progress} {theme} {dir} hoop={hoopOn} onscore={(s) => (score = s)} />
+{#if seaOn}
+  <Sea {progress} {theme} {dir} hoop={hoopOn} onscore={(s) => (score = s)} {density} {storm} />
+{/if}
 
 <div class="deck" data-dir={dir} bind:this={root}>
   {#each slides as S, i (i)}
@@ -240,7 +257,7 @@
   <div class="group">
     <nav class="links" aria-label="Site">
       {#each links as l}
-        <a href={l.href}>{l.label}</a>
+        <a href={l.href === DOCS ? docsUrl(theme) : l.href}>{l.label}</a>
       {/each}
     </nav>
     {#if hoopOn}
@@ -249,7 +266,7 @@
         <span class="sep">·</span> best <b>{high}</b>
       </span>
     {/if}
-    <button class="btn" class:on={hoopOn} onclick={() => (hoopOn = !hoopOn)} title="Hoop game (h)" aria-label="Hoop game" aria-pressed={hoopOn}>
+    <button class="btn" class:on={hoopOn} onclick={() => (hoopOn = !hoopOn)} disabled={!seaOn} title="Hoop game" aria-label="Hoop game" aria-pressed={hoopOn}>
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
         <ellipse cx="12" cy="9" rx="8" ry="3" />
         <path d="M6 11.5l1.5 6.5M18 11.5l-1.5 6.5M9 12l.6 6M15 12l-.6 6M7.5 18h9" stroke-width="1.3" />
@@ -281,11 +298,19 @@
 </header>
 
 <footer class="chrome bottom">
-  <button class="counter" onclick={() => (outlineOpen = !outlineOpen)} title="Outline (o)">
-    {pad(current + 1)} <span class="sep">/</span> {pad(n)}
-  </button>
+  <div class="group">
+    <button class="counter" onclick={() => (outlineOpen = !outlineOpen)} title="Outline (o)">
+      {pad(current + 1)} <span class="sep">/</span> {pad(n)}
+    </button>
+    <div class="wide-only">
+      <SeaControls bind:density bind:storm bind:enabled={seaOn} />
+    </div>
+  </div>
   {#if current === 0 && n > 1}
-    <p class="hint"><kbd>o</kbd> outline <span class="sep">·</span> <kbd>f</kbd> fullscreen <span class="sep">·</span> <kbd>t</kbd> theme <span class="sep">·</span> <kbd>h</kbd> hoop</p>
+    <p class="hint">
+      <kbd>←</kbd> <kbd>→</kbd> <span class="sep">·</span> <kbd>f</kbd> fullscreen <span class="sep">·</span> <kbd>t</kbd> theme
+      <span class="sep">·</span> <kbd>d</kbd> docs <span class="sep">·</span> <kbd>s</kbd> slides
+    </p>
   {/if}
   <div class="group">
     <button class="btn" onclick={prev} disabled={current === 0} aria-label="Previous slide">
@@ -317,7 +342,7 @@
     </ol>
     <nav class="outline-links" aria-label="Site">
       {#each links as l}
-        <a href={l.href}>{l.label}</a>
+        <a href={l.href === DOCS ? docsUrl(theme) : l.href}>{l.label}</a>
       {/each}
     </nav>
   </aside>

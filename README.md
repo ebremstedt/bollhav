@@ -1,10 +1,11 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/ebremstedt/bollhav/main/docs/content/bollhav_logo_large.png" alt="bollhav" width="300">
+  <img src="https://raw.githubusercontent.com/ebremstedt/bollhav/main/docs/bollhav_logo_large.png" alt="bollhav" width="300">
 </p>
 
 <p align="center">
   <strong>Bollhav</strong><br>
-  A Python framework that standardizes pipeline code
+  A framework that standardizes pipeline models<br>
+  <sub>and in the process, creates great metadata for execution, state, lineage and orchestration</sub>
 </p>
 
 <p align="center">
@@ -20,10 +21,10 @@
   <a href="https://bollhav.dev/lab/">Lab</a>
 </p>
 
-The idea is a clean separation: a **Model** is a pure data object that declares
-what your data looks like and where it goes, and it ✨deliberately✨ contains
-**no execution logic**. The actual work lives in a separate **execute** function
-that takes the model as a parameter.
+A **model** is a pure data object that declares what your data looks like and
+where it goes, and it ✨deliberately✨ contains **no execution logic**. The
+actual work lives in a separate **execute** function that takes the model as
+a parameter.
 
 Orchestrate the models with a classical tool like **Airflow**, or use the
 built-in choreography in **bollhav state**.
@@ -35,5 +36,5 @@ pip install bollhav
 # Demo
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/ebremstedt/bollhav/main/docs/content/batch_recording.gif" alt="bollhav running a batch">
+  <img src="https://raw.githubusercontent.com/ebremstedt/bollhav/main/docs/batch_recording.gif" alt="bollhav running a batch">
 </p>
