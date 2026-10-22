@@ -1,4 +1,5 @@
 <script>
+  import { untrack } from 'svelte'
   // The ball sea, as physics: a tank seen from the side, full of balls that
   // are rigid bodies in Matter.js. With enough small, slippery balls the pile
   // behaves like a granular fluid: a push on one side sends a wave across the
@@ -396,7 +397,9 @@
     ctx = canvas.getContext('2d')
     engine = Engine.create({ gravity: { x: 0, y: 1 } })
     readTokens()
-    layout()
+    // the first fill reads density; that must not make this effect re-run
+    // (and rebuild the tank) when the slider moves: the density effect does that
+    untrack(layout)
 
     let raf = 0
     let running = true
