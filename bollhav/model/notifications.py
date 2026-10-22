@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING, Callable, Iterable, Protocol
 
-from bollhav.model.modelrun import ModelRun, duration_string
+from bollhav.model.modelrun import ModelRun, duration_string, total_seconds
 
 if TYPE_CHECKING:
     from bollhav.model.model import Model
@@ -188,10 +188,6 @@ def send_quietly(send: Callable[..., None], *args, **kwargs) -> None:
         logger.exception("Notification failed; the run is unaffected")
 
 
-def _seconds(runs: Iterable[ModelRun]) -> float:
-    return sum(o.seconds for r in runs if (o := r.outcome) is not None)
-
-
 def _lines(runs: Iterable[ModelRun]) -> str:
     """One list item per run: the model and its run time."""
     return "\n".join(
@@ -218,7 +214,9 @@ def send_success(runs: Iterable[ModelRun], tags: str | None = None) -> None:
     completed = [r for r in runs if r.outcome is not None and r.outcome.error is None]
     for channel, group in group_runs_by_channel(completed, failure=False):
         models = [r.model for r in group]
-        summary = f"{len(group)} model(s) done in {duration_string(_seconds(group))}"
+        summary = (
+            f"{len(group)} model(s) done in {duration_string(total_seconds(group))}"
+        )
         text = f"{message_header('success', tags)}\n\n"
         if resolve_detail_level(models) is Detail.MODELS:
             text += f"{_lines(group)}\n\n"

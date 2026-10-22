@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Iterable
 from uuid import UUID, uuid4
 
 from bollhav.model.intervals import TZInterval
@@ -115,10 +115,16 @@ class ModelRun:
         return query
 
 
+def total_seconds(runs: Iterable[ModelRun]) -> float:
+    """The run times of the runs that reached their model, added up."""
+    return sum(o.seconds for r in runs if (o := r.outcome) is not None)
+
+
 __all__ = [
     "ModelRun",
     "Outcome",
     "duration_string",
+    "total_seconds",
     "MissingQueryBuilderError",
     "QueryNotSqlStringError",
 ]
