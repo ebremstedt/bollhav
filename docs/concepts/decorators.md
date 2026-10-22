@@ -1,6 +1,6 @@
 # Decorators
 
-Bollhav ships three decorators. One wraps your `main()` entry-point; two bracket the work inside it — one per model, one per unit of work.
+Bollhav comes with three decorators. One wraps the main function (validating what stuff to run), one wraps the per-model work (creating schemas, tables, indexes), and one wraps the unit of work (lets us know when a period of data is done).
 
 | Decorator | Wraps | What it brackets |
 |---|---|---|
