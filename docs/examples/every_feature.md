@@ -42,16 +42,13 @@ STOCKHOLM = ZoneInfo("Europe/Stockholm")
 
 daily_orders = Model(
     description="One row per customer and day: how many orders, and what they came to.",
-    # where the rows go
     target=Target(
         name="daily_orders",
         schema="marts",
         catalog="shop",
         database=Database.POSTGRES,
-        dsn_env_var="SHOP_DSN",  # the env var that holds the connection string
-        write_mode=WriteMode.UPSERT_NO_DELETE,  # merge on the key, never delete
-        # each chunk lands in an UNLOGGED staging table; one flush into the target
-        staging=PostgresStaging(keep_after_apply=False, logged=False),
+        write_mode=WriteMode.UPSERT_NO_DELETE,
+        staging=PostgresStaging(),
         columns=[
             PostgresColumn("day", data_type=PostgresType.DATE, nullable=False, primary_key=True, description="Stockholm time"),
             PostgresColumn("customer_id", data_type=PostgresType.BIGINT, nullable=False, primary_key=True),
@@ -59,14 +56,13 @@ daily_orders = Model(
             PostgresColumn("total", data_type=PostgresType.NUMERIC, nullable=False, precision=12, scale=2),
         ],
     ),
-    # a time axis, covered from the first of 2024 and open-ended, sliced into days
     temporality=Temporality.TEMPORAL,
     contract=Contract(begin=datetime(2024, 1, 1, tzinfo=STOCKHOLM)),
     batching=Batch(
         time=TimeChunking(
             chunk="@daily",
             tz=STOCKHOLM,
-            lookback=2,  # redo the two days before the window too: late orders
+            lookback=2,
         ),
         size=50_000,
         retries=2,
@@ -83,7 +79,7 @@ daily_orders = Model(
             "shop.raw.customers",
             type=SourceModel(),
             contract=UpstreamContract.WHOLE, 
-            deactivate_for_dev=True,  # a dev run reads prod's copy and does not wait for it
+            deactivate_for_dev=True,
         ),
     ],
     curfew=Curfew(windows=[(time(2), time(4))], tz=STOCKHOLM),
@@ -91,7 +87,7 @@ daily_orders = Model(
     people=People(
         owners=(Contact("Maja Lindqvist", "maja.lindqvist@example.com"),),
         maintainers=(Contact("Jonas Ek", "jonas.ek@example.com"), Contact("Priya Nair", "priya.nair@example.com")),
-        creators=(Contact("Tomas Berg"),),
+        creators=(Contact("Amira Haddad"),),
     ),
     notifications=Notifications(
         on_failure=MicrosoftTeams(webhook_env="TEAMS_WEBHOOK_FINANCE"),
