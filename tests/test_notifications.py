@@ -1,4 +1,4 @@
-"""Notifications: the per-run outcome registry and the one-message-per-channel
+"""Notifications: the outcome each run carries and the one-message-per-channel
 grouping that load_models sends from. The Teams channel has its own tests."""
 
 import logging
@@ -13,6 +13,7 @@ from bollhav.model.notifications import (
     Mention,
     Notifications,
     NotificationsError,
+    Outcome,
 )
 from bollhav.model.people import Contact, People
 from bollhav.model.target import Target
@@ -54,12 +55,21 @@ def _model(
     )
 
 
+def _run(
+    model: Model, seconds: float | None = None, error: BaseException | None = None
+) -> ModelRun:
+    """A ModelRun as `@model_lifecycle` leaves it: with an outcome once the
+    model ran (`seconds`), carrying the exception if it raised; without one
+    when the model was never reached."""
+    run = ModelRun(model=model)
+    if seconds is not None:
+        run.outcome = Outcome(model=model, seconds=seconds, error=error)
+    return run
+
+
 @pytest.fixture(autouse=True)
-def _fresh_outcomes(monkeypatch):
+def _clean_env(monkeypatch):
     monkeypatch.delenv("NOTIFICATIONS_ENABLED", raising=False)
-    n.OUTCOMES.reset()
-    yield
-    n.OUTCOMES.reset()
 
 
 # ── the model ──
@@ -82,18 +92,22 @@ def test_on_any_covers_both_outcomes_and_the_specific_ones_override_it():
     assert Notifications().success_channel is None
 
 
-def test_on_any_hears_a_success_and_a_failure(monkeypatch):
+def test_on_any_hears_a_success_and_a_failure():
     both = Recorder()
     model = _model("orders", Notifications(on_any=both))
-    n.OUTCOMES.record(model, 3.0)
-    n.send_success()
-    n.OUTCOMES.reset()
-    n.OUTCOMES.record(model, 3.0, RuntimeError("x"))
-    n.send_failure(RuntimeError("x"), runs=[ModelRun(model=model)])
+    n.send_success([_run(model, 3.0)])
+    n.send_failure(RuntimeError("x"), [_run(model, 3.0, RuntimeError("x"))])
     assert [t.split(":")[0] for t in both.sent] == [
         "Pipeline success",
         "Pipeline failure",
     ]
+
+
+def test_a_run_without_an_outcome_never_counts_as_done():
+    ok = Recorder()
+    model = _model("orders", Notifications(on_success=ok))
+    n.send_success([_run(model)])
+    assert ok.sent == []
 
 
 # ── enabled ──
@@ -102,40 +116,32 @@ def test_on_any_hears_a_success_and_a_failure(monkeypatch):
 def test_disabled_notifications_send_nothing():
     both = Recorder()
     model = _model("orders", Notifications(on_any=both, enabled=False))
-    n.OUTCOMES.record(model, 1.0)
-    n.send_success()
-    n.OUTCOMES.reset()
-    n.OUTCOMES.record(model, 1.0, RuntimeError("x"))
-    n.send_failure(RuntimeError("x"), runs=[ModelRun(model=model)])
-    n.OUTCOMES.reset()
-    n.send_failure(ConnectionError("no db"), runs=[ModelRun(model=model)])
+    n.send_success([_run(model, 1.0)])
+    n.send_failure(RuntimeError("x"), [_run(model, 1.0, RuntimeError("x"))])
+    n.send_failure(ConnectionError("no db"), [_run(model)])
     assert both.sent == []
 
 
 def test_env_var_false_silences_every_model(monkeypatch):
     monkeypatch.setenv("NOTIFICATIONS_ENABLED", "False")
     ok = Recorder()
-    n.OUTCOMES.record(_model("orders", Notifications(on_success=ok)), 1.0)
-    n.send_success()
+    n.send_success([_run(_model("orders", Notifications(on_success=ok)), 1.0)])
     assert ok.sent == []
 
 
 def test_env_var_true_forces_a_disabled_model_on(monkeypatch):
     monkeypatch.setenv("NOTIFICATIONS_ENABLED", "true")
     ok = Recorder()
-    n.OUTCOMES.record(
-        _model("orders", Notifications(on_success=ok, enabled=False)), 1.0
-    )
-    n.send_success()
+    model = _model("orders", Notifications(on_success=ok, enabled=False))
+    n.send_success([_run(model, 1.0)])
     assert len(ok.sent) == 1
 
 
 def test_env_var_garbage_is_ignored_with_a_warning(monkeypatch, caplog):
     monkeypatch.setenv("NOTIFICATIONS_ENABLED", "yes")
     ok = Recorder()
-    n.OUTCOMES.record(_model("orders", Notifications(on_success=ok)), 1.0)
     with caplog.at_level(logging.WARNING):
-        n.send_success()
+        n.send_success([_run(_model("orders", Notifications(on_success=ok)), 1.0)])
     assert len(ok.sent) == 1
     assert "NOTIFICATIONS_ENABLED must be true or false" in caplog.text
 
@@ -146,13 +152,9 @@ def test_env_var_garbage_is_ignored_with_a_warning(monkeypatch, caplog):
 def test_a_suffixed_run_is_quiet_by_default():
     both = Recorder()
     model = _model("orders", Notifications(on_any=both), suffixed=True)
-    n.OUTCOMES.record(model, 1.0)
-    n.send_success()
-    n.OUTCOMES.reset()
-    n.OUTCOMES.record(model, 1.0, RuntimeError("x"))
-    n.send_failure(RuntimeError("x"), runs=[ModelRun(model=model)])
-    n.OUTCOMES.reset()
-    n.send_failure(ConnectionError("no db"), runs=[ModelRun(model=model)])
+    n.send_success([_run(model, 1.0)])
+    n.send_failure(RuntimeError("x"), [_run(model, 1.0, RuntimeError("x"))])
+    n.send_failure(ConnectionError("no db"), [_run(model)])
     assert both.sent == []
 
 
@@ -160,8 +162,7 @@ def test_env_var_true_lifts_the_suffix_rule_for_the_run(monkeypatch):
     monkeypatch.setenv("NOTIFICATIONS_ENABLED", "true")
     ok = Recorder()
     model = _model("orders", Notifications(on_success=ok), suffixed=True)
-    n.OUTCOMES.record(model, 1.0)
-    n.send_success()
+    n.send_success([_run(model, 1.0)])
     assert len(ok.sent) == 1
 
 
@@ -171,8 +172,7 @@ def test_suffixed_runs_opt_in_and_the_card_reads_as_usual(monkeypatch):
     model = _model(
         "orders", Notifications(on_any=both, suffixed_runs=True), suffixed=True
     )
-    n.OUTCOMES.record(model, 1.0)
-    n.send_success(tags="[orders]")
+    n.send_success([_run(model, 1.0)], tags="[orders]")
     (text,) = both.sent
     assert text == (
         "Pipeline success: **dev-1**\n\nTAGS: `[orders]`\n\n1 model(s) done in 0m 1s"
@@ -184,10 +184,8 @@ def test_suffixed_opt_in_covers_failures_too():
     model = _model(
         "orders", Notifications(on_failure=errors, suffixed_runs=True), suffixed=True
     )
-    n.OUTCOMES.record(model, 2.0, RuntimeError("x"))
-    n.send_failure(RuntimeError("x"), runs=[ModelRun(model=model)])
-    n.OUTCOMES.reset()
-    n.send_failure(ConnectionError("no db"), runs=[ModelRun(model=model)])
+    n.send_failure(RuntimeError("x"), [_run(model, 2.0, RuntimeError("x"))])
+    n.send_failure(ConnectionError("no db"), [_run(model)])
     assert len(errors.sent) == 2
     assert "RuntimeError: x" in errors.sent[0]
     assert "ConnectionError: no db" in errors.sent[1]
@@ -197,11 +195,8 @@ def test_env_var_false_beats_the_suffixed_opt_in(monkeypatch):
     monkeypatch.setenv("NOTIFICATIONS_ENABLED", "false")
     both = Recorder()
     notif = Notifications(on_any=both, suffixed_runs=True)
-    n.OUTCOMES.record(_model("orders", notif, suffixed=True), 1.0)
-    n.send_success()
-    n.OUTCOMES.reset()
-    n.OUTCOMES.record(_model("orders", notif), 1.0)
-    n.send_success()
+    n.send_success([_run(_model("orders", notif, suffixed=True), 1.0)])
+    n.send_success([_run(_model("orders", notif), 1.0)])
     assert both.sent == []
 
 
@@ -215,10 +210,13 @@ def test_a_shared_channel_lists_only_the_models_that_may_report():
     ok = Recorder()
     on = Notifications(on_success=ok, detail=Detail.MODELS)
     off = Notifications(on_success=ok, detail=Detail.MODELS, enabled=False)
-    n.OUTCOMES.record(_model("orders", on), 1.0)
-    n.OUTCOMES.record(_model("customers", off), 1.0)
-    n.OUTCOMES.record(_model("audit", None), 1.0)
-    n.send_success()
+    n.send_success(
+        [
+            _run(_model("orders", on), 1.0),
+            _run(_model("customers", off), 1.0),
+            _run(_model("audit", None), 1.0),
+        ]
+    )
     (text,) = ok.sent
     assert "warehouse.orders" in text
     assert "customers" not in text and "audit" not in text
@@ -231,9 +229,13 @@ def test_a_shared_channel_lists_only_the_models_that_may_report():
 def test_minimal_success_has_tags_and_the_summary_but_no_model_lines(monkeypatch):
     monkeypatch.setenv("HOSTNAME", "daily-x-123")
     ok = Recorder()
-    n.OUTCOMES.record(_model("orders", Notifications(on_success=ok)), 65.0)
-    n.OUTCOMES.record(_model("customers", Notifications(on_success=ok)), 10.0)
-    n.send_success(tags="[all]")
+    n.send_success(
+        [
+            _run(_model("orders", Notifications(on_success=ok)), 65.0),
+            _run(_model("customers", Notifications(on_success=ok)), 10.0),
+        ],
+        tags="[all]",
+    )
     (text,) = ok.sent
     assert text == (
         "Pipeline success: **daily-x-123**\n\nTAGS: `[all]`\n\n2 model(s) done in 1m 15s"
@@ -242,11 +244,15 @@ def test_minimal_success_has_tags_and_the_summary_but_no_model_lines(monkeypatch
 
 def test_a_channel_is_detailed_when_any_of_its_models_asks_for_it():
     ok = Recorder()
-    n.OUTCOMES.record(_model("orders", Notifications(on_success=ok)), 1.0)
-    n.OUTCOMES.record(
-        _model("customers", Notifications(on_success=ok, detail=Detail.MODELS)), 2.0
+    n.send_success(
+        [
+            _run(_model("orders", Notifications(on_success=ok)), 1.0),
+            _run(
+                _model("customers", Notifications(on_success=ok, detail=Detail.MODELS)),
+                2.0,
+            ),
+        ]
     )
-    n.send_success()
     assert "- warehouse.orders: 0m 1s" in ok.sent[0]
 
 
@@ -254,11 +260,15 @@ def test_success_sends_one_message_per_channel_listing_its_models(monkeypatch):
     monkeypatch.setenv("HOSTNAME", "daily-x-123")
     a, b = Recorder(), Recorder()
     detailed = lambda ch: Notifications(on_success=ch, detail=Detail.MODELS)  # noqa: E731
-    n.OUTCOMES.record(_model("orders", detailed(a)), 65.0)
-    n.OUTCOMES.record(_model("customers", detailed(a)), 10.0)
-    n.OUTCOMES.record(_model("audit", detailed(b)), 1.0)
-    n.OUTCOMES.record(_model("silent", None), 1.0)
-    n.send_success(tags="[all]")
+    n.send_success(
+        [
+            _run(_model("orders", detailed(a)), 65.0),
+            _run(_model("customers", detailed(a)), 10.0),
+            _run(_model("audit", detailed(b)), 1.0),
+            _run(_model("silent", None), 1.0),
+        ],
+        tags="[all]",
+    )
     assert len(a.sent) == 1 and len(b.sent) == 1
     text = a.sent[0]
     assert text.startswith("Pipeline success: **daily-x-123**")
@@ -272,10 +282,8 @@ def test_success_sends_one_message_per_channel_listing_its_models(monkeypatch):
 
 def test_success_skips_models_that_failed():
     ok = Recorder()
-    n.OUTCOMES.record(
-        _model("orders", Notifications(on_success=ok)), 1.0, RuntimeError("x")
-    )
-    n.send_success()
+    model = _model("orders", Notifications(on_success=ok))
+    n.send_success([_run(model, 1.0, RuntimeError("x"))])
     assert ok.sent == []
 
 
@@ -285,9 +293,10 @@ def test_success_skips_models_that_failed():
 def test_failure_reports_the_raising_model_on_its_own_channel():
     errors = Recorder()
     model = _model("orders", Notifications(on_failure=errors))
-    n.OUTCOMES.record(model, 12.0, ValueError("bad rows"))
     n.send_failure(
-        ValueError("bad rows"), runs=[ModelRun(model=model)], tags="[orders]"
+        ValueError("bad rows"),
+        [_run(model, 12.0, ValueError("bad rows"))],
+        tags="[orders]",
     )
     (text,) = errors.sent
     assert text.startswith("Pipeline failure: **")
@@ -298,9 +307,9 @@ def test_detailed_failure_also_lists_what_completed_before_it():
     errors = Recorder()
     done = _model("orders", Notifications(on_failure=errors, detail=Detail.MODELS))
     bad = _model("customers", Notifications(on_failure=errors, detail=Detail.MODELS))
-    n.OUTCOMES.record(done, 5.0)
-    n.OUTCOMES.record(bad, 2.0, RuntimeError("x"))
-    n.send_failure(RuntimeError("x"), runs=[ModelRun(model=done), ModelRun(model=bad)])
+    n.send_failure(
+        RuntimeError("x"), [_run(done, 5.0), _run(bad, 2.0, RuntimeError("x"))]
+    )
     (text,) = errors.sent
     assert "- warehouse.customers after 0m 2s: RuntimeError: x" in text
     assert "Done before the failure:\n- warehouse.orders: 0m 5s" in text
@@ -310,20 +319,20 @@ def test_minimal_failure_does_not_list_the_completed_models():
     errors = Recorder()
     done = _model("orders", Notifications(on_failure=errors))
     bad = _model("customers", Notifications(on_failure=errors))
-    n.OUTCOMES.record(done, 5.0)
-    n.OUTCOMES.record(bad, 2.0, RuntimeError("x"))
-    n.send_failure(RuntimeError("x"), runs=[ModelRun(model=done), ModelRun(model=bad)])
+    n.send_failure(
+        RuntimeError("x"), [_run(done, 5.0), _run(bad, 2.0, RuntimeError("x"))]
+    )
     assert "Done before" not in errors.sent[0]
 
 
 def test_failure_outside_any_model_reaches_every_failure_channel_once():
     errors = Recorder()
     runs = [
-        ModelRun(model=_model("orders", Notifications(on_failure=errors))),
-        ModelRun(model=_model("customers", Notifications(on_failure=errors))),
-        ModelRun(model=_model("silent", None)),
+        _run(_model("orders", Notifications(on_failure=errors))),
+        _run(_model("customers", Notifications(on_failure=errors))),
+        _run(_model("silent", None)),
     ]
-    n.send_failure(ConnectionError("no state db"), runs=runs)
+    n.send_failure(ConnectionError("no state db"), runs)
     (text,) = errors.sent
     assert "ConnectionError: no state db" in text
 
@@ -331,9 +340,37 @@ def test_failure_outside_any_model_reaches_every_failure_channel_once():
 def test_failure_sends_nothing_without_failure_channels():
     ok = Recorder()
     model = _model("orders", Notifications(on_success=ok))
-    n.OUTCOMES.record(model, 1.0, RuntimeError("x"))
-    n.send_failure(RuntimeError("x"), runs=[ModelRun(model=model)])
+    n.send_failure(RuntimeError("x"), [_run(model, 1.0, RuntimeError("x"))])
     assert ok.sent == []
+
+
+def test_failure_names_the_runs_own_exception_when_a_model_error_was_caught():
+    errors = Recorder()
+    model = _model("orders", Notifications(on_failure=errors))
+    n.send_failure(
+        ConnectionError("db went away"),
+        [_run(model, 1.0, RuntimeError("locked, skipped"))],
+    )
+    (text,) = errors.sent
+    assert "- warehouse.orders after 0m 1s: RuntimeError: locked, skipped" in text
+    assert "The run then failed with ConnectionError: db went away" in text
+
+
+def test_failure_does_not_repeat_the_exception_that_is_the_models_own():
+    errors = Recorder()
+    model = _model("orders", Notifications(on_failure=errors))
+    exc = RuntimeError("x")
+    n.send_failure(exc, [_run(model, 1.0, exc)])
+    assert "The run then failed" not in errors.sent[0]
+
+
+def test_send_quietly_logs_and_swallows(caplog):
+    def bad() -> None:
+        raise RuntimeError("channel down")
+
+    with caplog.at_level(logging.ERROR):
+        n.send_quietly(bad)
+    assert "channel down" in caplog.text
 
 
 # ── mentions ──
@@ -341,10 +378,8 @@ def test_failure_sends_nothing_without_failure_channels():
 
 def test_nobody_is_mentioned_by_default():
     ok = Recorder()
-    n.OUTCOMES.record(
-        _model("orders", Notifications(on_success=ok), People(owners=(ERIK,))), 1.0
-    )
-    n.send_success()
+    model = _model("orders", Notifications(on_success=ok), People(owners=(ERIK,)))
+    n.send_success([_run(model, 1.0)])
     assert ok.mentions == [()]
 
 
@@ -354,32 +389,35 @@ def test_on_failure_mentions_owners_and_maintainers_only_when_it_fails():
     model = _model(
         "orders", Notifications(on_any=both, mention=Mention.ON_FAILURE), people
     )
-    n.OUTCOMES.record(model, 1.0)
-    n.send_success()
+    n.send_success([_run(model, 1.0)])
     assert both.mentions == [()]
-    n.OUTCOMES.reset()
-    n.OUTCOMES.record(model, 1.0, RuntimeError("x"))
-    n.send_failure(RuntimeError("x"), runs=[ModelRun(model=model)])
+    n.send_failure(RuntimeError("x"), [_run(model, 1.0, RuntimeError("x"))])
     assert both.mentions[-1] == (ERIK, ANNA)
 
 
 def test_always_mentions_on_success_and_each_person_once():
     ok = Recorder()
     notif = Notifications(on_success=ok, mention=Mention.ALWAYS)
-    n.OUTCOMES.record(_model("orders", notif, People(owners=(ERIK,))), 1.0)
-    n.OUTCOMES.record(_model("customers", notif, People(maintainers=(ERIK, ANNA))), 1.0)
-    n.OUTCOMES.record(
-        _model("audit", Notifications(on_success=ok), People(owners=(NO_EMAIL,))), 1.0
+    n.send_success(
+        [
+            _run(_model("orders", notif, People(owners=(ERIK,))), 1.0),
+            _run(_model("customers", notif, People(maintainers=(ERIK, ANNA))), 1.0),
+            _run(
+                _model(
+                    "audit", Notifications(on_success=ok), People(owners=(NO_EMAIL,))
+                ),
+                1.0,
+            ),
+        ]
     )
-    n.send_success()
     assert ok.mentions == [(ERIK, ANNA)]
 
 
 def test_a_run_that_fails_before_any_model_mentions_the_matched_models_people():
     errors = Recorder()
     notif = Notifications(on_failure=errors, mention=Mention.ON_FAILURE)
-    runs = [ModelRun(model=_model("orders", notif, People(owners=(ERIK,))))]
-    n.send_failure(ConnectionError("no db"), runs=runs)
+    runs = [_run(_model("orders", notif, People(owners=(ERIK,))))]
+    n.send_failure(ConnectionError("no db"), runs)
     assert errors.mentions == [(ERIK,)]
 
 
@@ -392,19 +430,15 @@ def test_mention_flags_pick_the_roles():
         mention_owners=False,
         mention_creators=True,
     )
-    n.OUTCOMES.record(_model("orders", notif, people), 1.0)
-    n.send_success()
+    n.send_success([_run(_model("orders", notif, people), 1.0)])
     assert both.mentions == [(ANNA, BOT)]
 
 
 def test_creators_are_not_mentioned_by_default():
     both = Recorder()
     people = People(owners=(ERIK,), creators=(BOT,))
-    n.OUTCOMES.record(
-        _model("orders", Notifications(on_any=both, mention=Mention.ALWAYS), people),
-        1.0,
-    )
-    n.send_success()
+    model = _model("orders", Notifications(on_any=both, mention=Mention.ALWAYS), people)
+    n.send_success([_run(model, 1.0)])
     assert both.mentions == [(ERIK,)]
 
 
@@ -416,34 +450,6 @@ def test_a_mention_that_would_address_nobody_is_rejected():
             mention_owners=False,
             mention_maintainers=False,
         )
-
-
-def test_failure_names_the_runs_own_exception_when_a_model_error_was_caught():
-    errors = Recorder()
-    model = _model("orders", Notifications(on_failure=errors))
-    n.OUTCOMES.record(model, 1.0, RuntimeError("locked, skipped"))
-    n.send_failure(ConnectionError("db went away"), runs=[ModelRun(model=model)])
-    (text,) = errors.sent
-    assert "- warehouse.orders after 0m 1s: RuntimeError: locked, skipped" in text
-    assert "The run then failed with ConnectionError: db went away" in text
-
-
-def test_failure_does_not_repeat_the_exception_that_is_the_models_own():
-    errors = Recorder()
-    model = _model("orders", Notifications(on_failure=errors))
-    exc = RuntimeError("x")
-    n.OUTCOMES.record(model, 1.0, exc)
-    n.send_failure(exc, runs=[ModelRun(model=model)])
-    assert "The run then failed" not in errors.sent[0]
-
-
-def test_send_quietly_logs_and_swallows(caplog):
-    def bad() -> None:
-        raise RuntimeError("channel down")
-
-    with caplog.at_level(logging.ERROR):
-        n.send_quietly(bad)
-    assert "channel down" in caplog.text
 
 
 # ── duration formatting ──

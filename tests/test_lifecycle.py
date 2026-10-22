@@ -259,10 +259,7 @@ class TestModelLifecycle:
 
     def test_a_failure_in_setup_is_recorded_as_the_models_outcome(self):
         """A model whose DDL raises never runs its body, but the failure is
-        still its own: the outcome carries the model and the exception."""
-        from bollhav.model.notifications import OUTCOMES
-
-        OUTCOMES.reset()
+        still its own: the run's outcome carries the model and the exception."""
         run = self._stateless_model()
 
         @model_lifecycle
@@ -277,10 +274,9 @@ class TestModelLifecycle:
             with pytest.raises(RuntimeError, match="DDL failed"):
                 execute_model(run, "DATA")
 
-        (outcome,) = OUTCOMES.items
-        assert outcome.model is run.model
-        assert isinstance(outcome.error, RuntimeError)
-        OUTCOMES.reset()
+        assert run.outcome is not None
+        assert run.outcome.model is run.model
+        assert isinstance(run.outcome.error, RuntimeError)
 
     def test_stateful_bootstraps_then_runs(self):
         """Stateful model: state bootstrap runs (ensure_library /
