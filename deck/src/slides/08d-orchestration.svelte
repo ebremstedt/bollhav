@@ -8,6 +8,15 @@
 </script>
 
 <Slide kicker="Running the models" title="Orchestration vs Choreography">
+  <p class="credit">
+    <span class="attrib" tabindex="0">
+      image attribution
+      <span class="card" role="tooltip">
+        <a href="https://www.flaticon.com/free-icons/conductor" title="conductor icons">Conductor icons created by mia elysia - Flaticon</a>
+        <a href="https://www.flaticon.com/free-icons/ballet" title="ballet icons">Ballet icons created by NeXore88 - Flaticon</a>
+      </span>
+    </span>
+  </p>
   <div class="cols">
     <div class="half">
       <img class="plain pic" src="./conductor.png" alt="" width="512" height="512" />
@@ -18,24 +27,24 @@
       <img class="plain pic" src="./dancer.png" alt="" width="512" height="512" />
     </div>
   </div>
-  <p class="credit">
-    <span class="attrib" tabindex="0">
-      image attribution
-      <span class="card" role="tooltip">
-        <a href="https://www.flaticon.com/free-icons/conductor" title="conductor icons">Conductor icons created by mia elysia - Flaticon</a>
-        <a href="https://www.flaticon.com/free-icons/ballet" title="ballet icons">Ballet icons created by NeXore88 - Flaticon</a>
-      </span>
-    </span>
-  </p>
 </Slide>
 
 <style>
-  /* a conductor and the orchestra beside the one, a dancer beside the other */
+  /* two blocks side by side, on different heights: orchestration up, choreography
+     down; a conductor beside the one, a dancer beside the other */
+  .cols {
+    align-items: start;
+  }
+
   .half {
     display: flex;
     align-items: flex-start;
     gap: 1.25rem;
     min-width: 0;
+  }
+
+  .half:last-child {
+    margin-top: 3rem;
   }
 
   /* the pictures are black line art on transparent: on the dark theme they
@@ -67,10 +76,12 @@
     margin-bottom: 0.6rem;
   }
 
-  /* where the pictures come from: two words, and the links in a card on hover */
+  /* where the pictures come from: two words at the top right, the links in a
+     card below them on hover */
   .credit {
-    margin-top: 0.5rem;
+    margin: -0.5rem 0 0;
     max-width: none;
+    text-align: right;
     font-family: var(--font-mono);
     font-size: 0.68rem;
     letter-spacing: 0.04em;
@@ -82,9 +93,6 @@
     display: inline-block;
     cursor: help;
     outline: none;
-    text-decoration: underline dotted;
-    text-decoration-thickness: 1.5px;
-    text-underline-offset: 0.2em;
   }
 
   .attrib:hover,
@@ -94,8 +102,10 @@
 
   .card {
     position: absolute;
-    left: 0;
-    bottom: calc(100% + 0.6em);
+    right: 0;
+    top: calc(100% + 0.6em);
+    z-index: 2;
+    text-align: left;
     display: grid;
     gap: 0.4em;
     width: max-content;
@@ -109,7 +119,7 @@
     color: var(--fg);
     opacity: 0;
     visibility: hidden;
-    transform: translateY(4px);
+    transform: translateY(-4px);
     transition:
       opacity 0.2s,
       transform 0.2s,
