@@ -19,7 +19,7 @@ export type PageRef = { url: string; title: string }
 export type Group = { name: string; label: string; parent: string; pages: PageRef[] }
 
 // the sidebar order; a folder not listed comes after these, alphabetically
-const order = ['', 'model', 'concepts', 'examples', 'articles', 'about']
+const order = ['', 'about', 'model', 'concepts', 'examples', 'articles']
 
 // a folder's README.md is its overview and lives at the folder's own URL
 export const urlFor = (path: string) => {
@@ -29,9 +29,9 @@ export const urlFor = (path: string) => {
 }
 
 // the first heading of any level; a page with none is named after its file.
-// The home page's first heading is a section, so it is the site's name.
+// The home page has no heading of its own, so it is Home.
 function titleOf(markdown: string, path: string): string {
-  if (path === 'README.md') return 'bollhav'
+  if (path === 'README.md') return 'Home'
   const match = markdown.match(/^#{1,6}\s+(.+?)\s*#*\s*$/m)
   return match ? match[1].replace(/`/g, '') : posix.basename(path, '.md')
 }

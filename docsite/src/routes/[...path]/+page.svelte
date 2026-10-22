@@ -9,7 +9,7 @@
   <title>{data.path === 'README.md' ? 'bollhav' : `${data.title} · bollhav`}</title>
 </svelte:head>
 
-<article class="prose" data-pagefind-body use:mermaidDiagrams={data.path}>
+<article class="prose" class:home={data.path === 'README.md'} data-pagefind-body use:mermaidDiagrams={data.path}>
   {@html data.html}
 </article>
 <p class="eyebrow source">

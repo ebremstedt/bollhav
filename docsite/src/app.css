@@ -557,6 +557,19 @@ p {
   margin-inline: 0;
 }
 
+/* the home page is a hero: everything centred in the column */
+.prose.home {
+  text-align: center;
+}
+
+.prose.home > :not(h1, pre.mermaid, .table) {
+  margin-inline: auto;
+}
+
+.prose.home pre {
+  text-align: left;
+}
+
 .prose ul,
 .prose ol {
   margin: 0 0 1rem;
