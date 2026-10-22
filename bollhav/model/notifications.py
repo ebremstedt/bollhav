@@ -116,7 +116,7 @@ def _header(kind: str, tags: str | None) -> str:
     return f"{header}\n\nTAGS: `{tags}`" if tags else header
 
 
-def _by_channel(
+def group_runs_by_channel(
     runs: Iterable[ModelRun], *, failure: bool
 ) -> list[tuple[Channel, list[ModelRun]]]:
     """Runs grouped by the channel their model reports the outcome to; models
@@ -211,7 +211,7 @@ def send_success(runs: Iterable[ModelRun], tags: str | None = None) -> None:
     models that completed on it with their run times. A suffixed run only
     reaches models with `suffixed_runs=True`."""
     completed = [r for r in runs if r.outcome is not None and r.outcome.error is None]
-    for channel, group in _by_channel(completed, failure=False):
+    for channel, group in group_runs_by_channel(completed, failure=False):
         models = [r.model for r in group]
         summary = f"{len(group)} model(s) done in {duration_string(_seconds(group))}"
         text = f"{_header('success', tags)}\n\n"
@@ -236,7 +236,7 @@ def send_failure(
     completed = [r for r in runs if r.outcome is not None and r.outcome.error is None]
     if failed:
         own = any(o.error is exc for r in failed if (o := r.outcome) is not None)
-        for channel, group in _by_channel(failed, failure=True):
+        for channel, group in group_runs_by_channel(failed, failure=True):
             models = [r.model for r in group]
             text = f"{header}\n\n{_failure_lines(group)}"
             if not own:
@@ -245,7 +245,7 @@ def send_failure(
                 text += f"\n\nDone before the failure:\n{_lines(completed)}"
             channel.send(text, resolve_mentions(models, failure=True))
         return
-    for channel, group in _by_channel(runs, failure=True):
+    for channel, group in group_runs_by_channel(runs, failure=True):
         channel.send(
             f"{header}\n\n{type(exc).__name__}: {exc}",
             resolve_mentions((r.model for r in group), failure=True),
