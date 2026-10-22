@@ -13,6 +13,7 @@
   --line: rgba(20, 36, 72, 0.16);
   --warm-1: #e2541f;
   --warm-2: #d99a12;
+  --code-fg: #a8400f; /* inline code: a deep warm orange that holds up on cream */
   --good: #1e7a42;
   --bad: #b8421a;
 
@@ -39,6 +40,7 @@
     --line: rgba(239, 230, 208, 0.16);
     --warm-1: #ff7a45;
     --warm-2: #ffc247;
+    --code-fg: #ff8a5b;
     --good: #8fd6a4;
     --bad: #ff9a76;
     color-scheme: dark;
@@ -55,6 +57,7 @@
   --line: rgba(239, 230, 208, 0.16);
   --warm-1: #ff7a45;
   --warm-2: #ffc247;
+  --code-fg: #ff8a5b;
   --good: #8fd6a4;
   --bad: #ff9a76;
   color-scheme: dark;
@@ -110,6 +113,7 @@ code {
    keeps its own line breaks */
 :not(pre) > code {
   white-space: nowrap;
+  color: var(--code-fg);
 }
 
 kbd {
