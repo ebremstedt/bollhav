@@ -120,6 +120,18 @@ class Notifications:
     def failure_channel(self) -> Channel | None:
         return self.on_failure if self.on_failure is not None else self.on_any
 
+    def channel(self, *, failure: bool, suffixed: bool) -> Channel | None:
+        """Where this outcome is reported, or None when the model stays quiet:
+        disabled, or a suffixed run (`Model.suffixed`, stamped by the runtime)
+        it did not opt in to. An explicit `NOTIFICATIONS_ENABLED=true` lifts
+        the suffix rule too: it means "this run reports", whatever kind of run
+        it is."""
+        if not self.is_enabled():
+            return None
+        if suffixed and not self.suffixed_runs and not _enabled_override():
+            return None
+        return self.failure_channel if failure else self.success_channel
+
 
 @dataclass
 class Outcome:
@@ -161,29 +173,20 @@ def _header(kind: str, tags: str | None) -> str:
     return f"{header}\n\nTAGS: `{tags}`" if tags else header
 
 
-def _reporting_channel(model: Model, *, failure: bool) -> Channel | None:
-    """Where this model reports the outcome: its failure or success channel,
-    or None when it stays quiet — no notifications, disabled, or a suffixed
-    run (`model.suffixed`, stamped by the runtime) it did not opt in to. An
-    explicit `NOTIFICATIONS_ENABLED=true` lifts the suffix rule too: it means
-    "this run reports", whatever kind of run it is."""
-    notifications = model.notifications
-    if notifications is None or not notifications.is_enabled():
-        return None
-    if model.suffixed and not notifications.suffixed_runs and not _enabled_override():
-        return None
-    return notifications.failure_channel if failure else notifications.success_channel
-
-
 def _grouped(
     outcomes: Iterable[Outcome], *, failure: bool
 ) -> list[tuple[Channel, list[Outcome]]]:
     """Outcomes grouped by the channel their model reports the outcome to;
-    models that stay quiet (see `_reporting_channel`) are left out.
+    models that stay quiet (see `Notifications.channel`) are left out.
     Grouping is by equality, so two `MicrosoftTeams("X")` are one channel."""
     groups: list[tuple[Channel, list[Outcome]]] = []
     for outcome in outcomes:
-        channel = _reporting_channel(outcome.model, failure=failure)
+        notifications = outcome.model.notifications
+        if notifications is None:
+            continue
+        channel = notifications.channel(
+            failure=failure, suffixed=outcome.model.suffixed
+        )
         if channel is None:
             continue
         for known, members in groups:
@@ -288,7 +291,10 @@ def send_failure(
         return
     by_channel: list[tuple[Channel, list[Model]]] = []
     for run in runs:
-        channel = _reporting_channel(run.model, failure=True)
+        notifications = run.model.notifications
+        if notifications is None:
+            continue
+        channel = notifications.channel(failure=True, suffixed=run.model.suffixed)
         if channel is None:
             continue
         for known, members in by_channel:
