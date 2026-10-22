@@ -1,10 +1,17 @@
-// The pages of the site, read from content/ where collect.mjs put every
-// Markdown file of docs/ at its path. The sidebar is derived from the
-// folders, a page's title from its first heading, and the reading order from
-// the two together: nothing is written by hand except the order of the groups.
-import { readdirSync, readFileSync, statSync } from 'node:fs'
-import { join, posix, relative } from 'node:path'
-import { contentDir, pagesDir } from './paths'
+// The pages of the site: every Markdown file of docs/, imported as text so
+// Vite watches them and a save reloads the page in dev. The sidebar is
+// derived from the folders, a page's title from its first heading, and the
+// reading order from the two together: nothing is written by hand except
+// the order of the groups.
+import { posix } from 'node:path'
+import { pagesDir } from './paths'
+
+// keyed by the file's path from here; the page's path is the part after docs/
+const files = import.meta.glob('../../../../docs/**/*.md', { query: '?raw', import: 'default', eager: true }) as Record<
+  string,
+  string
+>
+const pagePath = (key: string) => key.slice(key.indexOf('/docs/') + '/docs/'.length)
 
 export type Page = { path: string; url: string; title: string; group: string; markdown: string; source: string }
 export type PageRef = { url: string; title: string }
@@ -31,14 +38,6 @@ function titleOf(markdown: string, path: string): string {
 
 const groupOf = (path: string) => (path.includes('/') ? path.split('/')[0] : '')
 
-function* walk(dir: string): Generator<string, void, void> {
-  for (const name of readdirSync(dir).sort()) {
-    const full = join(dir, name)
-    if (statSync(full).isDirectory()) yield* walk(full)
-    else if (name.endsWith('.md')) yield relative(contentDir, full).split('\\').join('/')
-  }
-}
-
 const groupRank = (group: string) => {
   const at = order.indexOf(group)
   return at === -1 ? order.length : at
@@ -62,8 +61,8 @@ const compare = (a: Page, b: Page) => {
 /** Every page in reading order: home, then the groups in `order`, each with its overview first. */
 export function allPages(): Page[] {
   const pages: Page[] = []
-  for (const path of walk(contentDir)) {
-    const markdown = readFileSync(join(contentDir, path), 'utf8')
+  for (const [key, markdown] of Object.entries(files)) {
+    const path = pagePath(key)
     pages.push({
       path,
       url: urlFor(path),

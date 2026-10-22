@@ -1,21 +1,19 @@
-// The pages of docs/, copied into content/ at their path there, and the
-// images beside them into static/, where the built site serves them. The
-// site is built from those two folders alone, so a page exists on the site
-// because the file exists in docs/, and nothing is registered anywhere.
-// With --watch it keeps going and copies a file again whenever it changes,
-// which is what `npm run dev` uses: edit a page, reload the browser.
+// The images of docs/, copied into static/ at their path there, where the
+// built site serves them beside the pages. (The pages themselves are
+// imported by the site, see src/lib/server/content.ts, so vite watches them
+// and a save reloads the page in dev.) With --watch it keeps going and
+// copies an image again whenever it changes.
 import { cpSync, mkdirSync, readdirSync, rmSync, statSync, watch } from 'node:fs'
 import { dirname, extname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const site = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const pages = resolve(process.env.PAGES_DIR ?? resolve(site, '../docs'))
-const content = join(site, 'content')
 const assets = join(site, 'static')
 const images = new Set(['.png', '.gif', '.jpg', '.jpeg', '.svg', '.webp'])
 
 const skip = (name) => name.startsWith('.')
-const destOf = (name) => (name.endsWith('.md') ? content : images.has(extname(name)) ? assets : null)
+const destOf = (name) => (images.has(extname(name)) ? assets : null)
 
 function copy(full) {
   const rel = relative(pages, full)
@@ -27,7 +25,6 @@ function copy(full) {
 }
 
 function collect() {
-  rmSync(content, { recursive: true, force: true })
   rmSync(assets, { recursive: true, force: true })
   let count = 0
   function walk(dir) {
@@ -39,7 +36,7 @@ function collect() {
     }
   }
   walk(pages)
-  console.log(`${count} files collected from ${pages}`)
+  console.log(`${count} images collected from ${pages}`)
 }
 
 collect()
@@ -60,5 +57,5 @@ if (process.argv.includes('--watch')) {
       }
     }
   })
-  console.log('watching docs/ for changes')
+  console.log('watching docs/ for image changes')
 }

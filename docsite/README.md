@@ -22,9 +22,9 @@ MkDocs callouts (`!!! note "Title"`, folding `???`), fence titles
 
 ## Build
 
-`npm run build` copies the pages into `content/` and the images into
-`static/`, prerenders one folder per page into `build/`, and lets Pagefind
-index them. `BASE_PATH=/docs` at build time puts the site under that prefix,
+The pages are imported by the site (`src/lib/server/content.ts`), so vite
+watches them. `npm run build` copies the images into `static/`, prerenders
+one folder per page into `build/`, and lets Pagefind index them. `BASE_PATH=/docs` at build time puts the site under that prefix,
 which is how App Platform builds it.
 
 ## Locally
@@ -33,6 +33,5 @@ which is how App Platform builds it.
 cd docsite && npm install && npm run dev
 ```
 
-The pages are copied in again as you edit them, so a change shows on the
-next reload of the browser. Search needs the built site: `npm run build &&
-npm run preview`.
+Save a page and the browser reloads it. Search needs the built site served
+statically; `npm run preview` serves everything but the search index.
