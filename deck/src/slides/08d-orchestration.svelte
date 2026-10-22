@@ -35,27 +35,22 @@
     min-width: 0;
   }
 
-  /* the pictures are coloured line art on white: grayscale and a hard
-     contrast make them black and white, multiply drops the white on the light
-     theme, and inverted plus screen does the same on the dark one */
+  /* the pictures are black line art on transparent: on the dark theme they
+     are inverted, so the lines come out light */
   .pic {
     flex: none;
     width: clamp(6.5rem, 13vw, 11rem);
     height: auto;
     margin-top: 0.3rem;
-    filter: grayscale(1) contrast(4);
-    mix-blend-mode: multiply;
   }
 
   :global([data-theme='dark']) .pic {
-    filter: grayscale(1) contrast(4) invert(1);
-    mix-blend-mode: screen;
+    filter: invert(1);
   }
 
   @media (prefers-color-scheme: dark) {
     :global(:root:not([data-theme='light'])) .pic {
-      filter: grayscale(1) contrast(4) invert(1);
-      mix-blend-mode: screen;
+      filter: invert(1);
     }
   }
 
