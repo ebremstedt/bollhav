@@ -275,7 +275,6 @@ class TestModelLifecycle:
                 execute_model(run, "DATA")
 
         assert run.outcome is not None
-        assert run.outcome.model is run.model
         assert isinstance(run.outcome.error, RuntimeError)
 
     def test_stateful_bootstraps_then_runs(self):

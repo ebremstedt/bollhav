@@ -11,7 +11,6 @@ if TYPE_CHECKING:
     from psycopg import sql
 
     from bollhav.model.model import Model
-    from bollhav.model.notifications import Outcome
 
 
 class MissingQueryBuilderError(ValueError):
@@ -32,6 +31,22 @@ class QueryNotSqlStringError(TypeError):
             f"{full_name!r}: query_builder must return a str for resolve_sql, "
             f"got {got.__name__}"
         )
+
+
+def duration_string(seconds: float) -> str:
+    """Seconds as `1h 2m 5s` / `4m 12s`, for a run's time in a message."""
+    minutes, secs = divmod(int(seconds), 60)
+    hours, minutes = divmod(minutes, 60)
+    return f"{hours}h {minutes}m {secs}s" if hours else f"{minutes}m {secs}s"
+
+
+@dataclass
+class Outcome:
+    """What happened when a model ran, as `@model_lifecycle` saw it: how long
+    it took, and the exception if it raised."""
+
+    seconds: float
+    error: BaseException | None = None
 
 
 @dataclass
@@ -71,7 +86,7 @@ class ModelRun:
     is_reload: bool = False
     is_latest: bool = False
     is_backfill: bool = False
-    outcome: "Outcome | None" = None
+    outcome: Outcome | None = None
 
     def resolve_query(
         self, since: datetime | None = None, until: datetime | None = None
@@ -100,4 +115,10 @@ class ModelRun:
         return query
 
 
-__all__ = ["ModelRun", "MissingQueryBuilderError", "QueryNotSqlStringError"]
+__all__ = [
+    "ModelRun",
+    "Outcome",
+    "duration_string",
+    "MissingQueryBuilderError",
+    "QueryNotSqlStringError",
+]

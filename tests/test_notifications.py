@@ -7,13 +7,12 @@ import pytest
 
 from bollhav.model import notifications as n
 from bollhav.model.model import Model
-from bollhav.model.modelrun import ModelRun
+from bollhav.model.modelrun import ModelRun, Outcome, duration_string
 from bollhav.model.notifications import (
     Detail,
     Mention,
     Notifications,
     NotificationsError,
-    Outcome,
 )
 from bollhav.model.people import Contact, People
 from bollhav.model.target import Target
@@ -63,7 +62,7 @@ def _run(
     when the model was never reached."""
     run = ModelRun(model=model)
     if seconds is not None:
-        run.outcome = Outcome(model=model, seconds=seconds, error=error)
+        run.outcome = Outcome(seconds=seconds, error=error)
     return run
 
 
@@ -460,4 +459,4 @@ def test_a_mention_that_would_address_nobody_is_rejected():
     [(0, "0m 0s"), (59.9, "0m 59s"), (754, "12m 34s"), (3725, "1h 2m 5s")],
 )
 def test_duration(seconds, text):
-    assert n._duration(seconds) == text
+    assert duration_string(seconds) == text

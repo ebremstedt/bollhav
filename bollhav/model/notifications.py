@@ -11,12 +11,15 @@ import os
 import socket
 from dataclasses import dataclass
 from enum import Enum
-from typing import TYPE_CHECKING, Callable, Iterable, Protocol
+from typing import TYPE_CHECKING, Callable, Iterable, Protocol, TypeVar
+
+from bollhav.model.modelrun import ModelRun, Outcome, duration_string
 
 if TYPE_CHECKING:
     from bollhav.model.model import Model
-    from bollhav.model.modelrun import ModelRun
     from bollhav.model.people import Contact
+
+T = TypeVar("T")
 
 logger = logging.getLogger(__name__)
 
@@ -117,76 +120,49 @@ class Notifications:
         return self.failure_channel if failure else self.success_channel
 
 
-@dataclass
-class Outcome:
-    """One model's run as `@model_lifecycle` saw it: how long it took and the
-    exception, if it raised."""
-
-    model: Model
-    seconds: float
-    error: BaseException | None = None
-
-    @property
-    def line(self) -> str:
-        """The model and its run time, as a list item on a card."""
-        return f"- {self.model.target.full_name}: {_duration(self.seconds)}"
-
-    @property
-    def failure_line(self) -> str:
-        """The model, how long it ran, and what it raised."""
-        return (
-            f"- {self.model.target.full_name} after {_duration(self.seconds)}: "
-            f"{type(self.error).__name__}: {self.error}"
-        )
-
-
-def _duration(seconds: float) -> str:
-    minutes, secs = divmod(int(seconds), 60)
-    hours, minutes = divmod(minutes, 60)
-    return f"{hours}h {minutes}m {secs}s" if hours else f"{minutes}m {secs}s"
-
-
 def _header(kind: str, tags: str | None) -> str:
     host = os.environ.get("HOSTNAME", socket.gethostname())
     header = f"Pipeline {kind}: **{host}**"
     return f"{header}\n\nTAGS: `{tags}`" if tags else header
 
 
-def _grouped(
-    outcomes: Iterable[Outcome], *, failure: bool
-) -> list[tuple[Channel, list[Outcome]]]:
-    """Outcomes grouped by the channel their model reports the outcome to;
+def _by_channel(
+    items: Iterable[T], model_of: Callable[[T], Model], *, failure: bool
+) -> list[tuple[Channel, list[T]]]:
+    """`items` grouped by the channel their model reports the outcome to;
     models that stay quiet (see `Notifications.channel`) are left out.
     Grouping is by equality, so two `MicrosoftTeams("X")` are one channel."""
-    groups: list[tuple[Channel, list[Outcome]]] = []
-    for outcome in outcomes:
-        notifications = outcome.model.notifications
+    groups: list[tuple[Channel, list[T]]] = []
+    for item in items:
+        model = model_of(item)
+        notifications = model.notifications
         if notifications is None:
             continue
-        channel = notifications.channel(
-            failure=failure, suffixed=outcome.model.suffixed
-        )
+        channel = notifications.channel(failure=failure, suffixed=model.suffixed)
         if channel is None:
             continue
         for known, members in groups:
             if known == channel:
-                members.append(outcome)
+                members.append(item)
                 break
         else:
-            groups.append((channel, [outcome]))
+            groups.append((channel, [item]))
     return groups
 
 
-def resolve_detail_level(outcomes: Iterable[Outcome]) -> Detail:
+def resolve_detail_level(models: Iterable[Model]) -> Detail:
     """The group's level: MODELS if any member asks for it."""
-    for outcome in outcomes:
-        notifications = outcome.model.notifications
+    for model in models:
+        notifications = model.notifications
         if notifications is not None and notifications.detail is Detail.MODELS:
             return Detail.MODELS
     return Detail.MINIMAL
 
 
 def resolve_mentions(models: Iterable[Model], failure: bool) -> tuple[Contact, ...]:
+    """The people of the models whose `mention` setting applies to this
+    outcome, from the roles each model's `mention_*` flags select, each
+    person once."""
     seen: set[str] = set()
     people: list[Contact] = []
     for model in models:
@@ -209,69 +185,81 @@ def resolve_mentions(models: Iterable[Model], failure: bool) -> tuple[Contact, .
 
 
 def send_quietly(send: Callable[..., None], *args, **kwargs) -> None:
+    """Call a sender and log, never raise, whatever it throws: a notification
+    must not fail a run, nor replace the exception the run failed with."""
     try:
         send(*args, **kwargs)
     except Exception:
         logger.exception("Notification failed; the run is unaffected")
 
 
+Finished = tuple[ModelRun, Outcome]
+"""A run that reached its model, with what happened."""
+
+
+def _finished(runs: Iterable[ModelRun]) -> list[Finished]:
+    return [(run, run.outcome) for run in runs if run.outcome is not None]
+
+
+def _line(run: ModelRun, outcome: Outcome) -> str:
+    """The model and its run time, as a list item."""
+    return f"- {run.model.target.full_name}: {duration_string(outcome.seconds)}"
+
+
+def _failure_line(run: ModelRun, outcome: Outcome) -> str:
+    """The model, how long it ran, and what it raised."""
+    return (
+        f"- {run.model.target.full_name} after {duration_string(outcome.seconds)}: "
+        f"{type(outcome.error).__name__}: {outcome.error}"
+    )
+
+
 def send_success(runs: Iterable[ModelRun], tags: str | None = None) -> None:
     """After a clean `main()`: one message per `on_success` channel, listing the
     models that completed on it with their run times. A suffixed run only
     reaches models with `suffixed_runs=True`."""
-    completed = [
-        r.outcome for r in runs if r.outcome is not None and r.outcome.error is None
-    ]
-    for channel, outcomes in _grouped(completed, failure=False):
-        total = _duration(sum(o.seconds for o in outcomes))
-        summary = f"{len(outcomes)} model(s) done in {total}"
+    completed = [(r, o) for r, o in _finished(runs) if o.error is None]
+    for channel, group in _by_channel(completed, lambda p: p[0].model, failure=False):
+        models = [r.model for r, _ in group]
+        total = duration_string(sum(o.seconds for _, o in group))
+        summary = f"{len(group)} model(s) done in {total}"
         text = f"{_header('success', tags)}\n\n"
-        if resolve_detail_level(outcomes) is Detail.MODELS:
-            text += "\n".join(o.line for o in outcomes) + "\n\n"
-        channel.send(
-            text + summary, resolve_mentions((o.model for o in outcomes), failure=False)
-        )
+        if resolve_detail_level(models) is Detail.MODELS:
+            text += "\n".join(_line(r, o) for r, o in group) + "\n\n"
+        channel.send(text + summary, resolve_mentions(models, failure=False))
 
 
 def send_failure(
     exc: BaseException, runs: Iterable[ModelRun], tags: str | None = None
 ) -> None:
+    """After a `main()` that raised: one message per `on_failure` channel. A
+    model that raised reports on its own channel with its exception; when the
+    run died of something else afterwards (a model's error was caught and the
+    loop went on, then a connection dropped), that exception is named too.
+    When the run failed outside any model (a connection that never opened,
+    say), every matched model's failure channel hears it instead. A suffixed
+    run only reaches models with `suffixed_runs=True`."""
     runs = list(runs)
     header = _header("failure", tags)
-    outcomes = [r.outcome for r in runs if r.outcome is not None]
-    failed = [o for o in outcomes if o.error is not None]
-    completed = [o for o in outcomes if o.error is None]
+    finished = _finished(runs)
+    failed = [(r, o) for r, o in finished if o.error is not None]
+    completed = [(r, o) for r, o in finished if o.error is None]
     if failed:
-        own = any(o.error is exc for o in failed)
-        for channel, outcomes in _grouped(failed, failure=True):
-            text = f"{header}\n\n" + "\n".join(o.failure_line for o in outcomes)
+        own = any(o.error is exc for _, o in failed)
+        for channel, group in _by_channel(failed, lambda p: p[0].model, failure=True):
+            models = [r.model for r, _ in group]
+            text = f"{header}\n\n" + "\n".join(_failure_line(r, o) for r, o in group)
             if not own:
                 text += f"\n\nThe run then failed with {type(exc).__name__}: {exc}"
-            if completed and resolve_detail_level(outcomes) is Detail.MODELS:
-                done = "\n".join(o.line for o in completed)
+            if completed and resolve_detail_level(models) is Detail.MODELS:
+                done = "\n".join(_line(r, o) for r, o in completed)
                 text += f"\n\nDone before the failure:\n{done}"
-            channel.send(
-                text, resolve_mentions((o.model for o in outcomes), failure=True)
-            )
+            channel.send(text, resolve_mentions(models, failure=True))
         return
-    by_channel: list[tuple[Channel, list[Model]]] = []
-    for run in runs:
-        notifications = run.model.notifications
-        if notifications is None:
-            continue
-        channel = notifications.channel(failure=True, suffixed=run.model.suffixed)
-        if channel is None:
-            continue
-        for known, members in by_channel:
-            if known == channel:
-                members.append(run.model)
-                break
-        else:
-            by_channel.append((channel, [run.model]))
-    for channel, models in by_channel:
+    for channel, group in _by_channel(runs, lambda r: r.model, failure=True):
         channel.send(
             f"{header}\n\n{type(exc).__name__}: {exc}",
-            resolve_mentions(models, failure=True),
+            resolve_mentions((r.model for r in group), failure=True),
         )
 
 
@@ -281,6 +269,5 @@ __all__ = [
     "Mention",
     "Notifications",
     "NotificationsError",
-    "Outcome",
     "send_quietly",
 ]

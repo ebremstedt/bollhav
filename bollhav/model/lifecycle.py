@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from functools import wraps
 from typing import Callable
 
-from bollhav.model.notifications import Outcome
+from bollhav.model.modelrun import Outcome
 from bollhav.model.progress_bar import PROGRESS
 from bollhav.model.state_dry_plan import _fmt_window, _print_state_plan
 from bollhav.model.window import (
@@ -360,12 +360,10 @@ def model_lifecycle(func: Callable) -> Callable:
             if mark_applied:
                 return None
             result = func(*args, **kwargs)
-            run.outcome = Outcome(model=model, seconds=time.monotonic() - started)
+            run.outcome = Outcome(seconds=time.monotonic() - started)
             return result
         except BaseException as exc:
-            run.outcome = Outcome(
-                model=model, seconds=time.monotonic() - started, error=exc
-            )
+            run.outcome = Outcome(seconds=time.monotonic() - started, error=exc)
             raise
         finally:
             PROGRESS.finish_model()

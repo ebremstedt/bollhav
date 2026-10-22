@@ -326,7 +326,7 @@ class TestNotificationsThroughTheDecorator:
     def _run(self, notifications, *, raise_in_main=None, times=1, **env):
         from bollhav.model.modelrun import ModelRun
         from bollhav.model.model import Model
-        from bollhav.model.notifications import Outcome
+        from bollhav.model.modelrun import Outcome
         from bollhav.model.target import Target
         from bollhav.model.temporality import Temporality
 
@@ -355,7 +355,7 @@ class TestNotificationsThroughTheDecorator:
             def main(runs, debug):
                 # what @model_lifecycle does around each model's run
                 for run in runs:
-                    run.outcome = Outcome(model=run.model, seconds=1.0)
+                    run.outcome = Outcome(seconds=1.0)
                 if raise_in_main:
                     raise raise_in_main
 
