@@ -43,10 +43,7 @@ def _enabled_override() -> bool | None:
 
 
 class Channel(Protocol):
-    """Anything that can deliver a text message. `bollhav.channels` has the
-    shipped ones; a custom channel only needs `send`. `mentions` are the people to
-    address, from the models' `People`; a channel that can't mention may
-    ignore them."""
+    """Delivers a message. See `bollhav.channels` for the shipped ones."""
 
     def send(self, text: str, mentions: tuple[Contact, ...] = ()) -> None: ...
 
@@ -59,9 +56,7 @@ class Detail(Enum):
 
 
 class Mention(Enum):
-    """Whether to address the model's `people` in the message; the
-    `mention_*` flags on `Notifications` say which roles. ON_FAILURE pings
-    them only when the run raises."""
+    """How and whether to address the model's People"""
 
     NOBODY = "nobody"
     ON_FAILURE = "on_failure"
