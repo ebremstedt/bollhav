@@ -207,6 +207,7 @@ def _apply_to_model(
         tagging=model.tagging,
         people=model.people,
         notifications=model.notifications,
+        suffixed=bool(schema_suffix or table_suffix),
         **model.extra,
     )
     # Record which mode resolved the window — same precedence resolve_window

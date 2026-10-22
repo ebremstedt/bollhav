@@ -334,6 +334,8 @@ class TestNotificationsThroughTheDecorator:
             target=Target(name="orders", schema="warehouse"),
             temporality=Temporality.TIMELESS,
             notifications=notifications,
+            # the harness bypasses apply_runtime_overrides, which stamps this
+            suffixed=bool(env.get("schema_suffix") or env.get("table_suffix")),
         )
         patches = _patches(**env)
         with (

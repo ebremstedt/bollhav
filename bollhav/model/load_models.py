@@ -293,23 +293,11 @@ def load_models(
             try:
                 func(runs=runs, debug=cfg.debug)
             except BaseException as exc:
-                send_quietly(
-                    send_failure,
-                    exc,
-                    runs,
-                    tags=cfg.tags,
-                    schema_suffix=cfg.schema_suffix,
-                    table_suffix=cfg.table_suffix,
-                )
+                send_quietly(send_failure, exc, runs, tags=cfg.tags)
                 raise
             if not cfg.dry_state:
                 PROGRESS.finish()
-            send_quietly(
-                send_success,
-                tags=cfg.tags,
-                schema_suffix=cfg.schema_suffix,
-                table_suffix=cfg.table_suffix,
-            )
+            send_quietly(send_success, tags=cfg.tags)
 
         return wrapper
 

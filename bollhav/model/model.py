@@ -264,6 +264,7 @@ class Model:
         upstream: list[Source] | None = None,
         people: People | None = None,
         notifications: Notifications | None = None,
+        suffixed: bool = False,
         **kwargs,
     ):
         self.target = target
@@ -288,6 +289,9 @@ class Model:
         )
         self.people = people
         self.notifications = notifications
+        # True on the copy the runtime resolves for a run that set SCHEMA_SUFFIX
+        # or TABLE_SUFFIX: a dev run. Not about a suffix declared on the Target.
+        self.suffixed = suffixed
         self.extra = kwargs
         self._validate_kind_consistency()
         self._validate_upstream_requires_state()

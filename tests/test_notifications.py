@@ -38,13 +38,19 @@ BOT = Contact(name="Build bot", email="bot@example.test")
 
 
 def _model(
-    name: str, notifications: Notifications | None, people: People | None = None
+    name: str,
+    notifications: Notifications | None,
+    people: People | None = None,
+    suffixed: bool = False,
 ) -> Model:
+    """`suffixed` is what the runtime stamps on its copy for a SCHEMA_SUFFIX /
+    TABLE_SUFFIX run; a Model is frozen, so it is set at construction."""
     return Model(
         target=Target(name=name, schema="warehouse"),
         temporality=Temporality.TIMELESS,
         notifications=notifications,
         people=people,
+        suffixed=suffixed,
     )
 
 
@@ -139,33 +145,34 @@ def test_env_var_garbage_is_ignored_with_a_warning(monkeypatch, caplog):
 
 def test_a_suffixed_run_is_quiet_by_default():
     both = Recorder()
-    model = _model("orders", Notifications(on_any=both))
+    model = _model("orders", Notifications(on_any=both), suffixed=True)
     n.OUTCOMES.record(model, 1.0)
-    n.send_success(schema_suffix="test")
+    n.send_success()
     n.OUTCOMES.reset()
     n.OUTCOMES.record(model, 1.0, RuntimeError("x"))
-    n.send_failure(RuntimeError("x"), runs=[ModelRun(model=model)], table_suffix="v2")
+    n.send_failure(RuntimeError("x"), runs=[ModelRun(model=model)])
     n.OUTCOMES.reset()
-    n.send_failure(
-        ConnectionError("no db"), runs=[ModelRun(model=model)], schema_suffix="test"
-    )
+    n.send_failure(ConnectionError("no db"), runs=[ModelRun(model=model)])
     assert both.sent == []
 
 
 def test_env_var_true_lifts_the_suffix_rule_for_the_run(monkeypatch):
     monkeypatch.setenv("NOTIFICATIONS_ENABLED", "true")
     ok = Recorder()
-    n.OUTCOMES.record(_model("orders", Notifications(on_success=ok)), 1.0)
-    n.send_success(schema_suffix="test")
+    model = _model("orders", Notifications(on_success=ok), suffixed=True)
+    n.OUTCOMES.record(model, 1.0)
+    n.send_success()
     assert len(ok.sent) == 1
 
 
 def test_suffixed_runs_opt_in_and_the_card_reads_as_usual(monkeypatch):
     monkeypatch.setenv("HOSTNAME", "dev-1")
     both = Recorder()
-    model = _model("orders", Notifications(on_any=both, suffixed_runs=True))
+    model = _model(
+        "orders", Notifications(on_any=both, suffixed_runs=True), suffixed=True
+    )
     n.OUTCOMES.record(model, 1.0)
-    n.send_success(tags="[orders]", schema_suffix="test", table_suffix="v2")
+    n.send_success(tags="[orders]")
     (text,) = both.sent
     assert text == (
         "Pipeline success: **dev-1**\n\nTAGS: `[orders]`\n\n1 model(s) done in 0m 1s"
@@ -174,13 +181,13 @@ def test_suffixed_runs_opt_in_and_the_card_reads_as_usual(monkeypatch):
 
 def test_suffixed_opt_in_covers_failures_too():
     errors = Recorder()
-    model = _model("orders", Notifications(on_failure=errors, suffixed_runs=True))
-    n.OUTCOMES.record(model, 2.0, RuntimeError("x"))
-    n.send_failure(RuntimeError("x"), runs=[ModelRun(model=model)], schema_suffix="t")
-    n.OUTCOMES.reset()
-    n.send_failure(
-        ConnectionError("no db"), runs=[ModelRun(model=model)], table_suffix="v2"
+    model = _model(
+        "orders", Notifications(on_failure=errors, suffixed_runs=True), suffixed=True
     )
+    n.OUTCOMES.record(model, 2.0, RuntimeError("x"))
+    n.send_failure(RuntimeError("x"), runs=[ModelRun(model=model)])
+    n.OUTCOMES.reset()
+    n.send_failure(ConnectionError("no db"), runs=[ModelRun(model=model)])
     assert len(errors.sent) == 2
     assert "RuntimeError: x" in errors.sent[0]
     assert "ConnectionError: no db" in errors.sent[1]
@@ -189,9 +196,11 @@ def test_suffixed_opt_in_covers_failures_too():
 def test_env_var_false_beats_the_suffixed_opt_in(monkeypatch):
     monkeypatch.setenv("NOTIFICATIONS_ENABLED", "false")
     both = Recorder()
-    model = _model("orders", Notifications(on_any=both, suffixed_runs=True))
-    n.OUTCOMES.record(model, 1.0)
-    n.send_success(schema_suffix="test")
+    notif = Notifications(on_any=both, suffixed_runs=True)
+    n.OUTCOMES.record(_model("orders", notif, suffixed=True), 1.0)
+    n.send_success()
+    n.OUTCOMES.reset()
+    n.OUTCOMES.record(_model("orders", notif), 1.0)
     n.send_success()
     assert both.sent == []
 

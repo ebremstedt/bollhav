@@ -161,30 +161,29 @@ def _header(kind: str, tags: str | None) -> str:
     return f"{header}\n\nTAGS: `{tags}`" if tags else header
 
 
-def _channel(model: Model, attr: str, suffixed: bool = False) -> Channel | None:
-    """The model's channel for `attr` (`success_channel` / `failure_channel`),
-    or None when it has no notifications, they are disabled, or the run is
-    suffixed and the model did not opt in to those. An explicit
-    `NOTIFICATIONS_ENABLED=true` lifts the suffix rule too: it means "this run
-    reports", whatever kind of run it is."""
+def _reporting_channel(model: Model, *, failure: bool) -> Channel | None:
+    """Where this model reports the outcome: its failure or success channel,
+    or None when it stays quiet — no notifications, disabled, or a suffixed
+    run (`model.suffixed`, stamped by the runtime) it did not opt in to. An
+    explicit `NOTIFICATIONS_ENABLED=true` lifts the suffix rule too: it means
+    "this run reports", whatever kind of run it is."""
     notifications = model.notifications
     if notifications is None or not notifications.is_enabled():
         return None
-    if suffixed and not notifications.suffixed_runs and not _enabled_override():
+    if model.suffixed and not notifications.suffixed_runs and not _enabled_override():
         return None
-    return getattr(notifications, attr)
+    return notifications.failure_channel if failure else notifications.success_channel
 
 
 def _grouped(
-    outcomes: Iterable[Outcome], attr: str, suffixed: bool = False
+    outcomes: Iterable[Outcome], *, failure: bool
 ) -> list[tuple[Channel, list[Outcome]]]:
-    """Outcomes grouped by the channel their model resolves for `attr`
-    (`success_channel` / `failure_channel`); models without one, with
-    notifications disabled, or not opted in to a suffixed run are left out.
+    """Outcomes grouped by the channel their model reports the outcome to;
+    models that stay quiet (see `_reporting_channel`) are left out.
     Grouping is by equality, so two `MicrosoftTeams("X")` are one channel."""
     groups: list[tuple[Channel, list[Outcome]]] = []
     for outcome in outcomes:
-        channel = _channel(outcome.model, attr, suffixed)
+        channel = _reporting_channel(outcome.model, failure=failure)
         if channel is None:
             continue
         for known, members in groups:
@@ -231,8 +230,6 @@ def _mentions(models: Iterable[Model], failure: bool) -> tuple[Contact, ...]:
 
 
 def send_quietly(send: Callable[..., None], *args, **kwargs) -> None:
-    """Call a sender and log, never raise, whatever it throws: a notification
-    must not fail a run, nor replace the exception the run failed with."""
     try:
         send(*args, **kwargs)
     except Exception:
@@ -245,15 +242,12 @@ def _model_lines(outcomes: Iterable[Outcome]) -> str:
     )
 
 
-def send_success(
-    tags: str | None = None, schema_suffix: str = "", table_suffix: str = ""
-) -> None:
+def send_success(tags: str | None = None) -> None:
     """After a clean `main()`: one message per `on_success` channel, listing the
     models that completed on it with their run times. A suffixed run only
     reaches models with `suffixed_runs=True`."""
-    suffixed = bool(schema_suffix or table_suffix)
     completed = (o for o in OUTCOMES.items if o.error is None)
-    for channel, outcomes in _grouped(completed, "success_channel", suffixed):
+    for channel, outcomes in _grouped(completed, failure=False):
         total = _duration(sum(o.seconds for o in outcomes))
         summary = f"{len(outcomes)} model(s) done in {total}"
         text = f"{_header('success', tags)}\n\n"
@@ -265,11 +259,7 @@ def send_success(
 
 
 def send_failure(
-    exc: BaseException,
-    runs: Iterable[ModelRun],
-    tags: str | None = None,
-    schema_suffix: str = "",
-    table_suffix: str = "",
+    exc: BaseException, runs: Iterable[ModelRun], tags: str | None = None
 ) -> None:
     """After a `main()` that raised: one message per `on_failure` channel. A
     model that raised reports on its own channel with its exception; when the
@@ -278,13 +268,12 @@ def send_failure(
     When the run failed outside any model (a connection that never opened,
     say), every matched model's failure channel hears it instead. A suffixed
     run only reaches models with `suffixed_runs=True`."""
-    suffixed = bool(schema_suffix or table_suffix)
     header = _header("failure", tags)
     failed = [o for o in OUTCOMES.items if o.error is not None]
     completed = [o for o in OUTCOMES.items if o.error is None]
     if failed:
         own = any(o.error is exc for o in failed)
-        for channel, outcomes in _grouped(failed, "failure_channel", suffixed):
+        for channel, outcomes in _grouped(failed, failure=True):
             lines = [
                 f"- {o.model.target.full_name} after {_duration(o.seconds)}: "
                 f"{type(o.error).__name__}: {o.error}"
@@ -299,7 +288,7 @@ def send_failure(
         return
     by_channel: list[tuple[Channel, list[Model]]] = []
     for run in runs:
-        channel = _channel(run.model, "failure_channel", suffixed)
+        channel = _reporting_channel(run.model, failure=True)
         if channel is None:
             continue
         for known, members in by_channel:

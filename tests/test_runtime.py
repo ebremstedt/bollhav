@@ -426,6 +426,17 @@ class TestNotificationsPreservedThroughOverrides:
         assert run.model.notifications is notifications
         assert run.model.people is people
 
+    def test_the_copy_knows_whether_the_run_was_suffixed(self):
+        m = Model(
+            target=Target(name="orders", schema="public", schema_suffix_appendix=None),
+            batching=Batch(time=TimeChunking(chunk="@hourly", tz=UTC)),
+            contract=Contract(begin=_SINCE, end=_UNTIL),
+            temporality=Temporality.TEMPORAL,
+        )
+        assert m.suffixed is False
+        assert _apply(m, schema_suffix="dev").model.suffixed is True
+        assert _apply(m, schema_suffix="").model.suffixed is False
+
 
 class TestRunModeWindowMatrix:
     """The run-mode combinatorics at the resolution layer: STATE_MODE
