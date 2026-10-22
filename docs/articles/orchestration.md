@@ -26,7 +26,7 @@ with DAG("warehouse", schedule="@hourly", ...) as dag:
     raw >> clean        # ordering lives here, in Airflow — not in the models
 ```
 
-This is the only option on backends without state coordination — e.g. [MSSQL](../backends/mssql.md), where state isn't supported, so an external orchestrator (or your own loop) drives every run.
+This is the only option on backends without state coordination — e.g. [MSSQL](../backends.md), where state isn't supported, so an external orchestrator (or your own loop) drives every run.
 
 ## With state — the contracts are the DAG
 

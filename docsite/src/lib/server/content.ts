@@ -12,7 +12,7 @@ export type PageRef = { url: string; title: string }
 export type Group = { name: string; label: string; parent: string; pages: PageRef[] }
 
 // the sidebar order; a folder not listed comes after these, alphabetically
-const order = ['', 'model', 'concepts', 'backends', 'examples', 'articles', 'about']
+const order = ['', 'model', 'concepts', 'examples', 'articles', 'about']
 
 // a folder's README.md is its overview and lives at the folder's own URL
 export const urlFor = (path: string) => {

@@ -13,7 +13,7 @@ docs/
 │  ├─ README.md            overview
 │  ├─ target.md, contract.md, batch.md, temporality.md, state.md, upstream.md, …
 ├─ concepts/               env, decorators, tags, gui
-├─ backends/               postgres, mssql, iceberg
+├─ backends.md             postgres, mssql, iceberg, in short
 ├─ examples/
 ├─ articles/               README.md is the index
 └─ about/
