@@ -13,7 +13,7 @@ balls' bounce and drag) are at the top of `src/lib/Sea.svelte`.
 ```bash
 cd deck
 npm ci
-npm run dev        # http://localhost:5173
+npm run dev        # http://localhost:5180; its Docs link goes to the docs on 5190
 npm run build      # dist/
 ```
 

@@ -10,9 +10,9 @@
     slides = [],
     title = 'bollhav',
     home = 'https://bollhav.dev',
-    // learn and lab are kept out for now
+    // learn and lab are kept out for now. Locally, the docs are the local ones
     links = [
-      { label: 'Docs', href: 'https://bollhav.dev/docs/' },
+      { label: 'Docs', href: import.meta.env.DEV ? 'http://localhost:5190/' : 'https://bollhav.dev/docs/' },
       { label: 'GitHub', href: 'https://github.com/ebremstedt/bollhav' },
     ],
   } = $props()

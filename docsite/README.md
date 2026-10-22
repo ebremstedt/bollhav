@@ -30,8 +30,10 @@ which is how App Platform builds it.
 ## Locally
 
 ```bash
-cd docsite && npm install && npm run dev
+cd docsite && npm install && npm run dev   # http://localhost:5190
 ```
 
-Save a page and the browser reloads it. Search needs the built site served
+Save a page and the browser reloads it. The Slide deck link goes to the
+deck's own dev server on 5180 (`cd deck && npm run dev`), and the deck's
+Docs link comes back here. Search needs the built site served
 statically; `npm run preview` serves everything but the search index.

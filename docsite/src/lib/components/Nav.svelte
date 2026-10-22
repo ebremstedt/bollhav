@@ -4,9 +4,7 @@
   import Search from './Search.svelte'
   import ThemeToggle from './ThemeToggle.svelte'
   import { toggleFullscreen } from '$lib/fullscreen'
-
-  const github = 'https://github.com/ebremstedt/bollhav'
-  const deck = 'https://bollhav.dev/'
+  import { deck, github } from '$lib/sites'
 </script>
 
 <header class="top">

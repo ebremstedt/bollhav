@@ -1,5 +1,8 @@
 <script>
   import Slide from '../lib/Slide.svelte'
+
+  // locally, the local docs
+  const docs = import.meta.env.DEV ? 'http://localhost:5190/' : 'https://bollhav.dev/docs/'
 </script>
 
 <Slide layout="title" title="bollhav">
@@ -27,7 +30,7 @@
     <span class="touch">swipe left to start</span>
   </p>
   <p class="links">
-    <a href="https://bollhav.dev/docs/">Docs</a>
+    <a href={docs}>Docs</a>
     <a href="https://github.com/ebremstedt/bollhav">GitHub</a>
   </p>
 </Slide>
