@@ -68,20 +68,6 @@ daily_orders = Model(
         retries=2,
     ),
     state=State(mode=StateMode.DISCOVER, allow_concurrent_runs=False),
-    upstream=[
-        Source(
-            "shop.raw.orders",
-            type=SourceModel(),
-            contract=UpstreamContract.ENCAPSULATE, 
-            freshness=Freshness(within=timedelta(hours=6), scope=FreshnessScope.LATEST),
-        ),
-        Source(
-            "shop.raw.customers",
-            type=SourceModel(),
-            contract=UpstreamContract.WHOLE, 
-            deactivate_for_dev=True,
-        ),
-    ],
     curfew=Curfew(windows=[(time(2), time(4))], tz=STOCKHOLM),
     tagging=Tags(tags={"finance", "daily"}),
     people=People(
