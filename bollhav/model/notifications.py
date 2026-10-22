@@ -188,7 +188,7 @@ def send_quietly(send: Callable[..., None], *args, **kwargs) -> None:
         logger.exception("Notification failed; the run is unaffected")
 
 
-def _lines(runs: Iterable[ModelRun]) -> str:
+def lines_string(runs: Iterable[ModelRun]) -> str:
     """One list item per run: the model and its run time."""
     return "\n".join(
         f"- {r.model.target.full_name}: {duration_string(o.seconds)}"
@@ -197,7 +197,7 @@ def _lines(runs: Iterable[ModelRun]) -> str:
     )
 
 
-def _failure_lines(runs: Iterable[ModelRun]) -> str:
+def failure_string(runs: Iterable[ModelRun]) -> str:
     """One list item per run: the model, how long it ran, and what it raised."""
     return "\n".join(
         f"- {r.model.target.full_name} after {duration_string(o.seconds)}: "
@@ -219,7 +219,7 @@ def send_success(runs: Iterable[ModelRun], tags: str | None = None) -> None:
         )
         text = f"{message_header('success', tags)}\n\n"
         if resolve_detail_level(models) is Detail.MODELS:
-            text += f"{_lines(group)}\n\n"
+            text += f"{lines_string(group)}\n\n"
         channel.send(text + summary, resolve_mentions(models, failure=False))
 
 
@@ -241,11 +241,11 @@ def send_failure(
         own = any(o.error is exc for r in failed if (o := r.outcome) is not None)
         for channel, group in group_runs_by_channel(failed, failure=True):
             models = [r.model for r in group]
-            text = f"{header}\n\n{_failure_lines(group)}"
+            text = f"{header}\n\n{failure_string(group)}"
             if not own:
                 text += f"\n\nThe run then failed with {type(exc).__name__}: {exc}"
             if completed and resolve_detail_level(models) is Detail.MODELS:
-                text += f"\n\nDone before the failure:\n{_lines(completed)}"
+                text += f"\n\nDone before the failure:\n{lines_string(completed)}"
             channel.send(text, resolve_mentions(models, failure=True))
         return
     for channel, group in group_runs_by_channel(runs, failure=True):
