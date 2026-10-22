@@ -30,7 +30,7 @@
   let outlineOpen = $state(false)
   let theme = $state(initialTheme())
   let titles = $state([])
-  let hoopOn = $state(false) // the hoop game; the button top right or `h`
+  let hoopOn = $state(false) // the hoop game; the button top right
   let score = $state(0)
   let high = $state(readHigh())
   let root
@@ -151,9 +151,6 @@
       case 't':
         toggleTheme()
         break
-      case 'h':
-        hoopOn = !hoopOn
-        break
       case 'd':
         location.href = docsUrl(theme)
         break
@@ -260,7 +257,7 @@
         <span class="sep">·</span> best <b>{high}</b>
       </span>
     {/if}
-    <button class="btn" class:on={hoopOn} onclick={() => (hoopOn = !hoopOn)} title="Hoop game (h)" aria-label="Hoop game" aria-pressed={hoopOn}>
+    <button class="btn" class:on={hoopOn} onclick={() => (hoopOn = !hoopOn)} title="Hoop game" aria-label="Hoop game" aria-pressed={hoopOn}>
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
         <ellipse cx="12" cy="9" rx="8" ry="3" />
         <path d="M6 11.5l1.5 6.5M18 11.5l-1.5 6.5M9 12l.6 6M15 12l-.6 6M7.5 18h9" stroke-width="1.3" />
@@ -298,7 +295,7 @@
   {#if current === 0 && n > 1}
     <p class="hint">
       <kbd>←</kbd> <kbd>→</kbd> <span class="sep">·</span> <kbd>f</kbd> fullscreen <span class="sep">·</span> <kbd>t</kbd> theme
-      <span class="sep">·</span> <kbd>d</kbd> docs <span class="sep">·</span> <kbd>s</kbd> slides <span class="sep">·</span> <kbd>h</kbd> hoop
+      <span class="sep">·</span> <kbd>d</kbd> docs <span class="sep">·</span> <kbd>s</kbd> slides
     </p>
   {/if}
   <div class="group">
