@@ -297,7 +297,7 @@
   </button>
   {#if current === 0 && n > 1}
     <p class="hint">
-      <kbd>←</kbd> <kbd>→</kbd> <span class="sep">·</span> <kbd>o</kbd> outline <span class="sep">·</span> <kbd>f</kbd> fullscreen <span class="sep">·</span> <kbd>t</kbd> theme
+      <kbd>←</kbd> <kbd>→</kbd> <span class="sep">·</span> <kbd>f</kbd> fullscreen <span class="sep">·</span> <kbd>t</kbd> theme
       <span class="sep">·</span> <kbd>d</kbd> docs <span class="sep">·</span> <kbd>s</kbd> slides <span class="sep">·</span> <kbd>h</kbd> hoop
     </p>
   {/if}

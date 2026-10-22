@@ -57,7 +57,7 @@
     </button>
   </div>
   <p class="keys" aria-label="Keyboard shortcuts">
-    <kbd>←</kbd> <kbd>→</kbd> <span class="sep">·</span> <kbd>o</kbd> outline <span class="sep">·</span> <kbd>f</kbd> fullscreen <span class="sep">·</span> <kbd>t</kbd> theme
+    <kbd>←</kbd> <kbd>→</kbd> <span class="sep">·</span> <kbd>f</kbd> fullscreen <span class="sep">·</span> <kbd>t</kbd> theme
     <span class="sep">·</span> <kbd>d</kbd> docs <span class="sep">·</span> <kbd>s</kbd> slides
   </p>
   <div class="group">
