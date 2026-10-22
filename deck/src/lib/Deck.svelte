@@ -32,7 +32,8 @@
   let theme = $state(initialTheme())
   let titles = $state([])
   let hoopOn = $state(false) // the hoop game; the button top right
-  let density = $state(1) // the sea's sliders, beside the counter
+  let seaOn = $state(true) // the sea's controls, beside the counter
+  let density = $state(1)
   let storm = $state(1)
   let score = $state(0)
   let high = $state(readHigh())
@@ -229,7 +230,9 @@
   onpointercancel={onPointerEnd}
 />
 
-<Sea {progress} {theme} {dir} hoop={hoopOn} onscore={(s) => (score = s)} {density} {storm} />
+{#if seaOn}
+  <Sea {progress} {theme} {dir} hoop={hoopOn} onscore={(s) => (score = s)} {density} {storm} />
+{/if}
 
 <div class="deck" data-dir={dir} bind:this={root}>
   {#each slides as S, i (i)}
@@ -263,7 +266,7 @@
         <span class="sep">·</span> best <b>{high}</b>
       </span>
     {/if}
-    <button class="btn" class:on={hoopOn} onclick={() => (hoopOn = !hoopOn)} title="Hoop game" aria-label="Hoop game" aria-pressed={hoopOn}>
+    <button class="btn" class:on={hoopOn} onclick={() => (hoopOn = !hoopOn)} disabled={!seaOn} title="Hoop game" aria-label="Hoop game" aria-pressed={hoopOn}>
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
         <ellipse cx="12" cy="9" rx="8" ry="3" />
         <path d="M6 11.5l1.5 6.5M18 11.5l-1.5 6.5M9 12l.6 6M15 12l-.6 6M7.5 18h9" stroke-width="1.3" />
@@ -300,7 +303,7 @@
       {pad(current + 1)} <span class="sep">/</span> {pad(n)}
     </button>
     <div class="wide-only">
-      <SeaControls bind:density bind:storm />
+      <SeaControls bind:density bind:storm bind:enabled={seaOn} />
     </div>
   </div>
   {#if current === 0 && n > 1}

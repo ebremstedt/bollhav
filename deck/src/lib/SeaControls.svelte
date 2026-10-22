@@ -1,8 +1,8 @@
 <script>
-  // The sea's sliders, behind a small wave beside the counter: how many
-  // balls, and how stormy. The setting, and whether the panel is open, are
-  // remembered in this browser.
-  let { density = $bindable(1), storm = $bindable(1) } = $props()
+  // The sea's controls, behind a small wave beside the counter: on or off,
+  // how many balls, and how stormy. The setting, and whether the panel is
+  // open, are remembered in this browser.
+  let { density = $bindable(1), storm = $bindable(1), enabled = $bindable(true) } = $props()
 
   const KEY = 'sea-controls'
   let open = $state(false)
@@ -12,10 +12,11 @@
     try {
       const saved = localStorage.getItem(KEY)
       if (saved) {
-        const { density: d, storm: s, open: o } = JSON.parse(saved)
+        const { density: d, storm: s, open: o, enabled: e } = JSON.parse(saved)
         if (typeof d === 'number') density = d
         if (typeof s === 'number') storm = s
         if (typeof o === 'boolean') open = o
+        if (typeof e === 'boolean') enabled = e
       }
     } catch {
       // no storage, the defaults will do
@@ -25,7 +26,7 @@
 
   $effect(() => {
     if (!loaded) return
-    const snapshot = JSON.stringify({ density, storm, open })
+    const snapshot = JSON.stringify({ density, storm, open, enabled })
     try {
       localStorage.setItem(KEY, snapshot)
     } catch {
@@ -41,12 +42,16 @@
   {#if open}
     <form aria-label="The ball sea" onsubmit={(e) => e.preventDefault()}>
       <label>
+        <input type="checkbox" bind:checked={enabled} />
+        <span>{enabled ? 'on' : 'off'}</span>
+      </label>
+      <label>
         <span>number of balls</span>
-        <input type="range" min="0" max="1" step="0.05" bind:value={density} />
+        <input type="range" min="0" max="1" step="0.05" bind:value={density} disabled={!enabled} />
       </label>
       <label>
         <span>storminess</span>
-        <input type="range" min="0" max="1" step="0.05" bind:value={storm} />
+        <input type="range" min="0" max="1" step="0.05" bind:value={storm} disabled={!enabled} />
       </label>
     </form>
   {/if}
@@ -113,5 +118,14 @@
     height: 0.8rem;
     margin: 0;
     opacity: 0.8;
+  }
+
+  input:disabled {
+    opacity: 0.3;
+  }
+
+  input[type='checkbox'] {
+    width: 0.8rem;
+    cursor: pointer;
   }
 </style>
