@@ -35,7 +35,7 @@ def _enabled_override() -> bool | None:
 
 
 class Channel(Protocol):
-    """Delivers a message. See `bollhav.channels` for the shipped ones."""
+    """Delivers a message. See `bollhav.channels` for the shipped ones"""
 
     def send(self, text: str, mentions: tuple[Contact, ...] = ()) -> None: ...
 
