@@ -68,6 +68,8 @@
   /* where the pictures come from */
   .credit {
     margin-top: 0.5rem;
+    max-width: none;
+    white-space: nowrap;
     font-family: var(--font-mono);
     font-size: 0.68rem;
     letter-spacing: 0.04em;
