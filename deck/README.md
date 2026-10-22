@@ -22,6 +22,11 @@ npm run build      # dist/
 Each slide is a `.svelte` file in `src/slides/`, listed in order in
 `src/slides/index.js`. A slide wraps plain HTML in `<Slide>`:
 
+A slide's text can be a Markdown file next to it instead, imported with
+`?raw` and rendered by `<Markdown source={...} />` (`src/lib/Markdown.svelte`);
+the Orchestration vs Choreography slide is written that way, one `.md` per
+column. Save the `.md` and the dev server reloads the slide.
+
 ```svelte
 <script>
   import Slide from '../lib/Slide.svelte'
