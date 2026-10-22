@@ -23,7 +23,7 @@
 
   --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
   --radius: 14px;
-  --top-h: 3rem;
+  --top-h: 2.75rem;
   --measure: 40rem; /* the width of a text block, the same for every element whatever its font size */
   color-scheme: light;
 }
@@ -195,8 +195,8 @@ kbd {
   display: inline-grid;
   place-items: center;
   flex: none;
-  width: 2.5rem;
-  height: 2.5rem;
+  width: 2.25rem;
+  height: 2.25rem;
   border: 1px solid var(--line);
   border-radius: 50%;
   background: color-mix(in srgb, var(--bg) 72%, transparent);
@@ -217,8 +217,8 @@ kbd {
 }
 
 .toggle svg {
-  width: 1.15rem;
-  height: 1.15rem;
+  width: 1.05rem;
+  height: 1.05rem;
 }
 
 .sun {
@@ -247,7 +247,7 @@ kbd {
 .links {
   display: flex;
   align-items: center;
-  height: 2.5rem;
+  height: 2.25rem;
   margin-right: 0.5rem;
   padding-inline: 0.4rem;
   border: 1px solid var(--line);
@@ -256,9 +256,9 @@ kbd {
 }
 
 .links a {
-  padding: 0.35rem 0.65rem;
+  padding: 0.3rem 0.6rem;
   border-radius: 999px;
-  font-size: 0.85rem;
+  font-size: 0.8rem;
   font-weight: 600;
   letter-spacing: -0.005em;
   color: var(--fg-2);
@@ -312,7 +312,7 @@ kbd {
   align-items: center;
   gap: 0.5rem;
   padding: 0 0.8rem;
-  height: 2.5rem;
+  height: 2.25rem;
   border: 1px solid var(--line);
   border-radius: 999px;
   background: color-mix(in srgb, var(--bg-2) 70%, transparent);
