@@ -446,7 +446,7 @@
   .links {
     display: flex;
     align-items: center;
-    height: 2.25rem;
+    height: 2.5rem;
     margin-right: 0.5rem;
     padding-inline: 0.4rem;
     border: 1px solid var(--line);
@@ -456,9 +456,9 @@
     -webkit-backdrop-filter: blur(10px);
   }
   .links a {
-    padding: 0.3rem 0.6rem;
+    padding: 0.35rem 0.65rem;
     border-radius: 999px;
-    font-size: 0.8rem;
+    font-size: 0.85rem;
     font-weight: 600;
     letter-spacing: -0.005em;
     color: var(--fg-2);
@@ -470,8 +470,8 @@
   }
 
   .btn {
-    width: 2.25rem;
-    height: 2.25rem;
+    width: 2.5rem;
+    height: 2.5rem;
     border-radius: 999px;
     border: 1px solid var(--line);
     background: color-mix(in srgb, var(--bg) 72%, transparent);
@@ -485,8 +485,8 @@
     transition: border-color 0.2s, transform 0.2s var(--ease), opacity 0.2s;
   }
   .btn svg {
-    width: 1.05rem;
-    height: 1.05rem;
+    width: 1.15rem;
+    height: 1.15rem;
   }
   .btn:hover:not(:disabled) {
     border-color: var(--accent);
@@ -550,7 +550,7 @@
     display: inline-flex;
     align-items: center;
     gap: 0.35rem;
-    height: 2.25rem;
+    height: 2.5rem;
     padding-inline: 0.85rem;
     border: 1px solid var(--line);
     border-radius: 999px;
