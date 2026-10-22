@@ -2,10 +2,12 @@
 
 ## Born to deal with a lot of models
 
-Bollhav was born to deal with a lot of models. The model object exists to
-make it easy to reason about data engineering: what a table looks like,
-where it goes, what it depends on, when it runs. Because every model says
-that the same way, bollhav gets great metadata for free: for execution,
+Bollhav was born to deal with a lot of models. The model object is
+standardized: every model, in every pipeline, is the same kind of object
+with the same fields, declaring what a table looks like, where it goes, what
+it depends on and when it runs. That is what makes data engineering easy to
+reason about at scale, one model or three hundred. And because every model
+says it the same way, bollhav gets great metadata for free: for execution,
 for [lineage](../articles/lineage.md), and for [state](../model/state.md).
 
 ## Permissive by design
