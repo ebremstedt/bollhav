@@ -19,11 +19,13 @@
     </div>
   </div>
   <p class="credit">
-    <a href="https://www.flaticon.com/free-icons/conductor" title="conductor icons">Conductor icon by mia elysia</a>
-    <span class="sep">·</span>
-    <a href="https://www.flaticon.com/free-icons/ballet" title="ballet icons">Ballet icon by NeXore88</a>
-    <span class="sep">·</span>
-    Flaticon
+    <span class="attrib" tabindex="0">
+      image attribution
+      <span class="card" role="tooltip">
+        <a href="https://www.flaticon.com/free-icons/conductor" title="conductor icons">Conductor icons created by mia elysia - Flaticon</a>
+        <a href="https://www.flaticon.com/free-icons/ballet" title="ballet icons">Ballet icons created by NeXore88 - Flaticon</a>
+      </span>
+    </span>
   </p>
 </Slide>
 
@@ -65,31 +67,70 @@
     margin-bottom: 0.6rem;
   }
 
-  /* where the pictures come from */
+  /* where the pictures come from: two words, and the links in a card on hover */
   .credit {
     margin-top: 0.5rem;
     max-width: none;
-    white-space: nowrap;
     font-family: var(--font-mono);
     font-size: 0.68rem;
     letter-spacing: 0.04em;
     color: var(--fg-2);
   }
 
-  .credit a {
-    color: inherit;
-    text-decoration: none;
-    border-bottom: 1px solid color-mix(in srgb, var(--fg-2) 40%, transparent);
+  .attrib {
+    position: relative;
+    display: inline-block;
+    cursor: help;
+    outline: none;
+    text-decoration: underline dotted;
+    text-decoration-thickness: 1.5px;
+    text-underline-offset: 0.2em;
   }
 
-  .credit a:hover {
+  .attrib:hover,
+  .attrib:focus-visible {
     color: var(--accent);
-    border-color: var(--accent);
   }
 
-  .credit .sep {
-    opacity: 0.45;
-    margin-inline: 0.3em;
+  .card {
+    position: absolute;
+    left: 0;
+    bottom: calc(100% + 0.6em);
+    display: grid;
+    gap: 0.4em;
+    width: max-content;
+    padding: 0.7em 0.9em;
+    border: 1px solid var(--line);
+    border-radius: 0.7em;
+    background: var(--bg-2);
+    box-shadow: 0 18px 40px -20px rgba(10, 20, 44, 0.7);
+    font-size: 0.72rem;
+    letter-spacing: 0.02em;
+    color: var(--fg);
+    opacity: 0;
+    visibility: hidden;
+    transform: translateY(4px);
+    transition:
+      opacity 0.2s,
+      transform 0.2s,
+      visibility 0.2s;
+  }
+
+  .attrib:hover .card,
+  .attrib:focus-visible .card,
+  .attrib:focus-within .card {
+    opacity: 1;
+    visibility: visible;
+    transform: none;
+  }
+
+  .card a {
+    color: var(--fg);
+    text-decoration: none;
+  }
+
+  .card a:hover {
+    color: var(--accent);
   }
 
   @media (max-width: 760px) {
