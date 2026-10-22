@@ -8,6 +8,15 @@ standardized and because of that bollhav generates great metadata for free:
 - for [lineage](../articles/lineage.md)
 - for [state](../model/state.md)
 
+## For ingesting and transforming alike
+
+A model is the same shape whether it pulls a raw table in from a source
+system or derives one from tables already in the warehouse. Ingestion,
+cleaning, modelling, marts: one declaration and one function each, run and
+tracked the same way, into the same backends (Postgres, SQL Server,
+Iceberg; see [Backends](../concepts/backends.md)). There is no second tool
+for the first step.
+
 ## Designed for data engineers to be efficient
 
 Your code is the part only you can write: read, transform, write. The
