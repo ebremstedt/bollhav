@@ -31,7 +31,11 @@
             size=50_000,
             retries=2,
         ),
-        state=State(mode=StateMode.DISCOVER, allow_concurrent_runs=False),
+        state=State(mode=StateMode.DISCOVER),
+        upstream=[
+            Source("shop.raw.orders", type=SourceModel(), contract=UpstreamContract.ENCAPSULATE),
+            Source("shop.raw.customers", type=SourceModel(), contract=UpstreamContract.WHOLE),
+        ],
         curfew=Curfew(windows=[(time(2), time(4))], tz=STOCKHOLM),
         tagging=Tags(tags={"finance", "daily"}),
         people=People(
@@ -50,10 +54,7 @@
 </script>
 
 <Slide kicker="Metadata" title="Excellent metadata" layout="wide">
-  <p class="lead">
-    The model object is built to produce great metadata. Standardised models make it possible to build apps that track
-    lineage and execution results.
-  </p>
+  <p class="lead">The model object is built to produce great metadata, for execution, lineage, state, orchestration.</p>
   <!-- the whole model, small, in its own scrolling box under the text -->
   <div class="box">
     <Code file="models.py" code={model} />
