@@ -11,9 +11,7 @@
 
   type Group = (typeof page.data.nav)[number]
 
-  // by pathname, not by href: base is a relative path while the server
-  // renders, so an href comparison only works after hydration
-  const current = (url: string) => (page.url.pathname === url ? 'page' : undefined)
+  const current = (url: string) => (page.url.pathname === base + url ? 'page' : undefined)
   const close = () => (menu.open = false)
 
   const KEY = 'sidebar-folded-1'
@@ -41,7 +39,7 @@
   })
 
   // everything that can fold starts folded, except what holds the current page
-  const holdsCurrent = (group: Group) => group.pages.some((p) => p.url === page.url.pathname)
+  const holdsCurrent = (group: Group) => group.pages.some((p) => base + p.url === page.url.pathname)
   const sectionKey = (parent: string) => `section:${parent}`
   const isFolded = (group: Group) => folded[group.name] ?? !holdsCurrent(group)
   const isSectionFolded = (parent: string) =>
@@ -53,7 +51,7 @@
   // so a fold made on the page stays folded
   $effect(() => {
     const pathname = page.url.pathname
-    const here = page.data.nav.find((g) => g.pages.some((p) => p.url === pathname))
+    const here = page.data.nav.find((g) => g.pages.some((p) => base + p.url === pathname))
     if (!here) return
     untrack(() => {
       if (folded[here.name]) folded[here.name] = false

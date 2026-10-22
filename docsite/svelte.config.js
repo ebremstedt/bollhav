@@ -12,7 +12,9 @@ const config = {
     // docs, learn and lab (see .do/app.yaml), which sets BASE_PATH=/docs at
     // build time so every link and asset URL carries the prefix. Unset
     // (local dev) it is the root.
-    paths: { base: process.env.BASE_PATH || '' },
+    // absolute, not relative to the page being rendered, so a page can tell
+    // whether it is the current one by comparing base + its url to the path
+    paths: { base: process.env.BASE_PATH || '', relative: false },
   },
 }
 

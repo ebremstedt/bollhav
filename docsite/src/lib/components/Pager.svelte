@@ -9,8 +9,7 @@
 
   const order = $derived(page.data.order)
   const n = $derived(order.length)
-  // by pathname, not by href: base is relative while the server renders
-  const index = $derived(Math.max(0, order.findIndex((p) => p.url === page.url.pathname)))
+  const index = $derived(Math.max(0, order.findIndex((p) => base + p.url === page.url.pathname)))
   const prev = $derived(index > 0 ? order[index - 1] : null)
   const next = $derived(index < n - 1 ? order[index + 1] : null)
   const pad = (i: number) => String(i).padStart(2, '0')
