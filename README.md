@@ -5,7 +5,7 @@
 <p align="center">
   <strong>Bollhav</strong><br>
   A framework that standardizes pipeline models<br>
-  <sub>and in the process, creates great metadata for execution, state and lineage</sub>
+  <sub>and in the process, creates great metadata for execution, state, lineage and orchestration</sub>
 </p>
 
 <p align="center">
