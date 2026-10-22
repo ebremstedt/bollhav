@@ -557,8 +557,10 @@ p {
   margin-inline: 0;
 }
 
-/* the home page is a hero: everything centred in the column */
+/* the home page is a hero: a text-width block at the left edge, everything
+   centred inside it */
 .prose.home {
+  max-width: var(--measure);
   text-align: center;
 }
 
