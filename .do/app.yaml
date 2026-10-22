@@ -3,11 +3,10 @@
 # built from this repo on every push to main.
 #
 # App Platform trims the matched prefix before it reaches a component, so
-# /learn/_astro/x.css is served from learn's dist/_astro/x.css. The two
-# single-page sites therefore build with BASE_PATH set (below), which makes
-# their asset URLs carry the prefix; without it they build for the root. The
-# docs link relatively throughout (the MkDocs default), so they only carry the
-# prefix in mkdocs.yml's site_url. The deck sits at the root and builds plain.
+# /learn/_astro/x.css is served from learn's dist/_astro/x.css. The three
+# prefixed sites therefore build with BASE_PATH set (below), which makes
+# their links and asset URLs carry the prefix; without it they build for the
+# root. The deck sits at the root and builds plain.
 #
 # A spec change (a component, an ingress rule) is not picked up from the repo
 # on push — only the code is. Apply it by hand, after the code is on main:
@@ -76,10 +75,14 @@ static_sites:
       repo: ebremstedt/bollhav
       branch: main
       deploy_on_push: true
-    source_dir: docs
-    environment_slug: python
-    build_command: pip install -r requirements.txt && mkdocs build
-    output_dir: site
+    source_dir: docsite
+    environment_slug: node-js
+    build_command: npm ci && npm run build
+    output_dir: build
+    envs:
+      - key: BASE_PATH
+        value: /docs
+        scope: BUILD_TIME
   - name: bollhav-learn
     github:
       repo: ebremstedt/bollhav

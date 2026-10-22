@@ -18,6 +18,7 @@ lib/
 # `lib/` above is the Python-venv pattern; these source folders are not that
 !gui/frontend/src/lib/
 !deck/src/lib/
+!docsite/src/lib/
 lib64/
 parts/
 sdist/
