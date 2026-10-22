@@ -1,0 +1,114 @@
+# Every feature, one model
+
+One model that uses everything a model can declare: a staged, keyed, upserted
+Postgres table with four columns, sliced into days on a Stockholm clock, with
+state, two gated upstreams, a curfew, extra tags, owners and a Teams channel.
+Each field links to its own page from the [model overview](../model/README.md).
+
+```python title="models.py"
+from datetime import datetime, time, timedelta
+from zoneinfo import ZoneInfo
+
+from bollhav.channels import MicrosoftTeams
+from bollhav.model import (
+    Batch,
+    ChunkFlex,
+    Contact,
+    Contract,
+    Curfew,
+    Database,
+    Detail,
+    Freshness,
+    FreshnessScope,
+    Mention,
+    Model,
+    Notifications,
+    People,
+    Source,
+    SourceModel,
+    State,
+    StateMode,
+    Tags,
+    Target,
+    Temporality,
+    TimeChunking,
+    UpstreamContract,
+    WriteMode,
+)
+from bollhav.postgres import PostgresColumn, PostgresType
+from bollhav.postgres.staging import PostgresStaging
+
+STOCKHOLM = ZoneInfo("Europe/Stockholm")
+
+daily_orders = Model(
+    description="One row per customer and day: how many orders, and what they came to.",
+    # where the rows go
+    target=Target(
+        name="daily_orders",
+        schema="marts",
+        catalog="shop",
+        database=Database.POSTGRES,
+        dsn_env_var="SHOP_DSN",  # the env var that holds the connection string
+        write_mode=WriteMode.UPSERT_NO_DELETE,  # merge on the key, never delete
+        # each chunk lands in an UNLOGGED staging table; one flush into the target
+        staging=PostgresStaging(keep_after_apply=False, logged=False),
+        columns=[
+            PostgresColumn("day", data_type=PostgresType.DATE, nullable=False, primary_key=True, description="Stockholm time"),
+            PostgresColumn("customer_id", data_type=PostgresType.BIGINT, nullable=False, primary_key=True),
+            PostgresColumn("order_count", data_type=PostgresType.INTEGER, nullable=False),
+            PostgresColumn("total", data_type=PostgresType.NUMERIC, nullable=False, precision=12, scale=2),
+        ],
+    ),
+    # a time axis, covered from the first of 2024 and open-ended, sliced into days
+    temporality=Temporality.TEMPORAL,
+    contract=Contract(begin=datetime(2024, 1, 1, tzinfo=STOCKHOLM)),
+    batching=Batch(
+        time=TimeChunking(
+            chunk="@daily",
+            tz=STOCKHOLM,
+            lookback=2,  # redo the two days before the window too: late orders
+            flexibility=ChunkFlex(floor_chunk="@hourly"),  # a partial day is fine, down to the hour
+        ),
+        size=50_000,  # rows per read chunk
+        retries=2,
+    ),
+    # progress is tracked, one state row per day; one run of this model at a time
+    state=State(mode=StateMode.DISCOVER, allow_concurrent_runs=False),
+    # what it reads, and what it waits for
+    upstream=[
+        Source(
+            "shop.raw.orders",
+            type=SourceModel(),
+            contract=UpstreamContract.ENCAPSULATE,  # the day's orders must be in
+            freshness=Freshness(within=timedelta(hours=6), scope=FreshnessScope.LATEST),
+        ),
+        Source(
+            "shop.raw.customers",
+            type=SourceModel(),
+            contract=UpstreamContract.WHOLE,  # the whole table, as of now
+            deactivate_for_dev=True,  # a dev run reads prod's copy and does not wait for it
+        ),
+    ],
+    # never between 02:00 and 04:00 Stockholm time, while the source loads
+    curfew=Curfew(windows=[(time(2), time(4))], tz=STOCKHOLM),
+    # on top of the tags derived from the name: shop, marts, daily orders...
+    tagging=Tags(tags={"finance", "daily"}),
+    # who to ask, and who is told
+    people=People(
+        owners=(Contact("Erik Bremstedt", "erik@example.com"),),
+        maintainers=(Contact("Data platform", "platform@example.com"),),
+        creators=(Contact("Erik Bremstedt"),),
+    ),
+    notifications=Notifications(
+        on_failure=MicrosoftTeams(webhook_env="TEAMS_WEBHOOK_FINANCE"),
+        detail=Detail.MODELS,
+        mention=Mention.ON_FAILURE,
+    ),
+    enabled=True,  # False parks the model: still declared, never run
+)
+```
+
+Constructed, it is `shop.marts.daily_orders`, and its tags come out as `all`,
+`daily`, `daily_orders`, `finance`, `marts`, `marts.daily_orders`, `orders`,
+`shop` and `shop.marts.daily_orders`: the two declared ones plus everything
+[passive tagging](../model/tagging.md) derives from the name.
