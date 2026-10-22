@@ -16,6 +16,8 @@ You can use the model objects as configuration, for whatever kind of
 database you run against, or use the backends that come with bollhav:
 [Postgres, MSSQL and Iceberg](../backends.md).
 
+## With or without an orchestrator
+
 You can run bollhav without an orchestrator at all: with state on, the
 upstream contracts order the models and a plain cron or loop runs them. Or
 you can orchestrate them with Airflow, Dagster or whatever you already have,
