@@ -17,7 +17,13 @@ from roskarl import (
 
 from bollhav.model.runtime import apply_runtime_overrides
 from bollhav.model.modelrun import ModelRun
-from bollhav.model.notifications import send_failure, send_quietly, send_success
+from bollhav.model.notifications import (
+    Notifications,
+    default_notifications,
+    send_failure,
+    send_quietly,
+    send_success,
+)
 from bollhav.model.window import compute_intervals
 from bollhav.model.progress_bar import get_progress_level, PROGRESS, ProgressLevel
 from bollhav.model.state import StateMode
@@ -122,7 +128,10 @@ def load_models(_func: Callable[..., None]) -> Callable[[], None]: ...
 
 @overload
 def load_models(
-    _func: None = None, *, folder: str = ...
+    _func: None = None,
+    *,
+    folder: str = ...,
+    notifications: Notifications | None = ...,
 ) -> Callable[[Callable[..., None]], Callable[[], None]]: ...
 
 
@@ -130,11 +139,16 @@ def load_models(
     _func: Callable[..., None] | None = None,
     *,
     folder: str = "src/models",
+    notifications: Notifications | None = default_notifications,
 ) -> Callable[[], None] | Callable[[Callable[..., None]], Callable[[], None]]:
     """Decorator that reads runtime overrides from env vars, matches models
     in `folder` by `TAGS`, bakes the overrides in, resolves each run's window,
     and calls the wrapped function with `(runs, debug)` — one `ModelRun` per
-    matched model.
+    matched model. When the function raises, the failure is reported as
+    `notifications` says: by default a card to the Teams webhook in
+    `TEAMS_WEBHOOK_ERRORS`, skipped when the variable is unset. Pass your
+    own `Notifications` for a success channel, other channels, detail or
+    mentions, or `None` to never report.
 
     Usage:
         @load_models
@@ -209,9 +223,13 @@ def load_models(
                                       supplied window + chunk), never the backlog.
                                       No DDL, no data writes. An assertion, not a
                                       verification — only what you select
-        NOTIFICATIONS_ENABLED         bool; overrides every model's
-                                      Notifications.enabled for this run —
-                                      false silences all, true forces all on
+        NOTIFICATIONS_ENABLED         bool; overrides the run's
+                                      Notifications.enabled — false silences
+                                      it, true forces it on, also for a
+                                      suffixed run
+        TEAMS_WEBHOOK_ERRORS          the Teams webhook the default
+                                      notifications post a failure card to;
+                                      unset, nothing is sent
     """
 
     def decorator(func: Callable[..., None]) -> Callable[[], None]:
@@ -287,15 +305,14 @@ def load_models(
             try:
                 func(runs=runs, debug=cfg.debug)
             except BaseException as exc:
-                send_quietly(send_failure, exc, runs, tags=cfg.tags)
+                send_quietly(send_failure, notifications, exc, runs, tags=cfg.tags)
                 raise
             if not cfg.dry_state:
                 PROGRESS.finish()
-            send_quietly(send_success, runs, tags=cfg.tags)
+            send_quietly(send_success, notifications, runs, tags=cfg.tags)
 
         return wrapper
 
-    # Allow both @load_models and @load_models(folder=...).
     if _func is None:
         return decorator
     return decorator(_func)

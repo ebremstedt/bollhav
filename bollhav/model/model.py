@@ -26,7 +26,6 @@ from bollhav.model.source import (
 )
 from bollhav.model.curfew import Curfew
 from bollhav.model.people import People
-from bollhav.model.notifications import Notifications
 
 if TYPE_CHECKING:
     from psycopg import sql
@@ -265,7 +264,6 @@ class Model:
         description: str | None = None,
         upstream: list[Source] | None = None,
         people: People | None = None,
-        notifications: Notifications | None = None,
         suffixed: bool = False,
         **kwargs,
     ):
@@ -290,7 +288,6 @@ class Model:
             )
         )
         self.people = people
-        self.notifications = notifications
         # True on the copy the runtime resolves for a run that set SCHEMA_SUFFIX
         # or TABLE_SUFFIX: a dev run. Not about a suffix declared on the Target.
         self.suffixed = suffixed

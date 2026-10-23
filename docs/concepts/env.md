@@ -62,7 +62,7 @@ Non-negative int, optional. Sets every model's `batching.time.lookback`. Units a
 
 ## NOTIFICATIONS_ENABLED
 
-Bool, optional. Overrides every model's `Notifications.enabled` for this run: `false` silences all notifications (a dev run, a backfill), `true` turns them on even for models that declare `enabled=False` and also on a run with a schema or table suffix, which is otherwise quiet. Unset, each model's own settings apply. See [Notifications](../model/notifications.md).
+Bool, optional. Overrides the run's `Notifications.enabled`: `false` silences the run (a dev run, a backfill), `true` turns it on even when `main` passed `enabled=False`, and also on a run with a schema or table suffix, which is otherwise quiet. Unset, the run's own settings apply. See [Notifications](../model/notifications.md).
 
 ## PROGRESS_BAR
 
@@ -97,6 +97,10 @@ Required. Tag expression that selects which models run.
 Example: `TAGS="[clean & not:views]"`
 
 See [Tags](tags.md) for the full expression grammar.
+
+## TEAMS_WEBHOOK_ERRORS
+
+String, optional. The Microsoft Teams incoming webhook the default notifications post a failure card to. Unset, nothing is sent and the run's log says so. Only read by the default; a run that passes its own `Notifications` names its own variables. See [Notifications](../model/notifications.md).
 
 ## TIMEZONE_OVERRIDE
 

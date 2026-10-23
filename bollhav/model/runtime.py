@@ -206,7 +206,6 @@ def _apply_to_model(
         tags=set(model.tags),
         tagging=model.tagging,
         people=model.people,
-        notifications=model.notifications,
         suffixed=bool(schema_suffix or table_suffix),
         **model.extra,
     )

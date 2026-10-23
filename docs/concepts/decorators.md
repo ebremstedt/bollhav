@@ -57,6 +57,7 @@ When you call `main()`, the decorator runs the following steps **before** your f
    The chosen mode does not land on the model — it resolves the run's `[since, until)` **window** (from the mode + [Contract](../model/contract.md)), which is carried on the returned `ModelRun` as `run.window`, with `run.is_reload` / `run.is_latest` / `run.is_backfill` recording which mode resolved it.
 7. **If `DRY_RUN` (or `DRY_RUN_EXTRA`):** print the matched-model summary and **return without calling your `main()`**.
 8. **Otherwise: call your function** as `main(runs=<resolved list>, debug=<DEBUG>)`.
+9. **Report the outcome.** When your function raises, one failure card goes out as the decorator's `notifications` says: by default to the Teams webhook in `TEAMS_WEBHOOK_ERRORS`, skipped when unset; the exception is re-raised after. A clean run reports only if `@load_models(notifications=...)` names an `on_success` channel; `None` means silence. See [Notifications](../model/notifications.md).
 
 ### Calculating intervals
 

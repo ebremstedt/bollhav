@@ -5,6 +5,7 @@ the wrapped function. We patch the env helpers and mock apply_runtime_overrides
 so we can assert what the decorator passes through.
 """
 
+import logging
 from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 
@@ -312,9 +313,9 @@ def test_deprecated_backfill_since_alias_when_run_since_unset():
 
 
 class TestNotificationsThroughTheDecorator:
-    """The wiring from `@load_models` to the notification senders: real models
-    with real `Notifications` flow through, outcomes are recorded by what
-    `main()` runs, and the run's tags and suffixes reach the sender."""
+    """The wiring from `@load_models` to the notification senders: the run's
+    `Notifications` flow through, outcomes are recorded by what `main()`
+    runs, and the run's tags and suffixes reach the sender."""
 
     class _Recorder:
         def __init__(self) -> None:
@@ -323,7 +324,9 @@ class TestNotificationsThroughTheDecorator:
         def send(self, text, mentions=()):
             self.sent.append(text)
 
-    def _run(self, notifications, *, raise_in_main=None, times=1, **env):
+    DEFAULT = object()
+
+    def _run(self, notifications=DEFAULT, *, raise_in_main=None, times=1, **env):
         from bollhav.model.modelrun import ModelRun
         from bollhav.model.model import Model
         from bollhav.model.modelrun import Outcome
@@ -333,9 +336,13 @@ class TestNotificationsThroughTheDecorator:
         model = Model(
             target=Target(name="orders", schema="warehouse"),
             temporality=Temporality.TIMELESS,
-            notifications=notifications,
             # the harness bypasses apply_runtime_overrides, which stamps this
             suffixed=bool(env.get("schema_suffix") or env.get("table_suffix")),
+        )
+        decorate = (
+            load_models
+            if notifications is self.DEFAULT
+            else load_models(notifications=notifications)
         )
         patches = _patches(**env)
         with (
@@ -351,7 +358,7 @@ class TestNotificationsThroughTheDecorator:
             patch("bollhav.model.load_models._print_summary", lambda cfg, runs: None),
         ):
 
-            @load_models
+            @decorate
             def main(runs, debug):
                 # what @model_lifecycle does around each model's run
                 for run in runs:
@@ -365,7 +372,38 @@ class TestNotificationsThroughTheDecorator:
     @pytest.fixture(autouse=True)
     def _clean_env(self, monkeypatch, env_var_bool_from_environ):
         monkeypatch.delenv("NOTIFICATIONS_ENABLED", raising=False)
+        monkeypatch.delenv("TEAMS_WEBHOOK_ERRORS", raising=False)
         monkeypatch.setenv("HOSTNAME", "pod-1")
+
+    def test_the_default_posts_a_failure_card_to_the_errors_webhook(self, monkeypatch):
+        from bollhav.channels import teams
+
+        posted: list[dict] = []
+        monkeypatch.setenv("TEAMS_WEBHOOK_ERRORS", "https://example.test/errors")
+        monkeypatch.setattr(
+            teams,
+            "_post_json",
+            lambda url, payload, timeout=10.0: posted.append(payload),
+        )
+        with pytest.raises(RuntimeError, match="boom"):
+            self._run(raise_in_main=RuntimeError("boom"), use_schema_suffix=False)
+        (payload,) = posted
+        assert "RuntimeError: boom" in str(payload)
+
+    def test_the_default_sends_no_success_card(self, monkeypatch, caplog):
+        from bollhav.channels import teams
+
+        monkeypatch.setenv("TEAMS_WEBHOOK_SUCCESS", "https://example.test/success")
+        with patch.object(teams, "_post_json") as post, caplog.at_level(logging.INFO):
+            self._run(use_schema_suffix=False)
+        post.assert_not_called()
+        assert "Teams" not in caplog.text
+
+    def test_none_never_reports(self, caplog):
+        self._run(None, use_schema_suffix=False)
+        with pytest.raises(RuntimeError, match="boom"):
+            self._run(None, raise_in_main=RuntimeError("boom"), use_schema_suffix=False)
+        assert "Teams" not in caplog.text
 
     def test_a_clean_run_reports_with_the_run_tags(self):
         from bollhav.model.notifications import Notifications
@@ -384,7 +422,7 @@ class TestNotificationsThroughTheDecorator:
         assert len(both.sent) == 2
         assert all("1 model(s) done" in text for text in both.sent)
 
-    def test_a_schema_suffix_keeps_the_run_quiet_unless_the_model_opts_in(self):
+    def test_a_schema_suffix_keeps_the_run_quiet_unless_it_opts_in(self):
         from bollhav.model.notifications import Notifications
 
         quiet, loud = self._Recorder(), self._Recorder()

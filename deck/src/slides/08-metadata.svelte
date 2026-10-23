@@ -43,11 +43,6 @@
             maintainers=(Contact("Jonas Ek", "jonas.ek@example.com"), Contact("Priya Nair", "priya.nair@example.com")),
             creators=(Contact("Amira Haddad"),),
         ),
-        notifications=Notifications(
-            on_failure=MicrosoftTeams(webhook_env="TEAMS_WEBHOOK_FINANCE"),
-            detail=Detail.MODELS,
-            mention=Mention.ON_FAILURE,
-        ),
         enabled=True,
     )
   `
