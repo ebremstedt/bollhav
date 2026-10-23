@@ -128,6 +128,19 @@ class SourceApi:
 
 
 @dataclass
+class SourceSftp:
+    """SFTP input — a file fetched from an SFTP host. Read by the read
+    function (never SQL-addressable). `path` is the remote path; `hostname`
+    is declarative config for lineage and the read function — credentials
+    stay in the environment, and the transport is the read function's
+    business, as it is for a `SourceFile`."""
+
+    path: Path
+    hostname: str | None = None
+    extra: dict = field(default_factory=dict)
+
+
+@dataclass
 class SourceHardcoded:
     """Hardcoded input — the data is written **inline, in code**, not read from
     a database / file / API. For small constants maintained in the repo: seed /
@@ -216,7 +229,9 @@ class Source:
     Source)."""
 
     name: str
-    type: SourceModel | SourceFile | SourceApi | SourceHardcoded | None = None
+    type: SourceModel | SourceFile | SourceSftp | SourceApi | SourceHardcoded | None = (
+        None
+    )
     contract: UpstreamContract | None = None
     freshness: Freshness | None = None
     deactivate_for_dev: bool = False
@@ -245,11 +260,13 @@ class Source:
 
     @property
     def kind(self) -> str:
-        """A short label for lineage: model / file / api / hardcoded / unknown."""
+        """A short label for lineage: model / file / sftp / api / hardcoded / unknown."""
         if isinstance(self.type, SourceModel):
             return "model"
         if isinstance(self.type, SourceFile):
             return "file"
+        if isinstance(self.type, SourceSftp):
+            return "sftp"
         if isinstance(self.type, SourceApi):
             return "api"
         if isinstance(self.type, SourceHardcoded):
@@ -261,6 +278,7 @@ __all__ = [
     "Source",
     "SourceModel",
     "SourceFile",
+    "SourceSftp",
     "SourceApi",
     "SourceHardcoded",
 ]

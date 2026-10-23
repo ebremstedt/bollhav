@@ -24,6 +24,7 @@ from bollhav.model import (  # noqa: E402
     SourceApi,
     SourceFile,
     SourceModel,
+    SourceSftp,
     State,
     Target,
     UpstreamContract,
@@ -140,11 +141,21 @@ class TestRefAddressability:
         assert Source("x", type=SourceModel()).sql_addressable is True
         assert Source("x", type=SourceApi()).sql_addressable is False
         assert Source("x", type=SourceFile(path="x.csv")).sql_addressable is False
+        assert Source("x", type=SourceSftp(path="x.xml")).sql_addressable is False
 
     def test_api_source_raises(self) -> None:
         m = _pg_model(upstream=[Source("vendor.orders", type=SourceApi())])
         with pytest.raises(ValueError, match="not SQL-addressable"):
             m.ref("vendor.orders")
+
+    def test_sftp_source_is_a_file_fetched_over_the_wire(self) -> None:
+        s = Source("vendor.codes", type=SourceSftp(path="codes.xml", hostname="h"))
+        assert s.sql_addressable is False
+        assert s.gated is False
+        assert s.kind == "sftp"
+        m = _pg_model(upstream=[s])
+        with pytest.raises(ValueError, match="not SQL-addressable"):
+            m.ref("vendor.codes")
 
     def test_view_kind_is_addressable(self) -> None:
         m = _pg_model(upstream=[Source("raw.v_orders", type=SourceModel())])
@@ -155,6 +166,8 @@ class TestContractValidation:
     def test_contract_only_valid_on_source_model(self) -> None:
         with pytest.raises(ValueError, match="only a SourceModel can be gated"):
             Source("x", type=SourceApi(), contract=UpstreamContract.ENCAPSULATE)
+        with pytest.raises(ValueError, match="only a SourceModel can be gated"):
+            Source("x", type=SourceSftp(path="x.xml"), contract=UpstreamContract.WHOLE)
 
     def test_contract_on_model_is_ok(self) -> None:
         s = Source(

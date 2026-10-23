@@ -2,7 +2,7 @@
 
 A model's inputs — **all of them** — live in one list: `upstream: list[Source]`. A `Source` is one input, described by two independent dials:
 
-- **`type`** — *what* it is, and its read config: a [`SourceModel`](#sourcemodel) (relational — a managed model, an external table, or a view), a [`SourceFile`](#sourcefile), a `SourceApi`, or a [`SourceHardcoded`](#sourcehardcoded) (data written inline, in code).
+- **`type`** — *what* it is, and its read config: a [`SourceModel`](#sourcemodel) (relational — a managed model, an external table, or a view), a [`SourceFile`](#sourcefile), a [`SourceSftp`](#sourcesftp) (a file fetched over SFTP), a `SourceApi`, or a [`SourceHardcoded`](#sourcehardcoded) (data written inline, in code).
 - **`contract`** — *whether it gates*. A `Source` carrying a contract is a **managed upstream** the state machine waits for (it must be `applied` before this model runs). No contract ⇒ **ungated** — an external input assumed always present, never blocking.
 
 That's the whole model: gated-vs-ungated is just "does this `Source` have a `contract`," not which list it's in.
@@ -231,6 +231,22 @@ A `SourceFile` is **not** SQL-addressable (`ref()` on it raises — there's no `
 | `dateformat` | `str` · `None` | `strftime` format for date columns when polars can't autodetect (e.g. `"%d/%m/%Y"`). |
 | `file_ending` | `str` · `None` | File extension hint (e.g. `"csv"`, `"tsv"`). Only needed when `path` doesn't carry one. |
 
+## SourceSftp
+
+The `type` of a **file fetched over SFTP** — the same idea as a [`SourceFile`](#sourcefile), with the host it is read from recorded on the model:
+
+```python
+upstream=[Source("codes.xml", type=SourceSftp(path=Path("export/codes.xml"), hostname="sftp.vendor.example"))]
+```
+
+Like a `SourceFile` it is **not** SQL-addressable (`ref()` on it raises) and can't be gated (no `contract`). bollhav never opens the connection — your `read()` function fetches the file with whatever SFTP client you use, and credentials stay in the environment, not on the model. In [lineage](../articles/lineage.md) it appears with `kind="sftp"`, distinct from a local or object-storage file.
+
+| Field | Type · Default | Purpose |
+|---|---|---|
+| `path` | `Path` · *required* | Path to the file on the SFTP host. |
+| `hostname` | `str` · `None` | The SFTP host — declarative config for lineage and for the read function. |
+| `extra` | `dict` · `{}` | Free-form config bag for read functions that need extra knobs. |
+
 ## SourceHardcoded
 
 The `type` of a **hardcoded** input — data written **inline, in code**, not read from a database, file, or API. For small constants kept in the repo: seed / reference / lookup tables, enum mappings, fixtures. The data lives in **exactly one** of two forms:
@@ -280,7 +296,7 @@ An **ungated source** is a `Source` in `upstream` with **no `contract`** — a r
 | has a `contract` | yes | no |
 | refers to | a bollhav-managed model | an external, unmanaged input |
 | requires [state](state.md) | yes — gated by the state machine | no — never gated |
-| `type` allowed | `SourceModel` only | any (`SourceModel` / `SourceFile` / `SourceApi` / `SourceHardcoded`) |
+| `type` allowed | `SourceModel` only | any (`SourceModel` / `SourceFile` / `SourceSftp` / `SourceApi` / `SourceHardcoded`) |
 | `ref()` resolution | suffix-aware (moves with env) | literal (fixed location) |
 | purpose | wait-for + lineage | lineage / boundary marker |
 

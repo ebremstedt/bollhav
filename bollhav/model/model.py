@@ -22,6 +22,7 @@ from bollhav.model.source import (
     SourceFile,
     SourceHardcoded,
     SourceModel,
+    SourceSftp,
 )
 from bollhav.model.curfew import Curfew
 from bollhav.model.people import People
@@ -34,7 +35,8 @@ if TYPE_CHECKING:
 
 # The kinds a Source's `type` can be, for the `Model.single_*_source` getters.
 SourceType = TypeVar(
-    "SourceType", bound="SourceModel | SourceFile | SourceApi | SourceHardcoded"
+    "SourceType",
+    bound="SourceModel | SourceFile | SourceSftp | SourceApi | SourceHardcoded",
 )
 
 logger = logging.getLogger(__name__)
@@ -454,6 +456,12 @@ class Model:
         return self._single_source_of(SourceFile)
 
     @property
+    def single_sftp_source(self) -> SourceSftp:
+        """The model's one upstream as the SFTP file it is — its `path`,
+        `hostname`. Raises as `single_model_source` does."""
+        return self._single_source_of(SourceSftp)
+
+    @property
     def single_api_source(self) -> SourceApi:
         """The model's one upstream as the API it is — its `base_url`.
         Raises as `single_model_source` does."""
@@ -611,9 +619,9 @@ class Model:
 
         `name` must be one of this model's declared `upstream` Sources, and its
         `type` must be a `SourceModel` (a relational input). A `SourceFile` /
-        `SourceApi` has no `FROM`, so `ref()` on it raises — read those in your
-        read function. Referencing an undeclared name raises, so the SQL and
-        the dependency graph can't drift.
+        `SourceSftp` / `SourceApi` has no `FROM`, so `ref()` on it raises — read
+        those in your read function. Referencing an undeclared name raises, so
+        the SQL and the dependency graph can't drift.
 
         A gated source (one with a contract) is a managed model whose schema
         gets the same suffix this run applied to the model's own target — so

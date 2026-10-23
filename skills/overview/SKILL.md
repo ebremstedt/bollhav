@@ -29,8 +29,9 @@ A `Model` bundles a few sub-configs (all importable from `bollhav.model`):
 - **`Contract`** — the `begin`/`end` range a temporal model covers.
 - **`WriteMode`** — `APPEND`, `UPSERT_NO_DELETE`, `RECREATE_PARTITION`.
 - **`upstream=[Source(...)]`** — declared inputs (`SourceModel`, `SourceApi`,
-  `SourceFile`, `SourceHardcoded`); `model.ref("schema.table")` turns a
-  declared relational input into a suffix-aware, quoted identifier for SQL.
+  `SourceFile`, `SourceSftp`, `SourceHardcoded`); `model.ref("schema.table")`
+  turns a declared relational input into a suffix-aware, quoted identifier for
+  SQL.
 - **`State`** — opt-in state tracking (one row per interval / per model),
   required for staging and for gated upstream contracts.
 - **`Tags` / `tags`** — how the model is selected at run time.
