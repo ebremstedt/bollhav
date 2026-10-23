@@ -3,7 +3,7 @@
   import StagingStory from '../lib/StagingStory.svelte'
 </script>
 
-<Slide kicker="Writing data" title="Stage data before insertion" layout="wide">
+<Slide kicker="Writing data" title="Staging" layout="wide">
   <StagingStory />
   <ul>
     <li>Streaming means memory is kept low</li>

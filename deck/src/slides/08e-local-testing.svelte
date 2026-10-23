@@ -5,8 +5,9 @@
   // everything on one machine: the loop that runs the models, and one
   // postgres holding both the state it asks and the tables it writes
   const shapes = [
+    { kind: 'frame', x: 16, y: 10, w: 968, h: 344, label: 'your computer', dotted: true, tone: 'muted' },
     { kind: 'box', x: 70, y: 135, w: 250, h: 110, label: 'execution', sub: 'python main.py' },
-    { kind: 'frame', x: 540, y: 36, w: 410, h: 304, label: 'docker run postgres', dashed: true, align: 'center', tone: 'muted' },
+    { kind: 'frame', x: 540, y: 36, w: 410, h: 304, label: 'docker run postgres', dotted: true, align: 'center', tone: 'muted' },
     { kind: 'cylinder', x: 575, y: 100, w: 340, h: 104, label: 'state', sub: 'what is missing?' },
     { kind: 'cylinder', x: 575, y: 220, w: 340, h: 104, label: 'storage', sub: 'the target tables' },
     { kind: 'arrow', from: [322, 176], to: [573, 154], label: 'ask', packets: 'pingpong', labelOffset: [0, -4] },

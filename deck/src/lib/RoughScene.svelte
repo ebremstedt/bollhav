@@ -1,5 +1,5 @@
 <script>
-  // A hand-drawn scene: frames, boxes, cylinders and arrows placed by
+  // A hand-drawn scene: frames, boxes, cylinders, tables and arrows placed by
   // coordinates in a viewBox, sketched with rough.js in the deck's colours.
   //
   //   <RoughScene
@@ -8,84 +8,56 @@
   //     shapes={[
   //       { kind: 'frame', x: 16, y: 16, w: 968, h: 328, label: 'your computer' },
   //       { kind: 'box', x: 70, y: 135, w: 250, h: 110, label: 'execution', sub: 'python main.py' },
-  //       { kind: 'cylinder', x: 600, y: 96, w: 300, h: 100, label: 'choreography', sub: 'state' },
-  //       { kind: 'arrow', from: [320, 190], to: [600, 146], label: 'what is missing?', packets: 'pingpong' },
+  //       { kind: 'cylinder', x: 600, y: 96, w: 300, h: 100, label: 'state', sub: 'what is missing?' },
+  //       { kind: 'arrow', from: [320, 190], to: [600, 146], label: 'ask', packets: 'pingpong' },
   //     ]}
   //   />
   //
   // frame     an outline with its label in the top left corner (align: 'center' to centre it);
-  //           dashed: true for a dashed one
+  //           dashed: true or dotted: true for the border
   // box       a rectangle with label and sub centred
   // cylinder  a database with label and sub centred
+  // table     a table with a header row, label and sub under it
   // arrow     from [x, y] to [x, y], label above its middle (labelOffset: [dx, dy] to nudge it),
   //           packets 'dots' (a stream one way) or 'pingpong' (one dot there and back)
   // Any shape takes tone 'accent' (default) or 'muted'.
   //
+  // The pen lives in sketch.js, shared with the other sketched drawings.
   // Strokes and fills are currentColor, so colours come from CSS and follow
   // the theme without redrawing.
   import { onMount } from 'svelte'
-  import rough from 'roughjs'
+  import { sketcher, RY } from './sketch.js'
 
   let { width = 1000, height = 360, shapes = [] } = $props()
-
-  const RY = 16 // a cylinder's lid
 
   let sketch = $state()
 
   onMount(() => {
-    const rc = rough.svg(sketch.ownerSVGElement)
-    const pen = { roughness: 1.3, bowing: 1.1, strokeWidth: 2.2, stroke: 'currentColor' }
-    const tint = { ...pen, fill: 'currentColor', fillStyle: 'solid' }
-    const hatch = { ...pen, fill: 'currentColor', fillStyle: 'hachure', hachureGap: 8, fillWeight: 1 }
-    const add = (el, ...cls) => {
-      el.classList.add(...cls)
-      sketch.appendChild(el)
-    }
-
+    const draw = sketcher(sketch.ownerSVGElement)
     shapes.forEach((s, i) => {
       const seed = 11 + i * 7
       const tone = s.tone === 'muted' ? 'muted' : 'accent'
+      let els = []
       switch (s.kind) {
         case 'frame':
-          add(
-            rc.rectangle(s.x, s.y, s.w, s.h, {
-              ...pen,
-              seed,
-              roughness: 1.6,
-              strokeLineDash: s.dashed ? [10, 8] : undefined,
-            }),
-            'frame',
-            tone
-          )
+          els = draw.frame(s.x, s.y, s.w, s.h, { seed, dashed: s.dashed, dotted: s.dotted })
           break
         case 'box':
-          add(rc.rectangle(s.x, s.y, s.w, s.h, { ...tint, seed }), 'tint', tone)
+          els = draw.box(s.x, s.y, s.w, s.h, { seed })
           break
-        case 'cylinder': {
-          const rx = s.w / 2
-          const top = s.y + RY
-          const bottom = s.y + s.h - RY
-          add(
-            rc.path(
-              `M${s.x} ${top} L${s.x} ${bottom} A${rx} ${RY} 0 0 0 ${s.x + s.w} ${bottom} L${s.x + s.w} ${top} A${rx} ${RY} 0 0 1 ${s.x} ${top} Z`,
-              { ...tint, seed }
-            ),
-            'tint',
-            tone
-          )
-          add(rc.ellipse(s.x + rx, top, s.w, RY * 2, { ...hatch, seed: seed + 1 }), 'hatch', tone)
+        case 'cylinder':
+          els = draw.cylinder(s.x, s.y, s.w, s.h, { seed })
           break
-        }
-        case 'arrow': {
-          const [x1, y1] = s.from
-          const [x2, y2] = s.to
-          add(rc.line(x1, y1, x2, y2, { ...pen, seed }), 'arrow', tone)
-          // the head: two short strokes back from the tip along the line
-          const angle = Math.atan2(y2 - y1, x2 - x1)
-          const wing = (da) => [x2 - 16 * Math.cos(angle + da), y2 - 16 * Math.sin(angle + da)]
-          add(rc.linearPath([wing(0.5), [x2, y2], wing(-0.5)], { ...pen, seed: seed + 1 }), 'arrow', tone)
+        case 'table':
+          els = draw.table(s.x, s.y, s.w, s.h, { seed })
           break
-        }
+        case 'arrow':
+          els = draw.arrow(s.from[0], s.from[1], s.to[0], s.to[1], { seed })
+          break
+      }
+      for (const el of els) {
+        el.classList.add(tone)
+        sketch.appendChild(el)
       }
     })
   })
@@ -110,6 +82,12 @@
       <text class="label" x={cx} y={cy + (s.sub ? -2 : 9)} text-anchor="middle">{s.label}</text>
       {#if s.sub}
         <text class="sub" x={cx} y={cy + 24} text-anchor="middle">{s.sub}</text>
+      {/if}
+    {:else if s.kind === 'table'}
+      {@const cx = s.x + s.w / 2}
+      <text class="label" x={cx} y={s.y + s.h + 34} text-anchor="middle">{s.label}</text>
+      {#if s.sub}
+        <text class="sub" x={cx} y={s.y + s.h + 58} text-anchor="middle">{s.sub}</text>
       {/if}
     {:else if s.kind === 'arrow'}
       {#if s.label}
@@ -155,6 +133,16 @@
 
   .sketch :global(.hatch > path:first-child:not(:only-child)) {
     opacity: 0.55;
+  }
+
+  .sketch :global(.line) {
+    opacity: 0.45;
+  }
+
+  /* a dotted frame: round dots */
+  .sketch :global(.dotted path) {
+    stroke-linecap: round;
+    stroke-width: 3;
   }
 
   .label {

@@ -7,10 +7,6 @@
   <div class="top">
     <div>
       <p class="lead">
-        While bollhav does not force you to write data in a specific way, there is built in support to do so using
-        generators of dataframes.
-      </p>
-      <p>
         Preferably, the read, transform and write steps each hand over a generator, so only one batch is in memory at
         a time. Peak memory for the pipeline stays very, very low.
       </p>

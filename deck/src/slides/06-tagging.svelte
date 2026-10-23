@@ -3,20 +3,20 @@
   import Code from '../lib/Code.svelte'
 </script>
 
-<Slide kicker="Tags" title="The tag expression syntax" layout="wide">
+<Slide kicker="Tags" title="Tag expression syntax" layout="wide">
   <p class="lead">Used to target the models that you wish to run.</p>
   <p>Include one or many models, while excluding others, in one expression.</p>
   <div class="cols">
     <div>
       <h3>Simple</h3>
       <Code lang="bash" code={`$ TAGS='[orders]' python main.py`} />
-      <p class="muted">Every model tagged <code>orders</code>.</p>
+      <p class="muted">Every model tagged <code>orders</code></p>
     </div>
     <div>
       <h3>With or, and negation</h3>
       <Code lang="bash" code={`$ TAGS='[(erp|crm) & not:latest]' python main.py`} />
       <p class="muted">
-        Every model from <code>erp</code> or <code>crm</code>, except the ones tagged <code>latest</code>.
+        Every model from <code>erp</code> or <code>crm</code>, except the ones tagged <code>latest</code>
       </p>
     </div>
   </div>
