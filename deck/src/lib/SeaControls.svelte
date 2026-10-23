@@ -1,7 +1,7 @@
 <script>
   // The sea's controls, behind a small wave beside the counter: on or off,
-  // how many balls, and how stormy. The setting, and whether the panel is
-  // open, are remembered in this browser.
+  // how many balls, and how stormy. The settings are remembered in this
+  // browser; the panel itself starts closed on every load.
   let { density = $bindable(1), storm = $bindable(1), enabled = $bindable(true) } = $props()
 
   const KEY = 'sea-controls'
@@ -12,10 +12,9 @@
     try {
       const saved = localStorage.getItem(KEY)
       if (saved) {
-        const { density: d, storm: s, open: o, enabled: e } = JSON.parse(saved)
+        const { density: d, storm: s, enabled: e } = JSON.parse(saved)
         if (typeof d === 'number') density = d
         if (typeof s === 'number') storm = s
-        if (typeof o === 'boolean') open = o
         if (typeof e === 'boolean') enabled = e
       }
     } catch {
@@ -26,7 +25,7 @@
 
   $effect(() => {
     if (!loaded) return
-    const snapshot = JSON.stringify({ density, storm, open, enabled })
+    const snapshot = JSON.stringify({ density, storm, enabled })
     try {
       localStorage.setItem(KEY, snapshot)
     } catch {
