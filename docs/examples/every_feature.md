@@ -2,14 +2,13 @@
 
 One model that uses everything a model can declare: a staged, keyed, upserted
 Postgres table with four columns, sliced into days on a Stockholm clock, with
-state, two gated upstreams, a curfew, extra tags, owners and a Teams channel.
+state, two gated upstreams, a curfew, extra tags and owners.
 Each field links to its own page from the [model overview](../model/README.md).
 
 ```python title="models.py"
 from datetime import datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
-from bollhav.channels import MicrosoftTeams
 from bollhav.model import (
     Batch,
     ChunkFlex,
@@ -17,12 +16,9 @@ from bollhav.model import (
     Contract,
     Curfew,
     Database,
-    Detail,
     Freshness,
     FreshnessScope,
-    Mention,
     Model,
-    Notifications,
     People,
     Source,
     SourceModel,
@@ -75,11 +71,6 @@ daily_orders = Model(
         maintainers=(Contact("Jonas Ek", "jonas.ek@example.com"), Contact("Priya Nair", "priya.nair@example.com")),
         creators=(Contact("Amira Haddad"),),
     ),
-    notifications=Notifications(
-        on_failure=MicrosoftTeams(webhook_env="TEAMS_WEBHOOK_FINANCE"),
-        detail=Detail.MODELS,
-        mention=Mention.ON_FAILURE,
-    ),
     enabled=True, 
 )
 ```
@@ -88,3 +79,27 @@ Constructed, it is `shop.marts.daily_orders`, and its tags come out as `all`,
 `daily`, `daily_orders`, `finance`, `marts`, `marts.daily_orders`, `orders`,
 `shop` and `shop.marts.daily_orders`: the two declared ones plus everything
 [passive tagging](../model/tagging.md) derives from the name.
+
+Where the run reports is not the model's business. `@load_models` posts the
+outcome to Teams by default, and `main.py` is where that changes:
+
+```python title="main.py"
+from bollhav.channels import MicrosoftTeams
+from bollhav.model import Detail, Mention, Notifications, load_models
+
+
+@load_models(
+    folder="src/models",
+    notifications=Notifications(
+        on_failure=MicrosoftTeams(webhook_env="TEAMS_WEBHOOK_FINANCE"),
+        detail=Detail.MODELS,
+        mention=Mention.ON_FAILURE,
+    ),
+)
+def main(runs, debug):
+    ...
+```
+
+A failure then goes to the finance channel, lists what had completed, and
+@mentions Maja, Jonas and Priya, the owners and maintainers of the models
+that raised. See [Notifications](../model/notifications.md).

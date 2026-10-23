@@ -10,7 +10,7 @@ The `Model` itself is the top-level container. Its sub-objects each have their o
 - [Contract](contract.md) — historical envelope for backfill mode
 - [Batch](batch.md) — chunk size, lookback, retries
 - [Curfew](curfew.md) — wall-clock hours/days the model must not run
-- [Notifications](notifications.md) — where a run's outcome is reported (Teams), how much it says, and whom it mentions
+- [Notifications](notifications.md) — where a run reports its outcome (Teams), how much it says, and whom it mentions; set on `@load_models`, not the model
 - [State](state.md) — per-model state tracking
 - [Upstream](upstream.md) — the model's inputs (`list[Source]`): gated upstreams + ungated sources
 - [Tagging](tagging.md) — controls which auto-derived tags get added to the model

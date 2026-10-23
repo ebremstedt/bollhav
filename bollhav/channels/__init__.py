@@ -1,4 +1,4 @@
-"""Notification channels: where a run's outcome can be delivered. A model's
+"""Notification channels: where a run's outcome can be delivered. A run's
 `Notifications` names one per outcome; `bollhav.model.notifications.Channel`
 is the protocol a custom one implements."""
 
