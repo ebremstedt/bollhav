@@ -294,9 +294,10 @@
     left: 50%;
     transform: translateX(-50%);
     font-size: 0.5em;
+    font-weight: 600;
     letter-spacing: 0.14em;
     text-transform: uppercase;
-    color: var(--accent);
+    color: var(--fg);
     white-space: nowrap;
   }
 
@@ -324,9 +325,10 @@
     grid-row: 4;
     justify-self: center;
     font-size: 0.5em;
+    font-weight: 600;
     padding: 0.2em 0.6em;
     border: 1px solid var(--accent);
-    color: var(--accent);
+    color: var(--fg);
     border-radius: 999px;
     white-space: nowrap;
   }

@@ -92,7 +92,7 @@
     {:else if s.kind === 'arrow'}
       {#if s.label}
         {@const [lx, ly] = mid(s)}
-        <text class="sub" x={lx} y={ly - 12} text-anchor="middle">{s.label}</text>
+        <text class="edge" x={lx} y={ly - 12} text-anchor="middle">{s.label}</text>
       {/if}
       {#if s.packets === 'dots'}
         {#each [0, 1, 2, 3] as k}
@@ -162,9 +162,21 @@
   }
 
   .frame-label {
+    fill: var(--fg);
+    font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.12em;
     font-size: 14px;
+  }
+
+  /* an arrow's label, as on the staging slide: strong, in the text colour */
+  .edge {
+    fill: var(--fg);
+    font-family: var(--font-mono);
+    font-size: 14px;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
   }
 
   .dot {

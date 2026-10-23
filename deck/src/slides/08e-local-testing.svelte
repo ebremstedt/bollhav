@@ -17,13 +17,14 @@
 
 <Slide kicker="Running the models" title="End to end pipelines, locally*" layout="wide">
   <RoughScene width={1000} height={360} {shapes} />
-  <p class="muted footnote">* <em>If you use bollhav state</em></p>
+  <p class="footnote">* <em>If you use bollhav state</em></p>
 </Slide>
 
 <style>
-  .footnote {
+  p.footnote {
     font-family: var(--font-mono);
     font-size: 0.85rem;
     letter-spacing: 0.02em;
+    color: var(--fg);
   }
 </style>

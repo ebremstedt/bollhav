@@ -161,9 +161,10 @@
   }
 
   .lbl {
-    fill: var(--accent);
+    fill: var(--fg);
     font-family: var(--font-mono);
-    font-size: 13px;
+    font-size: 14px;
+    font-weight: 600;
     letter-spacing: 0.1em;
     text-transform: uppercase;
   }
