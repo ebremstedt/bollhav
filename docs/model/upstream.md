@@ -21,7 +21,7 @@ upstream=[
 ]
 ```
 
-A **contract is only valid on a `SourceModel`** — files and APIs aren't state-tracked, so they can't gate. Declaring one on a `SourceFile`/`SourceApi` is a definition-time error.
+A **contract is only valid on a `SourceModel`** — files and APIs aren't state-tracked, so they can't gate. Declaring one on a `SourceFile`/`SourceApi` is a definition-time error
 
 ## Contracts (gating)
 
