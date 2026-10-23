@@ -372,6 +372,7 @@ class TestSingleUpstream:
             SourceFile,
             SourceHardcoded,
             SourceModel,
+            SourceSftp,
         )
 
         table = make_model(
@@ -382,6 +383,16 @@ class TestSingleUpstream:
             upstream=[Source("ticker_<date>.csv", type=SourceFile(path=Path("docs")))]
         )
         assert file.single_file_source.path == Path("docs")
+        sftp = make_model(
+            upstream=[
+                Source(
+                    "codes.xml",
+                    type=SourceSftp(path=Path("codes.xml"), hostname="sftp.example"),
+                )
+            ]
+        )
+        assert sftp.single_sftp_source.path == Path("codes.xml")
+        assert sftp.single_sftp_source.hostname == "sftp.example"
         api = make_model(
             upstream=[Source("fhir", type=SourceApi(base_url="https://fhir.example"))]
         )

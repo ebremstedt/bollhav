@@ -50,6 +50,7 @@ or is it one whole snapshot (reference / config / dimension)?**
   `run.model.ref("schema.table")` so it follows the env's schema suffix.
 - An API → `Source(..., type=SourceApi())`; fetch it in `read.py`.
 - A file → `Source(..., type=SourceFile())`; read it in `read.py`.
+- A file over SFTP → `Source(..., type=SourceSftp())`; fetch it in `read.py`.
 - Small seed/constant → `Source(..., type=SourceHardcoded())`.
 
 **Q5. Must an upstream be fresh before this runs (enforced), or is it just a

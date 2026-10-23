@@ -14,6 +14,7 @@ from bollhav.model.source import (
     Source,
     SourceModel,
     SourceFile,
+    SourceSftp,
     SourceApi,
     SourceHardcoded,
 )
@@ -70,6 +71,7 @@ __all__ = [
     "Source",
     "SourceModel",
     "SourceFile",
+    "SourceSftp",
     "SourceApi",
     "SourceHardcoded",
     "Target",
