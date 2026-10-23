@@ -49,7 +49,9 @@
 </script>
 
 <Slide kicker="Metadata" title="Excellent metadata" layout="wide">
-  <p class="lead">The model object is built to produce great metadata, for execution, lineage, state, orchestration.</p>
+  <p class="lead one-line">
+    The model object is built to produce great metadata, for execution, lineage, state, orchestration.
+  </p>
   <!-- the whole model, small, in its own scrolling box under the text -->
   <div class="box">
     <Code file="models.py" code={model} />
@@ -57,6 +59,14 @@
 </Slide>
 
 <style>
+  /* the lead on one row: a touch smaller than a lead, no wrapping; a phone wraps it */
+  @media (min-width: 900px) {
+    p.lead.one-line {
+      white-space: nowrap;
+      font-size: clamp(1rem, 1.55vw, 1.4rem);
+    }
+  }
+
   .box {
     min-width: 0;
   }

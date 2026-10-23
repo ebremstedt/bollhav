@@ -49,10 +49,10 @@
     file="execute.py"
     code={`
       @execute_lifecycle
-      def execute(run: ModelRun, interval, data_conn, state_conn=None):
+      def execute(run: ModelRun, interval: TZInterval, data_conn: Connection):
           df_gen = read(run, interval)      # a generator of DataFrames
-          df_gen = transform(df_gen)        # still lazy
-          write(conn=data_conn, run=run, df_gen=df_gen)   # one batch at a time
+          df_gen = transform(df_gen)        # still a generator of DataFrames
+          write(conn=data_conn, run=run, df_gen=df_gen)   # accepts a generator of DataFrames
     `}
   />
 </Slide>
